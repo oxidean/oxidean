@@ -137,6 +137,24 @@ async fn dispatch_pull_request_inner(
         return Err(format!("bare repo missing: {}", event.bare_repo.display()));
     }
 
+    // [skip ci]-family markers on the PR head commit suppress both
+    // pull_request and pull_request_target runs. Unreadable head (un-synced
+    // fork objects) can't carry a marker we can see — don't skip on error.
+    if let Ok(c) = git
+        .show_commit(&event.bare_repo, &event.head_sha, None, None)
+        .await
+    {
+        if crate::actions::dispatch::message_has_skip_marker(&format!("{}\n{}", c.subject, c.body))
+        {
+            tracing::info!(
+                repository_id = %event.repository_id,
+                head_sha = %event.head_sha,
+                "actions pull_request skipped — head commit carries a skip marker"
+            );
+            return Ok(0);
+        }
+    }
+
     let is_fork = event
         .head_repo_id
         .as_deref()

@@ -154,3 +154,19 @@ pub async fn discover_workflows(
 pub fn workflows_dir() -> PathBuf {
     PathBuf::from(".github").join("workflows")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::confine_workflow_path;
+
+    #[test]
+    fn confine_workflow_path_is_flat_only() {
+        assert!(confine_workflow_path(".github/workflows/ci.yml").is_ok());
+        assert!(confine_workflow_path(".github/workflows/ci.yaml").is_ok());
+        // Nested dirs and escapes are not workflow files (GitHub parity).
+        assert!(confine_workflow_path(".github/workflows/sub/x.yml").is_err());
+        assert!(confine_workflow_path(".github/workflows/../x.yml").is_err());
+        assert!(confine_workflow_path(".github/other/x.yml").is_err());
+        assert!(confine_workflow_path(".github/workflows/x.txt").is_err());
+    }
+}

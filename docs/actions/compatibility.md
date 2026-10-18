@@ -1,0 +1,668 @@
+# GitHub Actions compatibility reference
+
+This document is the contract for Oxidean's GitHub Actions–compatible CI.
+Every row is one feature of the GitHub Actions specification — workflow
+syntax, triggers, expressions, steps, environments, OIDC, and the REST
+surface — with a status and machine-checked evidence.
+
+The drift gate at `crates/oxidean-api/tests/actions_compat_doc.rs` parses
+this file and enforces the contract: row IDs are unique and stable,
+statuses are valid, every non-`n/a` row cites at least one evidence token,
+every `case:` token names a conformance case in
+`crates/oxidean-api/tests/conformance/cases.json`, every `test:` token
+names a real test function, every conformance case is cited back by at
+least one row, and the Summary table below matches the real row counts.
+
+## How to read it
+
+Rows use `| \`id\` | Feature | Status | Evidence | Notes |`, one feature
+per row. Evidence tokens are comma-separated:
+
+- `case:<id>` — a conformance corpus case; the runner executes the
+  workflow end to end and asserts statuses and log content.
+- `test:<path>::<fn>` — a Rust test function at that repo-relative path.
+
+Statuses:
+
+- `supported` — behaves like GitHub; the evidence exercises it.
+- `partial` — works with a divergence spelled out in Notes; the evidence
+  pins today's behaviour.
+- `unsupported` — not implemented; the evidence pins today's loud
+  behaviour (a validation-failure run, a `::warning::`, or a refusal).
+  Nothing in this column silently mis-executes.
+- `n/a` — a GitHub-platform-only feature (hosted runner images, larger
+  runners, billing, enterprise policy). Notes name the Oxidean
+  alternative when one exists.
+
+Closing phases referenced in Notes: **P12** web UI; **P13** reusable
+workflows, job `continue-on-error`, `vars`, remaining events, workflow
+dirs, command gaps; **P14** cache service; **P15** PR test-merge;
+**P16** runner scopes, badges, workflow disable, run delete, log
+download, annotations, `workflow_job` webhook.
+
+## Summary
+
+| Section | supported | partial | unsupported | n/a |
+|---------|-----------|---------|-------------|-----|
+| 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
+| 2. Triggers & filters | 18 | 3 | 1 | 0 |
+| 3. Events | 7 | 1 | 28 | 0 |
+| 4. Workflow-level keys | 7 | 0 | 1 | 0 |
+| 5. Jobs | 24 | 1 | 4 | 1 |
+| 6. Steps | 17 | 1 | 1 | 1 |
+| 7. Expressions | 15 | 0 | 0 | 0 |
+| 8. Contexts | 18 | 5 | 1 | 0 |
+| 9. Workflow commands & environment files | 7 | 7 | 8 | 0 |
+| 10. Default environment variables | 38 | 0 | 10 | 0 |
+| 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
+| 12. Reusable workflows | 0 | 0 | 10 | 0 |
+| 13. Artifacts | 10 | 1 | 2 | 0 |
+| 14. Dependency caching | 0 | 0 | 5 | 0 |
+| 15. Concurrency | 4 | 1 | 0 | 0 |
+| 16. Environments & deployments | 9 | 1 | 1 | 0 |
+| 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
+| 18. OIDC | 9 | 0 | 0 | 0 |
+| 19. Secrets & configuration variables | 12 | 0 | 1 | 0 |
+| 20. Runners & labels | 6 | 0 | 0 | 3 |
+| 21. Security behaviours | 8 | 1 | 0 | 0 |
+| 22. Limits | 7 | 0 | 0 | 1 |
+| 23. Run lifecycle & integrations | 6 | 2 | 7 | 1 |
+| 24. GitHub REST API for Actions | 9 | 2 | 4 | 0 |
+
+## 1. Workflow files & discovery (`file.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#about-yaml-syntax-for-workflows>
+and <https://docs.github.com/en/actions/using-workflows/triggering-a-workflow>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `file.location` | Workflows live under `.github/workflows/` | supported | case:run-basic, test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_discovers_github_workflows_path | Pushed and default-branch workflows are discovered from the git tree. |
+| `file.extensions` | `.yml` and `.yaml` suffixes | supported | test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_discovers_github_workflows_path | |
+| `file.top-level-only` | Only flat files in the directory run — nested dirs ignored | supported | test:crates/oxidean-api/src/actions/workflow.rs::confine_workflow_path_is_flat_only | `ls_tree` on `.github/workflows` yields blobs only; nested trees are skipped. |
+| `file.other-files` | Non-workflow files (`.md`, `.txt`, …) ignored | supported | test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_unsupported_files_are_skipped | |
+| `file.multiple` | Multiple workflows per repo, each independent | supported | test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_bad_file_does_not_block_good_workflows | |
+| `file.yaml-on-key` | `on:` parses as a key, not a YAML 1.1 boolean | supported | test:crates/oxidean-api/src/actions/parse.rs::parses_minimal_push_workflow | serde_yaml ≥0.9 uses the YAML 1.2 core schema. |
+| `file.invalid` | Malformed/invalid YAML produces a failed-validation run | supported | case:runs-on-missing, test:crates/oxidean-api/tests/actions_phase8.rs::p8_discovery_errors_persist_as_failed_validation_runs | Parse errors never silently drop a workflow; a failed run records the error. |
+| `file.unknown-keys` | Unknown top-level keys rejected | partial | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | GitHub fails workflow validation; we emit a workflow warning and still run. Divergence pinned. |
+
+## 2. Triggers & filters (`on.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow>
+and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#on>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `on.scalar-form` | `on: push` (bare scalar) | supported | case:run-basic | |
+| `on.list-form` | `on: [push, pull_request]` | supported | case:trigger-list-form | |
+| `on.map-form` | `on:` mapping with per-event filters | supported | case:trigger-map-form | |
+| `on.branches` | `branches:` positive list for push/pull_request | supported | test:crates/oxidean-api/src/actions/filters.rs::branch_filters, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_push_branch_and_tag_filters | Matches the pushed branch or PR base branch. |
+| `on.branches-ignore` | `branches-ignore:` negative list | supported | test:crates/oxidean-api/src/actions/filters.rs::branch_ignore | Fires when the branch matches no ignore pattern. |
+| `on.tags` | `tags:` constrains tag pushes only | supported | test:crates/oxidean-api/src/actions/filters.rs::tags_constrain_only_tag_pushes | A tags-only workflow never fires on branch pushes (GitHub's ref-kind rule). |
+| `on.tags-ignore` | `tags-ignore:` negative list | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_push_branch_and_tag_filters | |
+| `on.paths` | `paths:` at least one changed file must match | supported | test:crates/oxidean-api/src/actions/filters.rs::paths_positive_and_ignore, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_push_paths_filters | |
+| `on.paths-ignore` | `paths-ignore:` fires when any file escapes the list | supported | test:crates/oxidean-api/src/actions/filters.rs::paths_positive_and_ignore | |
+| `on.types` | `types:` activity-type filter | supported | test:crates/oxidean-api/src/actions/filters.rs::types_filter, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | Applies to pull_request/pull_request_target/release/issues. |
+| `on.mixed-ignore` | Positive and `-ignore` list on the same event | partial | test:crates/oxidean-api/src/actions/parse.rs::mixed_positive_and_ignore_filters_warn | GitHub rejects the workflow; we warn and still run. Divergence pinned. |
+| `on.branches-and-paths` | `branches` and `paths` both apply (AND) | supported | test:crates/oxidean-api/src/actions/filters.rs::branch_and_path_filters_are_conjunctive | |
+| `on.glob-syntax` | `*`, `**`, `?`, `[...]` classes, `!` negation | supported | test:crates/oxidean-api/src/actions/filters.rs::glob_basics, test:crates/oxidean-api/src/actions/filters.rs::glob_char_classes | `+(…)`/`@(…)` extglob syntax is not implemented — GitHub behaviour unverified whether docs-minimatch requires it. |
+| `on.negation-order` | `!` patterns apply in order; a later positive re-includes | supported | test:crates/oxidean-api/src/actions/filters.rs::negation_last_match_wins | |
+| `on.paths-tag-push` | `paths`/`paths-ignore` never evaluated for tag pushes | supported | test:crates/oxidean-api/src/actions/filters.rs::paths_never_gate_tag_pushes, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_paths_filters_skipped_on_tag_push | |
+| `on.skip-ci` | `[skip ci]`/`[ci skip]`/`[no ci]`/`[skip actions]`/`[actions skip]` suppress runs | supported | test:crates/oxidean-api/src/actions/dispatch.rs::skip_ci_markers_all_tokens, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_skip_ci_marker_suppresses_push, case:push-skip-ci | Applied to push and pull_request events. |
+| `on.branch-delete` | A branch-deletion push does not trigger `push` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_branch_delete_and_tag_flood | |
+| `on.tag-flood` | A push with more than 3 tags triggers no tag events | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_branch_delete_and_tag_flood | |
+| `on.unsupported-event` | An event we do not implement warns instead of vanishing | supported | case:on-unsupported-event, test:crates/oxidean-api/src/actions/parse.rs::unimplemented_events_warn_loudly | The `on.<event>` name is emitted as a workflow warning; the workflow still runs for its other triggers. |
+| `on.token-events` | GITHUB_TOKEN-caused events do not create runs (except dispatch) | partial | test:crates/oxidean-runner/src/exec/mod.rs::checkout_auth_prefers_job_token | The job token is a fetch credential only — there is no push path, so token-driven events cannot recur. Dispatch suppression verified; the general rule is structurally held. |
+| `on.workflow-call` | `workflow_call` trigger | unsupported | case:reusable-workflow-local | Reusable workflows are not dispatched — the trigger is ignored with a warning. Closes in P13. |
+| `on.pr-merge-sha` | `pull_request` runs against the merge-commit SHA | partial | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | We run the PR head SHA; GitHub runs a synthesized merge commit. Closes in P15. |
+
+## 3. Events (`ev.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows>
+
+Every event on the GitHub page gets a row. Supported events carry their
+activity-type filter semantics; unsupported ones warn at parse (section 2,
+`on.unsupported-event`) and never fire silently.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `ev.push` | `push` — GITHUB_SHA = pushed head, GITHUB_REF = pushed ref | supported | case:run-basic, case:push-tag-ref, test:crates/oxidean-api/tests/actions_triggers.rs::actions_triggers_push_after_receive_pack | Filters: branches, tags, paths, and their -ignore twins. |
+| `ev.pull_request` | `pull_request` — default types opened/synchronize/reopened | supported | case:pr-only, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | GITHUB_SHA = head (not merge commit — see `on.pr-merge-sha`, P15). |
+| `ev.pull_request_target` | `pull_request_target` — trusted-context PR runs | supported | case:prt-only, case:prt-push, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | Requires the repo `actions_pull_request_target` opt-in; workflows read from the base ref. |
+| `ev.schedule` | `schedule` — cron on the default branch | supported | test:crates/oxidean-api/src/actions/cron.rs::exact_and_ranges, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | UTC; five-field cron; multiple entries allowed. |
+| `ev.workflow_dispatch` | `workflow_dispatch` — manual run with typed inputs | supported | case:dispatch-only, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run, test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | string/boolean/choice/number/environment types; required/default honoured; 25-input cap. |
+| `ev.release` | `release` — types published/created/edited/prereleased/released | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
+| `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
+| `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | partial | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | Cron firing is proven; the `schedule` field inside the event payload is not populated — GitHub behaviour unverified whether downstream steps rely on it. |
+| `ev.branch_protection_rule` | `branch_protection_rule` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.check_suite` | `check_suite` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.create` | `create` — branch/tag creation | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.delete` | `delete` — branch/tag deletion | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.deployment` | `deployment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.deployment_status` | `deployment_status` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.discussion` | `discussion` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.discussion_comment` | `discussion_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.fork` | `fork` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.gollum` | `gollum` — wiki edits | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.issue_comment` | `issue_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.label` | `label` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.milestone` | `milestone` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.page_build` | `page_build` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.project` | `project` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.project_card` | `project_card` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.project_column` | `project_column` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.public` | `public` — repo goes public | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.pull_request_review` | `pull_request_review` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.pull_request_review_comment` | `pull_request_review_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.pull_request_comment` | `issue_comment` on a PR (GitHub aliases it) | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.registry_package` | `registry_package` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.repository_dispatch` | `repository_dispatch` — external webhook trigger | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.status` | `status` — commit status posted | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.watch` | `watch` — repo starred | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.workflow_run` | `workflow_run` — another workflow finished | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+
+## 4. Workflow-level keys (`wf.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#about-yaml-syntax-for-workflows>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `wf.name` | `name:` — workflow display name | supported | test:crates/oxidean-api/src/actions/parse.rs::parses_minimal_push_workflow | |
+| `wf.run-name` | `run-name:` — per-run display name | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Warns at parse; runs show the workflow name. P13. |
+| `wf.on` | `on:` — see section 2 | supported | case:run-basic | |
+| `wf.env` | workflow-level `env:` map | supported | case:workflow-env, case:expr-env-layering | |
+| `wf.defaults` | `defaults.run.shell` / `defaults.run.working-directory` | supported | case:run-defaults-shell, case:run-defaults-workdir, test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_defaults_run_shell_and_workdir | |
+| `wf.permissions` | workflow-level `permissions:` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload | Detail in section 17. |
+| `wf.concurrency` | workflow-level `concurrency:` | supported | case:concurrency-workflow | Detail in section 15. |
+| `wf.jobs` | `jobs:` map | supported | case:run-basic | |
+
+## 5. Jobs (`job.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#jobs>
+and <https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `job.id` | Job id rules; ids must be unique | supported | test:crates/oxidean-api/src/actions/parse.rs::job_id_rules_enforced | Empty, `/`, `\` rejected; duplicates fail YAML mapping. |
+| `job.name` | `name:` — display name; expressions honoured | supported | case:job-name-override, case:expr-job-name | |
+| `job.needs` | `needs:` — dependency DAG, implicit skip on failure | supported | case:needs-basic, case:needs-diamond, case:needs-fail-default, case:needs-skipped-dep, case:needs-matrix-dep, case:multi-job-parallel | Jobs with no `needs` run in parallel; skipped deps propagate as `skipped`. |
+| `job.needs-result` | `needs.<id>.result` — success/failure/cancelled/skipped | supported | case:needs-failure-fn, case:needs-success-fn, case:needs-always | |
+| `job.needs-outputs` | `needs.<id>.outputs.<name>` — step outputs flow through | supported | case:needs-outputs | |
+| `job.needs-unknown` | `needs:` naming an undeclared job | supported | test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Validation failure — GitHub rejects the file. |
+| `job.needs-cycle` | Cyclic `needs:` | supported | case:needs-cycle | Validation failure, not a wedge. |
+| `job.if` | `if:` on a job — implicit `success()` unless a status fn is present | supported | case:job-if, case:job-if-skip, case:needs-ctx-if | |
+| `job.runs-on` | `runs-on:` string or array of labels | supported | case:runs-on-array, case:runs-on-nomatch, case:runs-on-expr | Expressions evaluated at enqueue. |
+| `job.runs-on-group` | `runs-on: {group, labels}` object form | n/a | | GitHub-hosted runner-group syntax; parse fails loudly. Self-hosted labels cover the same routing. |
+| `job.environment` | `environment:` — string, `{name, url}` object, or expression | supported | case:environment-job, test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | Detail in section 16. |
+| `job.concurrency` | job-level `concurrency:` group | supported | case:concurrency-job, case:concurrency-job-cancel | |
+| `job.outputs` | `outputs:` map — values evaluated per leg | supported | case:job-outputs | |
+| `job.outputs-secret-redact` | Secret values must not leak through job outputs | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_masked_in_logs | Outputs are log-masked; a workflow can still print a secret deliberately — same residual risk as GitHub. |
+| `job.env` | job-level `env:` | supported | case:job-env, case:expr-env-layering | |
+| `job.defaults` | job-level `defaults.run` | supported | case:run-defaults-shell | Step > job > workflow precedence. |
+| `job.timeout-minutes` | `timeout-minutes:` — expressions, fractional, 360 default | supported | case:timeout-minutes-job, case:job-timeout-kills | Absent → GitHub's 360-minute default; step value clipped by job deadline. |
+| `job.strategy` | `strategy.matrix` — axes, include extend+append, exclude partial-match, expressions, fromJSON | supported | case:strategy-matrix, case:matrix-basic, case:matrix-include-exclude, test:crates/oxidean-api/src/actions/matrix.rs::include_merges_and_appends | |
+| `job.matrix-empty` | Empty matrix fails loudly | supported | test:crates/oxidean-api/src/actions/matrix.rs::empty_axis_fails_loud | |
+| `job.matrix-cap` | Over-256 expanded legs fail loudly | supported | case:matrix-over-256, test:crates/oxidean-api/src/actions/matrix.rs::over_256_legs_fails_loud | GitHub's documented 256-job limit. |
+| `job.fail-fast` | `fail-fast:` cancels sibling legs on first failure; `false` disables | supported | case:matrix-fail-fast, case:matrix-fail-fast-off | |
+| `job.max-parallel` | `max-parallel:` caps concurrent legs | supported | case:matrix-max-parallel | |
+| `job.continue-on-error` | Job-level `continue-on-error:` | unsupported | case:continue-on-error-job, test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Validation failure at dispatch — GitHub's semantics (run stays green, upstream-skip for dependents) need scheduler work. Closes in P13. |
+| `job.container` | `container:` — image shorthand and object form | supported | case:container-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Requires a Docker-capable runner; absent Docker the job fails loudly. |
+| `job.services` | `services:` — service containers | supported | case:services-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Host jobs reach services on published ports; container jobs reach them by service id. |
+| `job.services-ports-ctx` | `job.services.<id>.ports` context | partial | case:services-job | Services run; the mapped-ports context is not populated. Closes in P13. |
+| `job.uses` | `jobs.<id>.uses:` — call a reusable workflow | unsupported | case:reusable-workflow-local, case:reusable-workflow-remote | Validation failure at dispatch. P13. |
+| `job.with` | `jobs.<id>.with:` — inputs to a called workflow | unsupported | case:reusable-workflow-local | P13. |
+| `job.secrets` | `jobs.<id>.secrets:` — secrets to a called workflow, `inherit` | unsupported | case:reusable-workflow-local | P13. |
+| `job.steps` | `steps:` — required unless `uses:` | supported | case:empty-steps | A job with neither `steps:` nor `uses:` is a validation failure, matching GitHub. |
+
+## 6. Steps (`step.`)
+
+Source: <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#jobsjob_idsteps>
+and <https://docs.github.com/en/actions/using-workflows/using-a-shell>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `step.id` | `id:` — addressable in `steps.<id>` contexts | supported | case:expr-steps-context | |
+| `step.if` | `if:` — implicit `success()` unless a status function is used | supported | case:step-if, test:crates/oxidean-runner/src/exec/mod.rs::step_allowed_implicit_success_gate | |
+| `step.if-false-literal` | `if: 'false'` — a non-empty string is truthy, bare `false` is not | supported | case:step-if-false-literal | GitHub's string-truthiness quirk pinned. |
+| `step.if-cancel` | `always()` steps still run when the job is cancelled | partial | test:crates/oxidean-runner/src/exec/mod.rs::step_allowed_implicit_success_gate | The gate honours `always()`; a mid-step cancellation aborts the remaining steps rather than draining `always()` ones. Closes in P13. |
+| `step.name` | `name:` — display name | supported | case:run-multi-step | |
+| `step.uses-remote` | `uses: owner/repo[@path]@ref` — fetched and run | supported | case:uses-remote-composite, case:checkout-basic, case:checkout-path, case:uses-unknown, test:crates/oxidean-runner/src/exec/action.rs::ls_remote_resolves_local_repo | GitHub.com fetches work too (public smoke). An unresolvable `uses:` fails the step loudly (`uses-unknown`). |
+| `step.uses-local` | `uses: ./path` — action in the same repo | supported | case:uses-local-composite | Requires a checkout first — same as GitHub. |
+| `step.uses-docker` | `uses: docker://image` | supported | test:crates/oxidean-runner/src/exec/containers.rs::spec_missing_image_fails | Requires a Docker-capable runner. |
+| `step.run` | `run:` — shell script; non-zero exit fails the step | supported | case:run-basic, case:exit-code-nonzero, case:run-fail, case:step-failure-flow, case:echo-unicode | A failed step fails the job and the run; UTF-8 output passes through ungarbled. |
+| `step.shell-default` | Unset `shell:` → `bash -e {0}` staged file, no pipefail | supported | test:crates/oxidean-runner/src/exec/mod.rs::shell_argv_defaults | GitHub's documented default. |
+| `step.shell-bash` | `shell: bash` → `bash --noprofile --norc -eo pipefail {0}` | supported | test:crates/oxidean-runner/src/exec/mod.rs::shell_argv_defaults | |
+| `step.shell-others` | `sh`, `pwsh`, `python`, custom `{0}` templates | supported | case:run-shell-sh, case:shell-python, case:shell-pwsh, case:shell-custom | pwsh/python run the staged script file. |
+| `step.shell-windows` | `cmd`, `powershell` builtins | n/a | | Windows-hosted shell defaults; Oxidean runners are POSIX-first. `shell: pwsh` works wherever pwsh is installed. |
+| `step.working-directory` | `working-directory:` — must exist | supported | case:run-workdir, case:run-workdir-missing | Missing dir fails the step loudly. |
+| `step.env` | step-level `env:` | supported | case:run-env-step, case:run-env-multiline | |
+| `step.with` | `with:` inputs to an action | supported | case:checkout-with-inputs | |
+| `step.with-on-run` | `with:` on a `run:` step has no effect | supported | test:crates/oxidean-api/src/actions/parse.rs::captured_features_warn_not_unsupported | Warned at parse, matching the docs' "no effect" note. |
+| `step.continue-on-error` | `continue-on-error:` — step failure does not fail the job | supported | case:continue-on-error-step, case:step-conclusion-coe | `steps.<id>.outcome` keeps `failure`; `conclusion` normalizes to `success`. |
+| `step.timeout-minutes` | `timeout-minutes:` per step — expressions allowed | supported | case:timeout-minutes-step | Clipped by the job deadline. |
+| `step.args-entrypoint` | `with.args`/`with.entrypoint` on docker actions (step-level `args:`/`entrypoint:` keys) | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Unknown step keys warn at parse; docker action args arrive via `with.args`. P13. |
+
+## 7. Expressions (`expr.`)
+
+Source: <https://docs.github.com/en/actions/reference/evaluate-expressions-in-workflows-and-actions>
+and <https://docs.github.com/en/actions/learn-github-actions/expressions>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `expr.syntax` | `${{ }}` interpolation anywhere in a workflow | supported | case:expr-in-run, test:crates/oxidean-actions-expr/src/eval.rs::interpolation | |
+| `expr.bare` | Bare expressions in `if:` (no delimiters needed) | supported | test:crates/oxidean-actions-expr/src/eval.rs::eval_bool_accepts_bare_or_delimited | |
+| `expr.literals` | null, true/false, numbers, strings with `''` escaping | supported | test:crates/oxidean-actions-expr/src/eval.rs::literals_and_identity | Exponent (`1e3`) and hex literals: GitHub docs do not define them — GitHub behaviour unverified; ours rejects non-decimal forms loudly. |
+| `expr.coercion` | Type coercion table (null/bool/''/NaN → 0/false) | supported | test:crates/oxidean-actions-expr/src/eval.rs::truthiness_and_logic_operands | |
+| `expr.equality` | Loose `==`, case-insensitive strings, objects by reference | supported | test:crates/oxidean-actions-expr/src/eval.rs::equality_is_loose_and_case_insensitive | |
+| `expr.ordering` | `<` `<=` `>` `>=` with coercion | supported | test:crates/oxidean-actions-expr/src/eval.rs::ordering | |
+| `expr.logic` | `&&` and `&#124;&#124;` return operands, `!` coerces to bool | supported | test:crates/oxidean-actions-expr/src/eval.rs::truthiness_and_logic_operands | |
+| `expr.member-access` | Case-insensitive property access, `[index]`/`['key']`, `.*` object filters | supported | test:crates/oxidean-actions-expr/src/eval.rs::member_index_deref | |
+| `expr.functions-string` | contains/startsWith/endsWith/format/toJSON/fromJSON/join — case-insensitive | supported | test:crates/oxidean-actions-expr/src/eval.rs::functions, case:expr-functions | `format` handles `{{`/`}}` escapes; `toJSON` pretty-prints. |
+| `expr.status-fns` | success()/failure()/cancelled()/always() | supported | test:crates/oxidean-actions-expr/src/eval.rs::status_functions, test:crates/oxidean-actions-expr/src/eval.rs::status_fn_detection | |
+| `expr.hashfiles` | hashFiles — multi-pattern, `!` exclusion, empty on no match | supported | case:expr-hashfiles, test:crates/oxidean-runner/src/exec/mod.rs::hash_files_is_deterministic | |
+| `expr.secrets-context` | `secrets.*` in expressions | supported | case:secrets-context, test:crates/oxidean-actions-expr/src/eval.rs::secrets_context_is_plain_lookup | |
+| `expr.malformed` | Malformed expressions fail loudly at parse | supported | case:expr-malformed-run, case:expr-malformed-if, test:crates/oxidean-api/src/actions/parse.rs::malformed_expressions_flag_unsupported | No silent literal passthrough. |
+| `expr.if-implicit-success` | `if:` without a status fn implies `success() &&` | supported | test:crates/oxidean-runner/src/exec/mod.rs::step_allowed_implicit_success_gate | |
+| `expr.eval-errors` | Runtime eval errors fail the step/job loudly | supported | case:expr-malformed-run | |
+
+## 8. Contexts (`ctx.`, `avail.`)
+
+Source: <https://docs.github.com/en/actions/reference/workflows-and-actions/contexts>
+
+The `avail.*` rows pin the context-availability table: which contexts each
+workflow key may reference. Oxidean evaluates expressions wherever they
+appear; the availability notes call out where GitHub restricts a context
+that we also restrict.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `ctx.github` | `github` context — sha, ref, ref_name, ref_type, event_name, event payload, repository*, actor*, workflow*, job, run_*, server_url, api_url, base_ref, head_ref, workspace, token | partial | case:expr-github-ctx, test:crates/oxidean-runner/src/exec/context.rs::runner_context | Missing `graphql_url`, `ref_protected`, `retention_days`, `triggering_actor`, `action`, `action_path`, `action_ref`, `action_repository`, `action_status`. Closes in P13. |
+| `ctx.env` | `env` context — workflow/job/step layering | supported | case:expr-env-layering, case:workflow-env | |
+| `ctx.vars` | `vars` context — configuration variables | unsupported | case:expr-vars-empty | Vars are not stored yet; the context is empty rather than absent. Closes in P13. |
+| `ctx.job` | `job` context — status | partial | test:crates/oxidean-runner/src/exec/context.rs::sync_job_ctx | `status` only; `container`/`services` sub-objects not populated. P13. |
+| `ctx.jobs` | `jobs.<id>.result` / `.outputs` | supported | case:needs-outputs | |
+| `ctx.steps` | `steps.<id>.outcome` / `.conclusion` / `.outputs` | supported | case:expr-steps-context, case:step-conclusion-coe | |
+| `ctx.runner` | `runner` context — os, arch, name, temp, tool_cache | partial | test:crates/oxidean-runner/src/exec/context.rs::runner_context | Missing `debug` and `environment`. P13. |
+| `ctx.secrets` | `secrets` context | supported | case:secrets-context | |
+| `ctx.strategy` | `strategy` context — job-index, job-total, fail-fast, max-parallel | partial | case:matrix-basic | `matrix` carries the leg; `strategy.*` metadata is not populated. P13. |
+| `ctx.matrix` | `matrix` context | supported | case:matrix-basic | |
+| `ctx.needs` | `needs.<id>.result` / `.outputs` | supported | case:needs-outputs, case:needs-failure-fn | |
+| `ctx.inputs` | `inputs` context — workflow_dispatch / workflow_call inputs | partial | test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | `github.event.inputs` carries the typed values; the dedicated `inputs` context is empty. P13. |
+| `avail.on` | Contexts in `on:` filters | supported | case:trigger-map-form | Filters are pattern lists, not expressions — matching GitHub. |
+| `avail.env` | Contexts in `env:` at all levels | supported | case:expr-env-layering | |
+| `avail.job-if` | Contexts in `jobs.<id>.if` | supported | case:job-if, case:needs-ctx-if | needs/github/env/vars/inputs available — no steps context, matching GitHub. |
+| `avail.job-outputs` | Contexts in `jobs.<id>.outputs` | supported | case:job-outputs | jobs/needs/steps available per GitHub. |
+| `avail.runs-on` | Contexts in `runs-on` | supported | case:runs-on-expr | |
+| `avail.strategy` | Contexts in `strategy.matrix` | supported | test:crates/oxidean-api/src/actions/matrix.rs::expressions_evaluate | github/env/vars/inputs at enqueue — no needs/steps, matching GitHub's table. |
+| `avail.concurrency` | Contexts in `concurrency` | supported | case:concurrency-job | github/vars/inputs at enqueue. |
+| `avail.container` | Contexts in `container`/`services` | supported | case:container-job | Expressions in the spec evaluate at the runner. |
+| `avail.environment` | Contexts in `environment.name`/`url` | supported | case:environment-job | |
+| `avail.step-fields` | Contexts in step `name`/`run`/`uses`/`working-directory`/`env`/`with`/`if`/`timeout-minutes` | supported | case:expr-in-run, case:expr-steps-context | steps context populated progressively during the job. |
+| `avail.permissions` | Contexts in `permissions` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload | Literal scope values only — GitHub does not permit expressions here either. |
+| `avail.outputs-step` | `$GITHUB_OUTPUT` → `steps.<id>.outputs` | supported | case:needs-outputs | |
+
+## 9. Workflow commands & environment files (`cmd.`, `envfile.`)
+
+Source: <https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands>
+
+Log commands (`::name::`) are echoed to the job log. Behaviour-changing
+commands the runner does not interpret produce a `::warning::` — never a
+silent no-op. Annotation rendering (error/warning/notice decorators in the
+UI) is a P16 UI item; the command text is preserved in the log either way.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `cmd.error` | `::error file=…,line=…::msg` — error annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Text is logged; the annotation is not parsed or rendered. P16 annotations. |
+| `cmd.warning` | `::warning::` annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.error`. |
+| `cmd.notice` | `::notice::` annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.error`. |
+| `cmd.debug` | `::debug::` shown only with ACTIONS_STEP_DEBUG | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Debug lines are always logged as text; the ACTIONS_STEP_DEBUG gate does not exist. P16. |
+| `cmd.group` | `::group::`/`::endgroup::` collapsible log sections | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns and logs the text; no folding. P16 log rendering. |
+| `cmd.add-mask` | `::add-mask::` registers a runtime mask | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; repo/env secrets are always masked already, but dynamic masks are not registered. P13 command gaps. |
+| `cmd.set-output` | `::set-output::` (deprecated upstream) | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; use `$GITHUB_OUTPUT`. decision: not planned — deprecated upstream. |
+| `cmd.save-state` | `::save-state::` (deprecated upstream) | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; use `$GITHUB_STATE`. decision: not planned — deprecated upstream. |
+| `cmd.set-env` | `::set-env::` — disabled upstream unless ACTIONS_ALLOW_UNSECURE_COMMANDS | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | GitHub hard-errors; we warn and continue without applying. Use `$GITHUB_ENV`. decision: matches GitHub's disabled default, different signal. |
+| `cmd.add-path` | `::add-path::` — same disabled-by-default family | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.set-env`; use `$GITHUB_PATH`. |
+| `cmd.stop-commands` | `::stop-commands::{token}`/`::{token}::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; command processing is never paused — a line looking like a command inside a stop block still warns. P13. |
+| `cmd.echo` | `::echo::on` / `::echo::off` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; all commands echo anyway. P13. |
+| `cmd.add-matcher` | `::add-matcher::`/`::remove-matcher::` problem matchers | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; matchers are not installed. P16 annotations. |
+| `cmd.escaping` | `%25 %0D %0A %3A %2C` command-data escaping | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Commands are not parsed, so escape sequences pass through literally — consistent with not interpreting them. |
+| `envfile.env` | `$GITHUB_ENV` — `KEY=value` and `KEY<<DELIM` heredoc, later steps see it | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_simple_and_blank_lines, test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc, case:run-env-step | |
+| `envfile.env-later-wins` | Later entries override earlier ones | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_later_wins | |
+| `envfile.output` | `$GITHUB_OUTPUT` → `steps.<id>.outputs.*` | supported | case:needs-outputs, test:crates/oxidean-runner/src/exec/mod.rs::path_file_parsing | |
+| `envfile.path` | `$GITHUB_PATH` — prepended for later steps only | supported | test:crates/oxidean-runner/src/exec/mod.rs::file_commands_merge_env_and_path | Container steps prepend onto the image PATH, not the host's. |
+| `envfile.step-summary` | `$GITHUB_STEP_SUMMARY` → rendered step summary | supported | case:step-summary, test:crates/oxidean-api/tests/workflow_conformance.rs::step_summary_persists_on_job | |
+| `envfile.state` | `$GITHUB_STATE` → `STATE_*` in an action's post step | supported | case:uses-node-post, test:crates/oxidean-runner/src/exec/mod.rs::env_file_simple_and_blank_lines | Scoped to the writing action — `run:` writes are cleared, not leaked. |
+| `envfile.reserved` | Reserved names cannot be overridden via env files or secrets | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_cannot_override_reserved_vars | Warns and skips the entry. |
+| `envfile.heredoc-collision` | Delimiter line inside the value truncates it | partial | test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc | Same truncation rule as GitHub; an unterminated heredoc consumes the file tail — GitHub behaves identically. |
+
+## 10. Default environment variables (`env.`)
+
+Source: <https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables>
+
+One row per documented variable. Values are emitted as both `GITHUB_*`
+and `OXIDEAN_*` twins (same value, both spellings) unless noted.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `env.ci` | `CI` — always `true` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | `OXIDEAN=true` twin too. |
+| `env.github-action` | `GITHUB_ACTION` — current action name/id | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Not populated. P13. |
+| `env.github-action-path` | `GITHUB_ACTION_PATH` — the action's checked-out dir | supported | test:crates/oxidean-runner/src/exec/action.rs::resolve_inputs_applies_scalar_and_expr_defaults | Set inside `uses:` steps. |
+| `env.github-action-repository` | `GITHUB_ACTION_REPOSITORY` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | P13. |
+| `env.github-actions` | `GITHUB_ACTIONS=true` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-actor` | `GITHUB_ACTOR` — triggering user | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-actor-id` | `GITHUB_ACTOR_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-api-url` | `GITHUB_API_URL` — REST root | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | `{server_url}/api`. |
+| `env.github-base-ref` | `GITHUB_BASE_REF` — PR base, else empty | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_pull_request_head_ref | |
+| `env.github-env` | `GITHUB_ENV` — env file path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | Oxidean-side name is `OXIDEAN_ENV_FILE` (see section 9). |
+| `env.github-event-name` | `GITHUB_EVENT_NAME` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-event-path` | `GITHUB_EVENT_PATH` — event.json path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values, test:crates/oxidean-runner/src/exec/mod.rs::event_json_pull_request | |
+| `env.github-graphql-url` | `GITHUB_GRAPHQL_URL` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | No GraphQL API exists. P13. |
+| `env.github-head-ref` | `GITHUB_HEAD_REF` — PR source branch, else empty | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_pull_request_head_ref | |
+| `env.github-job` | `GITHUB_JOB` — job id | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-output` | `GITHUB_OUTPUT` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-path` | `GITHUB_PATH` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-ref` | `GITHUB_REF` — full ref | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
+| `env.github-ref-name` | `GITHUB_REF_NAME` — short ref | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
+| `env.github-ref-protected` | `GITHUB_REF_PROTECTED` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Branch-protection state not surfaced. P13. |
+| `env.github-ref-type` | `GITHUB_REF_TYPE` — branch/tag | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
+| `env.github-repository` | `GITHUB_REPOSITORY` — `owner/repo` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-repository-id` | `GITHUB_REPOSITORY_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-repository-owner` | `GITHUB_REPOSITORY_OWNER` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-repository-owner-id` | `GITHUB_REPOSITORY_OWNER_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-retention-days` | `GITHUB_RETENTION_DAYS` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Instance-configured retention exists (sweep in `sweeps.rs`); the variable is not emitted. P16. |
+| `env.github-run-attempt` | `GITHUB_RUN_ATTEMPT` | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_rerun_bumps_run_attempt | |
+| `env.github-run-id` | `GITHUB_RUN_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-run-number` | `GITHUB_RUN_NUMBER` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-server-url` | `GITHUB_SERVER_URL` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-sha` | `GITHUB_SHA` — run commit | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-step-summary` | `GITHUB_STEP_SUMMARY` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-triggering-actor` | `GITHUB_TRIGGERING_ACTOR` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | P13. |
+| `env.github-workflow` | `GITHUB_WORKFLOW` — workflow name | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-workflow-ref` | `GITHUB_WORKFLOW_REF` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-workflow-sha` | `GITHUB_WORKFLOW_SHA` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-workspace` | `GITHUB_WORKSPACE` — checkout dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.github-token` | `GITHUB_TOKEN` — scoped job token | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_token_masked_in_logs | Masked in logs; revoked at job end. |
+| `env.runner-arch` | `RUNNER_ARCH` — X64/ARM64/… | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.runner-debug` | `RUNNER_DEBUG` — set when debug logging enabled | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | No runner-debug toggle. P16. |
+| `env.runner-environment` | `RUNNER_ENVIRONMENT` — github-hosted/self-hosted | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | All Oxidean runners are self-hosted; the variable is not emitted. P16. |
+| `env.runner-name` | `RUNNER_NAME` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.runner-os` | `RUNNER_OS` — Linux/macOS/Windows spelling | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
+| `env.runner-temp` | `RUNNER_TEMP` — per-job temp dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::runner_temp_dir_files | |
+| `env.runner-tool-cache` | `RUNNER_TOOL_CACHE` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | setup-* actions honour it. |
+| `env.actions-id-token-request` | `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — OIDC mint credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | Present only when `permissions.id-token: write` survives provenance gating. |
+| `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | unsupported | case:cache-service-absent | No cache service; unset, so actions/cache warns and continues. P14. |
+| `env.actions-step-debug` | `ACTIONS_STEP_DEBUG` — enables `::debug::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | P16 (with `cmd.debug`). |
+
+## 11. Action metadata — action.yml (`action.`)
+
+Source: <https://docs.github.com/en/actions/sharing-automations/creating-actions/metadata-syntax-for-github-actions>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `action.filename` | `action.yml` and `action.yaml` both read | supported | test:crates/oxidean-runner/src/exec/action.rs::resolve_inputs_applies_scalar_and_expr_defaults | `load_action_spec` tries both names. |
+| `action.name-description` | `name:`/`description:`/`author:` | supported | case:uses-local-composite | Informational; carried through. |
+| `action.inputs` | `inputs.<id>` — description, required, default | supported | case:checkout-with-inputs, case:action-metadata-warnings | |
+| `action.input-defaults` | Scalar defaults (bool/number) stringified; expression defaults evaluated | supported | test:crates/oxidean-runner/src/exec/action.rs::resolve_inputs_applies_scalar_and_expr_defaults | `debug: false` reaches the action as `INPUT_DEBUG=false`; `${{ github.token }}` defaults resolve. |
+| `action.input-env-names` | `INPUT_<NAME>` env names preserve hyphens | supported | test:crates/oxidean-runner/src/exec/action.rs::input_env_names_preserve_hyphens | Matches @actions/core's space-only underscore rule. |
+| `action.inputs-required` | `required: true` without a value | partial | case:action-metadata-warnings | GitHub logs a warning (modern runners); we warn the same way — but enforcement details are GitHub behaviour unverified. |
+| `action.unexpected-input` | `with:` keys not declared in `inputs:` warn | supported | case:action-metadata-warnings | `::warning::unexpected input(s)` in the log. |
+| `action.deprecation` | `deprecationMessage:` surfaces as a warning | supported | case:action-metadata-warnings | |
+| `action.outputs` | `outputs:` — composite `outputs.<id>.value` evaluated | supported | case:uses-local-composite, case:composite-env | |
+| `action.runs-using` | `runs.using:` — composite, node*, docker | supported | case:uses-local-composite, case:uses-node-action, test:crates/oxidean-runner/src/exec/containers.rs::spec_missing_image_fails | |
+| `action.node-versions` | `using: node12/16/20/24` | partial | case:uses-node-action | Non-bundled runtimes are coerced to the runner's bundled Node instead of downloading per-version — same execution semantics, different runtime provenance. GitHub behaviour unverified for node24 selection rules. |
+| `action.pre-post` | `pre:`/`post:` lifecycle, `pre-if`/`post-if` default `always()` | supported | case:uses-node-pre-if, case:uses-node-post | |
+| `action.post-order` | Post steps run in reverse order | supported | case:uses-node-post | |
+| `action.docker-runtime` | docker `image`/`entrypoint`/`args`/`pre-entrypoint`/`post-entrypoint`/`env`, workspace mounted | supported | test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Requires a Docker-capable runner. |
+| `action.composite` | composite steps — run/shell/uses nesting, inputs context | supported | case:uses-local-composite, case:composite-env | |
+| `action.branding` | `branding:` icon/color | n/a | | Cosmetic metadata; stored nowhere, never blocks execution. |
+| `action.state-save` | `save-state`/`STATE_*` pre-to-post channel | supported | case:uses-node-post | Via `$GITHUB_STATE`. |
+| `action.docker-step-args` | Step-level `args:`/`entrypoint:` for docker actions | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Warned at parse. `with.args`/`with.entrypoint` still reach docker actions. P13. |
+
+## 12. Reusable workflows (`reuse.`)
+
+Source: <https://docs.github.com/en/actions/sharing-automations/reusing-workflows>
+
+Not implemented — a `uses:` job or `on: workflow_call` workflow is a
+validation-failure run, never a silent skip. Whole section closes in P13.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `reuse.call` | `jobs.<id>.uses:` — call a reusable workflow | unsupported | case:reusable-workflow-local, case:reusable-workflow-remote | Validation failure. P13. |
+| `reuse.trigger` | `on: workflow_call` — define a callable workflow | unsupported | case:reusable-workflow-local | Warned at parse. P13. |
+| `reuse.inputs` | `on.workflow_call.inputs` typed inputs | unsupported | case:reusable-workflow-local | P13. |
+| `reuse.outputs` | `on.workflow_call.outputs` | unsupported | case:reusable-workflow-local | P13. |
+| `reuse.secrets` | `jobs.<id>.secrets` / `secrets: inherit` | unsupported | case:reusable-workflow-local | P13. |
+| `reuse.with` | `jobs.<id>.with` inputs to the call | unsupported | case:reusable-workflow-local | P13. |
+| `reuse.strategy` | matrix over a call | unsupported | case:reusable-workflow-local | P13. |
+| `reuse.nesting` | Up to 4 nested call levels | unsupported | case:reusable-workflow-remote | P13. |
+| `reuse.permissions` | Called workflow can only reduce permissions | unsupported | case:reusable-workflow-remote | P13. |
+| `reuse.env-context` | `env` in a call is not permitted by GitHub | unsupported | test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | P13. |
+
+## 13. Artifacts (`art.`)
+
+Source: <https://github.com/actions/upload-artifact#readme> and
+<https://github.com/actions/download-artifact#readme> (v4) plus
+<https://docs.github.com/en/actions/using-workflows/storing-workflow-data-as-artifacts>
+
+Upload/download are built-in actions on the runner — no marketplace fetch
+needed. Search-path semantics follow upstream `findFilesToUpload`
+(search-path root, multi-path LCA).
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `art.upload` | `actions/upload-artifact` uploads named artifacts | supported | case:artifact-upload-download | v4 semantics: immutable artifacts, `overwrite` replaces. |
+| `art.search-path-root` | Archive root = the pattern's search path (multi-pattern → LCA) | supported | case:artifact-search-path-root, test:crates/oxidean-runner/src/exec/artifacts.rs::archive_root_follows_search_paths | Single literal file → parent dir. Dir pattern with one deep match → contents relative to the dir. |
+| `art.if-no-files-found` | `if-no-files-found:` warn/error/ignore | supported | case:artifact-no-files-error | `error` fails the step; `warn` logs `::warning::`. |
+| `art.hidden-files` | `include-hidden-files:` — dot-segments excluded by default | supported | test:crates/oxidean-runner/src/exec/artifacts.rs::archive_root_follows_search_paths | v4 default changed upstream; we match (hidden files skipped unless opted in). |
+| `art.retention-days` | `retention-days:` per-artifact expiry | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Server sweep enforces expiry; artifact-level override accepted. |
+| `art.overwrite` | `overwrite: true` replaces an existing artifact | supported | case:artifact-overwrite | v4 requires this flag to re-upload a name. |
+| `art.compression-level` | `compression-level:` | partial | case:artifact-upload-download | Accepted but ignored — archives are always gzip. Warns in log. |
+| `art.download` | `actions/download-artifact` — by name into `path:` | supported | case:artifact-upload-download, case:artifact-pattern-download | |
+| `art.download-pattern` | `pattern:` glob over artifact names | supported | case:artifact-pattern-download | |
+| `art.merge-multiple` | `merge-multiple: true` flattens matched artifacts into `path:` | supported | case:artifact-pattern-download | |
+| `art.download-missing` | Missing artifact name fails the step | supported | case:artifact-missing | |
+| `art.cross-repo` | `github-token`/`repository`/`run-id` download from another repo/run | unsupported | case:artifact-upload-download | Inputs warned as ignored; same-run only. decision: not planned — cross-repo token semantics need design. |
+| `art.digest` | `outputs.digest` — artifact SHA-256 | unsupported | case:artifact-upload-download | Not emitted. P13. |
+
+## 14. Dependency caching (`cache.`)
+
+Source: <https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows>
+and <https://github.com/actions/cache#readme>
+
+No cache service exists yet. `actions/cache*` resolves and runs as a node
+action, but without `ACTIONS_CACHE_URL` the toolkit warns and continues —
+the step does not fail. The curated action ledger flags every
+`actions/cache*` reference for template listings. Whole section closes in
+P14.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `cache.action` | `actions/cache` restore+save | unsupported | case:cache-service-absent | Warns "cache service not available"; step succeeds. P14. |
+| `cache.keys` | `key`/`restore-keys` prefix fallback | unsupported | case:cache-service-absent | P14. |
+| `cache.save-only` | `actions/cache/save` | unsupported | case:cache-service-absent | P14. |
+| `cache.restore-only` | `actions/cache/restore` | unsupported | case:cache-service-absent | P14. |
+| `cache.lookup-only` | `lookup-only` dry-run | unsupported | case:cache-service-absent | P14. |
+
+## 15. Concurrency (`conc.`)
+
+Source: <https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `conc.group` | `concurrency:` — bare group string or `{group, cancel-in-progress}` | supported | case:concurrency-workflow, case:concurrency-job | Workflow- and job-level; job group wins for its legs. |
+| `conc.case-insensitive` | Group names match case-insensitively | supported | case:concurrency-cancel | Groups are normalized to lowercase at enqueue. |
+| `conc.cancel-in-progress` | `cancel-in-progress: true` supersedes running same-group runs/jobs | supported | case:concurrency-cancel, case:concurrency-job-cancel | |
+| `conc.pending-supersede` | At most one running + one pending per group; a newer pending cancels the older pending | partial | case:concurrency-workflow | Without `cancel-in-progress`, same-group jobs are not serialized and an older pending run is not superseded — both queue normally. Closes in P13. |
+| `conc.expression-group` | `group` evaluated as an expression | supported | case:concurrency-job | github/vars/inputs contexts at enqueue. |
+
+## 16. Environments & deployments (`envr.`)
+
+Source: <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments-with-environments>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `envr.auto-create` | A job naming an environment creates it if missing | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
+| `envr.required-reviewers` | `required_reviewers` hold the job for approval | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | `waiting_approval` until a reviewer releases it. |
+| `envr.reviewer-cap` | Max 6 reviewers per environment | partial | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | The cap is not enforced — GitHub rejects more; we store them. P13 hardening. |
+| `envr.prevent-self-review` | `prevent_self_review` — the deployer cannot approve | unsupported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | Field is not stored/enforced today — silently ignored, flagged for P13. |
+| `envr.wait-timer` | `wait_timer_minutes` delays the deployment | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_wait_timer | GitHub caps at 30 days; ours accepts any non-negative value — cap not enforced. |
+| `envr.branch-policy` | `deployment_branches` allowlist fails non-matching refs | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_branch_allowlist_fails_loudly | Loud failure on disallowed refs, not a silent skip. |
+| `envr.rejection-fails` | Rejected approval fails the job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |
+| `envr.secret-precedence` | Environment secrets override repo secrets, which override org secrets | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_org_env_secret_merge_precedence_and_audit | |
+| `envr.url` | `environment.url` → job outputs `url` | supported | case:environment-job | |
+| `envr.deployments` | Deployment records per job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
+| `envr.admin-bypass` | Repo admins can release a held deployment | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | Matches GitHub's admin override. |
+
+## 17. `GITHUB_TOKEN` permissions (`perm.`)
+
+Source: <https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication>
+and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#permissions>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `perm.scopes` | All 16 scopes — actions, attestations, checks, contents, deployments, discussions, id-token, issues, models, packages, pages, pull-requests, repository-projects, security-events, statuses | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_map_contents_write | Every scope name recognized; unknown keys flag `unsupported`. |
+| `perm.read-all` | `permissions: read-all` | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_read_all_and_write_all_scalars | |
+| `perm.write-all` | `permissions: write-all` | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_read_all_and_write_all_scalars | |
+| `perm.none` | `permissions: {}` — every scope none | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_map_without_contents_defaults_to_none | |
+| `perm.unspecified-none` | A map resets unlisted scopes to `none` | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_map_contents_write | |
+| `perm.job-override` | A job-level block replaces the workflow-level one | supported | test:crates/oxidean-api/src/actions/parse.rs::effective_contents_permission_job_overrides_workflow | |
+| `perm.default-floor` | Unspecified `contents` falls back to the repo default | supported | test:crates/oxidean-api/src/actions/parse.rs::effective_contents_permission_defaults_to_read, test:crates/oxidean-api/tests/actions_phase7.rs::p7_default_permissions_floor | |
+| `perm.fork-read-only` | Fork PR runs get read-only tokens | partial | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | Provenance-gated; the write-to-read downgrade is enforced at token mint, and fork runs hold for approval. Exact per-scope narrowing on forks is GitHub behaviour unverified. |
+| `perm.id-token` | `id-token: write` mints OIDC credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials, case:oidc-curl | Only scope that changes job env today; other scopes are recorded in the payload for the runner/API surface. |
+
+## 18. OIDC (`oidc.`)
+
+Source: <https://docs.github.com/en/actions/concepts/security/openid-connect>
+and <https://docs.github.com/en/actions/reference/oidc>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `oidc.issuer` | `iss` = `{public_origin}/api/actions/oidc` (path issuer, like GHES) | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | |
+| `oidc.discovery` | `{iss}/.well-known/openid-configuration` — served under `/api` so the web proxy passes it | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | issuer field byte-matches the token `iss`. |
+| `oidc.jwks` | `jwks_uri` = `{iss}/jwks`; RSA keys only | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | kty RSA, kid, alg RS256, use sig. |
+| `oidc.rs256` | Tokens signed RS256 with RSA-2048 via aws-lc-rs | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | Cloud-provider-compatible: AWS STS and GCP STS accept RS256/RSA. EdDSA was dropped for this. |
+| `oidc.claims` | Full documented claim set — sub formats for environment/pull_request/ref, actor*, base_ref, event_name, head_ref, job_workflow_ref/sha, ref, ref_protected, ref_type, repository*, repository_visibility, run_attempt, run_id, run_number, runner_environment, sha, workflow*, iss/aud/exp/iat/nbf/jti | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | Sub precedence: environment > pull_request > ref. |
+| `oidc.aud` | `audience`/`aud` query parameter sets `aud` | supported | case:oidc-curl | `curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=…"` works verbatim — the URL already carries `?api-version=2.0`. |
+| `oidc.request-url` | `ACTIONS_ID_TOKEN_REQUEST_URL` ends `?api-version=2.0` for `&audience=` append | supported | case:oidc-curl, test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | Matches @actions/core's `${URL}&audience=${aud}` contract. |
+| `oidc.key-at-rest` | RSA private key encrypted at rest with the Actions secrets key | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | No secrets key configured → the token endpoint errors instead of minting. |
+| `oidc.mint-gate` | `id-token: write` required; credentials per-job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | |
+
+## 19. Secrets & configuration variables (`secret.`, `var.`)
+
+Source: <https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions>
+and <https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `secret.repo` | Repository secrets — create/list/delete via RPC | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_enable_toggle_persists | |
+| `secret.env` | Environment secrets | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_org_env_secret_merge_precedence_and_audit | |
+| `secret.org` | Organization secrets with visibility scoping | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_org_secret_selected_visibility_scopes_repos | |
+| `secret.precedence` | env > repo > org precedence | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_org_env_secret_merge_precedence_and_audit | |
+| `secret.name-rules` | Name must be `[A-Z_][A-Z0-9_]*`-ish, no `GITHUB_` prefix | supported | test:crates/oxidean-api/src/actions/secrets.rs::validate_name_rejects_empty | |
+| `secret.size` | 48 KiB value cap, non-empty | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_value_size_cap | GitHub's documented limit. |
+| `secret.encryption` | Encrypted at rest; never echoed back | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_encrypt_never_stores_plaintext_blob, test:crates/oxidean-api/src/actions/secrets.rs::encrypt_fails_closed_without_key | Fails closed without a configured secrets key. |
+| `secret.injection` | Secrets land in the `secrets` context and as step env | supported | case:secrets-env, case:secrets-context | |
+| `secret.masking` | Secret values masked (`***`) in logs | supported | case:secrets-mask, test:crates/oxidean-runner/src/exec/mod.rs::secrets_masked_in_logs | |
+| `secret.reserved` | A secret cannot override a reserved `GITHUB_*`/`RUNNER_*` name | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_cannot_override_reserved_vars | Warns and skips. |
+| `secret.fork-pr` | Secrets withheld on untrusted fork PRs | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | Fork runs also hold for approval (see `sec.fork-approval`). |
+| `var.vars-context` | `vars` configuration variables | unsupported | case:expr-vars-empty | Context exists but is empty; no vars storage yet. P13. |
+| `var.cases-sensitivity` | Variable/secret names in contexts are case-insensitive lookups | supported | test:crates/oxidean-actions-expr/src/eval.rs::secrets_context_is_plain_lookup | Context keys resolve case-insensitively like GitHub. |
+
+## 20. Runners & labels (`runner.`)
+
+Source: <https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job>
+and <https://docs.github.com/en/actions/hosting-your-own-runners>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `runner.self-hosted` | Self-hosted runners register and claim jobs | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register | Gitea runner.v1 protocol — stock `act_runner` works too. |
+| `runner.labels` | `runs-on` labels match runner-declared labels (all must match) | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_fetch_task_label_match, case:runs-on-nomatch | |
+| `runner.labels-array` | `runs-on: [a, b]` — every label must be present | supported | case:runs-on-array | |
+| `runner.group` | `runs-on: {group: …}` runner groups | n/a | | GitHub-hosted grouping; labels cover routing. Parse fails loudly today. |
+| `runner.hosted-images` | `ubuntu-latest`/`windows-latest` image pool | n/a | | No hosted fleet; `ubuntu-latest` on a self-hosted runner is just a label the runner declares. |
+| `runner.larger-runners` | Larger/hosted runner SKUs | n/a | | Bring-your-own hardware. |
+| `runner.registration-token` | Short-lived registration tokens | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_admin_create_registration_token | |
+| `runner.env-bootstrap` | Env-based runner bootstrap token | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_env_bootstrap_token | |
+| `runner.docker-mode` | Runner can execute jobs inside Docker containers | supported | case:container-job | Declared via labels; absent Docker the job fails loudly. |
+
+## 21. Security behaviours (`sec.`)
+
+Source: <https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `sec.fork-secrets` | Fork PRs get no secrets and a read-only token | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | |
+| `sec.fork-approval` | First-time/external fork contributors hold for approval | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_fork_approval_hold_and_release | |
+| `sec.prt-optin` | `pull_request_target` requires the repo opt-in flag | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | Base-ref checkout enforced — a fork PR cannot reach a privileged run by rewriting its own workflow file. |
+| `sec.prt-workflow-source` | `pull_request_target` runs the base-ref workflow | supported | case:prt-only | |
+| `sec.pr-workflow-source` | `pull_request` runs the PR-head workflow | supported | case:pr-only | GitHub runs it against the test-merge SHA — head SHA divergence closes in P15. |
+| `sec.token-recursion` | Job-token events never re-trigger workflows | partial | test:crates/oxidean-runner/src/exec/mod.rs::checkout_auth_prefers_job_token | The job token has no push capability, so the rule holds structurally; dispatch suppression is explicit. |
+| `sec.action-policy` | Instance allowlist / full-SHA pinning for actions | supported | test:crates/oxidean-api/src/actions/policy.rs::allowlist_enforces_owner_and_repo, test:crates/oxidean-api/tests/actions_phase8.rs::p8_policy_violation_fails_validation_loudly | `peter-evans/*` style owner and repo allowlists; `@<full-sha>` pinning enforcible. |
+| `sec.script-injection` | `${{ }}` in `run:` is text-substituted — injection-resistant guidance applies | supported | case:expr-in-run | Same model as GitHub; mitigations are workflow-authoring concerns. |
+| `sec.log-masking` | Secrets and job token masked in logs | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_masked_in_logs, test:crates/oxidean-runner/src/exec/mod.rs::job_token_masked_in_logs | `::add-mask::` dynamic masks are not interpreted (see `cmd.add-mask`). |
+
+## 22. Limits (`limit.`)
+
+Source: <https://docs.github.com/en/actions/administering-github-actions/usage-limits-billing-and-administration>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `limit.matrix` | Max 256 jobs per matrix | supported | case:matrix-over-256, test:crates/oxidean-api/src/actions/matrix.rs::over_256_legs_fails_loud | Loud error naming the cap. |
+| `limit.dispatch-inputs` | Max 25 `workflow_dispatch` inputs | supported | test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_cap_25 | |
+| `limit.job-timeout` | Default 360-minute job timeout | supported | case:timeout-minutes-job | |
+| `limit.workflow-size` | Max workflow file bytes | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_discovery_errors_persist_as_failed_validation_runs | `MAX_WORKFLOW_BYTES`; oversize becomes a discovery error. |
+| `limit.log-size` | Bounded job log with a truncation marker | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_bounded_log_cap_writes_truncation_marker_once | |
+| `limit.log-stream` | Log index ordering / CAS | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_log_index_cas_orders_batches | |
+| `limit.retention` | Artifact/log retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Instance-configured window. |
+| `limit.api-rate` | REST API rate limiting | n/a | | No rate limiter today; self-hosted instances are trusted by definition. |
+
+## 23. Run lifecycle & integrations (`life.`)
+
+Source: <https://docs.github.com/en/actions/managing-workflow-runs>
+and <https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows>
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `life.rerun-all` | Re-run whole run | supported | test:crates/oxidean-api/tests/workflow_conformance.rs::rerun_resets_and_regates, test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | Attempt counter bumps; `needs`/approval gates re-apply. |
+| `life.rerun-failed` | Re-run failed/cancelled jobs only | supported | test:crates/oxidean-api/src/actions/rpc.rs::rerun_run | `failed_only` flag. |
+| `life.rerun-job` | Re-run a single job | supported | test:crates/oxidean-api/src/actions/rpc.rs::rerun_run | `job_id` targeting. |
+| `life.cancel` | Cancel a run | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | Runners see cancel on next update. |
+| `life.debug-rerun` | Re-run with step-debug logging | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | No ACTIONS_STEP_DEBUG plumbing. P16. |
+| `life.delete-run` | Delete run history | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
+| `life.disable-workflow` | Disable/enable a workflow file | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous | P16. |
+| `life.status-badge` | Workflow status badge endpoint | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
+| `life.log-download` | Download a run's full log archive | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Per-job logs stream over RPC; a zip-archive download endpoint does not exist. P16. |
+| `life.log-retention` | Logs compress + expire on a retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends, test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | |
+| `life.commit-status` | Commit status / required checks integration | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run results are not reported back as commit statuses. P16. |
+| `life.workflow-run-webhook` | `workflow_run` event fires when a run completes | unsupported | case:on-unsupported-event | Same gap as `ev.workflow_run`. P13/P16. |
+| `life.workflow-job-webhook` | `workflow_job` webhook | unsupported | case:on-unsupported-event | P16. |
+| `life.notifications` | Email/Slack notifications on failure | n/a | | No notification subsystem on Oxidean. |
+| `life.ui` | Runs list/detail in the web UI | partial | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | RPC surface exists; the web console is P12. |
+| `life.approval-gate` | Deployment approval releases a held job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |
+
+## 24. GitHub REST API for Actions (`api.`)
+
+Source: <https://docs.github.com/en/rest/actions>
+
+One row per endpoint group, mapped to the Oxidean RPC equivalent. The
+Oxidean surface is RPC, not REST — `api.*` rows describe the operation
+class, not URL parity.
+
+| `id` | Feature | Status | Evidence | Notes |
+|------|---------|--------|----------|-------|
+| `api.runs` | List/get workflow runs | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates, test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | `actions_listRuns` / `actions_getRun` RPC. |
+| `api.runs-mutate` | Cancel / rerun (all, failed, one job) | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | `actions_rerunRun` / `actions_cancelRun`. |
+| `api.runs-delete` | Delete a workflow run | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
+| `api.jobs` | List jobs / get a job | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Jobs embed in the run detail. |
+| `api.logs` | Stream/download job logs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Streamed per job; no archive download. P16. |
+| `api.artifacts` | List/download artifacts | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Runner protocol + artifact endpoint. |
+| `api.cache` | Cache endpoints | unsupported | case:cache-service-absent | P14. |
+| `api.runners` | Runner registration / tokens / labels | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register, test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_declare_labels | Plus the gitea runner.v1 bridge for stock act_runner. |
+| `api.secrets` | Secret CRUD (repo/env/org) | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_list_names_only_never_echoes_value | Values are write-only. |
+| `api.variables` | Configuration-variable CRUD | unsupported | case:expr-vars-empty | P13 — with `var.vars-context`. |
+| `api.environments` | Environment CRUD + protection rules | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
+| `api.oidc` | OIDC discovery + token mint | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | `/api/actions/oidc` subtree. |
+| `api.workflows` | List workflows / dispatch | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run | |
+| `api.permissions-req` | Token-scope enforcement matching `permissions:` | partial | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload | The payload records every scope; only `contents` and `id-token` currently gate behaviour. P13 hardening. |
+| `api.github-rest-compat` | github.com REST URL compatibility for third-party actions | unsupported | test:crates/oxidean-api/src/actions/templates.rs::classify_uses | Actions that call api.github.com directly (labeler, github-script, stale, …) are flagged `GithubApi` in the curated caveats — no shim layer exists. decision: not planned as a REST shim; the caveat table marks them. |

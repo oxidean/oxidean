@@ -47,11 +47,61 @@ fn glob_match(p: &[u8], s: &[u8]) -> bool {
             Some((&sc, srest)) => sc != b'/' && glob_match(prest, srest),
             None => false,
         },
+        // `[abc]`/`[a-z]`/`[!abc]` character classes (minimatch parity);
+        // never matches `/`.
+        b'[' => {
+            if let Some((matched, rest)) = match_class(prest, s) {
+                return matched && glob_match(rest, &s[1..]);
+            }
+            // Unclosed `[` is a literal.
+            match s.split_first() {
+                Some((&sc, srest)) => sc == b'[' && glob_match(prest, srest),
+                None => false,
+            }
+        }
         c => match s.split_first() {
             Some((&sc, srest)) => sc == c && glob_match(prest, srest),
             None => false,
         },
     }
+}
+
+/// Match a `[...]` class against the next byte of `s`. Returns
+/// `(matched, pattern-after-']')` — `None` when the class is unterminated.
+fn match_class<'a>(body: &'a [u8], s: &[u8]) -> Option<(bool, &'a [u8])> {
+    let (negate, body) = match body.split_first() {
+        Some((b'!', rest)) | Some((b'^', rest)) => (true, rest),
+        _ => (false, body),
+    };
+    let (&sc, _) = s.split_first()?;
+    if sc == b'/' {
+        return Some((false, &[])); // classes never match `/` — rest unused
+    }
+    let mut i = 0usize;
+    let mut hit = false;
+    let mut closed = false;
+    while i < body.len() {
+        if body[i] == b']' && i > 0 {
+            closed = true;
+            break;
+        }
+        // `a-z` range — `]` is a member only in first position.
+        if i + 2 < body.len() && body[i + 1] == b'-' && body[i + 2] != b']' {
+            if body[i] <= sc && sc <= body[i + 2] {
+                hit = true;
+            }
+            i += 3;
+        } else {
+            if body[i] == sc {
+                hit = true;
+            }
+            i += 1;
+        }
+    }
+    if !closed {
+        return None;
+    }
+    Some((hit != negate, &body[i + 1..]))
 }
 
 /// Ordered pattern-list match — `!` negations apply last-match-wins
@@ -127,8 +177,10 @@ pub fn event_matches(
         }
         _ => {}
     }
-    // Path filters — `None` (creation/unknown) counts as matching.
+    // Path filters — `None` (creation/unknown) counts as matching, and
+    // GitHub never evaluates `paths`/`paths-ignore` for tag pushes.
     match changed {
+        _ if tag.is_some() => {}
         Some(files) => {
             if !filters.paths.is_empty()
                 && !files
@@ -238,6 +290,64 @@ mod tests {
         assert!(event_matches(&ign, None, None, Some(&files), None));
         let only_docs = vec!["docs/b.md".to_string()];
         assert!(!event_matches(&ign, None, None, Some(&only_docs), None));
+    }
+
+    #[test]
+    fn paths_never_gate_tag_pushes() {
+        // GitHub does not evaluate paths/paths-ignore for tag pushes —
+        // a non-matching paths list still fires on `refs/tags/*`.
+        let files = vec!["src/a.rs".to_string()];
+        let filt = EventFilters {
+            paths: f(&["docs/**"]),
+            ..Default::default()
+        };
+        assert!(!event_matches(
+            &filt,
+            Some("main"),
+            None,
+            Some(&files),
+            None
+        ));
+        assert!(event_matches(&filt, None, Some("v1"), Some(&files), None));
+        let ign = EventFilters {
+            paths_ignore: f(&["src/**"]),
+            ..Default::default()
+        };
+        assert!(!event_matches(&ign, Some("main"), None, Some(&files), None));
+        assert!(event_matches(&ign, None, Some("v1"), Some(&files), None));
+    }
+
+    #[test]
+    fn glob_char_classes() {
+        assert!(glob_one("[ab]c.rs", "ac.rs"));
+        assert!(glob_one("[a-c]d.rs", "bd.rs"));
+        assert!(!glob_one("[ab]c.rs", "xc.rs"));
+        assert!(glob_one("[!ab]c.rs", "xc.rs"));
+        assert!(!glob_one("[!ab]c.rs", "ac.rs"));
+        assert!(glob_one("[]a].rs", "].rs"));
+        assert!(!glob_one("[ab]c.rs", "a/c.rs")); // classes never match `/`
+        assert!(glob_one("[ab.rs", "[ab.rs")); // unclosed `[` is literal
+    }
+
+    #[test]
+    fn branch_and_path_filters_are_conjunctive() {
+        // `branches` AND `paths` both gate: a matching path on a
+        // non-matching branch does not fire, and vice versa.
+        let files = vec!["src/a.rs".to_string()];
+        let filt = EventFilters {
+            branches: f(&["main"]),
+            paths: f(&["src/**"]),
+            ..Default::default()
+        };
+        assert!(event_matches(&filt, Some("main"), None, Some(&files), None));
+        assert!(!event_matches(&filt, Some("dev"), None, Some(&files), None));
+        assert!(!event_matches(
+            &filt,
+            Some("main"),
+            None,
+            Some(&["docs/x".into()]),
+            None
+        ));
     }
 
     #[test]

@@ -95,6 +95,32 @@ fn exec_mode_for(task: &Task, config: &Config) -> ExecMode {
     ExecMode::Host
 }
 
+/// Behaviour-changing `::command::`s the runner does not interpret —
+/// detected as `::cmd::` or `::cmd key=v::`. Annotation-only commands
+/// (`error`, `warning`, `notice`, `debug`) are deliberately absent: they
+/// carry rendering semantics the log consumer owns, and warning about them
+/// would flood the log.
+fn uninterpreted_commands_in_line(line: &str) -> Vec<&'static str> {
+    const EFFECT_COMMANDS: &[&str] = &[
+        "add-mask",
+        "set-env",
+        "add-path",
+        "set-output",
+        "save-state",
+        "stop-commands",
+        "echo",
+        "add-matcher",
+        "remove-matcher",
+        "group",
+        "endgroup",
+    ];
+    EFFECT_COMMANDS
+        .iter()
+        .copied()
+        .filter(|cmd| line.contains(&format!("::{cmd}::")) || line.contains(&format!("::{cmd} ")))
+        .collect()
+}
+
 pub(crate) struct Logger<'a> {
     pub client: &'a Client,
     pub run_id: String,
@@ -107,6 +133,11 @@ pub(crate) struct Logger<'a> {
     /// Next log-batch index the server expects. Shared because log sends can
     /// overlap with step output; every ack (and every 409) resyncs it.
     pub log_cursor: std::sync::atomic::AtomicI64,
+    /// Behaviour-changing `::cmd::` workflow commands already warned about —
+    /// they pass through to the log uninterpreted (annotations-only lines
+    /// like `::error::`/`::warning::` are excluded — log consumers render
+    /// those themselves).
+    pub seen_cmd_warns: std::sync::Mutex<std::collections::BTreeSet<&'static str>>,
 }
 
 impl<'a> Logger<'a> {
@@ -136,17 +167,49 @@ impl<'a> Logger<'a> {
         Ok(ack)
     }
 
+    /// Behaviour-changing workflow commands we do not interpret — a line
+    /// carrying one passes through to the log verbatim, which on GitHub
+    /// would mask secrets or mutate env. Warn once per command per job so
+    /// the gap is loud, never silent.
+    async fn warn_uninterpreted_commands(&self, chunk: &str) {
+        let mut pending: Vec<&'static str> = Vec::new();
+        {
+            let mut seen = self.seen_cmd_warns.lock().unwrap();
+            for line in chunk.lines() {
+                for cmd in uninterpreted_commands_in_line(line.trim()) {
+                    if seen.insert(cmd) {
+                        pending.push(cmd);
+                    }
+                }
+            }
+        }
+        for cmd in pending {
+            // Bypass `send`'s command scan — the warning text itself
+            // contains `::cmd::` markers (and would recurse).
+            let w = format!(
+                "::warning::workflow command '::{cmd}::' is not interpreted by the Oxidean runner — use the $GITHUB_* env files instead\n"
+            );
+            self.send_masked(&mask_secrets(&w, self.mask_values)).await;
+        }
+    }
+
     pub(crate) async fn send(&self, chunk: &str) {
-        let masked = mask_secrets(chunk, self.mask_values);
+        self.warn_uninterpreted_commands(chunk).await;
+        self.send_masked(&mask_secrets(chunk, self.mask_values))
+            .await;
+    }
+
+    /// Masked-text send: upload with cursor/ack handling + stdout mirror.
+    async fn send_masked(&self, masked: &str) {
         if masked.is_empty() {
             return;
         }
-        match self.send_once(&masked).await {
+        match self.send_once(masked).await {
             Ok(ack) if !ack.ok => {
                 // 409 gap — cursor already resynced to the server's expected
                 // index; resend this chunk once. A second gap drops it (log
                 // loss is tolerable; wedging is not).
-                match self.send_once(&masked).await {
+                match self.send_once(masked).await {
                     Ok(ack) if ack.cancelled => {
                         self.cancelled
                             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -164,7 +227,7 @@ impl<'a> Logger<'a> {
                 // lost. Resend once at the same index: the server answers
                 // Duplicate (drop, resync) or Accept (append) — exactly-once
                 // either way. A second failure drops the chunk.
-                match self.send_once(&masked).await {
+                match self.send_once(masked).await {
                     Ok(ack) if ack.cancelled => {
                         self.cancelled
                             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -258,10 +321,18 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         mask_values: &mask_values,
         cancelled: std::sync::atomic::AtomicBool::new(false),
         log_cursor: std::sync::atomic::AtomicI64::new(0),
+        seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
     };
 
     match client.update_task(&job_id, "in_progress", None, None).await {
-        Ok(ack) if ack.cancelled => return "cancelled",
+        // Superseded between claim and start — still say so in the log,
+        // otherwise the job page shows an empty log with no explanation.
+        Ok(ack) if ack.cancelled => {
+            logger
+                .line("::notice::job cancelled before it could start")
+                .await;
+            return "cancelled";
+        }
         Ok(_) => {}
         Err(e) => {
             tracing::error!("update_task in_progress failed: {e}");
@@ -396,7 +467,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 logger
                     .line(&format!("::notice::step '{step_id}' skipped — job timeout"))
                     .await;
-                record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+                record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 cancelled = true;
                 ctx.set_job_status(JobStatus::Cancelled);
                 sync_job_ctx(&mut ctx);
@@ -410,7 +481,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                         "::notice::step '{step_id}' skipped — job cancelled"
                     ))
                     .await;
-                record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+                record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 cancelled = true;
                 ctx.set_job_status(JobStatus::Cancelled);
                 sync_job_ctx(&mut ctx);
@@ -425,14 +496,14 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                             "::error::step '{step_id}' if evaluation failed: {e}"
                         ))
                         .await;
-                    record_step(&mut ctx, &step_id, "failure", HashMap::new());
+                    record_step(&mut ctx, &step_id, "failure", "failure", HashMap::new());
                     ctx.set_job_status(JobStatus::Failure);
                     sync_job_ctx(&mut ctx);
                     continue;
                 }
             };
             if !allowed {
-                record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+                record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 continue;
             }
             // Interpolate all expression-bearing fields once per step.
@@ -442,7 +513,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                     logger
                         .line(&format!("::error::step '{step_id}' expression error: {e}"))
                         .await;
-                    record_step(&mut ctx, &step_id, "failure", HashMap::new());
+                    record_step(&mut ctx, &step_id, "failure", "failure", HashMap::new());
                     ctx.set_job_status(JobStatus::Failure);
                     sync_job_ctx(&mut ctx);
                     continue;
@@ -541,7 +612,12 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 }
                 Err(_) => "failure",
             };
-            record_step(&mut ctx, &step_id, outcome, outputs);
+            let conclusion = if continue_on_error && outcome == "failure" {
+                "success"
+            } else {
+                outcome
+            };
+            record_step(&mut ctx, &step_id, outcome, conclusion, outputs);
             if let Err(e) = result {
                 if continue_on_error {
                     // GitHub: continue-on-error failure marks the step failed
@@ -723,6 +799,8 @@ mod tests {
             environment_url: None,
             id_token_request_url: None,
             id_token_request_token: None,
+            cache_url: None,
+            cache_token: None,
         }
     }
 
@@ -862,6 +940,33 @@ mod tests {
         let map = env_map(&je.vars);
         assert_eq!(map["OXIDEAN_TOKEN"], "");
         assert_eq!(map["GITHUB_TOKEN"], "");
+    }
+
+    #[test]
+    fn job_env_cache_creds_flow_when_minted() {
+        let mut t = task();
+        t.cache_url = Some("https://oxidean.example/api/actions/_apis/artifactcache".into());
+        t.cache_token = Some("oxrt_secret".into());
+        let je = job_env(&t, &cfg("x"), "/ws", "/tmp/rt", &HashMap::new());
+        let map = env_map(&je.vars);
+        assert_eq!(
+            map["ACTIONS_CACHE_URL"],
+            "https://oxidean.example/api/actions/_apis/artifactcache"
+        );
+        assert_eq!(map["ACTIONS_RESULTS_URL"], map["ACTIONS_CACHE_URL"]);
+        assert_eq!(map["ACTIONS_RUNTIME_TOKEN"], "oxrt_secret");
+        // Absent creds → the vars are never emitted (actions/cache skips).
+        let t2 = task();
+        let je2 = job_env(&t2, &cfg("x"), "/ws", "/tmp/rt", &HashMap::new());
+        let map2 = env_map(&je2.vars);
+        assert!(!map2.contains_key("ACTIONS_CACHE_URL"));
+        assert!(!map2.contains_key("ACTIONS_RUNTIME_TOKEN"));
+        // And a repo secret can't shadow the runtime token.
+        let mut secrets = HashMap::new();
+        secrets.insert("ACTIONS_RUNTIME_TOKEN".to_string(), "evil".to_string());
+        let je3 = job_env(&t, &cfg("x"), "/ws", "/tmp/rt", &secrets);
+        let map3 = env_map(&je3.vars);
+        assert_eq!(map3["ACTIONS_RUNTIME_TOKEN"], "oxrt_secret");
     }
 
     #[test]
@@ -1061,14 +1166,23 @@ mod tests {
 
     #[test]
     fn shell_argv_defaults() {
+        // GitHub default shell (unset) is `bash -e {0}` — staged file, no
+        // pipefail; explicit `shell: bash` adds `--noprofile --norc` and
+        // pipefail.
+        let stage = tempfile::tempdir().unwrap();
+        let argv = shell_argv(None, "echo hi", stage.path(), "/tmp");
+        assert_eq!(argv[..2], ["bash", "-e"]);
+        assert!(argv[2].ends_with("_scripts/step-0.sh"));
+        assert!(!argv.iter().any(|a| a == "pipefail"));
+        let argv = shell_argv(Some("bash"), "echo hi", stage.path(), "/tmp");
         assert_eq!(
-            shell_argv(None, "echo hi", Path::new("/tmp"), "/tmp"),
-            vec!["bash", "-e", "-o", "pipefail", "-c", "echo hi"]
+            argv[..6],
+            ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail"]
         );
-        assert_eq!(
-            shell_argv(Some("sh"), "x", Path::new("/tmp"), "/tmp"),
-            vec!["sh", "-e", "-c", "x"]
-        );
+        assert!(argv[6].ends_with("_scripts/step-1.sh"));
+        let argv = shell_argv(Some("sh"), "x", stage.path(), "/tmp");
+        assert_eq!(argv[..2], ["sh", "-e"]);
+        assert!(argv[2].ends_with(".sh"));
     }
 
     #[test]
@@ -1223,5 +1337,44 @@ mod tests {
         prepare_workspace(&ws).unwrap();
         assert!(!ws.join("stale").exists());
         assert!(ws.exists());
+    }
+
+    #[test]
+    fn warn_uninterpreted_commands_covers_behavior_changing_commands() {
+        // Every behaviour-changing GitHub command we don't interpret is
+        // detected (bare and parameterized forms).
+        for (line, want) in [
+            ("::add-mask::hunter2", "add-mask"),
+            ("::set-env name=FOO::bar", "set-env"),
+            ("::add-path::/opt/bin", "add-path"),
+            ("::set-output name=x::1", "set-output"),
+            ("::save-state name=k::v", "save-state"),
+            ("::stop-commands::tok123", "stop-commands"),
+            ("::echo::off", "echo"),
+            ("::add-matcher::p.json", "add-matcher"),
+            ("::remove-matcher owner=lint::", "remove-matcher"),
+            ("::group::build", "group"),
+            ("::endgroup::", "endgroup"),
+        ] {
+            assert!(
+                uninterpreted_commands_in_line(line).contains(&want),
+                "'{line}' should flag '{want}'"
+            );
+        }
+        // Annotation commands are NOT flagged — they pass through as text
+        // for the log consumer to render.
+        for line in [
+            "::error file=a.rs,line=1::boom",
+            "::warning::careful",
+            "::notice::fyi",
+            "::debug::detail",
+        ] {
+            assert!(
+                uninterpreted_commands_in_line(line).is_empty(),
+                "'{line}' must not be flagged"
+            );
+        }
+        // Plain text never warns.
+        assert!(uninterpreted_commands_in_line("just text").is_empty());
     }
 }

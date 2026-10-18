@@ -646,3 +646,291 @@ jobs:
     assert_eq!(payload["ref"], "refs/heads/main");
     assert_eq!(payload["after"], tip);
 }
+
+#[tokio::test]
+async fn p6_skip_ci_marker_suppresses_push() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-s").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    let yaml = br#"
+name: S
+on: [push]
+jobs:
+  s:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo s
+"#;
+    let (uid, repo_id, _tip) = mk_user_repo(&db, "s", &bare, yaml).await;
+    let git: Arc<dyn GitBackend> = Arc::new(CliGitBackend::new());
+    let repos_dir = bare.parent().unwrap().parent().unwrap().to_path_buf();
+
+    // Head commit carrying `[skip ci]` — GitHub suppresses push workflows.
+    let skip_tip = commit_on(
+        git.as_ref(),
+        &bare,
+        "main",
+        "main",
+        "docs: touch readme [skip ci]",
+        &[("readme.md", b"x")],
+    )
+    .await;
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-s",
+        "p6-demo",
+        Some(&uid),
+        &[("0".repeat(40), skip_tip, "refs/heads/main".into())],
+        true,
+    )
+    .await;
+    assert_eq!(run_count(&db, &repo_id).await, 0, "[skip ci] must not run");
+
+    // A normal follow-up commit still dispatches.
+    let ok_tip = commit_on(
+        git.as_ref(),
+        &bare,
+        "main",
+        "main",
+        "docs: touch readme again",
+        &[("readme.md", b"y")],
+    )
+    .await;
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-s",
+        "p6-demo",
+        Some(&uid),
+        &[("".into(), ok_tip, "refs/heads/main".into())],
+        true,
+    )
+    .await;
+    assert_eq!(run_count(&db, &repo_id).await, 1);
+}
+
+#[tokio::test]
+async fn p6_branch_delete_and_tag_flood() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-d").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    let yaml = br#"
+name: D
+on: [push]
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo d
+"#;
+    let (uid, repo_id, tip) = mk_user_repo(&db, "d", &bare, yaml).await;
+    let git: Arc<dyn GitBackend> = Arc::new(CliGitBackend::new());
+    let repos_dir = bare.parent().unwrap().parent().unwrap().to_path_buf();
+
+    // Branch deletion — `after` all-zeros never runs workflows.
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-d",
+        "p6-demo",
+        Some(&uid),
+        &[(tip.clone(), "0".repeat(40), "refs/heads/main".into())],
+        true,
+    )
+    .await;
+    assert_eq!(run_count(&db, &repo_id).await, 0, "deletion must not run");
+
+    // More than three tags in one push — GitHub suppresses all tag events;
+    // a branch update in the same push still runs.
+    let zero = "0".repeat(40);
+    let updates: Vec<(String, String, String)> = (0..4)
+        .map(|i| (zero.clone(), tip.clone(), format!("refs/tags/v9.{i}")))
+        .chain(std::iter::once((
+            zero.clone(),
+            tip.clone(),
+            "refs/heads/main".to_string(),
+        )))
+        .collect();
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-d",
+        "p6-demo",
+        Some(&uid),
+        &updates,
+        true,
+    )
+    .await;
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
+    assert_eq!(runs.len(), 1, "tag flood suppressed, branch ran");
+    assert_eq!(runs[0].head_ref, "refs/heads/main");
+}
+
+#[tokio::test]
+async fn p6_paths_filters_skipped_on_tag_push() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-tp").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    // `paths` that no commit matches — a tag push still fires because
+    // GitHub never evaluates path filters for tag pushes.
+    let yaml = br#"
+name: TP
+on:
+  push:
+    paths: ['docs/**']
+jobs:
+  tp:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo tp
+"#;
+    let (uid, repo_id, tip) = mk_user_repo(&db, "tp", &bare, yaml).await;
+    let git: Arc<dyn GitBackend> = Arc::new(CliGitBackend::new());
+    let repos_dir = bare.parent().unwrap().parent().unwrap().to_path_buf();
+
+    // Same commit on a branch: touched only readme → no run (sanity).
+    let c = commit_on(
+        git.as_ref(),
+        &bare,
+        "main",
+        "main",
+        "c",
+        &[("readme.md", b"1")],
+    )
+    .await;
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-tp",
+        "p6-demo",
+        Some(&uid),
+        &[(tip.clone(), c.clone(), "refs/heads/main".into())],
+        true,
+    )
+    .await;
+    assert_eq!(
+        run_count(&db, &repo_id).await,
+        0,
+        "paths filtered branch push"
+    );
+
+    // Tag push of that same non-matching commit: paths don't apply to tags.
+    notify_push_actions(
+        &db,
+        git.clone(),
+        &repos_dir,
+        &repo_id,
+        "p6-tp",
+        "p6-demo",
+        Some(&uid),
+        &[("0".repeat(40), c, "refs/tags/v1".into())],
+        true,
+    )
+    .await;
+    assert_eq!(run_count(&db, &repo_id).await, 1, "tag push ignores paths");
+}
+
+#[tokio::test]
+async fn p6_skip_ci_marker_suppresses_pull_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-ps").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    let yaml = br#"
+name: PS
+on:
+  pull_request:
+jobs:
+  ps:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ps
+"#;
+    let (uid, repo_id, _tip) = mk_user_repo(&db, "ps", &bare, yaml).await;
+    let git = CliGitBackend::new();
+
+    // PR head commit with [ci skip] → no pull_request run.
+    let head = commit_on(
+        &git,
+        &bare,
+        "feature",
+        "main",
+        "feature work [ci skip]",
+        &[("f", b"1")],
+    )
+    .await;
+    let n = dispatch_pull_request_for_sha(
+        &db,
+        &git as &dyn GitBackend,
+        &bare,
+        &repo_id,
+        PullRequestAction::Opened,
+        &head,
+        "refs/heads/feature",
+        Some(&uid),
+        Some(&repo_id),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, 0, "[ci skip] must suppress pull_request runs");
+
+    // Clean head commits still dispatch.
+    let head2 = commit_on(
+        &git,
+        &bare,
+        "feature",
+        "feature",
+        "more work",
+        &[("f", b"2")],
+    )
+    .await;
+    let n = dispatch_pull_request_for_sha(
+        &db,
+        &git as &dyn GitBackend,
+        &bare,
+        &repo_id,
+        PullRequestAction::Opened,
+        &head2,
+        "refs/heads/feature",
+        Some(&uid),
+        Some(&repo_id),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, 1);
+}

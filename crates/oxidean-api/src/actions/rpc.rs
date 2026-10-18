@@ -381,12 +381,8 @@ pub async fn put_secret(
     })?;
     validate_secret_name(&req.secret_name)
         .map_err(|msg| AppError::new("repo.actions.invalid_secret_name", msg))?;
-    if req.value.is_empty() {
-        return Err(AppError::new(
-            "repo.actions.invalid_secret_value",
-            "secret value is required",
-        ));
-    }
+    crate::actions::secrets::validate_secret_value(&req.value)
+        .map_err(|msg| AppError::new("repo.actions.invalid_secret_value", msg))?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let ciphertext = encrypt_secret(&req.value)
         .map_err(|e| AppError::new("repo.actions.secret_encrypt_failed", e))?;
@@ -874,12 +870,8 @@ pub async fn put_environment_secret(
         })?;
     validate_secret_name(&req.secret_name)
         .map_err(|msg| AppError::new("repo.actions.invalid_secret_name", msg))?;
-    if req.value.is_empty() {
-        return Err(AppError::new(
-            "repo.actions.invalid_secret_value",
-            "secret value is required",
-        ));
-    }
+    crate::actions::secrets::validate_secret_value(&req.value)
+        .map_err(|msg| AppError::new("repo.actions.invalid_secret_value", msg))?;
     let env = resolve_env_for_admin(ctx, &req.owner, &req.name, &req.environment).await?;
     let ciphertext = encrypt_secret(&req.value)
         .map_err(|e| AppError::new("repo.actions.secret_encrypt_failed", e))?;

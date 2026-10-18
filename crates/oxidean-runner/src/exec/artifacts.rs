@@ -33,6 +33,11 @@ pub(crate) async fn upload(
     let path_spec =
         input(with, "path").ok_or_else(|| "upload-artifact requires a 'path' input".to_string())?;
     let include_hidden = bool_input(with, "include-hidden-files");
+    if input(with, "compression-level").is_some() {
+        senv.logger
+            .line("::warning::input 'compression-level' is ignored — artifacts are always gzip-compressed")
+            .await;
+    }
 
     // Multiline path list; `!` negates like hashFiles.
     let mut files: Vec<PathBuf> = Vec::new();
@@ -180,6 +185,15 @@ pub(crate) async fn download(
         .as_deref()
         .ok_or_else(|| "download-artifact: task has no run_id".to_string())?;
     let merge = bool_input(with, "merge-multiple");
+    for ignored in ["github-token", "repository", "run-id"] {
+        if input(with, ignored).is_some() {
+            senv.logger
+                .line(&format!(
+                    "::warning::input '{ignored}' is ignored — artifact download is same-run only"
+                ))
+                .await;
+        }
+    }
 
     // `name` → one artifact into `path`; `pattern`/empty → list, filter by
     // name glob, each into `path/<name>` unless merge-multiple.

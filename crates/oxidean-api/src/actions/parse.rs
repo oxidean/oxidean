@@ -253,6 +253,8 @@ pub struct StepSpec {
 #[derive(Debug, Deserialize)]
 struct RawWorkflow {
     name: Option<String>,
+    #[serde(rename = "run-name")]
+    run_name: Option<serde_yaml::Value>,
     #[serde(rename = "on")]
     on: Option<RawOn>,
     jobs: Option<serde_yaml::Mapping>,
@@ -260,6 +262,8 @@ struct RawWorkflow {
     defaults: Option<RawDefaults>,
     permissions: Option<serde_yaml::Value>,
     concurrency: Option<serde_yaml::Value>,
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
 /// are honoured (workflow-level fallback for every step).
 #[derive(Debug, Deserialize, Clone)]
@@ -315,6 +319,9 @@ struct RawJob {
     continue_on_error: Option<serde_yaml::Value>,
     #[serde(rename = "timeout-minutes")]
     timeout_minutes: Option<serde_yaml::Value>,
+    /// Unknown job keys — GitHub rejects them; we warn loudly at parse.
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
 
 #[derive(Debug, Deserialize)]
@@ -343,6 +350,10 @@ struct RawStep {
     continue_on_error: Option<serde_yaml::Value>,
     #[serde(rename = "timeout-minutes")]
     timeout_minutes: Option<serde_yaml::Value>,
+    /// Unknown step keys (`args`, `entrypoint`, …) — GitHub applies them for
+    /// docker actions; we warn loudly rather than dropping them silently.
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
 
 fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
@@ -489,16 +500,30 @@ fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<Stri
     let mut warnings = Vec::new();
     match on {
         None => {}
-        Some(RawOn::Single(s)) => apply_event(&mut t, &s, None),
+        Some(RawOn::Single(s)) => {
+            if let Some(name) = apply_event(&mut t, &s, None) {
+                warnings.push(format!(
+                    "on.{name}: unsupported event — the workflow will never run on it"
+                ));
+            }
+        }
         Some(RawOn::List(list)) => {
             for s in list {
-                apply_event(&mut t, &s, None);
+                if let Some(name) = apply_event(&mut t, &s, None) {
+                    warnings.push(format!(
+                        "on.{name}: unsupported event — the workflow will never run on it"
+                    ));
+                }
             }
         }
         Some(RawOn::Map(map)) => {
             for (k, v) in &map {
                 if let serde_yaml::Value::String(s) = k {
-                    apply_event(&mut t, s, Some(v));
+                    if let Some(name) = apply_event(&mut t, s, Some(v)) {
+                        warnings.push(format!(
+                            "on.{name}: unsupported event — the workflow will never run on it"
+                        ));
+                    }
                 }
             }
         }
@@ -530,7 +555,14 @@ fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<Stri
     (t, unsupported, warnings)
 }
 
-fn apply_event(t: &mut WorkflowTriggers, name: &str, value: Option<&serde_yaml::Value>) {
+/// Returns `Some(name)` when the event is unrecognized — unimplemented
+/// `on:` entries simply never fire, so the caller records a loud warning
+/// instead of silently ignoring them.
+fn apply_event(
+    t: &mut WorkflowTriggers,
+    name: &str,
+    value: Option<&serde_yaml::Value>,
+) -> Option<String> {
     match name.trim() {
         "push" => {
             t.push = true;
@@ -574,11 +606,13 @@ fn apply_event(t: &mut WorkflowTriggers, name: &str, value: Option<&serde_yaml::
             t.issues = true;
             t.issues_types = parse_event_filters(value).types;
         }
-        _ => {
-            // Other unimplemented events (fork, watch, discussion, …) simply
-            // never fire — harmless to ignore, not mis-executed.
+        other => {
+            // Other unimplemented events (fork, watch, discussion, …) never
+            // fire — the caller warns loudly so the gap isn't silent.
+            return Some(other.to_string());
         }
     }
+    None
 }
 
 /// Parse the `{branches, tags, paths, types, *-ignore}` mapping under an
@@ -803,6 +837,19 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
     }
 
     let (triggers, mut unsupported, mut warnings) = parse_triggers(raw.on);
+
+    // Unknown top-level keys: GitHub rejects keys outside the workflow schema;
+    // warn loudly rather than silently dropping them.
+    if raw.run_name.is_some() {
+        warnings.push("run-name: not supported — runs are titled after the workflow".into());
+    }
+    for (k, _) in &raw.extra {
+        let key = k.as_str().unwrap_or("<non-string>");
+        warnings.push(format!(
+            "{key}: unknown top-level key — ignored (GitHub rejects it)"
+        ));
+    }
+
     let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
     check_str(&name, &mut unsupported, &mut warnings);
     let wf_env = raw.env.map(yaml_to_json).transpose()?;
@@ -843,6 +890,12 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         let job: RawJob = serde_yaml::from_value(value).map_err(|e| ParseError {
             message: format!("invalid job '{id}': {e}"),
         })?;
+        for (k, _) in &job.extra {
+            warnings.push(format!(
+                "jobs.{id}.{}: unknown key — ignored (GitHub rejects it)",
+                k.as_str().unwrap_or("<non-string>")
+            ));
+        }
         // Structural features that would mis-execute — fail loudly at dispatch.
         if job.continue_on_error.is_some() {
             flag(&mut unsupported, "continue-on-error");
@@ -907,6 +960,12 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
+            for (k, _) in &step.extra {
+                warnings.push(format!(
+                    "jobs.{id}.steps[{i}].{}: unknown key — ignored (GitHub applies it or rejects the workflow)",
+                    k.as_str().unwrap_or("<non-string>")
+                ));
+            }
             if step.uses.is_none() && step.run.is_none() {
                 return Err(ParseError {
                     message: format!("job '{id}' step {i} needs uses or run"),
@@ -1583,5 +1642,128 @@ jobs:
         .expect("parse");
         assert!(doc.unsupported.is_empty());
         assert!(doc.triggers.push);
+    }
+
+    #[test]
+    fn unimplemented_events_warn_loudly() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+  discussion:
+  label:
+    types: [created]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        // Known events stay set; unknown ones warn instead of silently
+        // never firing.
+        assert!(doc.triggers.push);
+        assert!(
+            doc.warnings
+                .iter()
+                .any(|w| w.contains("on.discussion") && w.contains("unsupported event")),
+            "missing unsupported-event warning: {:?}",
+            doc.warnings
+        );
+        assert!(
+            doc.warnings.iter().any(|w| w.contains("on.label")),
+            "map entry with filters warns too: {:?}",
+            doc.warnings
+        );
+        // List form also warns.
+        let doc2 = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push, watch]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc2.warnings.iter().any(|w| w.contains("on.watch")));
+    }
+
+    #[test]
+    fn unknown_keys_warn_at_every_level() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+run-name: ${{ github.actor }}
+bogus-top: 1
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    bogus-job-key: yes
+    steps:
+      - run: echo hi
+        args: [--verbose]
+"#,
+        )
+        .expect("parse");
+        for want in [
+            "run-name",
+            "bogus-top",
+            "jobs.a.bogus-job-key",
+            "jobs.a.steps[0].args",
+        ] {
+            assert!(
+                doc.warnings.iter().any(|w| w.contains(want)),
+                "missing warning for '{want}': {:?}",
+                doc.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn job_id_rules_enforced() {
+        for bad in ["", "a/b", "a\\b"] {
+            let yaml = format!(
+                "name: CI\non: [push]\njobs:\n  '{bad}':\n    runs-on: x\n    steps:\n      - run: hi\n"
+            );
+            assert!(
+                parse_workflow_yaml(yaml.as_bytes()).is_err(),
+                "job id '{bad}' should be rejected"
+            );
+        }
+        // Duplicate ids are a YAML-level error.
+        let dup = b"name: CI\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n";
+        assert!(parse_workflow_yaml(dup).is_err());
+    }
+
+    #[test]
+    fn mixed_positive_and_ignore_filters_warn() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+    branches: [main]
+    branches-ignore: [docs-*]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(
+            doc.warnings
+                .iter()
+                .any(|w| w.contains("branches") && w.contains("mutually exclusive")),
+            "missing mutual-exclusion warning: {:?}",
+            doc.warnings
+        );
     }
 }

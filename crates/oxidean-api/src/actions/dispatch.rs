@@ -61,6 +61,23 @@ pub async fn notify_push_actions(
     }
 }
 
+/// GitHub's "skip CI" markers — a head-commit message containing any of
+/// these suppresses `push`, `pull_request`, and `pull_request_target`
+/// runs. Compared case-insensitively (GitHub's matcher is documented by
+/// behaviour, not spec — treat as best-effort).
+pub fn message_has_skip_marker(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "[skip ci]",
+        "[ci skip]",
+        "[no ci]",
+        "[skip actions]",
+        "[actions skip]",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_push_inner(
     db: &Database,
@@ -112,6 +129,16 @@ async fn dispatch_push_inner(
 
     // GitHub dispatches one run per updated ref — iterate every non-delete
     // branch/tag update rather than collapsing to a single tip.
+    //
+    // A push updating more than three tags produces no tag events at all
+    // (GitHub's tag-flood guard); branch updates in the same push still run.
+    let tag_flood = updates
+        .iter()
+        .filter(|(_, after, r)| {
+            r.starts_with("refs/tags/") && !after.is_empty() && !after.chars().all(|c| c == '0')
+        })
+        .count()
+        > 3;
     for (before, after, refname) in updates {
         if after.chars().all(|c| c == '0') || after.is_empty() {
             continue; // ref deletion never runs workflows
@@ -119,10 +146,24 @@ async fn dispatch_push_inner(
         let (branch, tag) = if let Some(b) = refname.strip_prefix("refs/heads/") {
             (Some(b), None)
         } else if let Some(t) = refname.strip_prefix("refs/tags/") {
+            if tag_flood {
+                continue;
+            }
             (None, Some(t))
         } else {
             continue; // notes/replace/etc — no push workflows on non-branch/tag refs
         };
+        // [skip ci]-family markers on the head commit suppress the event.
+        if let Ok(c) = git.show_commit(&bare, after, None, None).await {
+            if message_has_skip_marker(&format!("{}\n{}", c.subject, c.body)) {
+                tracing::info!(
+                    repository_id,
+                    refname,
+                    "actions push skipped — head commit carries a skip marker"
+                );
+                continue;
+            }
+        }
         let commits = match git.push_event_commits(&bare, before, after, 2048).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -304,7 +345,9 @@ pub async fn enqueue_run(
     // the scheduler phase.
     if let Some(group_src) = doc.concurrency.as_ref().and_then(|c| c.group.as_deref()) {
         let mut notes = Vec::new();
-        let group = crate::actions::eval_ctx::interp_or_raw(group_src, &ctx, &mut notes);
+        // GitHub concurrency groups are case-insensitive — store lowercase.
+        let group =
+            crate::actions::eval_ctx::interp_or_raw(group_src, &ctx, &mut notes).to_lowercase();
         eval_warnings.extend(notes);
         if let Err(e) = db.set_action_run_concurrency(&run_id, &group).await {
             tracing::warn!(error = %e, run_id, "failed to record run concurrency group");
@@ -395,7 +438,7 @@ pub async fn enqueue_run(
                 .unwrap_or(false);
             cip.then_some(c.group.as_deref()).flatten()
         })
-        .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut Vec::new()));
+        .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut Vec::new()).to_lowercase());
     for job in &doc.jobs {
         // Per-job expression evaluation. Errors in `if`/`runs-on` fail the
         // job loudly; errors in display fields degrade to ::warning::.
@@ -456,6 +499,7 @@ pub async fn enqueue_run(
             .unwrap_or_else(|| job.id.clone());
         // `timeout-minutes` → absolute deadline; the evaluated seconds ride
         // the payload so a rerun can restart the clock without the YAML.
+        // Absent → GitHub's 360-minute default job timeout.
         let timeout_seconds = match &job.timeout_minutes {
             Some(src) => match crate::actions::eval_ctx::eval_minutes(src, &ctx) {
                 Ok(m) => Some(m * 60.0),
@@ -464,7 +508,7 @@ pub async fn enqueue_run(
                     None
                 }
             },
-            None => None,
+            None => Some(360.0 * 60.0),
         };
         let timeout_at = timeout_seconds.map(|s| {
             (chrono::Utc::now() + chrono::Duration::milliseconds((s * 1000.0) as i64))
@@ -475,15 +519,16 @@ pub async fn enqueue_run(
         // workflow-level groups supersede whole runs; job-level groups only
         // supersede same-group jobs in other runs.
         let concurrency_spec = job.concurrency.as_ref().or(doc.concurrency.as_ref());
+        // Groups match case-insensitively on GitHub — normalize lowercase.
         let concurrency_group = concurrency_spec
             .and_then(|c| c.group.as_deref())
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
             .filter(|g| !g.is_empty());
         let job_group = job
             .concurrency
             .as_ref()
             .and_then(|c| c.group.as_deref())
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
             .filter(|g| !g.is_empty());
         let cancel_in_progress = concurrency_spec
             .and_then(|c| c.cancel_in_progress.as_deref())
@@ -841,6 +886,12 @@ pub async fn dispatch_push_for_sha(
     if !db.get_repo_actions_enabled(repository_id).await? {
         return Ok(0);
     }
+    // Same skip-marker contract as the post-receive path.
+    if let Ok(c) = git.show_commit(bare, head_sha, None, None).await {
+        if message_has_skip_marker(&format!("{}\n{}", c.subject, c.body)) {
+            return Ok(0);
+        }
+    }
     let mut n = 0;
     let discovered = discover_workflows(git, bare, head_sha)
         .await
@@ -1026,4 +1077,26 @@ pub async fn fail_discovery_runs(
 
 pub fn bare_repo_path(repos_dir: &Path, owner: &str, name: &str) -> PathBuf {
     repos_dir.join(owner).join(format!("{name}.git"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_has_skip_marker;
+
+    #[test]
+    fn skip_ci_markers_all_tokens() {
+        for tok in [
+            "[skip ci]",
+            "[ci skip]",
+            "[no ci]",
+            "[skip actions]",
+            "[actions skip]",
+        ] {
+            assert!(message_has_skip_marker(&format!("subject {tok}")), "{tok}");
+        }
+        // Case-insensitive, anywhere in the message (subject or body).
+        assert!(message_has_skip_marker("feat: x\n\nbody [SKIP CI]"));
+        assert!(!message_has_skip_marker("feat: x"));
+        assert!(!message_has_skip_marker("[skip c")); // partial token no
+    }
 }

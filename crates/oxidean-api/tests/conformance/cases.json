@@ -1,1184 +1,1305 @@
 {
- "cases": [
-  {
-   "id": "run-basic",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "hello conformance"
-   ]
-  },
-  {
-   "id": "run-fail",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   }
-  },
-  {
-   "id": "run-multi-step",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "one",
-    "two",
-    "three",
-    "##[step]first",
-    "##[step]third"
-   ]
-  },
-  {
-   "id": "run-env-step",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "marker=step-env-value"
-   ]
-  },
-  {
-   "id": "run-env-multiline",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "line one",
-    "line two"
-   ]
-  },
-  {
-   "id": "run-workdir",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "/sub"
-   ]
-  },
-  {
-   "id": "run-workdir-missing",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   }
-  },
-  {
-   "id": "run-shell-sh",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "shell is"
-   ]
-  },
-  {
-   "id": "run-defaults-shell",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "default shell applied"
-   ]
-  },
-  {
-   "id": "run-defaults-workdir",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "/sub"
-   ]
-  },
-  {
-   "id": "checkout-basic",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "post-checkout"
-   ]
-  },
-  {
-   "id": "checkout-with-inputs",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "done"
-   ],
-   "log_absent": [
-    "with (inputs applied"
-   ]
-  },
-  {
-   "id": "uses-unknown",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   },
-   "log_contains": [
-    "could not resolve action",
-    "no-such-repo-12345"
-   ]
-  },
-  {
-   "id": "multi-job-parallel",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success",
-    "test": "success"
-   },
-   "log_contains": [
-    "from build",
-    "from test"
-   ]
-  },
-  {
-   "id": "job-name-override",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "expect_job_names": {
-    "build": "Fancy Build Job"
-   }
-  },
-  {
-   "id": "exit-code-nonzero",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   }
-  },
-  {
-   "id": "echo-unicode",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "héllo wörld ünïcode"
-   ]
-  },
-  {
-   "id": "runs-on-array",
-   "kind": "run",
-   "runner_labels": [
-    "self-hosted",
-    "linux"
-   ],
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "array labels"
-   ]
-  },
-  {
-   "id": "runs-on-nomatch",
-   "kind": "queued",
-   "runner_labels": [
-    "ubuntu-latest"
-   ],
-   "expect_jobs": {
-    "build": "queued"
-   }
-  },
-  {
-   "id": "secrets-mask",
-   "kind": "run",
-   "secrets": {
-    "CONFORMANCE_SECRET": "hunter2-do-not-print"
-   },
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "token is ***"
-   ],
-   "log_absent": [
-    "hunter2-do-not-print"
-   ]
-  },
-  {
-   "id": "secrets-env",
-   "kind": "run",
-   "secrets": {
-    "CONFORMANCE_SECRET": "hunter2-do-not-print"
-   },
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "secret present"
-   ],
-   "log_absent": [
-    "hunter2-do-not-print"
-   ]
-  },
-  {
-   "id": "expr-in-run",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "sha is "
-   ],
-   "log_absent": [
-    "${{",
-    "expressions are not evaluated"
-   ]
-  },
-  {
-   "id": "workflow-env",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "GLOBAL_VAR=from-workflow"
-   ],
-   "log_absent": [
-    "env (workflow env is not applied yet)"
-   ]
-  },
-  {
-   "id": "job-env",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "JOB_VAR=from-job"
-   ],
-   "log_absent": [
-    "env (job env is not applied yet)"
-   ]
-  },
-  {
-   "id": "push-tag-ref",
-   "kind": "run",
-   "head_ref": "refs/tags/v1.0.0",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "ref is refs/tags/v1.0.0"
-   ]
-  },
-  {
-   "id": "trigger-map-form",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "map form"
-   ]
-  },
-  {
-   "id": "trigger-list-form",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "list form"
-   ]
-  },
-  {
-   "id": "dispatch-only",
-   "kind": "never_dispatch",
-   "note": "workflow_dispatch alone does not fire on push"
-  },
-  {
-   "id": "pr-only",
-   "kind": "never_dispatch",
-   "note": "pull_request fires via the PR path, not push dispatch"
-  },
-  {
-   "id": "prt-only",
-   "kind": "never_dispatch",
-   "note": "pull_request_target parses but the repo opt-in is off by default — never fires"
-  },
-  {
-   "id": "runs-on-missing",
-   "kind": "validation_failure",
-   "note": "ParseError — Phase 8 persists discovery errors as failed __validation runs",
-   "expect_unsupported": [
-    "runs-on"
-   ]
-  },
-  {
-   "id": "needs-basic",
-   "kind": "run",
-   "expect_unsupported": [
-    "needs"
-   ],
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success",
-    "test": "success"
-   },
-   "log_contains": [
-    "build",
-    "test"
-   ]
-  },
-  {
-   "id": "needs-diamond",
-   "kind": "run",
-   "expect_unsupported": [
-    "needs"
-   ],
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success",
-    "lint": "success",
-    "test": "success",
-    "ship": "success"
-   },
-   "log_contains": [
-    "build",
-    "lint",
-    "test",
-    "ship"
-   ]
-  },
-  {
-   "id": "strategy-matrix",
-   "kind": "run",
-   "expect_unsupported": [
-    "strategy"
-   ],
-   "expect_run": "success",
-   "expect_job_statuses": {
-    "build": [
-     "success",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "matrix"
-   ]
-  },
-  {
-   "id": "container-job",
-   "kind": "docker_gated",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "Started job container (node:20)",
-    "in container"
-   ]
-  },
-  {
-   "id": "services-job",
-   "kind": "docker_gated",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "Started service 'postgres' (postgres:16)",
-    "with service"
-   ]
-  },
-  {
-   "id": "environment-job",
-   "kind": "queued",
-   "expect_jobs": {
-    "deploy": "success"
-   }
-  },
-  {
-   "id": "concurrency-workflow",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "build"
-   ]
-  },
-  {
-   "id": "concurrency-job",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "build"
-   ]
-  },
-  {
-   "id": "job-if",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "conditional"
-   ]
-  },
-  {
-   "id": "step-if",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "always",
-    "conditional",
-    "embedded"
-   ],
-   "log_absent": [
-    "never"
-   ]
-  },
-  {
-   "id": "job-outputs",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "version="
-   ]
-  },
-  {
-   "id": "reusable-workflow-local",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "reusable-workflow"
-   ]
-  },
-  {
-   "id": "reusable-workflow-remote",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "reusable-workflow"
-   ]
-  },
-  {
-   "id": "continue-on-error-job",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "continue-on-error"
-   ]
-  },
-  {
-   "id": "continue-on-error-step",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "after"
-   ]
-  },
-  {
-   "id": "timeout-minutes-job",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "bounded"
-   ]
-  },
-  {
-   "id": "timeout-minutes-step",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   },
-   "log_contains": [
-    "step timed out"
-   ]
-  },
-  {
-   "id": "prt-push",
-   "kind": "run",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "note": "pull_request_target is a declared (opt-in-gated) trigger — push still fires normally"
-  },
-  {
-   "id": "empty-steps",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "steps"
-   ]
-  },
-  {
-   "id": "job-if-skip",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "skipped",
-    "other": "success"
-   },
-   "log_contains": [
-    "skipped — if evaluated to false",
-    "other ran"
-   ],
-   "log_absent": [
-    "should-not-run"
-   ]
-  },
-  {
-   "id": "expr-functions",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "fmt=v7-x",
-    "contained=true",
-    "starts=true",
-    "ends=true",
-    "joined=a-b-c",
-    "tostr=push",
-    "fromjson=42",
-    "neg=true",
-    "cmp=true"
-   ]
-  },
-  {
-   "id": "expr-env-layering",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "JOBV=job-wfval",
-    "out=job-wfval-s",
-    "ctx=wfval-job-wfval"
-   ]
-  },
-  {
-   "id": "expr-steps-context",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "got=9.9",
-    "consumer ran"
-   ],
-   "log_absent": [
-    "bad consumer"
-   ]
-  },
-  {
-   "id": "expr-hashfiles",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "HASH_LEN=64"
-   ]
-  },
-  {
-   "id": "expr-job-name",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "expect_job_names": {
-    "build": "job-push"
-   }
-  },
-  {
-   "id": "runs-on-expr",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "label evaluated"
-   ]
-  },
-  {
-   "id": "expr-github-ctx",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "evt=push",
-    "refname=main",
-    "empt=fallback"
-   ]
-  },
-  {
-   "id": "job-timeout-kills",
-   "kind": "run",
-   "expect_run": "cancelled",
-   "expect_jobs": {
-    "build": "cancelled"
-   },
-   "log_contains": [
-    "step timed out"
-   ],
-   "log_absent": [
-    "unreachable"
-   ]
-  },
-  {
-   "id": "expr-malformed-run",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "expressions"
-   ]
-  },
-  {
-   "id": "expr-malformed-if",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "expressions"
-   ]
-  },
-  {
-   "id": "checkout-path",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "checked-out"
-   ]
-  },
-  {
-   "id": "secrets-context",
-   "kind": "run",
-   "secrets": {
-    "CONFORMANCE_SECRET": "hunter2-do-not-print"
-   },
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "masked=***"
-   ],
-   "log_absent": [
-    "hunter2-do-not-print"
-   ]
-  },
-  {
-   "id": "step-failure-flow",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure"
-   },
-   "log_contains": [
-    "always-ran",
-    "on-failure"
-   ],
-   "log_absent": [
-    "skipped-after-failure"
-   ]
-  },
-  {
-   "id": "needs-fail-default",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure",
-    "test": "skipped"
-   },
-   "log_absent": [
-    "should-not-run"
-   ]
-  },
-  {
-   "id": "needs-always",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure",
-    "cleanup": "success"
-   },
-   "log_contains": [
-    "cleanup-ran"
-   ]
-  },
-  {
-   "id": "needs-failure-fn",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure",
-    "onfail": "success"
-   },
-   "log_contains": [
-    "failure-handler-ran"
-   ]
-  },
-  {
-   "id": "needs-success-fn",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "build": "failure",
-    "onok": "skipped"
-   },
-   "log_absent": [
-    "should-not-run"
-   ]
-  },
-  {
-   "id": "needs-outputs",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success",
-    "package": "success"
-   },
-   "log_contains": [
-    "got-version=2.5"
-   ]
-  },
-  {
-   "id": "needs-ctx-if",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "a": "success",
-    "gated-yes": "success",
-    "gated-no": "skipped"
-   },
-   "log_contains": [
-    "gated-ran"
-   ],
-   "log_absent": [
-    "should-not-run"
-   ]
-  },
-  {
-   "id": "needs-skipped-dep",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "a": "skipped",
-    "b": "skipped",
-    "c": "success"
-   },
-   "log_contains": [
-    "c-ran-after-skips"
-   ],
-   "log_absent": [
-    "should-not-run"
-   ]
-  },
-  {
-   "id": "needs-matrix-dep",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "test": "success"
-   },
-   "expect_job_statuses": {
-    "build": [
-     "success",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "cfg=debug",
-    "cfg=release",
-    "all-configs-done"
-   ]
-  },
-  {
-   "id": "matrix-basic",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_job_statuses": {
-    "build": [
-     "success",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "node-18",
-    "node-20"
-   ]
-  },
-  {
-   "id": "matrix-include-exclude",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_job_statuses": {
-    "build": [
-     "success",
-     "success",
-     "success",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "leg-linux-a",
-    "leg-linux-b",
-    "leg-macos-a",
-    "leg-win-c"
-   ],
-   "log_absent": [
-    "leg-macos-b"
-   ]
-  },
-  {
-   "id": "matrix-max-parallel",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_job_statuses": {
-    "build": [
-     "success",
-     "success",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "leg-x",
-    "leg-y",
-    "leg-z"
-   ]
-  },
-  {
-   "id": "matrix-fail-fast",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_job_statuses": {
-    "build": [
-     "cancelled",
-     "failure"
-    ]
-   },
-   "log_absent": [
-    "\"ok\" = bad"
-   ]
-  },
-  {
-   "id": "matrix-fail-fast-off",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_job_statuses": {
-    "build": [
-     "failure",
-     "success"
-    ]
-   },
-   "log_contains": [
-    "leg-ok"
-   ]
-  },
-  {
-   "id": "needs-cycle",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "needs"
-   ]
-  },
-  {
-   "id": "concurrency-cancel",
-   "kind": "run",
-   "second_dispatch": true,
-   "expect_runs": [
-    "cancelled",
-    "success"
-   ],
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "build-ran"
-   ]
-  },
-  {
-   "id": "concurrency-job-cancel",
-   "kind": "run",
-   "second_dispatch": true,
-   "expect_runs": [
-    "cancelled",
-    "success"
-   ],
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "job-level-supersede"
-   ]
-  },
-  {
-   "id": "shell-python",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "py-marker version="
-   ]
-  },
-  {
-   "id": "shell-custom",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "custom shell marker"
-   ]
-  },
-  {
-   "id": "shell-pwsh",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "pwsh-marker"
-   ]
-  },
-  {
-   "id": "uses-local-composite",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "files": {
-    ".github/actions/hello/action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
-   },
-   "log_contains": [
-    "saw=hello world"
-   ]
-  },
-  {
-   "id": "uses-remote-composite",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "action_repos": {
-    "hello-remote": {
-     "action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
+  "cases": [
+    {
+      "id": "run-basic",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "hello conformance"
+      ]
+    },
+    {
+      "id": "run-fail",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      }
+    },
+    {
+      "id": "run-multi-step",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "one",
+        "two",
+        "three",
+        "##[step]first",
+        "##[step]third"
+      ]
+    },
+    {
+      "id": "run-env-step",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "marker=step-env-value"
+      ]
+    },
+    {
+      "id": "run-env-multiline",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "line one",
+        "line two"
+      ]
+    },
+    {
+      "id": "run-workdir",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "/sub"
+      ]
+    },
+    {
+      "id": "run-workdir-missing",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      }
+    },
+    {
+      "id": "run-shell-sh",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "shell is"
+      ]
+    },
+    {
+      "id": "run-defaults-shell",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "default shell applied"
+      ]
+    },
+    {
+      "id": "run-defaults-workdir",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "/sub"
+      ]
+    },
+    {
+      "id": "checkout-basic",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "post-checkout"
+      ]
+    },
+    {
+      "id": "checkout-with-inputs",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "done"
+      ],
+      "log_absent": [
+        "with (inputs applied"
+      ]
+    },
+    {
+      "id": "uses-unknown",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      },
+      "log_contains": [
+        "could not resolve action",
+        "no-such-repo-12345"
+      ]
+    },
+    {
+      "id": "multi-job-parallel",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success",
+        "test": "success"
+      },
+      "log_contains": [
+        "from build",
+        "from test"
+      ]
+    },
+    {
+      "id": "job-name-override",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "expect_job_names": {
+        "build": "Fancy Build Job"
+      }
+    },
+    {
+      "id": "exit-code-nonzero",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      }
+    },
+    {
+      "id": "echo-unicode",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "h\u00e9llo w\u00f6rld \u00fcn\u00efcode"
+      ]
+    },
+    {
+      "id": "runs-on-array",
+      "kind": "run",
+      "runner_labels": [
+        "self-hosted",
+        "linux"
+      ],
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "array labels"
+      ]
+    },
+    {
+      "id": "runs-on-nomatch",
+      "kind": "queued",
+      "runner_labels": [
+        "ubuntu-latest"
+      ],
+      "expect_jobs": {
+        "build": "queued"
+      }
+    },
+    {
+      "id": "secrets-mask",
+      "kind": "run",
+      "secrets": {
+        "CONFORMANCE_SECRET": "hunter2-do-not-print"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "token is ***"
+      ],
+      "log_absent": [
+        "hunter2-do-not-print"
+      ]
+    },
+    {
+      "id": "secrets-env",
+      "kind": "run",
+      "secrets": {
+        "CONFORMANCE_SECRET": "hunter2-do-not-print"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "secret present"
+      ],
+      "log_absent": [
+        "hunter2-do-not-print"
+      ]
+    },
+    {
+      "id": "expr-in-run",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "sha is "
+      ],
+      "log_absent": [
+        "${{",
+        "expressions are not evaluated"
+      ]
+    },
+    {
+      "id": "workflow-env",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "GLOBAL_VAR=from-workflow"
+      ],
+      "log_absent": [
+        "env (workflow env is not applied yet)"
+      ]
+    },
+    {
+      "id": "job-env",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "JOB_VAR=from-job"
+      ],
+      "log_absent": [
+        "env (job env is not applied yet)"
+      ]
+    },
+    {
+      "id": "push-tag-ref",
+      "kind": "run",
+      "head_ref": "refs/tags/v1.0.0",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "ref is refs/tags/v1.0.0"
+      ]
+    },
+    {
+      "id": "trigger-map-form",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "map form"
+      ]
+    },
+    {
+      "id": "trigger-list-form",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "list form"
+      ]
+    },
+    {
+      "id": "dispatch-only",
+      "kind": "never_dispatch",
+      "note": "workflow_dispatch alone does not fire on push"
+    },
+    {
+      "id": "pr-only",
+      "kind": "never_dispatch",
+      "note": "pull_request fires via the PR path, not push dispatch"
+    },
+    {
+      "id": "prt-only",
+      "kind": "never_dispatch",
+      "note": "pull_request_target parses but the repo opt-in is off by default \u2014 never fires"
+    },
+    {
+      "id": "runs-on-missing",
+      "kind": "validation_failure",
+      "note": "ParseError \u2014 Phase 8 persists discovery errors as failed __validation runs",
+      "expect_unsupported": [
+        "runs-on"
+      ]
+    },
+    {
+      "id": "needs-basic",
+      "kind": "run",
+      "expect_unsupported": [
+        "needs"
+      ],
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success",
+        "test": "success"
+      },
+      "log_contains": [
+        "build",
+        "test"
+      ]
+    },
+    {
+      "id": "needs-diamond",
+      "kind": "run",
+      "expect_unsupported": [
+        "needs"
+      ],
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success",
+        "lint": "success",
+        "test": "success",
+        "ship": "success"
+      },
+      "log_contains": [
+        "build",
+        "lint",
+        "test",
+        "ship"
+      ]
+    },
+    {
+      "id": "strategy-matrix",
+      "kind": "run",
+      "expect_unsupported": [
+        "strategy"
+      ],
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "matrix"
+      ]
+    },
+    {
+      "id": "container-job",
+      "kind": "docker_gated",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "Started job container (node:20)",
+        "in container"
+      ]
+    },
+    {
+      "id": "services-job",
+      "kind": "docker_gated",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "Started service 'postgres' (postgres:16)",
+        "with service"
+      ]
+    },
+    {
+      "id": "environment-job",
+      "kind": "queued",
+      "expect_jobs": {
+        "deploy": "success"
+      }
+    },
+    {
+      "id": "concurrency-workflow",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "build"
+      ]
+    },
+    {
+      "id": "concurrency-job",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "build"
+      ]
+    },
+    {
+      "id": "job-if",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "conditional"
+      ]
+    },
+    {
+      "id": "step-if",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "always",
+        "conditional",
+        "embedded"
+      ],
+      "log_absent": [
+        "never"
+      ]
+    },
+    {
+      "id": "job-outputs",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "version="
+      ]
+    },
+    {
+      "id": "reusable-workflow-local",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "reusable-workflow"
+      ]
+    },
+    {
+      "id": "reusable-workflow-remote",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "reusable-workflow"
+      ]
+    },
+    {
+      "id": "continue-on-error-job",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "continue-on-error"
+      ]
+    },
+    {
+      "id": "continue-on-error-step",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "after"
+      ]
+    },
+    {
+      "id": "timeout-minutes-job",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "bounded"
+      ]
+    },
+    {
+      "id": "timeout-minutes-step",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      },
+      "log_contains": [
+        "step timed out"
+      ]
+    },
+    {
+      "id": "prt-push",
+      "kind": "run",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "note": "pull_request_target is a declared (opt-in-gated) trigger \u2014 push still fires normally"
+    },
+    {
+      "id": "empty-steps",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "steps"
+      ]
+    },
+    {
+      "id": "job-if-skip",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "skipped",
+        "other": "success"
+      },
+      "log_contains": [
+        "skipped \u2014 if evaluated to false",
+        "other ran"
+      ],
+      "log_absent": [
+        "should-not-run"
+      ]
+    },
+    {
+      "id": "expr-functions",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "fmt=v7-x",
+        "contained=true",
+        "starts=true",
+        "ends=true",
+        "joined=a-b-c",
+        "tostr=push",
+        "fromjson=42",
+        "neg=true",
+        "cmp=true"
+      ]
+    },
+    {
+      "id": "expr-env-layering",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "JOBV=job-wfval",
+        "out=job-wfval-s",
+        "ctx=wfval-job-wfval"
+      ]
+    },
+    {
+      "id": "expr-steps-context",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "got=9.9",
+        "consumer ran"
+      ],
+      "log_absent": [
+        "bad consumer"
+      ]
+    },
+    {
+      "id": "expr-hashfiles",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "HASH_LEN=64"
+      ]
+    },
+    {
+      "id": "expr-job-name",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "expect_job_names": {
+        "build": "job-push"
+      }
+    },
+    {
+      "id": "runs-on-expr",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "label evaluated"
+      ]
+    },
+    {
+      "id": "expr-github-ctx",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "evt=push",
+        "refname=main",
+        "empt=fallback"
+      ]
+    },
+    {
+      "id": "job-timeout-kills",
+      "kind": "run",
+      "expect_run": "cancelled",
+      "expect_jobs": {
+        "build": "cancelled"
+      },
+      "log_contains": [
+        "step timed out"
+      ],
+      "log_absent": [
+        "unreachable"
+      ]
+    },
+    {
+      "id": "expr-malformed-run",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "expressions"
+      ]
+    },
+    {
+      "id": "expr-malformed-if",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "expressions"
+      ]
+    },
+    {
+      "id": "checkout-path",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "checked-out"
+      ]
+    },
+    {
+      "id": "secrets-context",
+      "kind": "run",
+      "secrets": {
+        "CONFORMANCE_SECRET": "hunter2-do-not-print"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "masked=***"
+      ],
+      "log_absent": [
+        "hunter2-do-not-print"
+      ]
+    },
+    {
+      "id": "step-failure-flow",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure"
+      },
+      "log_contains": [
+        "always-ran",
+        "on-failure"
+      ],
+      "log_absent": [
+        "skipped-after-failure"
+      ]
+    },
+    {
+      "id": "needs-fail-default",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure",
+        "test": "skipped"
+      },
+      "log_absent": [
+        "should-not-run"
+      ]
+    },
+    {
+      "id": "needs-always",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure",
+        "cleanup": "success"
+      },
+      "log_contains": [
+        "cleanup-ran"
+      ]
+    },
+    {
+      "id": "needs-failure-fn",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure",
+        "onfail": "success"
+      },
+      "log_contains": [
+        "failure-handler-ran"
+      ]
+    },
+    {
+      "id": "needs-success-fn",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "build": "failure",
+        "onok": "skipped"
+      },
+      "log_absent": [
+        "should-not-run"
+      ]
+    },
+    {
+      "id": "needs-outputs",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success",
+        "package": "success"
+      },
+      "log_contains": [
+        "got-version=2.5"
+      ]
+    },
+    {
+      "id": "needs-ctx-if",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "a": "success",
+        "gated-yes": "success",
+        "gated-no": "skipped"
+      },
+      "log_contains": [
+        "gated-ran"
+      ],
+      "log_absent": [
+        "should-not-run"
+      ]
+    },
+    {
+      "id": "needs-skipped-dep",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "a": "skipped",
+        "b": "skipped",
+        "c": "success"
+      },
+      "log_contains": [
+        "c-ran-after-skips"
+      ],
+      "log_absent": [
+        "should-not-run"
+      ]
+    },
+    {
+      "id": "needs-matrix-dep",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "test": "success"
+      },
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "cfg=debug",
+        "cfg=release",
+        "all-configs-done"
+      ]
+    },
+    {
+      "id": "matrix-basic",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "node-18",
+        "node-20"
+      ]
+    },
+    {
+      "id": "matrix-include-exclude",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success",
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "leg-linux-a",
+        "leg-linux-b",
+        "leg-macos-a",
+        "leg-win-c"
+      ],
+      "log_absent": [
+        "leg-macos-b"
+      ]
+    },
+    {
+      "id": "matrix-max-parallel",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "leg-x",
+        "leg-y",
+        "leg-z"
+      ]
+    },
+    {
+      "id": "matrix-fail-fast",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_job_statuses": {
+        "build": [
+          "cancelled",
+          "failure"
+        ]
+      },
+      "log_absent": [
+        "\"ok\" = bad"
+      ]
+    },
+    {
+      "id": "matrix-fail-fast-off",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_job_statuses": {
+        "build": [
+          "failure",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "leg-ok"
+      ]
+    },
+    {
+      "id": "needs-cycle",
+      "kind": "validation_failure",
+      "expect_unsupported": [
+        "needs"
+      ]
+    },
+    {
+      "id": "concurrency-cancel",
+      "kind": "run",
+      "second_dispatch": true,
+      "expect_runs": [
+        "cancelled",
+        "success"
+      ],
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "build-ran"
+      ]
+    },
+    {
+      "id": "concurrency-job-cancel",
+      "kind": "run",
+      "second_dispatch": true,
+      "expect_runs": [
+        "cancelled",
+        "success"
+      ],
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "job-level-supersede"
+      ]
+    },
+    {
+      "id": "shell-python",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "py-marker version="
+      ]
+    },
+    {
+      "id": "shell-custom",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "custom shell marker"
+      ]
+    },
+    {
+      "id": "shell-pwsh",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "pwsh-marker"
+      ]
+    },
+    {
+      "id": "uses-local-composite",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        ".github/actions/hello/action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
+      },
+      "log_contains": [
+        "saw=hello world"
+      ]
+    },
+    {
+      "id": "uses-remote-composite",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "action_repos": {
+        "hello-remote": {
+          "action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
+        }
+      },
+      "log_contains": [
+        "remote saw=hello remote"
+      ]
+    },
+    {
+      "id": "uses-node-action",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        "tools/nodeecho/action.yml": "name: nodeecho\ninputs:\n  msg:\n    default: hi\nruns:\n  using: node26\n  main: index.js\n",
+        "tools/nodeecho/index.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_OUTPUT, `echoed=${process.env.INPUT_MSG}-echoed\\n`);\nconsole.log('node main ran');\n"
+      },
+      "log_contains": [
+        "node main ran",
+        "node saw=node-hello-echoed"
+      ]
+    },
+    {
+      "id": "uses-node-post",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        "tools/nodepost/action.yml": "name: nodepost\nruns:\n  using: node26\n  pre: pre.js\n  main: main.js\n  post: post.js\n  post-if: success()\n",
+        "tools/nodepost/pre.js": "console.log('pre ran');\n",
+        "tools/nodepost/main.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_STATE, \"ver=main-state\\n\");\nconsole.log('post-action main ran');\n",
+        "tools/nodepost/post.js": "console.log('post-marker state=' + process.env.STATE_ver);\n"
+      },
+      "log_contains": [
+        "pre ran",
+        "post-action main ran",
+        "post-marker state=main-state",
+        "after-main"
+      ]
+    },
+    {
+      "id": "composite-env",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        ".github/actions/envwriter/action.yml": "name: envwriter\nruns:\n  using: composite\n  steps:\n    - run: echo \"MADE_BY_COMPOSITE=flag-42\" >> $GITHUB_ENV\n      shell: bash\n"
+      },
+      "log_contains": [
+        "env=[flag-42] via=flag-42"
+      ]
+    },
+    {
+      "id": "step-summary",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "step ran"
+      ]
+    },
+    {
+      "id": "artifact-upload-download",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success",
+        "down": "success"
+      },
+      "log_contains": [
+        "Uploaded artifact 'bundle'",
+        "Downloaded artifact 'bundle'",
+        "hello-artifact"
+      ]
+    },
+    {
+      "id": "artifact-search-path-root",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success",
+        "down": "success"
+      },
+      "log_contains": [
+        "app-content"
+      ]
+    },
+    {
+      "id": "artifact-overwrite",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success"
+      },
+      "log_contains": [
+        "version-two"
+      ]
+    },
+    {
+      "id": "artifact-pattern-download",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success"
+      },
+      "log_contains": [
+        "from-a",
+        "from-b"
+      ]
+    },
+    {
+      "id": "artifact-missing",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "down": "failure"
+      },
+      "log_contains": [
+        "artifact 'never-uploaded' not found"
+      ]
+    },
+    {
+      "id": "artifact-no-files-error",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "up": "failure"
+      },
+      "log_contains": [
+        "no files were found"
+      ]
+    },
+    {
+      "id": "oidc-curl",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "oidc": "success"
+      },
+      "log_contains": [
+        "oidc header:",
+        "\"alg\":\"RS256\"",
+        "\"aud\":\"sts.amazonaws.com\""
+      ],
+      "needs_public_origin": true
+    },
+    {
+      "id": "push-skip-ci",
+      "kind": "never_dispatch",
+      "commit_message": "conformance seed [skip ci]"
+    },
+    {
+      "id": "on-unsupported-event",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "on.discussion: unsupported event",
+        "ran-on-push"
+      ]
+    },
+    {
+      "id": "matrix-over-256",
+      "kind": "run",
+      "expect_run": "failure",
+      "expect_jobs": {
+        "mx": "failure"
+      },
+      "log_contains": [
+        "256-job limit"
+      ]
+    },
+    {
+      "id": "uses-node-pre-if",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        "tools/np/action.yml": "name: np\nruns:\n  using: node26\n  pre: pre.js\n  pre-if: 'false'\n  main: main.js\n",
+        "tools/np/pre.js": "console.log('np pre ran');\n",
+        "tools/np/main.js": "console.log('np main ran');\n"
+      },
+      "log_contains": [
+        "np main ran"
+      ],
+      "log_absent": [
+        "np pre ran"
+      ]
+    },
+    {
+      "id": "action-metadata-warnings",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "files": {
+        "tools/warn/action.yml": "name: warn\ndeprecationMessage: 'this action is deprecated: use warn2'\ninputs:\n  msg:\n    required: true\nruns:\n  using: composite\n  steps:\n    - run: echo \"msg=${{ inputs.msg }}\"\n      shell: bash\n"
+      },
+      "log_contains": [
+        "::warning::this action is deprecated: use warn2",
+        "unexpected input(s) 'bogus'",
+        "msg=hi"
+      ]
+    },
+    {
+      "id": "step-conclusion-coe",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "coe conclusion=success outcome=failure"
+      ]
+    },
+    {
+      "id": "step-if-false-literal",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "literal-false-ran"
+      ],
+      "log_absent": [
+        "bool-false-skipped"
+      ]
+    },
+    {
+      "id": "expr-vars-empty",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "vars=[] end"
+      ],
+      "divergence": "ctx.vars"
+    },
+    {
+      "id": "cache-service-absent",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "action_repos": {
+        "cache-probe": {
+          "action.yml": "name: cache-probe\nruns:\n  using: node26\n  main: main.js\n",
+          "main.js": "const u = process.env.ACTIONS_CACHE_URL; console.log(u === undefined ? 'cache-url-unset' : 'cache-url=' + u);\n"
+        }
+      },
+      "log_contains": [
+        "cache-url-unset"
+      ],
+      "log_absent": [
+        "cache-url="
+      ],
+      "divergence": "cache.action"
     }
-   },
-   "log_contains": [
-    "remote saw=hello remote"
-   ]
-  },
-  {
-   "id": "uses-node-action",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "files": {
-    "tools/nodeecho/action.yml": "name: nodeecho\ninputs:\n  msg:\n    default: hi\nruns:\n  using: node26\n  main: index.js\n",
-    "tools/nodeecho/index.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_OUTPUT, `echoed=${process.env.INPUT_MSG}-echoed\\n`);\nconsole.log('node main ran');\n"
-   },
-   "log_contains": [
-    "node main ran",
-    "node saw=node-hello-echoed"
-   ]
-  },
-  {
-   "id": "uses-node-post",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "files": {
-    "tools/nodepost/action.yml": "name: nodepost\nruns:\n  using: node26\n  pre: pre.js\n  main: main.js\n  post: post.js\n  post-if: success()\n",
-    "tools/nodepost/pre.js": "console.log('pre ran');\n",
-    "tools/nodepost/main.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_STATE, \"ver=main-state\\n\");\nconsole.log('post-action main ran');\n",
-    "tools/nodepost/post.js": "console.log('post-marker state=' + process.env.STATE_ver);\n"
-   },
-   "log_contains": [
-    "pre ran",
-    "post-action main ran",
-    "post-marker state=main-state",
-    "after-main"
-   ]
-  },
-  {
-   "id": "composite-env",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "files": {
-    ".github/actions/envwriter/action.yml": "name: envwriter\nruns:\n  using: composite\n  steps:\n    - run: echo \"MADE_BY_COMPOSITE=flag-42\" >> $GITHUB_ENV\n      shell: bash\n"
-   },
-   "log_contains": [
-    "env=[flag-42] via=flag-42"
-   ]
-  },
-  {
-   "id": "step-summary",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "build": "success"
-   },
-   "log_contains": [
-    "step ran"
-   ]
-  },
-  {
-   "id": "artifact-upload-download",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "up": "success",
-    "down": "success"
-   },
-   "log_contains": [
-    "Uploaded artifact 'bundle'",
-    "Downloaded artifact 'bundle'",
-    "hello-artifact"
-   ]
-  },
-  {
-   "id": "artifact-search-path-root",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "up": "success",
-    "down": "success"
-   },
-   "log_contains": [
-    "app-content"
-   ]
-  },
-  {
-   "id": "artifact-overwrite",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "up": "success"
-   },
-   "log_contains": [
-    "version-two"
-   ]
-  },
-  {
-   "id": "artifact-pattern-download",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "up": "success"
-   },
-   "log_contains": [
-    "from-a",
-    "from-b"
-   ]
-  },
-  {
-   "id": "artifact-missing",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "down": "failure"
-   },
-   "log_contains": [
-    "artifact 'never-uploaded' not found"
-   ]
-  },
-  {
-   "id": "artifact-no-files-error",
-   "kind": "run",
-   "expect_run": "failure",
-   "expect_jobs": {
-    "up": "failure"
-   },
-   "log_contains": [
-    "no files were found"
-   ]
-  },
-  {
-   "id": "oidc-curl",
-   "kind": "run",
-   "expect_run": "success",
-   "expect_jobs": {
-    "oidc": "success"
-   },
-   "log_contains": [
-    "oidc header:",
-    "\"alg\":\"RS256\"",
-    "\"aud\":\"sts.amazonaws.com\""
-   ],
-   "needs_public_origin": true
-  }
- ]
+  ]
 }

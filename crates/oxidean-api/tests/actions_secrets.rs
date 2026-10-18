@@ -383,3 +383,42 @@ async fn actions_secrets_admin_create_registration_token() {
         .unwrap();
     assert_eq!(list.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn actions_secrets_value_size_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("cap.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+    let (cookie, _uid) = signup_login_verify(&app, &db, "cap@ex.com", "capown").await;
+
+    let create = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.create","input":{"name":"caprepo","visibility":"private"}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::OK);
+
+    // 49 KiB — over GitHub's 48 KiB secret limit → loud refusal.
+    let big = "x".repeat(49 * 1024);
+    let body = format!(
+        r#"{{"procedure":"repo.actions.secrets.put","input":{{"owner":"capown","name":"caprepo","secret_name":"TOO_BIG","value":"{big}"}}}}"#
+    );
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(&body, &cookie))
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        v["error"]["code"], "repo.actions.invalid_secret_value",
+        "over-limit secret must be refused: {v}"
+    );
+}

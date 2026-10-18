@@ -114,7 +114,12 @@ async fn dialect_actions_schema_presence() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("actions.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    // The scratch DB is always sqlite even when the outer run probes
+    // postgres/mysql via OXIDEAN_DB_DIALECT — connect with the explicit
+    // dialect so the env guard does not reject the scheme mismatch.
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
     db.migrate().await.expect("migrate");
 
     let owner = db

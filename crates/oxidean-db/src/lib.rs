@@ -138,6 +138,14 @@ impl Database {
 
     pub async fn connect(url: &str) -> Result<Self, String> {
         let dialect = resolve_from_env(url)?;
+        Self::connect_as(url, dialect).await
+    }
+
+    /// Connect with an explicit dialect, ignoring `OXIDEAN_DB_DIALECT`.
+    /// Tests and tools that manage more than one engine in one process
+    /// (e.g. a scratch sqlite DB under a postgres probe run) need this —
+    /// `connect` would reject the scheme mismatch.
+    pub async fn connect_as(url: &str, dialect: Dialect) -> Result<Self, String> {
         let pool = Pool::connect(url, dialect).await?;
         Ok(Self {
             pool: Some(pool),

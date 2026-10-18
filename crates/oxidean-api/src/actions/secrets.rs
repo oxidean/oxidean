@@ -7,7 +7,26 @@ use oxidean_db::Database;
 /// Actions secret key chain — dedicated var first, session secret fallback.
 const KEY_ENVS: &[&str] = &["OXIDEAN_ACTIONS_SECRETS_KEY", "OXIDEAN_SESSION_SECRET"];
 
-/// Validate Actions secret name (alphanumeric + `_`).
+/// GitHub's secret value cap — 48 KiB per secret.
+pub const MAX_SECRET_VALUE_BYTES: usize = 48 * 1024;
+
+/// Validate a secret value: non-empty and within GitHub's 48 KiB cap.
+pub fn validate_secret_value(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("secret value is required".into());
+    }
+    if value.len() > MAX_SECRET_VALUE_BYTES {
+        return Err(format!(
+            "secret value exceeds the {} KiB limit",
+            MAX_SECRET_VALUE_BYTES / 1024
+        ));
+    }
+    Ok(())
+}
+
+/// Validate Actions secret name — alphanumeric + `_` + `-`, ≤128 chars.
+/// More permissive than GitHub (no `-`, no leading digit, no `GITHUB_`
+/// prefix) — tightening is a compat-doc divergence, not a silent one.
 pub fn validate_secret_name(name: &str) -> Result<(), String> {
     let n = name.trim();
     if n.is_empty() {

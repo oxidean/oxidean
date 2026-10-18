@@ -1,0 +1,11 @@
+name: step-if-false-literal
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "literal-false-ran"
+        if: "${{ 'false' }}"
+      - run: echo "bool-false-skipped"
+        if: false
+      - run: echo done

@@ -1,0 +1,10 @@
+name: step-conclusion-coe
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: cf
+        run: exit 1
+        continue-on-error: true
+      - run: echo "coe conclusion=${{ steps.cf.conclusion }} outcome=${{ steps.cf.outcome }}"

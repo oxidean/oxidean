@@ -614,12 +614,16 @@ WHERE id = $1",
             .map_err(|e| format!("set email_verified_at failed: {e}"))?;
         }
         DbPool::MySql(p) => {
-            sqlx::query("UPDATE users SET email_verified_at = ?, updated_at = NOW() WHERE id = ?")
-                .bind(at)
-                .bind(id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("set email_verified_at failed: {e}"))?;
+            sqlx::query(
+                "UPDATE users SET email_verified_at = \
+                 STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), \
+                 updated_at = NOW() WHERE id = ?",
+            )
+            .bind(at)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set email_verified_at failed: {e}"))?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(
@@ -940,12 +944,16 @@ pub async fn set_banned_at(pool: &DbPool, id: &str, at: &str) -> Result<UserRow,
             .map_err(|e| format!("set banned_at failed: {e}"))?;
         }
         DbPool::MySql(p) => {
-            sqlx::query("UPDATE users SET banned_at = ?, updated_at = NOW() WHERE id = ?")
-                .bind(at)
-                .bind(id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("set banned_at failed: {e}"))?;
+            sqlx::query(
+                "UPDATE users SET banned_at = \
+                 STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), \
+                 updated_at = NOW() WHERE id = ?",
+            )
+            .bind(at)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set banned_at failed: {e}"))?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(

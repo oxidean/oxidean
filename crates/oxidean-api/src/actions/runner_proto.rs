@@ -561,6 +561,39 @@ async fn fetch_task(
                     .unwrap_or_default();
                 crate::actions::scheduler::needs_context_for_task(&all, &j.needs_json)
             };
+            // Job timeout clock starts at claim (GitHub semantics), not at
+            // enqueue — a needs-gated or held job's `timeout-minutes` must
+            // not tick while it waits, and a rerun's cleared `timeout_at`
+            // gets restamped from the payload's evaluated duration.
+            let timeout_seconds = payload_json
+                .get("timeout_seconds")
+                .and_then(|v| v.as_f64())
+                .map(|s| s as i64)
+                .or_else(|| {
+                    // Payloads enqueued before the field existed — fall back
+                    // to the enqueue-stamped row deadline.
+                    j.timeout_at.as_deref().and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
+                            t.signed_duration_since(chrono::Utc::now())
+                                .num_seconds()
+                                .max(0)
+                        })
+                    })
+                });
+            let mut timeout_at = j.timeout_at.clone();
+            if let Some(secs) = timeout_seconds {
+                let fresh_deadline = (chrono::Utc::now() + chrono::Duration::seconds(secs))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                if let Err(e) = state
+                    .db
+                    .set_action_job_timeout_at(&j.id, Some(&fresh_deadline))
+                    .await
+                {
+                    tracing::warn!(error = %e, job_id = %j.id, "claim-time timeout restamp failed");
+                } else {
+                    timeout_at = Some(fresh_deadline);
+                }
+            }
             FetchTaskResponse {
                 job_id: Some(j.id),
                 run_id: Some(j.run_id),
@@ -589,7 +622,7 @@ async fn fetch_task(
                 workflow_ref: Some(workflow_ref),
                 env: payload_json.get("env").cloned(),
                 workflow_env: payload_json.get("workflow_env").cloned(),
-                timeout_at: j.timeout_at.clone(),
+                timeout_at,
                 event_payload: Some(
                     run.event_payload_json
                         .as_deref()

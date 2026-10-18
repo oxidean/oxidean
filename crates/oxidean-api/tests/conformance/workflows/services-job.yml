@@ -7,6 +7,7 @@ jobs:
       postgres:
         image: postgres:16
         ports:
-          - 5432:5432
+          # High port — a real postgres may already own 5432 on a dev host.
+          - 15432:5432
     steps:
       - run: echo with service

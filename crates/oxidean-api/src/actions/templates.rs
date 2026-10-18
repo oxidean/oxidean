@@ -142,20 +142,178 @@ fn icon_url(icon_name: Option<&str>) -> Option<String> {
     }
 }
 
-/// Distinct `uses:` refs the bundled runner cannot execute — anything not
-/// `actions/checkout*` (Unit A runner supports local steps + checkout only).
-fn unsupported_actions(doc: &WorkflowDocument) -> Vec<String> {
-    let mut out = BTreeSet::new();
-    for job in &doc.jobs {
-        for step in &job.steps {
-            if let Some(uses) = &step.uses {
-                if uses != "actions/checkout" && !uses.starts_with("actions/checkout@") {
-                    out.insert(uses.clone());
-                }
-            }
+// ---------------------------------------------------------------------------
+// Runner capability ledger
+// ---------------------------------------------------------------------------
+//
+// The bundled runner executes remote `owner/repo[/path]@ref` actions on the
+// node/composite/docker runtimes, the three `actions/` builtins, and local
+// `./` actions. `KNOWN_ACTION_CAVEATS` is the curated exception table: refs
+// that technically fetch and run, but whose real function needs something
+// Oxidean does not provide today. Categories decide where a hit lands —
+// hard misses go to `unsupported_actions`, degradations to `warnings`.
+
+/// Why a `uses:` ref needs a caveat despite a working action runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionCaveat {
+    /// Calls the GitHub REST/GraphQL API — Oxidean has no compatibility
+    /// layer, so the action fails at runtime.
+    GithubApi,
+    /// GitHub Pages hosting — no equivalent exists.
+    Pages,
+    /// `actions/attest*` artifact attestations — no equivalent exists.
+    Attestations,
+    /// `actions/cache*` — no cache service yet (P14); upload is a no-op
+    /// warning on a real run.
+    CacheService,
+    /// Needs a Docker-capable runner (image pulls, docker CLI).
+    Docker,
+    /// Needs a Windows/macOS (or otherwise non-Linux) external runner.
+    ExternalOs,
+}
+
+impl ActionCaveat {
+    /// Short reason shown next to the action in catalog listings.
+    fn reason(self) -> &'static str {
+        match self {
+            ActionCaveat::GithubApi => "calls the GitHub API, which Oxidean does not emulate",
+            ActionCaveat::Pages => "GitHub Pages is not available on Oxidean",
+            ActionCaveat::Attestations => "artifact attestations are not available on Oxidean",
+            ActionCaveat::CacheService => "no actions cache service yet — runs without caching",
+            ActionCaveat::Docker => "requires a Docker-capable runner",
+            ActionCaveat::ExternalOs => "requires a Windows/macOS external runner",
         }
     }
-    out.into_iter().collect()
+}
+
+/// Hard caveats — the action's function cannot work at all.
+fn caveat_is_hard(c: ActionCaveat) -> bool {
+    matches!(
+        c,
+        ActionCaveat::GithubApi | ActionCaveat::Pages | ActionCaveat::Attestations
+    )
+}
+
+/// `owner/repo[/path]` prefixes that need a caveat, longest-prefix match
+/// (`actions/cache` covers `actions/cache/save`). Ref is ignored — the
+/// caveat is about what the action does, not its version.
+static KNOWN_ACTION_CAVEATS: &[(&str, ActionCaveat)] = &[
+    // GitHub REST/GraphQL API — labels, comments, dependency submission,
+    // code scanning, scripting, models inference.
+    ("actions/stale", ActionCaveat::GithubApi),
+    ("actions/labeler", ActionCaveat::GithubApi),
+    ("actions/first-interaction", ActionCaveat::GithubApi),
+    ("actions/github-script", ActionCaveat::GithubApi),
+    ("actions/ai-inference", ActionCaveat::GithubApi),
+    ("actions/dependency-review-action", ActionCaveat::GithubApi),
+    (
+        "advanced-security/maven-dependency-submission-action",
+        ActionCaveat::GithubApi,
+    ),
+    (
+        "gradle/actions/dependency-submission",
+        ActionCaveat::GithubApi,
+    ),
+    ("github/codeql-action", ActionCaveat::GithubApi),
+    (
+        "scalacenter/sbt-dependency-submission",
+        ActionCaveat::GithubApi,
+    ),
+    // GitHub Pages.
+    ("actions/configure-pages", ActionCaveat::Pages),
+    ("actions/upload-pages-artifact", ActionCaveat::Pages),
+    ("actions/deploy-pages", ActionCaveat::Pages),
+    // Artifact attestations / SLSA provenance.
+    ("actions/attest", ActionCaveat::Attestations),
+    (
+        "actions/attest-build-provenance",
+        ActionCaveat::Attestations,
+    ),
+    ("actions/attest-sbom", ActionCaveat::Attestations),
+    (
+        "slsa-framework/slsa-github-generator",
+        ActionCaveat::Attestations,
+    ),
+    // Cache service (P14).
+    ("actions/cache", ActionCaveat::CacheService),
+    // Docker-capable runner required.
+    ("docker/setup-buildx-action", ActionCaveat::Docker),
+    ("docker/setup-qemu-action", ActionCaveat::Docker),
+    ("docker/login-action", ActionCaveat::Docker),
+    ("docker/build-push-action", ActionCaveat::Docker),
+    ("docker/metadata-action", ActionCaveat::Docker),
+    ("docker/bake-action", ActionCaveat::Docker),
+    ("azure/docker-login", ActionCaveat::Docker),
+    ("github/super-linter", ActionCaveat::Docker),
+    ("pypa/gh-action-pypi-publish", ActionCaveat::Docker),
+    // Windows/macOS-only actions.
+    ("microsoft/setup-msbuild", ActionCaveat::ExternalOs),
+];
+
+/// Builtins the runner implements natively (no checkout/fetch needed).
+fn is_builtin_action(uses: &str) -> bool {
+    [
+        "actions/checkout",
+        "actions/upload-artifact",
+        "actions/download-artifact",
+    ]
+    .iter()
+    .any(|b| uses == *b || uses.starts_with(&format!("{b}@")))
+}
+
+/// Longest-prefix caveat lookup for `owner/repo[/path]@ref`.
+fn caveat_for(uses: &str) -> Option<ActionCaveat> {
+    let noref = uses.split('@').next().unwrap_or(uses).to_ascii_lowercase();
+    KNOWN_ACTION_CAVEATS
+        .iter()
+        .filter(|(prefix, _)| noref == *prefix || noref.starts_with(&format!("{prefix}/")))
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, c)| *c)
+}
+
+/// Classify every distinct `uses:` ref in the doc — supported refs
+/// (builtins, `./` local, plain `owner/repo@ref`) drop out; caveated refs
+/// land in `unsupported_actions` (hard) or `warnings` (degraded); anything
+/// unparseable also lands in `unsupported_actions`.
+fn classify_uses(doc: &WorkflowDocument) -> (Vec<String>, Vec<String>) {
+    let mut unsupported = BTreeSet::new();
+    let mut warnings = BTreeSet::new();
+    for job in &doc.jobs {
+        for step in &job.steps {
+            let Some(uses) = &step.uses else { continue };
+            if uses.starts_with("docker://") {
+                warnings.insert(format!("{uses} ({})", ActionCaveat::Docker.reason()));
+                continue;
+            }
+            if uses.starts_with("./") || is_builtin_action(uses) {
+                continue;
+            }
+            if let Some(c) = caveat_for(uses) {
+                if caveat_is_hard(c) {
+                    unsupported.insert(format!("{uses} ({})", c.reason()));
+                } else {
+                    warnings.insert(format!("{uses} ({})", c.reason()));
+                }
+                continue;
+            }
+            // owner/repo[/path]@ref — fetches and runs on the bundled runner.
+            if !uses.contains('@') {
+                unsupported.insert(format!("{uses} (missing @ref)"));
+            }
+        }
+        // Service containers and a job-level `container:` need a
+        // Docker-capable runner regardless of step actions.
+        if job.container.is_some() {
+            warnings.insert("jobs.<id>.container (requires a Docker-capable runner)".into());
+        }
+        if job.services.is_some() {
+            warnings.insert("jobs.<id>.services (requires a Docker-capable runner)".into());
+        }
+    }
+    (
+        unsupported.into_iter().collect(),
+        warnings.into_iter().collect(),
+    )
 }
 
 /// Compatibility classification for a template — the single source the
@@ -183,14 +341,24 @@ pub fn classify_template_content(content: &str) -> TemplateCompat {
             parse_error: Some(e.message),
         },
         Ok(doc) => {
-            let unsupported = unsupported_actions(&doc);
-            let status = if doc.unsupported.iter().any(|u| u == "pull_request_target") {
-                "restricted"
-            } else if doc.unsupported.iter().any(|u| u == "reusable-workflow") {
+            let (unsupported, warnings) = classify_uses(&doc);
+            let warnings: Vec<String> = warnings
+                .into_iter()
+                .chain(doc.warnings.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            // Precedence: parse_error (early return above) > reusable-workflow
+            // > restricted (pull_request_target opt-in) > unsupported-runtime
+            // (>0 unsupported actions or missing features) > partial
+            // (warnings only) > runnable.
+            let status = if doc.unsupported.iter().any(|u| u == "reusable-workflow") {
                 "reusable-workflow"
-            } else if !doc.unsupported.is_empty() {
+            } else if doc.unsupported.iter().any(|u| u == "pull_request_target") {
+                "restricted"
+            } else if !doc.unsupported.is_empty() || !unsupported.is_empty() {
                 "unsupported-runtime"
-            } else if !doc.warnings.is_empty() || !unsupported.is_empty() {
+            } else if !warnings.is_empty() {
                 "partial"
             } else {
                 "runnable"
@@ -199,7 +367,7 @@ pub fn classify_template_content(content: &str) -> TemplateCompat {
                 status,
                 missing_features: doc.unsupported,
                 unsupported_actions: unsupported,
-                warnings: doc.warnings,
+                warnings,
                 parse_error: None,
             }
         }

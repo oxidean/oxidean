@@ -1,0 +1,11 @@
+name: action-metadata-warnings
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./tools/warn
+        with:
+          msg: hi
+          bogus: nope

@@ -107,6 +107,14 @@ pub fn expand_legs(
             .iter()
             .any(|exc| exc.iter().all(|(k, v)| leg.get(k) == Some(v)))
     });
+    // GitHub rejects matrices producing more than 256 jobs — fail loudly
+    // rather than enqueue a runaway fan-out.
+    if legs.len() > 256 {
+        return Err(format!(
+            "strategy.matrix expands to {} legs — exceeds GitHub's 256-job limit",
+            legs.len()
+        ));
+    }
     if legs.is_empty() {
         return Err("strategy.matrix + include/exclude produced no legs".into());
     }
@@ -282,5 +290,20 @@ mod tests {
         let legs = expand_legs(None, &ctx()).unwrap();
         assert_eq!(legs.len(), 1);
         assert_eq!(legs[0].matrix_key, "");
+    }
+
+    #[test]
+    fn over_256_legs_fails_loud() {
+        // 17×16 = 272 legs — past GitHub's 256-job matrix cap.
+        let s = crate::actions::parse::StrategySpec {
+            matrix: Some(json!({
+                "a": (0..17).collect::<Vec<i32>>(),
+                "b": (0..16).collect::<Vec<i32>>(),
+            })),
+            fail_fast: None,
+            max_parallel: None,
+        };
+        let err = expand_legs(Some(&s), &ctx()).unwrap_err();
+        assert!(err.contains("256"), "error must name the cap: {err}");
     }
 }

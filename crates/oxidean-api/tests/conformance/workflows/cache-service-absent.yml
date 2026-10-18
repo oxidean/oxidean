@@ -1,0 +1,7 @@
+name: cache-service-absent
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: {{SLUG}}/cache-probe@main

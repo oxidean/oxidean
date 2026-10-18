@@ -19,38 +19,55 @@ use super::Step;
 /// from a staged file. `stage_dir` is where the file is written (host path);
 /// `visible_dir` is the path the step sees (identical on host, the container
 /// mount point under Docker).
+/// GitHub's shell semantics (workflow-syntax docs):
+/// - unset `shell:` → `bash -e {0}` — no pipefail — on Linux/macOS runners;
+/// - `shell: bash` → `bash --noprofile --norc -eo pipefail {0}`;
+/// - `shell: sh` → `sh -e {0}`;
+/// - `pwsh`/`python` run the staged script file; a custom shell is a command
+///   template where `{0}` is replaced by the script path.
 pub(crate) fn shell_argv(
     shell: Option<&str>,
     script: &str,
     stage_dir: &Path,
     visible_dir: &str,
 ) -> Vec<String> {
-    match shell.unwrap_or("bash") {
-        "bash" => vec![
-            "bash".into(),
-            "-e".into(),
-            "-o".into(),
-            "pipefail".into(),
-            "-c".into(),
-            script.into(),
-        ],
-        "sh" => vec!["sh".into(), "-e".into(), "-c".into(), script.into()],
-        "pwsh" => {
+    match shell {
+        None => {
+            let f = stage_script(stage_dir, visible_dir, script, "sh");
+            vec!["bash".into(), "-e".into(), f]
+        }
+        Some("bash") => {
+            let f = stage_script(stage_dir, visible_dir, script, "sh");
+            vec![
+                "bash".into(),
+                "--noprofile".into(),
+                "--norc".into(),
+                "-e".into(),
+                "-o".into(),
+                "pipefail".into(),
+                f,
+            ]
+        }
+        Some("sh") => {
+            let f = stage_script(stage_dir, visible_dir, script, "sh");
+            vec!["sh".into(), "-e".into(), f]
+        }
+        Some("pwsh") => {
             let f = stage_script(stage_dir, visible_dir, script, "ps1");
             vec!["pwsh".into(), "-command".into(), format!(". '{f}'")]
         }
-        "python" => {
+        Some("python") => {
             let f = stage_script(stage_dir, visible_dir, script, "py");
             vec!["python".into(), f]
         }
-        custom if custom.contains("{0}") => {
+        Some(custom) if custom.contains("{0}") => {
             let f = stage_script(stage_dir, visible_dir, script, "sh");
             custom
                 .split_whitespace()
                 .map(|tok| tok.replace("{0}", &f))
                 .collect()
         }
-        other => vec![other.into(), "-c".into(), script.into()],
+        Some(other) => vec![other.into(), "-c".into(), script.into()],
     }
 }
 

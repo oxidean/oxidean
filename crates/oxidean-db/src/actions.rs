@@ -2411,7 +2411,7 @@ pub async fn set_job_timeout_at(
                 .bind(timeout_at).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query("UPDATE action_jobs SET timeout_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            sqlx::query("UPDATE action_jobs SET timeout_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
                 .bind(timeout_at).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
         }
     }
@@ -3094,6 +3094,8 @@ pub struct ActionArtifactRow {
 }
 
 const ARTIFACT_COLS: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, expires_at, created_at";
+/// MySQL TIMESTAMP columns do not decode into String — project RFC3339 text.
+const ARTIFACT_COLS_MYSQL: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at";
 
 macro_rules! map_artifact_row {
     ($row:expr) => {{
@@ -3147,7 +3149,7 @@ pub async fn upsert_action_artifact(pool: &DbPool, a: &ActionArtifactRow) -> Res
         }
         DbPool::MySql(p) => {
             sqlx::query(sqlx::AssertSqlSafe(format!(
-                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,NOW()) \
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),NOW()) \
                  ON DUPLICATE KEY UPDATE job_id=VALUES(job_id), storage_path=VALUES(storage_path), \
                  size_bytes=VALUES(size_bytes), digest_sha256=VALUES(digest_sha256), expires_at=VALUES(expires_at)"
             )))
@@ -3185,7 +3187,7 @@ pub async fn find_action_artifact(
         .map(|r| r.map(|r| map_artifact_row!(r)))
         .map_err(|e| e.to_string()),
         DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? AND name = ?"
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE run_id = ? AND name = ?"
         )))
         .bind(run_id)
         .bind(name)
@@ -3218,7 +3220,7 @@ pub async fn list_action_artifacts_for_run(
         .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
         .map_err(|e| e.to_string()),
         DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? ORDER BY name"
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE run_id = ? ORDER BY name"
         )))
         .bind(run_id)
         .fetch_all(p)

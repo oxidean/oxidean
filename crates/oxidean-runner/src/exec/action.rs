@@ -38,6 +38,9 @@ pub(crate) struct ActionSpec {
     pub inputs: Option<serde_yaml::Mapping>,
     #[serde(default)]
     pub outputs: Option<serde_yaml::Mapping>,
+    /// Surfaced as a `::warning::` when the action runs (GitHub parity).
+    #[serde(default, rename = "deprecationMessage")]
+    pub deprecation_message: Option<String>,
     pub runs: ActionRuns,
 }
 
@@ -52,6 +55,8 @@ pub(crate) struct ActionRuns {
     pub main: Option<String>,
     #[serde(default)]
     pub pre: Option<String>,
+    #[serde(rename = "pre-if", default)]
+    pub pre_if: Option<String>,
     #[serde(default)]
     pub post: Option<String>,
     #[serde(rename = "post-if", default)]
@@ -505,6 +510,33 @@ fn run_action_spec<'x>(
         }
         // Resolve `with:` inputs → INPUT_* env + `inputs` context.
         let inputs = resolve_inputs(&spec, step, ctx)?;
+        // GitHub warns for deprecated actions and `with:` keys the action
+        // never declared.
+        if let Some(msg) = spec
+            .deprecation_message
+            .as_deref()
+            .filter(|m| !m.is_empty())
+        {
+            senv.logger.line(&format!("::warning::{msg}")).await;
+        }
+        if let (Some(declared), Some(with)) = (&spec.inputs, step.with.as_ref()) {
+            let unexpected: Vec<String> = with
+                .as_object()
+                .into_iter()
+                .flat_map(|m| m.keys())
+                .filter(|k| !declared.contains_key(serde_yaml::Value::String(k.to_string())))
+                .cloned()
+                .collect();
+            if !unexpected.is_empty() {
+                senv.logger
+                    .line(&format!(
+                        "::warning::unexpected input(s) '{}' supplied to {}",
+                        unexpected.join("', '"),
+                        step.uses.as_deref().unwrap_or("action")
+                    ))
+                    .await;
+            }
+        }
         let mut action_env = step_env.to_vec();
         let mut inputs_json = serde_json::Map::new();
         for (k, v) in &inputs {
@@ -673,7 +705,7 @@ async fn run_composite(
         let iid = istep.id.clone().unwrap_or_else(|| format!("__inner{i}"));
         let allowed = step_allowed(istep.if_expr.as_deref(), &actx).unwrap_or(false);
         if !allowed {
-            record_step(&mut actx, &iid, "skipped", HashMap::new());
+            record_step(&mut actx, &iid, "skipped", "skipped", HashMap::new());
             continue;
         }
         let result: Result<(), String> = if istep.run.is_some() {
@@ -699,12 +731,8 @@ async fn run_composite(
             .await;
             let applied = senv.apply_commands(&mut actx).await;
             reoverlay_env(ctx, &applied.env);
-            record_step(
-                &mut actx,
-                &iid,
-                if r.is_ok() { "success" } else { "failure" },
-                applied.outputs,
-            );
+            let ioutcome = if r.is_ok() { "success" } else { "failure" };
+            record_step(&mut actx, &iid, ioutcome, ioutcome, applied.outputs);
             r
         } else if istep.uses.is_some() {
             let is = super::context::interpolate_step(istep, &actx)
@@ -725,13 +753,13 @@ async fn run_composite(
                     let applied = senv.apply_commands(&mut actx).await;
                     reoverlay_env(ctx, &applied.env);
                     outs.extend(applied.outputs);
-                    record_step(&mut actx, &iid, "success", outs);
+                    record_step(&mut actx, &iid, "success", "success", outs);
                     Ok(())
                 }
                 Err(e) => {
                     let applied = senv.apply_commands(&mut actx).await;
                     reoverlay_env(ctx, &applied.env);
-                    record_step(&mut actx, &iid, "failure", applied.outputs);
+                    record_step(&mut actx, &iid, "failure", "failure", applied.outputs);
                     Err(e)
                 }
             }
@@ -826,14 +854,29 @@ async fn run_node_action(
     let node = resolve_node(senv, major).await?;
 
     let env = action_env.to_vec();
-    // `pre` runs before the main entrypoint.
+    // `pre` runs before the main entrypoint, gated by `pre-if`
+    // (default `always()` per GitHub).
     if let Some(pre) = &spec.runs.pre {
-        let script = action_dir.join(pre);
-        let mut cmd = Command::new(&node);
-        cmd.arg(&script).current_dir(senv.workspace);
-        let code = run_streamed(&mut cmd, &env, senv.logger, timeout).await?;
-        if code != 0 {
-            return Err(format!("pre '{pre}' exited {code}"));
+        let pre_allowed =
+            match expr::eval_bool(spec.runs.pre_if.as_deref().unwrap_or("always()"), ctx) {
+                Ok(b) => b,
+                Err(e) => {
+                    senv.logger
+                        .line(&format!(
+                            "::warning::pre-if evaluation failed: {e} — skipped"
+                        ))
+                        .await;
+                    false
+                }
+            };
+        if pre_allowed {
+            let script = action_dir.join(pre);
+            let mut cmd = Command::new(&node);
+            cmd.arg(&script).current_dir(senv.workspace);
+            let code = run_streamed(&mut cmd, &env, senv.logger, timeout).await?;
+            if code != 0 {
+                return Err(format!("pre '{pre}' exited {code}"));
+            }
         }
     }
     let main = spec
@@ -1466,6 +1509,7 @@ runs: {using: node20, main: index.js}
             mask_values: &[],
             cancelled: std::sync::atomic::AtomicBool::new(false),
             log_cursor: std::sync::atomic::AtomicI64::new(0),
+            seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
         };
         let mode = ExecMode::Host;
         let mut env: Vec<(String, String)> = vec![];

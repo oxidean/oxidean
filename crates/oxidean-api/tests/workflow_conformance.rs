@@ -59,6 +59,14 @@ struct Case {
     needs_public_origin: Option<bool>,
     log_contains: Option<Vec<String>>,
     log_absent: Option<Vec<String>>,
+    /// Compatibility-doc row this case pins — set when the case exists to
+    /// document a `partial`/`unsupported` divergence. Validated by the
+    /// `actions_compat_doc` drift gate, not by the harness itself.
+    #[allow(dead_code)]
+    divergence: Option<String>,
+    /// Seed-commit message override — skip-marker cases need `[skip ci]` in
+    /// the head commit message.
+    commit_message: Option<String>,
 }
 
 fn base_case(id: &str) -> Case {
@@ -80,6 +88,8 @@ fn base_case(id: &str) -> Case {
         needs_public_origin: None,
         log_contains: None,
         log_absent: None,
+        divergence: None,
+        commit_message: None,
     }
 }
 
@@ -131,6 +141,15 @@ static SHARED_LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new()
 /// because `enqueue_run` resolves it from env, not `AppState`.
 fn ensure_env() -> &'static PathBuf {
     INIT_ONCE.call_once(|| {
+        // Runner-side warnings (dropped log chunks, command diagnostics) go
+        // through `tracing` — install a subscriber so failures surface in
+        // test output instead of vanishing.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+            )
+            .try_init();
         std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "conformance-test-key");
         let dir = std::env::temp_dir().join(format!("oxidean-conf-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -204,7 +223,8 @@ async fn fixture(case: &Case) -> Fixture {
         .unwrap();
     for (name, value) in case.secrets.clone().unwrap_or_default() {
         db.insert_action_secret(
-            &format!("s-{}", Uuid::new_v4()),
+            // CHAR(36) on MySQL — a bare UUID fits; `s-<uuid>` does not.
+            &Uuid::new_v4().to_string(),
             &repo.id,
             &name,
             &encrypt_secret(&value).unwrap(),
@@ -231,9 +251,14 @@ async fn fixture(case: &Case) -> Fixture {
     for (p, c) in case.files.clone().unwrap_or_default() {
         seed_files.push((p, c.replace("{{SLUG}}", &slug).into_bytes()));
     }
-    git.seed_commit(&bare, "main", "conformance seed", &seed_files)
-        .await
-        .unwrap();
+    git.seed_commit(
+        &bare,
+        "main",
+        case.commit_message.as_deref().unwrap_or("conformance seed"),
+        &seed_files,
+    )
+    .await
+    .unwrap();
     // Remote `uses:` repos — `{slug}/{name}.git` on the fixture origin, plus a
     // repository row so smart-HTTP resolves them. The runner's `git_token` is
     // a user PAT: job tokens are repo-locked and can't clone a sibling repo.
@@ -743,6 +768,16 @@ conformance_case!(expr_malformed_if, "expr-malformed-if");
 conformance_case!(prt_push, "prt-push");
 conformance_case!(empty_steps, "empty-steps");
 conformance_case!(oidc_curl, "oidc-curl");
+// P11a — corner pins.
+conformance_case!(push_skip_ci, "push-skip-ci");
+conformance_case!(on_unsupported_event, "on-unsupported-event");
+conformance_case!(matrix_over_256, "matrix-over-256");
+conformance_case!(uses_node_pre_if, "uses-node-pre-if");
+conformance_case!(action_metadata_warnings, "action-metadata-warnings");
+conformance_case!(step_conclusion_coe, "step-conclusion-coe");
+conformance_case!(step_if_false_literal, "step-if-false-literal");
+conformance_case!(expr_vars_empty, "expr-vars-empty");
+conformance_case!(cache_service_absent, "cache-service-absent");
 
 /// Every `cases.json` entry is wired to a generated test and every corpus
 /// workflow is referenced — guards the corpus against silent drift.
@@ -837,11 +872,18 @@ async fn running_job_aborts_on_supersede() {
             .unwrap();
         runs[0].id.clone()
     };
-    // Wait until run 1's job is actually executing.
+    // Wait until run 1's job is actually mid-flight. `in_progress` alone is
+    // set at claim — on slower engines the supersede commit can land before
+    // the runner's `update_task(in_progress)`, which then aborts before any
+    // step (empty log, no "skipped" markers). Requiring a step boundary line
+    // in the log proves the step loop is running when the cancel arrives.
     for _ in 0..200 {
         let jobs = fx.db.list_action_jobs_for_run(&run1_id).await.unwrap();
-        if jobs.iter().any(|j| j.status == "in_progress") {
-            break;
+        if let Some(j) = jobs.first() {
+            if j.status == "in_progress" && read_job_log(&fx, &run1_id, &j.id).contains("##[step]")
+            {
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }

@@ -1,0 +1,7 @@
+name: expr-vars-empty
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "vars=[${{ vars.SOME_VAR }}] end"

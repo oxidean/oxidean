@@ -9,10 +9,10 @@ CREATE INDEX idx_action_runs_repo_created
 DROP INDEX idx_action_runs_repository_id ON action_runs;
 
 -- claim_queued_job_for_labels + the stale sweep: the queue scan filters
--- status='queued' and orders by created_at — (status, created_at) keeps the
--- candidate probe indexed instead of scanning the jobs table.
-CREATE INDEX idx_action_jobs_status_created
-  ON action_jobs(status, created_at);
+-- status='queued' and orders by created_at — the (status, created_at)
+-- covering index is already created by 0053_action_job_payloads. MySQL has
+-- no CREATE INDEX IF NOT EXISTS, so unlike sqlite/postgres this dialect
+-- does not restate it here.
 
 -- The claim probe's NOT EXISTS leg joins action_job_labels on job_id first —
 -- the 0053 index on (base) alone can't serve it.

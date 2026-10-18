@@ -149,10 +149,14 @@ pub(crate) fn step_allowed(src: Option<&str>, ctx: &Context) -> Result<bool, Str
 
 /// Record a finished step into `steps.<id>` for `steps.*` expressions and
 /// `$GITHUB_OUTPUT` consumers (`needs` lands with the scheduler phase).
+/// `outcome` is the step's raw result; `conclusion` is the normalized job
+/// effect — GitHub reports `conclusion: success` for a `continue-on-error`
+/// failure while `outcome` stays `failure`.
 pub(crate) fn record_step(
     ctx: &mut Context,
     id: &str,
     outcome: &str,
+    conclusion: &str,
     outputs: HashMap<String, String>,
 ) {
     let mut steps = ctx
@@ -164,7 +168,7 @@ pub(crate) fn record_step(
             id.to_string(),
             serde_json::json!({
                 "outcome": outcome,
-                "conclusion": outcome,
+                "conclusion": conclusion,
                 "outputs": outputs,
             }),
         );
