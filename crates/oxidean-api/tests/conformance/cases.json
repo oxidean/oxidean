@@ -707,10 +707,13 @@
         "build": "cancelled"
       },
       "log_contains": [
-        "step timed out"
+        "step timed out",
+        "cleanup-ran",
+        "cancel-gated-ran"
       ],
       "log_absent": [
-        "unreachable"
+        "unreachable",
+        "failure-gated-skipped"
       ]
     },
     {

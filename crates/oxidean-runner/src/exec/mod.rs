@@ -591,30 +591,30 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 }
                 ctx.set_context("github", gh);
             }
-            // Job deadline gates every subsequent step (GitHub `cancelled`).
-            if deadline.expired() {
+            // Job deadline marks the job cancelled — but GitHub semantics
+            // keep `always()`/`cancelled()` steps running (timeout cleanup),
+            // so fall through to the `if` gate instead of hard-skipping.
+            if !cancelled && deadline.expired() {
                 logger
-                    .line(&format!("::notice::step '{step_id}' skipped — job timeout"))
+                    .line(
+                        "::notice::job timed out — remaining steps evaluate under a cancelled job",
+                    )
                     .await;
-                record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 cancelled = true;
                 ctx.set_job_status(JobStatus::Cancelled);
                 sync_job_ctx(&mut ctx);
-                continue;
             }
             // Server-side cancel (concurrency supersede, fail-fast sibling,
-            // run cancel) arrives via update_log acks.
-            if logger.take_cancelled() {
+            // run cancel) arrives via update_log acks — same drain semantics.
+            if !cancelled && logger.take_cancelled() {
                 logger
-                    .line(&format!(
-                        "::notice::step '{step_id}' skipped — job cancelled"
-                    ))
+                    .line(
+                        "::notice::job cancelled — remaining steps evaluate under a cancelled job",
+                    )
                     .await;
-                record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 cancelled = true;
                 ctx.set_job_status(JobStatus::Cancelled);
                 sync_job_ctx(&mut ctx);
-                continue;
             }
             // Step `if` — implicit `success()` unless a status fn is present.
             let allowed = match step_allowed(raw_step.if_expr.as_deref(), &ctx) {
@@ -656,8 +656,19 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 .unwrap_or_else(|| format!("step {i}"));
             logger.line(&format!("##[step]{title}")).await;
 
-            let (timeout, timeout_warnings) =
-                step_timeout(&step, &ctx, default_timeout, deadline.remaining());
+            // A cancelled job's drained steps get their own timeout — the
+            // job deadline already fired; clipping to `remaining() == 0`
+            // would insta-kill cleanup steps GitHub lets run.
+            let (timeout, timeout_warnings) = step_timeout(
+                &step,
+                &ctx,
+                default_timeout,
+                if cancelled {
+                    None
+                } else {
+                    deadline.remaining()
+                },
+            );
             for w in timeout_warnings {
                 logger.line(&w).await;
             }

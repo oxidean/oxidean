@@ -49,7 +49,7 @@ download, annotations, `workflow_job` webhook.
 | 3. Events | 9 | 0 | 27 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
-| 6. Steps | 17 | 1 | 1 | 1 |
+| 6. Steps | 18 | 0 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
 | 8. Contexts | 24 | 0 | 0 | 0 |
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
@@ -225,7 +225,7 @@ and <https://docs.github.com/en/actions/using-workflows/using-a-shell>
 | `step.id` | `id:` — addressable in `steps.<id>` contexts | supported | case:expr-steps-context | |
 | `step.if` | `if:` — implicit `success()` unless a status function is used | supported | case:step-if, test:crates/oxidean-runner/src/exec/mod.rs::step_allowed_implicit_success_gate | |
 | `step.if-false-literal` | `if: 'false'` — a non-empty string is truthy, bare `false` is not | supported | case:step-if-false-literal | GitHub's string-truthiness quirk pinned. |
-| `step.if-cancel` | `always()` steps still run when the job is cancelled | partial | test:crates/oxidean-runner/src/exec/mod.rs::step_allowed_implicit_success_gate | The gate honours `always()`; a mid-step cancellation aborts the remaining steps rather than draining `always()` ones. Closes in P13. |
+| `step.if-cancel` | `always()`/`cancelled()` steps still run when the job is cancelled | supported | case:job-timeout-kills | Cancellation (timeout or server-side) marks the job `cancelled`, then remaining steps evaluate under the normal `if` gate — implicit-`success()` steps skip, `always()`/`cancelled()` drain with their own step timeout, `failure()` skips; post actions still run with `action_status=cancelled`. |
 | `step.name` | `name:` — display name | supported | case:run-multi-step | |
 | `step.uses-remote` | `uses: owner/repo[@path]@ref` — fetched and run | supported | case:uses-remote-composite, case:checkout-basic, case:checkout-path, case:uses-unknown, test:crates/oxidean-runner/src/exec/action.rs::ls_remote_resolves_local_repo | GitHub.com fetches work too (public smoke). An unresolvable `uses:` fails the step loudly (`uses-unknown`). |
 | `step.uses-local` | `uses: ./path` — action in the same repo | supported | case:uses-local-composite | Requires a checkout first — same as GitHub. |
