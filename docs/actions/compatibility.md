@@ -66,7 +66,7 @@ download, annotations, `workflow_job` webhook.
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
-| 23. Run lifecycle & integrations | 14 | 2 | 0 | 1 |
+| 23. Run lifecycle & integrations | 15 | 1 | 0 | 1 |
 | 24. GitHub REST API for Actions | 14 | 0 | 1 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
@@ -643,7 +643,7 @@ and <https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows
 | `life.delete-run` | Delete run history | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | `repo.actions.deleteRun` (Write+) removes a finished run — jobs, tokens, and artifact rows cascade; the run's log dir and artifact payloads are unlinked. In-flight runs must be cancelled first. P16. |
 | `life.disable-workflow` | Disable/enable a workflow file | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::workflow_enable_disable | `repo.actions.setWorkflowEnabled` (Write+) upserts a per-(repo, path) flag; `listWorkflows` marks `disabled`, dispatch errors `workflow_disabled`, push/pull/schedule/lifecycle loops skip it, and `workflow_call` fails the caller. |
 | `life.status-badge` | Workflow status badge endpoint | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::workflow_badge_svg | `GET /{owner}/{repo}/actions/workflows/{file}/badge.svg` (proxied by the web tier + Traefik) and `/api/repos/.../badge.svg`; `?branch=`/`?event=` filters; anonymous on public repos, 404 on private. |
-| `life.log-download` | Download a run's full log archive | partial | test:crates/oxidean-api/tests/actions_endpoints.rs::download_run_logs_zip | `GET /api/repos/{o}/{r}/actions/runs/{run}/logs` returns `logs.zip`; single-job raw logs at `.../jobs/{job}/logs`. Archive carries one `{job}.txt` entry per job — GitHub zips per step; per-step files aren't retained. P16. |
+| `life.log-download` | Download a run's full log archive | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::download_run_logs_zip | `GET /api/repos/{o}/{r}/actions/runs/{run}/logs` returns `logs.zip`; single-job raw logs at `.../jobs/{job}/logs`. The archive follows GitHub's `{job}/{seq}_{step}.txt` layout — runner preamble lands in `0_setup.txt`, post-step tail in `N_teardown.txt`, and markerless logs (skipped/failed legs) stay flat `{job}.txt`. |
 | `life.log-tail` | Live log tail while a job runs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Log reads are pull/poll RPC — clients refetch `job_logs` for new offsets. No SSE/WebSocket push channel; deliberately out of scope for the parity surface. |
 | `life.log-retention` | Logs compress + expire on a retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends, test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | |
 | `life.commit-status` | Commit status / required checks integration | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | Classic commit statuses under context `{workflow} / {job_key}`: enqueue publishes each job's real state (queued/waiting → pending, `if:`-skipped → success, validation-failed → failure); runner updates refresh; cancel → error, deadline-fail/fail-fast-cancel → error/failure via `actions::statuses`. |

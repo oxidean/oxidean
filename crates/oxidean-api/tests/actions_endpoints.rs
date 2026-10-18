@@ -849,6 +849,24 @@ async fn download_run_logs_zip() {
     std::fs::create_dir_all(&log_dir).unwrap();
     std::fs::write(log_dir.join("job-z.log"), "build output\n").unwrap();
 
+    // A second job whose log carries `##[step]` markers splits into GitHub's
+    // per-step archive layout.
+    fx.db
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-z2",
+            "run-z",
+            "test",
+            "test",
+            r#"["ubuntu-latest"]"#,
+        ))
+        .await
+        .unwrap();
+    std::fs::write(
+        log_dir.join("job-z2.log"),
+        "Job leg — test / 2 step(s) [host]\n##[step]checkout\ncheckout out\n##[step-done]checkout\n##[step]run tests\ntest out\n##[step-done]run tests\njob concluded success\n",
+    )
+    .unwrap();
+
     // Anonymous on a public repo reads the archive.
     let res = fx
         .app
@@ -872,10 +890,34 @@ async fn download_run_logs_zip() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..2], b"PK", "zip magic");
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let mut entry = zip.by_name("build.txt").expect("job entry in archive");
-    let mut text = String::new();
-    std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
-    assert_eq!(text, "build output\n");
+    {
+        let mut entry = zip.by_name("build.txt").expect("job entry in archive");
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+        assert_eq!(text, "build output\n");
+    }
+
+    // Per-step layout — `{job}/{seq}_{step}.txt` with the runner preamble in
+    // `0_setup.txt` and trailing lines in `N_teardown.txt`.
+    let read_entry = |zip: &mut zip::ZipArchive<std::io::Cursor<axum::body::Bytes>>, name: &str| {
+        let mut e = zip.by_name(name).unwrap_or_else(|_| panic!("entry {name}"));
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut e, &mut s).unwrap();
+        s
+    };
+    assert_eq!(
+        read_entry(&mut zip, "test/0_setup.txt"),
+        "Job leg — test / 2 step(s) [host]\n"
+    );
+    assert_eq!(
+        read_entry(&mut zip, "test/1_checkout.txt"),
+        "checkout out\n"
+    );
+    assert_eq!(read_entry(&mut zip, "test/2_run_tests.txt"), "test out\n");
+    assert_eq!(
+        read_entry(&mut zip, "test/3_teardown.txt"),
+        "job concluded success\n"
+    );
 
     // Unknown run and private-repo anonymous reads 404.
     let missing = fx

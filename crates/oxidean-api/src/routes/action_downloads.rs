@@ -276,9 +276,48 @@ pub async fn download_job_log(
     res
 }
 
+/// Split a job log stream on `##[step]`/`##[step-done]` markers into GitHub's
+/// per-step archive shape — `(preamble, steps, tail)`. Marker lines are
+/// stripped; content outside any step lands in the preamble or tail.
+fn split_step_sections(log: &str) -> (String, Vec<(String, String)>, String) {
+    let mut preamble = String::new();
+    let mut tail = String::new();
+    let mut steps: Vec<(String, String)> = Vec::new();
+    let mut current: Option<usize> = None;
+    for line in log.lines() {
+        if let Some(name) = line.strip_prefix("##[step]") {
+            steps.push((name.trim().to_string(), String::new()));
+            current = Some(steps.len() - 1);
+            continue;
+        }
+        if line.starts_with("##[step-done]") {
+            current = None;
+            continue;
+        }
+        match current {
+            Some(i) => {
+                steps[i].1.push_str(line);
+                steps[i].1.push('\n');
+            }
+            None if steps.is_empty() => {
+                preamble.push_str(line);
+                preamble.push('\n');
+            }
+            None => {
+                tail.push_str(line);
+                tail.push('\n');
+            }
+        }
+    }
+    (preamble, steps, tail)
+}
+
 /// GET /api/repos/{owner}/{repo}/actions/runs/{run_id}/logs — every job log
-/// in the run as a zip archive (GitHub's run-logs download). Entries are one
-/// `{job_name}.txt` per job — GitHub zips per step, we retain per-job streams.
+/// in the run as a zip archive. Entries follow GitHub's layout: one
+/// `{job_name}/` folder per job holding `{seq}_{step_name}.txt` per step
+/// (runner preamble → `0_setup.txt`, trailing lines → `N_teardown.txt`).
+/// Logs with no step markers (skipped legs, validation failures) keep the
+/// flat `{job_name}.txt` entry.
 pub async fn download_run_logs(
     State(state): State<AppState>,
     AxumPath((owner, repo, run_id)): AxumPath<(String, String, String)>,
@@ -333,25 +372,54 @@ pub async fn download_run_logs(
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
         let mut used = std::collections::HashSet::new();
+        let archive_failed = || {
+            err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "archive build failed",
+            )
+        };
         for job in &jobs {
             let (bytes, _size) =
                 crate::actions::logs::read_job_log(&state.actions_log_dir, &run.id, &job.id, 0)
                     .await
                     .unwrap_or_default();
             // Unique, filesystem-safe entry names — matrix siblings share a name.
-            let mut entry = format!("{}.txt", sanitize_filename(&job.name));
+            let mut dir = sanitize_filename(&job.name);
             for n in 2.. {
-                if used.insert(entry.clone()) {
+                if used.insert(dir.clone()) {
                     break;
                 }
-                entry = format!("{} ({n}).txt", sanitize_filename(&job.name));
+                dir = format!("{} ({n})", sanitize_filename(&job.name));
             }
-            if zip.start_file(entry, opts).is_err() || zip.write_all(&bytes).is_err() {
-                return err_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "actions.internal",
-                    "archive build failed",
-                );
+            let text = String::from_utf8_lossy(&bytes);
+            let (preamble, steps, tail) = split_step_sections(&text);
+            let mut entries: Vec<(String, &[u8])> = Vec::new();
+            if steps.is_empty() {
+                // No step markers — skipped/validation-failure legs keep the
+                // flat `{job}.txt` entry.
+                entries.push((format!("{dir}.txt"), &bytes));
+            } else {
+                if !preamble.trim().is_empty() {
+                    entries.push((format!("{dir}/0_setup.txt"), preamble.as_bytes()));
+                }
+                for (idx, (name, body)) in steps.iter().enumerate() {
+                    entries.push((
+                        format!("{dir}/{}_{}.txt", idx + 1, sanitize_filename(name)),
+                        body.as_bytes(),
+                    ));
+                }
+                if !tail.trim().is_empty() {
+                    entries.push((
+                        format!("{dir}/{}_teardown.txt", steps.len() + 1),
+                        tail.as_bytes(),
+                    ));
+                }
+            }
+            for (entry, content) in entries {
+                if zip.start_file(entry, opts).is_err() || zip.write_all(content).is_err() {
+                    return archive_failed();
+                }
             }
         }
         if zip.finish().is_err() {
