@@ -457,8 +457,16 @@ jobs:
           # provisions one (image-sourced services have no repo triggers),
           # so ensure polls briefly for a Railway-made env, then creates
           # oxidean-pr-<n> as an ephemeral fork of preview itself.
-          env_id="$(scripts/railway-pr-env-ensure.sh "$PR" "$RAILWAY_PROJECT_ID" || true)"
+          # A non-zero exit with no id is a real failure — fail the step so
+          # it surfaces on the PR instead of masquerading as "no env yet".
+          env_id=""
+          ensure_rc=0
+          env_id="$(scripts/railway-pr-env-ensure.sh "$PR" "$RAILWAY_PROJECT_ID")" || ensure_rc=$?
           if [[ -z "$env_id" ]]; then
+            if (( ensure_rc != 0 )); then
+              echo "error: railway-pr-env-ensure.sh exited ${ensure_rc} without an environment id"
+              exit 1
+            fi
             echo "warning: no Railway environment for PR #${PR} — a later push retries"
             exit 0
           fi
