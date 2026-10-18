@@ -13,7 +13,8 @@
 //! | `::set-env name=k::v`       | `k=v` → `$GITHUB_ENV` file (deprecation warn)  |
 //! | `::add-path::p`             | `p` → `$GITHUB_PATH` file (deprecation warn)   |
 //! | `::echo::on` / `::echo::off`| consumed — command echoing is never on here    |
-//! | `::stop-commands::t`        | suppresses interpretation until `::t::`        |
+//! | `::stop-commands::t`        | literal forwards until `::t::`                 |
+//! | `::error/warning/notice::m` | `##[level]m` + `##[ann]{json}` annotation marker |
 //!
 //! File-targeted commands write into the same `runner_temp` files the
 //! `$GITHUB_*` env-file protocol uses, so the existing post-step drain
@@ -173,8 +174,12 @@ impl<'a> Logger<'a> {
                 if line.trim() == format!("::{tok}::") {
                     drop(guard);
                     *self.stop_token.lock().unwrap() = None;
+                    return Verdict::Drop;
                 }
-                return Verdict::Drop;
+                // Inside a stop-commands block every other line is literal —
+                // GitHub forwards it to the log verbatim rather than
+                // interpreting `::cmd::` syntax.
+                return Verdict::Forward;
             }
         }
         let Some(rest) = line.strip_prefix("::") else {
@@ -190,6 +195,38 @@ impl<'a> Logger<'a> {
         };
         let payload = unescape_data(payload_raw);
         match cmd {
+            // Annotation commands — `::error file=f,line=3::msg` — log as
+            // GitHub's `##[level]msg` text and ride an `##[ann]{json}`
+            // marker so the server persists a structured annotation
+            // (stripped at ingest; never visible in stored logs).
+            "error" | "warning" | "notice" => {
+                let mut ann = serde_json::json!({
+                    "level": cmd,
+                    "message": payload,
+                });
+                if let Some(obj) = ann.as_object_mut() {
+                    for (prop, key) in [
+                        ("file", "path"),
+                        ("line", "line"),
+                        ("endLine", "end_line"),
+                        ("col", "col"),
+                        ("endColumn", "end_col"),
+                        ("title", "title"),
+                    ] {
+                        if let Some(v) = param(params, prop) {
+                            let v = unescape_prop(v);
+                            if matches!(key, "line" | "end_line" | "col" | "end_col") {
+                                if let Ok(n) = v.parse::<u64>() {
+                                    obj.insert(key.into(), serde_json::json!(n));
+                                }
+                            } else {
+                                obj.insert(key.into(), serde_json::json!(v));
+                            }
+                        }
+                    }
+                }
+                Verdict::Replace(format!("##[ann]{ann}\n##[{cmd}]{payload}"))
+            }
             "group" => Verdict::Replace(format!("##[group]{payload}")),
             "endgroup" => Verdict::Replace("##[endgroup]".into()),
             "debug" => {
@@ -344,9 +381,12 @@ mod tests {
     #[test]
     fn stop_commands_suppresses_until_token() {
         let l = logger();
-        let out =
-            l.interpret_chunk("::stop-commands::t9\n::add-mask::nope\n::t9::\n::add-mask::yes\n");
-        assert_eq!(out, "");
+        // Commands inside the block are literal text — forwarded to the log
+        // but not interpreted (GitHub semantics: the text must still appear).
+        let out = l.interpret_chunk(
+            "::stop-commands::t9\n::add-mask::nope\nplain line\n::t9::\n::add-mask::yes\n",
+        );
+        assert_eq!(out, "::add-mask::nope\nplain line\n");
         let masks = l.extra_masks.lock().unwrap();
         assert_eq!(masks.as_slice(), &["yes"]);
     }
@@ -391,10 +431,35 @@ mod tests {
     }
 
     #[test]
-    fn annotations_and_text_pass_through() {
+    fn annotation_commands_emit_marker_plus_github_line() {
         let l = logger();
         let out = l.interpret_chunk("::error::boom\nplain text with :: inside\n");
-        assert_eq!(out, "::error::boom\nplain text with :: inside\n");
+        assert_eq!(
+            out,
+            "##[ann]{\"level\":\"error\",\"message\":\"boom\"}\n##[error]boom\nplain text with :: inside\n"
+        );
+    }
+
+    #[test]
+    fn annotation_props_decode_into_marker() {
+        let l = logger();
+        let out = l.interpret_chunk(
+            "::warning file=src/main.rs,line=3,endLine=4,col=1,endColumn=9,title=Lint%3Aclean::careful\n",
+        );
+        let (marker, visible) = out.split_once('\n').unwrap();
+        assert_eq!(visible, "##[warning]careful\n");
+        let ann: serde_json::Value =
+            serde_json::from_str(marker.strip_prefix("##[ann]").unwrap()).unwrap();
+        assert_eq!(ann["level"], "warning");
+        assert_eq!(ann["message"], "careful");
+        assert_eq!(ann["path"], "src/main.rs");
+        assert_eq!(ann["line"], 3);
+        assert_eq!(ann["end_line"], 4);
+        assert_eq!(ann["col"], 1);
+        assert_eq!(ann["end_col"], 9);
+        // `%3A` is a property escape — `%20` is not (URL encoding, not
+        // command encoding); a literal colon would split the prop list.
+        assert_eq!(ann["title"], "Lint:clean");
     }
 
     #[test]

@@ -345,6 +345,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.listRuns",
     "repo.actions.getRun",
     "repo.actions.getJobLog",
+    "repo.actions.jobAnnotations",
     "repo.actions.listWorkflows",
     "repo.actions.dispatchWorkflow",
     "repo.actions.dispatchRepository",
@@ -1414,6 +1415,12 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.jobAnnotations" => {
+            match crate::actions::rpc::job_annotations(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.listWorkflows" => {
             match crate::actions::rpc::list_workflows(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),

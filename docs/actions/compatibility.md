@@ -52,7 +52,7 @@ download, annotations, `workflow_job` webhook.
 | 6. Steps | 19 | 0 | 0 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
 | 8. Contexts | 24 | 0 | 0 | 0 |
-| 9. Workflow commands & environment files | 18 | 3 | 1 | 0 |
+| 9. Workflow commands & environment files | 21 | 0 | 1 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 16 | 1 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
@@ -313,15 +313,16 @@ same `runner_temp` files the `$GITHUB_*` protocol drains, `add-mask` extends
 the job mask list, `stop-commands` pauses interpretation, and `group`/
 `endgroup`/`debug` translate to the `##[…]` log markers the UI folds.
 Uninterpreted commands (`add-matcher`/`remove-matcher`) produce a
-`::warning::` — never a silent no-op. Annotation rendering (error/warning/
-notice decorators in the UI) is a P16 UI item; the command text is preserved
-in the log either way.
+`::warning::` — never a silent no-op. Annotation commands translate to the
+`##[level]msg` text GitHub's own logs carry plus an `##[ann]{json}` marker
+the server strips at ingest and persists as a structured annotation row;
+`repo.actions.jobAnnotations` serves them and the run page renders a panel.
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `cmd.error` | `::error file=…,line=…::msg` — error annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Text is logged; the annotation is not parsed or rendered. P16 annotations. |
-| `cmd.warning` | `::warning::` annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Same as `cmd.error`. |
-| `cmd.notice` | `::notice::` annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Same as `cmd.error`. |
+| `cmd.error` | `::error file=…,line=…::msg` — error annotation | supported | test:crates/oxidean-runner/src/exec/commands.rs::annotation_props_decode_into_marker, case:annotations | Logs `##[error]msg` (GitHub's log form) + persists a structured row (`path`, `line`/`endLine`, `col`/`endColumn`, `title`); the run page lists it and `repo.actions.jobAnnotations` serves it. |
+| `cmd.warning` | `::warning::` annotation | supported | test:crates/oxidean-api/src/actions/logs.rs::extract_annotations_strips_markers_and_parses_fields | Same as `cmd.error`; severity `warning`. |
+| `cmd.notice` | `::notice::` annotation | supported | case:annotations | Same as `cmd.error`; severity `notice`. |
 | `cmd.debug` | `::debug::` shown only with ACTIONS_STEP_DEBUG | supported | test:crates/oxidean-runner/src/exec/commands.rs::debug_lines_gate_on_step_debug | Forwarded when `ACTIONS_STEP_DEBUG` (or `ACTIONS_RUNNER_DEBUG`) is truthy in job env, `vars`, or secrets; otherwise dropped. |
 | `cmd.group` | `::group::`/`::endgroup::` collapsible log sections | supported | test:crates/oxidean-runner/src/exec/commands.rs::group_commands_emit_markers | Translated to `##[group]`/`##[endgroup]` markers; the log viewer folds them. |
 | `cmd.add-mask` | `::add-mask::` registers a runtime mask | supported | test:crates/oxidean-runner/src/exec/commands.rs::add_mask_extends_masks | Appends to the job's mask list alongside repo/env secrets. |

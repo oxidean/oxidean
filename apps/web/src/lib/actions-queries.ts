@@ -1,6 +1,7 @@
 import type {
   ActionArtifactsListResponse,
   ActionDeploymentsListResponse,
+  ActionJobAnnotationsResponse,
   ActionJobLogResponse,
   ActionSecretsListResponse,
   ActionVariablesListResponse,
@@ -127,6 +128,34 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
     // flag never set it and keep polling.
     refetchInterval: (query: { state: { data?: ActionJobLogResponse } }) =>
       query.state.data?.done ? false : 1_000,
+  };
+}
+
+/**
+ * Structured `::error`/`::warning`/`::notice` annotations for one job
+ * (`repo.actions.jobAnnotations`). Live-tail cadence matches the log query —
+ * annotations accrue while the job runs.
+ */
+export function actionsJobAnnotationsQuery(
+  owner: string,
+  name: string,
+  runId: string,
+  jobId: string,
+) {
+  return {
+    queryKey: ["repo", "actions", "annotations", owner, name, runId, jobId] as const,
+    queryFn: async (): Promise<ActionJobAnnotationsResponse> => {
+      const res = await apiClient.repo.actions.jobAnnotations({
+        owner,
+        name,
+        run_id: runId,
+        job_id: jobId,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(runId && jobId),
+    refetchInterval: 10_000,
   };
 }
 

@@ -167,6 +167,45 @@ pub struct ActionJobLogRequest {
     pub wait_ms: Option<u64>,
 }
 
+/// `repo.actions.jobAnnotations` — annotations a job emitted through the
+/// `::error|warning|notice::` workflow commands (GitHub's run/job
+/// annotation surface). Fields follow GitHub's check-run annotation shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionAnnotationPublic {
+    /// `error` | `warning` | `notice`.
+    pub annotation_level: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_column: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobAnnotationsRequest {
+    pub owner: String,
+    pub name: String,
+    /// Restrict to one job; absent lists every annotation on the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobAnnotationsResponse {
+    pub annotations: Vec<ActionAnnotationPublic>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobLogResponse {
     /// Log bytes starting at the requested `offset` (lossy UTF-8).

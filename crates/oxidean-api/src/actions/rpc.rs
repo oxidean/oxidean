@@ -5,34 +5,36 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use oxidean_core::{
-    ActionArtifactDeleteRequest, ActionArtifactDeleteResponse, ActionArtifactPublic,
-    ActionArtifactsListRequest, ActionArtifactsListResponse, ActionCacheDeleteRequest,
-    ActionCacheDeleteResponse, ActionCachePublic, ActionCachesListRequest,
-    ActionCachesListResponse, ActionDeploymentPublic, ActionDeploymentReviewPublic,
-    ActionDeploymentReviewRequest, ActionDeploymentReviewResponse, ActionDeploymentsListRequest,
-    ActionDeploymentsListResponse, ActionDispatchInputPublic, ActionDispatchRepositoryRequest,
-    ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
-    ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobApproveRequest,
-    ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic,
-    ActionListRunnersResponse, ActionRegistrationTokenResponse, ActionRunGetRequest,
-    ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
-    ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
-    ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionSetWorkflowEnabledRequest,
-    ActionVariablePublic, ActionVariablesDeleteRequest, ActionVariablesListRequest,
-    ActionVariablesListResponse, ActionVariablesPutRequest, ActionWorkflowFileError,
-    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
-    RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
-    RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
-    RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
-    RepoActionsEnvironmentSecretDeleteRequest, RepoActionsEnvironmentSecretPutRequest,
-    RepoActionsEnvironmentSecretsListRequest, RepoActionsEnvironmentUpsertRequest,
-    RepoActionsEnvironmentVariableDeleteRequest, RepoActionsEnvironmentVariablePutRequest,
-    RepoActionsEnvironmentVariablesListRequest, RepoActionsEnvironmentsListRequest,
-    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
-    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
-    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
-    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
+    ActionAnnotationPublic, ActionArtifactDeleteRequest, ActionArtifactDeleteResponse,
+    ActionArtifactPublic, ActionArtifactsListRequest, ActionArtifactsListResponse,
+    ActionCacheDeleteRequest, ActionCacheDeleteResponse, ActionCachePublic,
+    ActionCachesListRequest, ActionCachesListResponse, ActionDeploymentPublic,
+    ActionDeploymentReviewPublic, ActionDeploymentReviewRequest, ActionDeploymentReviewResponse,
+    ActionDeploymentsListRequest, ActionDeploymentsListResponse, ActionDispatchInputPublic,
+    ActionDispatchRepositoryRequest, ActionDispatchRequest, ActionDispatchResponse,
+    ActionEnabledRequest, ActionEnabledResponse, ActionEnvironmentProtection,
+    ActionEnvironmentPublic, ActionJobAnnotationsRequest, ActionJobAnnotationsResponse,
+    ActionJobApproveRequest, ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse,
+    ActionJobPublic, ActionListRunnersResponse, ActionRegistrationTokenResponse,
+    ActionRunGetRequest, ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse,
+    ActionRunPublic, ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse,
+    ActionSecretDeleteRequest, ActionSecretMetaPublic, ActionSecretPutRequest,
+    ActionSecretsListRequest, ActionSecretsListResponse, ActionSetEnabledRequest,
+    ActionSetWorkflowEnabledRequest, ActionVariablePublic, ActionVariablesDeleteRequest,
+    ActionVariablesListRequest, ActionVariablesListResponse, ActionVariablesPutRequest,
+    ActionWorkflowFileError, ActionWorkflowPublic, ActionWorkflowsListRequest,
+    ActionWorkflowsListResponse, AppError, RepoActionsDefaultPermissionsRequest,
+    RepoActionsDefaultPermissionsResponse, RepoActionsEnvironmentDeleteRequest,
+    RepoActionsEnvironmentDeleteResponse, RepoActionsEnvironmentGetRequest,
+    RepoActionsEnvironmentResponse, RepoActionsEnvironmentSecretDeleteRequest,
+    RepoActionsEnvironmentSecretPutRequest, RepoActionsEnvironmentSecretsListRequest,
+    RepoActionsEnvironmentUpsertRequest, RepoActionsEnvironmentVariableDeleteRequest,
+    RepoActionsEnvironmentVariablePutRequest, RepoActionsEnvironmentVariablesListRequest,
+    RepoActionsEnvironmentsListRequest, RepoActionsEnvironmentsListResponse,
+    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
+    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
+    RepoActionsSetDefaultPermissionsRequest, RepoActionsSetForkPrApprovalRequest,
+    RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -503,6 +505,71 @@ pub async fn get_job_log(
 
 fn job_status_terminal(status: &str) -> bool {
     matches!(status, "success" | "failure" | "cancelled" | "skipped")
+}
+
+/// `repo.actions.jobAnnotations` — Read+ (anonymous OK on public repos).
+/// Annotations a run's jobs emitted via `::error|warning|notice::`.
+pub async fn job_annotations(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionJobAnnotationsResponse, AppError> {
+    let req: ActionJobAnnotationsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.jobAnnotations input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let run = ctx
+        .db
+        .find_action_run_by_id(&req.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let rows = match &req.job_id {
+        Some(job_id) => {
+            let job = ctx
+                .db
+                .find_action_job_by_id(job_id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(not_found)?;
+            if job.run_id != run.id {
+                return Err(not_found());
+            }
+            ctx.db
+                .list_action_annotations_for_job(job_id)
+                .await
+                .map_err(db_err)?
+        }
+        None => ctx
+            .db
+            .list_action_annotations_for_run(&req.run_id)
+            .await
+            .map_err(db_err)?,
+    };
+    Ok(ActionJobAnnotationsResponse {
+        annotations: rows
+            .into_iter()
+            .map(|r| ActionAnnotationPublic {
+                annotation_level: r.annotation_level,
+                message: r.message,
+                path: r.path,
+                start_line: r.start_line,
+                end_line: r.end_line,
+                start_column: r.start_column,
+                end_column: r.end_column,
+                title: r.title,
+                created_at: r.created_at,
+            })
+            .collect(),
+    })
 }
 
 /// `repo.actions.secrets.list` — Admin; names only (D-ACT-17).

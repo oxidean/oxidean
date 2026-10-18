@@ -56,7 +56,9 @@ export type ParsedJobLog = {
 const STEP_OPEN = /^##\[step\](.*)$/;
 const STEP_DONE = /^##\[step-done\](.*)$/;
 const GROUP_OPEN = /^##\[group\](.*)$/;
-const ANNOTATION = /^::(error|warning|notice)::(.*)$/;
+// `::error::` is the raw workflow-command form; `##[error]` is the runner's
+// translated form (and what GitHub's own downloaded logs carry).
+const ANNOTATION = /^(?:::(error|warning|notice)::|##\[(error|warning|notice)\])(.*)$/;
 // `::debug::` is the bundled runner's passthrough form; `##[debug]` is what
 // a stock act_runner emits — both render as dimmed debug lines.
 const DEBUG_LINE = /^(?:::debug::|##\[debug\])(.*)$/;
@@ -242,13 +244,17 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
       continue;
     }
     if (HIDDEN_COMMAND.test(raw) || OTHER_MARKER.test(raw)) {
-      // `##[group]`/`::debug::` are visible line kinds — handle them first.
+      // `##[group]`/`::debug::`/`##[error]` are visible line kinds — handle
+      // them first; `##[ann]` and any other `##[x]` stay hidden.
       const group = GROUP_OPEN.exec(raw);
       const debug = DEBUG_LINE.exec(raw);
-      if (group || debug) {
+      const ann = ANNOTATION.exec(raw);
+      if (group || debug || ann) {
         const line = group
           ? makeLine(n, "group", group[1].trim() || "group")
-          : makeLine(n, "debug", debug![1]);
+          : debug
+            ? makeLine(n, "debug", debug[1])
+            : makeLine(n, (ann![1] ?? ann![2]) as LogLineKind, ann![3]);
         if (current) {
           current.lines.push(line);
         } else if (sawDone) {
@@ -260,7 +266,9 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
       continue;
     }
     const ann = ANNOTATION.exec(raw);
-    const line = ann ? makeLine(n, ann[1] as LogLineKind, ann[2]) : makeLine(n, "out", raw);
+    const line = ann
+      ? makeLine(n, (ann[1] ?? ann[2]) as LogLineKind, ann[3])
+      : makeLine(n, "out", raw);
     if (current) {
       current.lines.push(line);
     } else if (sawDone) {

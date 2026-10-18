@@ -1213,16 +1213,32 @@ pub async fn update_log(
             }
             Err(e) => return internal_err(e),
         }
-        if let Err(e) = crate::actions::logs::append_job_log_bounded(
+        // `##[ann]` markers (native-runner annotation side-channel) strip
+        // and persist — act_runner never emits them, but a custom client
+        // could; extraction is the same either way.
+        let (text, anns) = crate::actions::logs::extract_annotations(chunk.as_bytes());
+        match crate::actions::logs::append_job_log_bounded(
             &state.actions_log_dir,
             &job.run_id,
             &job.id,
-            chunk.as_bytes(),
+            &text,
             crate::actions::runner_proto::max_job_log_bytes() as u64,
         )
         .await
         {
-            return internal_err(e);
+            Ok(true) => {
+                if !anns.is_empty() {
+                    crate::actions::logs::persist_annotations(
+                        &state.db,
+                        &job.run_id,
+                        &job.id,
+                        anns,
+                    )
+                    .await;
+                }
+            }
+            Ok(false) => {}
+            Err(e) => return internal_err(e),
         }
     }
     let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);

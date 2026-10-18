@@ -3827,6 +3827,31 @@ impl Database {
         actions::list_deployment_reviews_for_run(self.require_pool()?, run_id).await
     }
 
+    /// Record one workflow-command annotation (`::error|warning|notice::`)
+    /// extracted at log ingest.
+    pub async fn insert_action_annotation(
+        &self,
+        a: &actions::ActionAnnotationRow,
+    ) -> Result<(), String> {
+        actions::insert_action_annotation(self.require_pool()?, a).await
+    }
+
+    /// Annotations for one job, oldest first.
+    pub async fn list_action_annotations_for_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<actions::ActionAnnotationRow>, String> {
+        actions::list_action_annotations_for_job(self.require_pool()?, job_id).await
+    }
+
+    /// Annotations across a run's jobs — the run summary surface.
+    pub async fn list_action_annotations_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionAnnotationRow>, String> {
+        actions::list_action_annotations_for_run(self.require_pool()?, run_id).await
+    }
+
     /// Stamp the environment wait-timer deadline on a needs-gated leg.
     pub async fn set_job_deployment_timer(
         &self,

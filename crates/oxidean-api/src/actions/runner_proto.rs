@@ -1035,15 +1035,22 @@ async fn append_job_log_capped(
     job: &oxidean_db::ActionJobRow,
     chunk: &[u8],
 ) -> Result<bool, StatusCode> {
-    crate::actions::logs::append_job_log_bounded(
+    // `##[ann]` markers carry structured annotations out-of-band — strip
+    // them from the stored text and persist rows on successful append.
+    let (text, anns) = crate::actions::logs::extract_annotations(chunk);
+    let appended = crate::actions::logs::append_job_log_bounded(
         &state.actions_log_dir,
         &job.run_id,
         &job.id,
-        chunk,
+        &text,
         max_job_log_bytes() as u64,
     )
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if appended && !anns.is_empty() {
+        crate::actions::logs::persist_annotations(&state.db, &job.run_id, &job.id, anns).await;
+    }
+    Ok(appended)
 }
 
 async fn update_log(

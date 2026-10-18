@@ -175,6 +175,102 @@ pub async fn compress_job_log(log_dir: &Path, run_id: &str, job_id: &str) -> Res
     Ok(true)
 }
 
+/// One `##[ann]` marker decoded at ingest — a GitHub `::error|warning|
+/// notice::` workflow command carried out-of-band by the runner.
+/// Field names follow GitHub's check-run annotation shape.
+#[derive(Debug, Clone)]
+pub struct JobAnnotation {
+    pub level: String,
+    pub message: String,
+    pub path: Option<String>,
+    pub start_line: Option<i64>,
+    pub end_line: Option<i64>,
+    pub start_column: Option<i64>,
+    pub end_column: Option<i64>,
+    pub title: Option<String>,
+}
+
+/// Split `##[ann]{json}` marker lines out of an incoming log chunk: the
+/// returned text drops markers (they are runner-side metadata, not log
+/// content) and the returned list carries the parsed annotations to persist.
+/// A marker whose JSON fails to parse stays in the text — never lose log
+/// content to a malformed line.
+pub fn extract_annotations(chunk: &[u8]) -> (Vec<u8>, Vec<JobAnnotation>) {
+    let text = match std::str::from_utf8(chunk) {
+        Ok(t) => t,
+        // Binary chunks can't carry markers — pass through untouched.
+        Err(_) => return (chunk.to_vec(), Vec::new()),
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut anns = Vec::new();
+    for line in text.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        match body
+            .strip_prefix("##[ann]")
+            .and_then(|j| parse_annotation(j).ok())
+        {
+            Some(a) => anns.push(a),
+            None => out.push_str(line),
+        }
+    }
+    (out.into_bytes(), anns)
+}
+
+fn parse_annotation(json: &str) -> Result<JobAnnotation, ()> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| ())?;
+    let get_s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
+    let get_n = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_u64().or_else(|| x.as_i64().map(|i| i as u64)))
+            .map(|n| n as i64)
+    };
+    let level = get_s("level").filter(|l| matches!(l.as_str(), "error" | "warning" | "notice"));
+    let message = get_s("message");
+    match (level, message) {
+        (Some(level), Some(message)) => Ok(JobAnnotation {
+            level,
+            message,
+            path: get_s("path"),
+            start_line: get_n("line"),
+            end_line: get_n("end_line"),
+            start_column: get_n("col"),
+            end_column: get_n("end_col"),
+            title: get_s("title"),
+        }),
+        _ => Err(()),
+    }
+}
+
+/// Persist annotations extracted by [`extract_annotations`] — annotation
+/// loss is tolerable (the `##[level]` text is already in the log), so an
+/// insert failure logs a warning rather than failing the log append.
+pub async fn persist_annotations(
+    db: &oxidean_db::Database,
+    run_id: &str,
+    job_id: &str,
+    anns: Vec<JobAnnotation>,
+) {
+    for a in anns {
+        let row = oxidean_db::actions::ActionAnnotationRow {
+            id: uuid::Uuid::new_v4().to_string(),
+            run_id: run_id.to_string(),
+            job_id: job_id.to_string(),
+            annotation_level: a.level,
+            message: a.message,
+            path: a.path,
+            start_line: a.start_line,
+            end_line: a.end_line,
+            start_column: a.start_column,
+            end_column: a.end_column,
+            title: a.title,
+            created_at: String::new(),
+        };
+        if let Err(e) = db.insert_action_annotation(&row).await {
+            tracing::warn!("action annotation insert failed for job {job_id}: {e}");
+        }
+    }
+}
+
 /// Read the job log tail starting at `offset` bytes. Returns
 /// `(content_from_offset, total_size)` — `total_size` doubles as the caller's
 /// next offset (`next_offset`).
@@ -220,4 +316,58 @@ pub async fn read_job_log(
         start += 1;
     }
     Ok((bytes.split_off(start), size))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_annotations_strips_markers_and_parses_fields() {
+        let chunk = b"step out\n##[ann]{\"level\":\"error\",\"message\":\"boom\",\"path\":\"src/main.rs\",\"line\":3,\"end_line\":4,\"col\":1,\"end_col\":9,\"title\":\"Lint\"}\n##[error]boom\n";
+        let (text, anns) = extract_annotations(chunk);
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "step out\n##[error]boom\n"
+        );
+        assert_eq!(anns.len(), 1);
+        let a = &anns[0];
+        assert_eq!(a.level, "error");
+        assert_eq!(a.message, "boom");
+        assert_eq!(a.path.as_deref(), Some("src/main.rs"));
+        assert_eq!(a.start_line, Some(3));
+        assert_eq!(a.end_line, Some(4));
+        assert_eq!(a.start_column, Some(1));
+        assert_eq!(a.end_column, Some(9));
+        assert_eq!(a.title.as_deref(), Some("Lint"));
+    }
+
+    #[test]
+    fn extract_annotations_keeps_malformed_markers_in_text() {
+        let chunk = b"##[ann]{not json}\n##[ann]{\"level\":\"bogus\"}\nok\n";
+        let (text, anns) = extract_annotations(chunk);
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "##[ann]{not json}\n##[ann]{\"level\":\"bogus\"}\nok\n"
+        );
+        assert!(anns.is_empty());
+    }
+
+    #[test]
+    fn extract_annotations_passes_binary_through() {
+        let chunk: &[u8] = b"##[ann]{\"level\":\"notice\",\"message\":\"x\"}\xff\xfe\n";
+        let (text, anns) = extract_annotations(chunk);
+        assert_eq!(text, chunk);
+        assert!(anns.is_empty());
+    }
+
+    #[test]
+    fn extract_annotations_minimal_marker() {
+        let chunk = b"##[ann]{\"level\":\"notice\",\"message\":\"hi\"}\n";
+        let (text, anns) = extract_annotations(chunk);
+        assert!(text.is_empty());
+        assert_eq!(anns[0].level, "notice");
+        assert_eq!(anns[0].message, "hi");
+        assert!(anns[0].path.is_none());
+    }
 }

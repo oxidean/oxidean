@@ -96,6 +96,24 @@ describe("parseJobLog", () => {
     expect(parsed.steps[0].lines.map((l) => l.plain)).toEqual(["in"]);
   });
 
+  it("renders ##[level] annotation lines and hides ##[ann] metadata markers", () => {
+    const log = [
+      "##[step]build",
+      '##[ann]{"level":"error","message":"boom","path":"src/main.rs"}',
+      "##[error]boom",
+      "##[warning]careful",
+      "##[notice]fyi",
+      "##[step-done]build",
+    ].join("\n");
+    const parsed = parseJobLog(log, "success");
+    const lines = parsed.steps[0].lines;
+    expect(lines.map((l) => [l.kind, l.plain])).toEqual([
+      ["error", "boom"],
+      ["warning", "careful"],
+      ["notice", "fyi"],
+    ]);
+  });
+
   it("treats a run with no markers as one preamble", () => {
     const parsed = parseJobLog("plain\nlog\n", "success");
     expect(parsed.steps).toHaveLength(0);

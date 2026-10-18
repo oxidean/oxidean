@@ -258,6 +258,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "repo.actions.listRuns"
         | "repo.actions.getRun"
         | "repo.actions.getJobLog"
+        | "repo.actions.jobAnnotations"
         | "repo.actions.listWorkflows"
         | "repo.actions.listArtifacts"
         | "repo.actions.listCaches"

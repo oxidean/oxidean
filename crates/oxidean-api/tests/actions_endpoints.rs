@@ -1115,3 +1115,170 @@ async fn environment_reviewer_cap() {
         "duplicate token deduped"
     );
 }
+
+#[tokio::test]
+async fn job_annotations_lists_and_enforces_ownership() {
+    let fx = fixture("private").await;
+    fx.db
+        .insert_action_run(
+            "run-ann",
+            "r-act",
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            "deadbeef",
+            "main",
+            "CI",
+            Some(&fx.owner_id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-ann",
+            "run-ann",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
+        .await
+        .unwrap();
+    // A second run/job in the same repo to prove job scoping.
+    fx.db
+        .insert_action_run(
+            "run-ann-2",
+            "r-act",
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            "cafef00d",
+            "main",
+            "CI",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-ann-2",
+            "run-ann-2",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_annotation(&oxidean_db::actions::ActionAnnotationRow {
+            id: "ann-1".into(),
+            run_id: "run-ann".into(),
+            job_id: "job-ann".into(),
+            annotation_level: "error".into(),
+            message: "boom".into(),
+            path: Some("src/main.rs".into()),
+            start_line: Some(3),
+            end_line: Some(4),
+            start_column: Some(1),
+            end_column: Some(9),
+            title: Some("Lint".into()),
+            created_at: String::new(),
+        })
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_annotation(&oxidean_db::actions::ActionAnnotationRow {
+            id: "ann-2".into(),
+            run_id: "run-ann".into(),
+            job_id: "job-ann".into(),
+            annotation_level: "notice".into(),
+            message: "fyi".into(),
+            path: None,
+            start_line: None,
+            end_line: None,
+            start_column: None,
+            end_column: None,
+            title: None,
+            created_at: String::new(),
+        })
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_annotation(&oxidean_db::actions::ActionAnnotationRow {
+            id: "ann-3".into(),
+            run_id: "run-ann-2".into(),
+            job_id: "job-ann-2".into(),
+            annotation_level: "warning".into(),
+            message: "other run".into(),
+            path: None,
+            start_line: None,
+            end_line: None,
+            start_column: None,
+            end_column: None,
+            title: None,
+            created_at: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Anonymous on a private repo is denied.
+    let res = rpc_json(
+        &fx.app,
+        "",
+        r#"{"procedure":"repo.actions.jobAnnotations","input":{"owner":"actowner","name":"actdemo","run_id":"run-ann","job_id":"job-ann"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], false, "anonymous private — {res}");
+
+    // Job-scoped list returns only that job's annotations with full fields.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.jobAnnotations","input":{"owner":"actowner","name":"actdemo","run_id":"run-ann","job_id":"job-ann"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "job-scoped list — {res}");
+    let anns = res["data"]["annotations"].as_array().unwrap();
+    assert_eq!(anns.len(), 2, "job annotations — {anns:?}");
+    let err = anns
+        .iter()
+        .find(|a| a["annotation_level"] == "error")
+        .unwrap();
+    assert_eq!(err["message"], "boom");
+    assert_eq!(err["path"], "src/main.rs");
+    assert_eq!(err["start_line"], 3);
+    assert_eq!(err["end_line"], 4);
+    assert_eq!(err["start_column"], 1);
+    assert_eq!(err["end_column"], 9);
+    assert_eq!(err["title"], "Lint");
+
+    // Run-level list spans jobs on the run but not other runs.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.jobAnnotations","input":{"owner":"actowner","name":"actdemo","run_id":"run-ann"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "run-scoped list — {res}");
+    let anns = res["data"]["annotations"].as_array().unwrap();
+    assert_eq!(anns.len(), 2, "run annotations stay run-scoped — {anns:?}");
+
+    // Cross-run job/run mismatches are not-found, not leaks.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.jobAnnotations","input":{"owner":"actowner","name":"actdemo","run_id":"run-ann","job_id":"job-ann-2"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], false, "job from another run — {res}");
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.jobAnnotations","input":{"owner":"actowner","name":"actdemo","run_id":"no-such-run"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], false, "unknown run — {res}");
+}

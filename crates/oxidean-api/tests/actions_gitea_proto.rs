@@ -296,7 +296,12 @@ jobs:
         serde_json::json!({
             "taskId": task_id,
             "index": 0,
-            "rows": [{"content": "line one"}, {"content": "line two"}],
+            "rows": [
+                {"content": "line one"},
+                {"content": "line two"},
+                {"content": "##[ann]{\"level\":\"warning\",\"message\":\"careful\",\"path\":\"src/lib.rs\",\"line\":7}"},
+                {"content": "##[warning]careful"}
+            ],
             "noMore": false
         })
         .to_string()
@@ -305,7 +310,7 @@ jobs:
     .await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(v["ackIndex"], 2);
+    assert_eq!(v["ackIndex"], 4);
 
     // UpdateTask success with outputs.
     let (status, bytes) = post_headers(
@@ -337,7 +342,7 @@ jobs:
     let outputs: serde_json::Value = serde_json::from_str(&job.outputs_json).unwrap();
     assert_eq!(outputs["artifact_path"], "out.bin");
 
-    // Log landed on disk.
+    // Log landed on disk — `##[ann]` marker stripped, visible line kept.
     let log_path = dir
         .path()
         .join("actions-logs")
@@ -345,6 +350,13 @@ jobs:
         .join(format!("{}.log", job.id));
     let log = std::fs::read_to_string(log_path).unwrap();
     assert!(log.contains("line one\nline two\n"));
+    assert!(log.contains("##[warning]careful"));
+    assert!(!log.contains("##[ann]"), "annotation marker stripped");
+    let anns = db.list_action_annotations_for_job(&job.id).await.unwrap();
+    assert_eq!(anns.len(), 1, "annotation row persisted — {anns:?}");
+    assert_eq!(anns[0].annotation_level, "warning");
+    assert_eq!(anns[0].path.as_deref(), Some("src/lib.rs"));
+    assert_eq!(anns[0].start_line, Some(7));
 }
 
 #[tokio::test]

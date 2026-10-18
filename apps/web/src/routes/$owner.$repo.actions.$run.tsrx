@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActionsAnnotations } from "@/components/repo/actions-annotations";
 import { ActionsLogViewer } from "@/components/repo/actions-log-viewer";
 import {
   ActionsForkApprovalBanner,
@@ -448,6 +449,14 @@ function RepoActionsRunPageContent() @{
                 }
                 @if (selectedJob) {
                   <ActionsJobReview owner={owner} name={repoName} job={selectedJob} />;
+                }
+                @if (selectedJob) {
+                  <ActionsAnnotations
+                    owner={owner}
+                    name={repoName}
+                    runId={runId}
+                    jobId={selectedJob.id}
+                  />;
                 }
                 <ActionsLogViewer
                   log={logText}

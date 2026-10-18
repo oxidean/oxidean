@@ -4655,6 +4655,163 @@ pub async fn list_deployment_reviews_for_run(
     }
 }
 
+/// `action_annotations` row (0070) — one `::error|warning|notice::` workflow
+/// command extracted at log ingest. Field names follow GitHub's check-run
+/// annotation shape (`path`/`start_line`/`end_line`/`start_column`/
+/// `end_column`/`title`/`message`/`annotation_level`).
+#[derive(Debug, Clone)]
+pub struct ActionAnnotationRow {
+    pub id: String,
+    pub run_id: String,
+    pub job_id: String,
+    /// `'error'` | `'warning'` | `'notice'`.
+    pub annotation_level: String,
+    pub message: String,
+    pub path: Option<String>,
+    pub start_line: Option<i64>,
+    pub end_line: Option<i64>,
+    pub start_column: Option<i64>,
+    pub end_column: Option<i64>,
+    pub title: Option<String>,
+    pub created_at: String,
+}
+
+pub async fn insert_action_annotation(
+    pool: &DbPool,
+    a: &ActionAnnotationRow,
+) -> Result<(), String> {
+    macro_rules! ins {
+        ($q:expr, $p:expr) => {{
+            sqlx::query($q)
+                .bind(&a.id)
+                .bind(&a.run_id)
+                .bind(&a.job_id)
+                .bind(&a.annotation_level)
+                .bind(&a.message)
+                .bind(&a.path)
+                .bind(a.start_line)
+                .bind(a.end_line)
+                .bind(a.start_column)
+                .bind(a.end_column)
+                .bind(&a.title)
+                .execute($p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }};
+    }
+    match pool {
+        DbPool::Sqlite(p) => ins!(
+            "INSERT INTO action_annotations
+             (id, run_id, job_id, annotation_level, message, path,
+              start_line, end_line, start_column, end_column, title)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            p
+        ),
+        DbPool::Postgres(p) => ins!(
+            "INSERT INTO action_annotations
+             (id, run_id, job_id, annotation_level, message, path,
+              start_line, end_line, start_column, end_column, title)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            p
+        ),
+        DbPool::MySql(p) => ins!(
+            "INSERT INTO action_annotations
+             (id, run_id, job_id, annotation_level, message, path,
+              start_line, end_line, start_column, end_column, title)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            p
+        ),
+    }
+    Ok(())
+}
+
+/// Annotations for one job, oldest first — feeds `getJob`/annotations RPC.
+pub async fn list_action_annotations_for_job(
+    pool: &DbPool,
+    job_id: &str,
+) -> Result<Vec<ActionAnnotationRow>, String> {
+    list_action_annotations_where(pool, "job_id", job_id).await
+}
+
+/// Annotations across a run's jobs — feeds the run summary surface.
+pub async fn list_action_annotations_for_run(
+    pool: &DbPool,
+    run_id: &str,
+) -> Result<Vec<ActionAnnotationRow>, String> {
+    list_action_annotations_where(pool, "run_id", run_id).await
+}
+
+async fn list_action_annotations_where(
+    pool: &DbPool,
+    column: &str,
+    value: &str,
+) -> Result<Vec<ActionAnnotationRow>, String> {
+    macro_rules! map {
+        ($r:expr) => {{
+            let r = $r;
+            ActionAnnotationRow {
+                id: r.get("id"),
+                run_id: r.get("run_id"),
+                job_id: r.get("job_id"),
+                annotation_level: r.get("annotation_level"),
+                message: r.get("message"),
+                path: r.try_get("path").unwrap_or(None),
+                start_line: r.try_get("start_line").unwrap_or(None),
+                end_line: r.try_get("end_line").unwrap_or(None),
+                start_column: r.try_get("start_column").unwrap_or(None),
+                end_column: r.try_get("end_column").unwrap_or(None),
+                title: r.try_get("title").unwrap_or(None),
+                created_at: r.try_get("created_at").unwrap_or_default(),
+            }
+        }};
+    }
+    // The int columns read as i64 — PG/MySQL CAST keeps one Rust type.
+    let cols = "id, run_id, job_id, annotation_level, message, path, \
+                CAST(start_line AS BIGINT) AS start_line, \
+                CAST(end_line AS BIGINT) AS end_line, \
+                CAST(start_column AS BIGINT) AS start_column, \
+                CAST(end_column AS BIGINT) AS end_column, title";
+    match pool {
+        DbPool::Sqlite(p) => {
+            let q = format!(
+                "SELECT {cols}, created_at FROM action_annotations
+                 WHERE {column} = ? ORDER BY created_at, id"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(q.as_str()))
+                .bind(value)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let q = format!(
+                "SELECT {cols}, created_at::text AS created_at FROM action_annotations
+                 WHERE {column} = $1 ORDER BY created_at, id"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(q.as_str()))
+                .bind(value)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let q = format!(
+                "SELECT {cols}, CAST(created_at AS CHAR) AS created_at
+                 FROM action_annotations
+                 WHERE {column} = ? ORDER BY created_at, id"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(q.as_str()))
+                .bind(value)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+    }
+}
+
 /// Reject a held job — terminal `failure`, hold cleared. Only fires when the
 /// row is still `waiting` + held (the CAS keeps a raced approve/reject pair
 /// from both landing).

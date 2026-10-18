@@ -2148,6 +2148,30 @@ export type ActionJobLogResponse = {
   done?: boolean;
 };
 
+/** One `::error|warning|notice::` workflow-command annotation. */
+export type ActionAnnotationPublic = {
+  annotation_level: string;
+  message: string;
+  path?: string;
+  start_line?: number;
+  end_line?: number;
+  start_column?: number;
+  end_column?: number;
+  title?: string;
+  created_at?: string;
+};
+
+export type ActionJobAnnotationsRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+  job_id?: string;
+};
+
+export type ActionJobAnnotationsResponse = {
+  annotations: ActionAnnotationPublic[];
+};
+
 export type ActionWorkflowsListRequest = {
   owner: string;
   name: string;
@@ -4440,6 +4464,12 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRunGetResponse>(opts, "repo.actions.getRun", input),
         getJobLog: (input: ActionJobLogRequest) =>
           rpcCall<ActionJobLogResponse>(opts, "repo.actions.getJobLog", input),
+        jobAnnotations: (input: ActionJobAnnotationsRequest) =>
+          rpcCall<ActionJobAnnotationsResponse>(
+            opts,
+            "repo.actions.jobAnnotations",
+            input,
+          ),
         listWorkflows: (input: ActionWorkflowsListRequest) =>
           rpcCall<ActionWorkflowsListResponse>(opts, "repo.actions.listWorkflows", input),
         dispatchWorkflow: (input: ActionDispatchRequest) =>

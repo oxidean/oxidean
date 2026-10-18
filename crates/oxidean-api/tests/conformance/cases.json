@@ -1819,6 +1819,22 @@
       "log_contains": [
         "upstream-"
       ]
+    },
+    {
+      "id": "annotations",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "##[error]boom",
+        "##[warning]careful",
+        "##[notice]fyi"
+      ],
+      "log_absent": [
+        "##[ann]"
+      ]
     }
   ]
 }

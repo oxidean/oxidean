@@ -562,6 +562,39 @@ jobs:
         .unwrap();
     assert_eq!(log_res.status(), StatusCode::OK);
 
+    // `##[ann]{json}` markers are stripped at ingest and persisted as
+    // structured annotation rows; the visible `##[error]` line survives.
+    let ann_chunk = "##[ann]{\"level\":\"error\",\"message\":\"boom\",\"path\":\"src/main.rs\",\"line\":3,\"col\":1,\"title\":\"Lint\"}\n##[error]boom\n";
+    let ann_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/update_log")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from(
+                    serde_json::json!({
+                        "run_id": run_id,
+                        "job_id": job_id,
+                        "chunk": ann_chunk
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ann_res.status(), StatusCode::OK);
+    let anns = db.list_action_annotations_for_job(job_id).await.unwrap();
+    assert_eq!(anns.len(), 1, "annotation row persisted — {anns:?}");
+    assert_eq!(anns[0].annotation_level, "error");
+    assert_eq!(anns[0].message, "boom");
+    assert_eq!(anns[0].path.as_deref(), Some("src/main.rs"));
+    assert_eq!(anns[0].start_line, Some(3));
+    assert_eq!(anns[0].start_column, Some(1));
+    assert_eq!(anns[0].title.as_deref(), Some("Lint"));
+
     let upd = app
         .oneshot(
             Request::builder()
@@ -605,9 +638,18 @@ jobs:
 
     let log_path = log_dir.join(run_id).join(format!("{job_id}.log"));
     let log_bytes = std::fs::read(&log_path).expect("log file written by update_log");
+    let log_text = String::from_utf8_lossy(&log_bytes);
     assert!(
-        String::from_utf8_lossy(&log_bytes).contains("hello from runner"),
+        log_text.contains("hello from runner"),
         "update_log chunk must persist under ACTIONS_LOG_DIR"
+    );
+    assert!(
+        log_text.contains("##[error]boom"),
+        "visible annotation line persists"
+    );
+    assert!(
+        !log_text.contains("##[ann]"),
+        "annotation side-channel markers are stripped at ingest"
     );
 
     let statuses = db.list_commit_statuses(&repo.id, "cafebabe").await.unwrap();
