@@ -796,6 +796,7 @@ conformance_case!(runs_on_missing, "runs-on-missing");
 conformance_case!(needs_cycle, "needs-cycle");
 conformance_case!(container_job, "container-job");
 conformance_case!(services_job, "services-job");
+conformance_case!(docker_uses_args, "docker-uses-args");
 conformance_case!(environment_job, "environment-job");
 conformance_case!(reusable_workflow_local, "reusable-workflow-local");
 conformance_case!(reusable_workflow_remote, "reusable-workflow-remote");

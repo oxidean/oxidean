@@ -49,12 +49,12 @@ download, annotations, `workflow_job` webhook.
 | 3. Events | 23 | 0 | 13 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
-| 6. Steps | 18 | 0 | 1 | 1 |
+| 6. Steps | 19 | 0 | 0 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
 | 8. Contexts | 24 | 0 | 0 | 0 |
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
-| 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
+| 11. Action metadata — action.yml | 15 | 2 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
 | 13. Artifacts | 12 | 0 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
@@ -241,7 +241,7 @@ and <https://docs.github.com/en/actions/using-workflows/using-a-shell>
 | `step.with-on-run` | `with:` on a `run:` step has no effect | supported | test:crates/oxidean-api/src/actions/parse.rs::captured_features_warn_not_unsupported | Warned at parse, matching the docs' "no effect" note. |
 | `step.continue-on-error` | `continue-on-error:` — step failure does not fail the job | supported | case:continue-on-error-step, case:step-conclusion-coe | `steps.<id>.outcome` keeps `failure`; `conclusion` normalizes to `success`. |
 | `step.timeout-minutes` | `timeout-minutes:` per step — expressions allowed | supported | case:timeout-minutes-step | Clipped by the job deadline. |
-| `step.args-entrypoint` | `with.args`/`with.entrypoint` on docker actions (step-level `args:`/`entrypoint:` keys) | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Unknown step keys warn at parse; docker action args arrive via `with.args`. P13. |
+| `step.args-entrypoint` | `with.args`/`with.entrypoint` on docker actions | supported | case:docker-uses-args, test:crates/oxidean-runner/src/exec/action.rs::split_arg_string_honors_quotes | `with.entrypoint` → `--entrypoint`; `with.args` is a single string split with quote grouping. Bare `args:`/`entrypoint:` step keys still warn — GitHub rejects them outright. |
 
 ## 7. Expressions (`expr.`)
 
@@ -423,7 +423,7 @@ Source: <https://docs.github.com/en/actions/sharing-automations/creating-actions
 | `action.composite` | composite steps — run/shell/uses nesting, inputs context | supported | case:uses-local-composite, case:composite-env | |
 | `action.branding` | `branding:` icon/color | n/a | | Cosmetic metadata; stored nowhere, never blocks execution. |
 | `action.state-save` | `save-state`/`STATE_*` pre-to-post channel | supported | case:uses-node-post | Via `$GITHUB_STATE`. |
-| `action.docker-step-args` | Step-level `args:`/`entrypoint:` for docker actions | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Warned at parse. `with.args`/`with.entrypoint` still reach docker actions. P13. |
+| `action.docker-step-args` | `with.args:`/`with.entrypoint:` overrides for docker actions | supported | case:docker-uses-args | Step `with.*` values replace the action.yml `entrypoint`/`args` (GitHub precedence). Also applies to `docker://` `uses:` steps. |
 
 ## 12. Reusable workflows (`reuse.`)
 

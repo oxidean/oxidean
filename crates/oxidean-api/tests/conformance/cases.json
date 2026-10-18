@@ -431,6 +431,22 @@
       ]
     },
     {
+      "id": "docker-uses-args",
+      "kind": "docker_gated",
+      "files": {
+        "tools/dockact/Dockerfile": "FROM alpine:3\nENTRYPOINT [\"/bin/cat\"]\n",
+        "tools/dockact/action.yml": "name: dockact\nruns:\n  using: docker\n  image: Dockerfile\n  entrypoint: /bin/cat\n  args:\n    - /etc/hostname\n"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "run": "success"
+      },
+      "log_contains": [
+        "docker-entrypoint-args",
+        "action-spec-override"
+      ]
+    },
+    {
       "id": "environment-job",
       "kind": "queued",
       "expect_jobs": {

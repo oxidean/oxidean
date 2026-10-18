@@ -400,8 +400,10 @@ struct RawStep {
     continue_on_error: Option<serde_yaml::Value>,
     #[serde(rename = "timeout-minutes")]
     timeout_minutes: Option<serde_yaml::Value>,
-    /// Unknown step keys (`args`, `entrypoint`, …) — GitHub applies them for
-    /// docker actions; we warn loudly rather than dropping them silently.
+    /// Unknown step keys — GitHub rejects the whole workflow for these
+    /// (bare `args:`/`entrypoint:` are not step keys; docker steps take
+    /// `with.args`/`with.entrypoint`); we warn loudly rather than drop
+    /// them silently.
     #[serde(flatten)]
     extra: serde_yaml::Mapping,
 }

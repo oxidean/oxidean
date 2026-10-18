@@ -131,13 +131,15 @@ pub(crate) async fn run_action(
     let target = resolve_target(senv, &uses, local_base).await?;
     match target {
         ActionTarget::DockerImage(image) => {
-            let args = step
-                .with
-                .as_ref()
+            let with = step.with.as_ref();
+            let args = with
                 .and_then(|w| w.get("args"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            docker_run_image(senv, &image, args, step_env, timeout).await?;
+            let entrypoint = with
+                .and_then(|w| w.get("entrypoint"))
+                .and_then(|v| v.as_str());
+            docker_run_image(senv, &image, args, entrypoint, step_env, timeout).await?;
             Ok(HashMap::new())
         }
         ActionTarget::Local(dir) | ActionTarget::Remote(dir) => {
@@ -1094,6 +1096,7 @@ async fn docker_run_image(
     senv: &StepEnv<'_>,
     image: &str,
     args: &str,
+    entrypoint: Option<&str>,
     step_env: &[(String, String)],
     timeout: Duration,
 ) -> Result<(), String> {
@@ -1112,8 +1115,9 @@ async fn docker_run_image(
     }
     argv.push("-w".into());
     argv.push("/workspace".into());
+    argv.extend(entrypoint_argv(&entrypoint.map(String::from)));
     argv.push(image.to_string());
-    argv.extend(args.split_whitespace().map(String::from));
+    argv.extend(split_arg_string(args));
     let mut cmd = Command::new("docker");
     cmd.args(&argv).current_dir(senv.workspace);
     let code = run_streamed(&mut cmd, step_env, senv.logger, timeout).await?;
@@ -1187,9 +1191,20 @@ async fn run_docker_action(
     argv.push("-w".into());
     argv.push("/github/workspace".into());
     let argv_base = argv.clone();
-    argv.extend(entrypoint_argv(&spec.runs.entrypoint));
+    // `with.entrypoint`/`with.args` on the step override the action.yml
+    // `entrypoint`/`args` (GitHub treats the with-keys as step-level
+    // overrides for docker actions).
+    let with = step.with.as_ref();
+    let entrypoint = with
+        .and_then(|w| w.get("entrypoint"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| spec.runs.entrypoint.clone());
+    argv.extend(entrypoint_argv(&entrypoint));
     argv.push(tag.clone());
-    if let Some(args) = &spec.runs.args {
+    if let Some(a) = with.and_then(|w| w.get("args")).and_then(|v| v.as_str()) {
+        argv.extend(split_arg_string(a));
+    } else if let Some(args) = &spec.runs.args {
         if let Some(arr) = args.as_sequence() {
             for a in arr {
                 argv.push(a.as_str().unwrap_or_default().to_string());
@@ -1232,6 +1247,40 @@ fn entrypoint_argv(ep: &Option<String>) -> Vec<String> {
         Some(e) => vec!["--entrypoint".into(), e.clone()],
         None => Vec::new(),
     }
+}
+
+/// `with.args` is a single string (GitHub: arrays unsupported); whitespace
+/// separates words except inside double or single quotes, which group a
+/// single argument that contains spaces.
+fn split_arg_string(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote = None;
+    // `in_word` marks a quoted (possibly empty) word so `""` survives.
+    let mut in_word = false;
+    for c in s.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (None, '"') | (None, '\'') => {
+                quote = Some(c);
+                in_word = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if in_word {
+                    out.push(std::mem::take(&mut cur));
+                    in_word = false;
+                }
+            }
+            (_, c) => {
+                cur.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        out.push(cur);
+    }
+    out
 }
 
 /// `docker pull` only when the image isn't in the local store.
@@ -1701,5 +1750,31 @@ runs: {using: node20, main: index.js}
             "b",
         );
         assert_eq!(eps.len(), 1);
+    }
+
+    /// `with.args` splits on whitespace but honors quoting so a single
+    /// argument containing spaces survives — `-c "echo hi"` →
+    /// `["-c", "echo hi"]`, matching GitHub's documented quoting rule.
+    #[test]
+    fn split_arg_string_honors_quotes() {
+        use super::split_arg_string;
+
+        assert_eq!(split_arg_string(""), Vec::<String>::new());
+        assert_eq!(split_arg_string("-v ./out:/out"), vec!["-v", "./out:/out"]);
+        assert_eq!(
+            split_arg_string("-c \"echo hello world\""),
+            vec!["-c", "echo hello world"]
+        );
+        assert_eq!(
+            split_arg_string("-c 'echo single quoted'"),
+            vec!["-c", "echo single quoted"]
+        );
+        // A quoted empty argument is still an argument.
+        assert_eq!(split_arg_string("-c \"\""), vec!["-c", ""]);
+        // Trailing whitespace and mixed quoting.
+        assert_eq!(
+            split_arg_string("  one \"two three\" four  "),
+            vec!["one", "two three", "four"]
+        );
     }
 }
