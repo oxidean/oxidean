@@ -302,6 +302,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.jobAnnotations"
         | "repo.actions.listWorkflows"
         | "repo.actions.listArtifacts"
+        | "repo.actions.listAllArtifacts"
+        | "repo.actions.getArtifact"
         | "repo.actions.listCaches"
         | "repo.actions.workflowTemplates.list"
         | "repo.actions.workflowTemplates.get" => ActionsRead,

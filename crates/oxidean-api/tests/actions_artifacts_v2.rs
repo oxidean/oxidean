@@ -97,6 +97,34 @@ fn backend_ids(token: &str) -> (String, String) {
 /// Claim a job on `main` for a fresh repo; returns (runtime token, run_id,
 /// job_id) — the last two decoded out of the token itself, like the client.
 async fn claim(app: &axum::Router, db: &Database, key: &str) -> (String, String, String) {
+    let (tok, run, job, _job_token) = claim_full(app, db, key).await;
+    (tok, run, job)
+}
+
+/// `claim` plus the minted `oxidean_job_…` plaintext — the `GITHUB_TOKEN`
+/// a step would use against the REST facade.
+async fn claim_full(
+    app: &axum::Router,
+    db: &Database,
+    key: &str,
+) -> (String, String, String, String) {
+    claim_full_yaml(
+        app,
+        db,
+        key,
+        b"name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    )
+    .await
+}
+
+/// `claim_full` with a caller-supplied workflow — e.g. to pin `permissions:`
+/// so the minted `GITHUB_TOKEN` carries `actions` scopes.
+async fn claim_full_yaml(
+    app: &axum::Router,
+    db: &Database,
+    key: &str,
+    workflow: &[u8],
+) -> (String, String, String, String) {
     let owner = db
         .create_user(
             &format!("u-{key}"),
@@ -122,10 +150,7 @@ async fn claim(app: &axum::Router, db: &Database, key: &str) -> (String, String,
         )
         .await
         .unwrap();
-    let doc = parse_workflow_yaml(
-        b"name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
-    )
-    .unwrap();
+    let doc = parse_workflow_yaml(workflow).unwrap();
     enqueue_run(
         db,
         &repo.id,
@@ -178,8 +203,13 @@ async fn claim(app: &axum::Router, db: &Database, key: &str) -> (String, String,
     )
     .await;
     let token = v["cache_token"].as_str().unwrap().to_string();
+    let job_token = v["job_token"]
+        .as_str()
+        .expect("fetch_task mints a job token")
+        .to_string();
+    assert!(!job_token.is_empty(), "job token must be minted at claim");
     let (run_id, job_id) = backend_ids(&token);
-    (token, run_id, job_id)
+    (token, run_id, job_id, job_token)
 }
 
 fn ids(run_id: &str, job_id: &str) -> serde_json::Value {
@@ -611,4 +641,190 @@ async fn v4_sweep_reaps_stale_pending_and_expired_artifacts() {
         .await
         .unwrap()
         .is_some());
+}
+
+/// `/api/v1` GitHub-shaped artifact routes — the cross-run path
+/// `download-artifact` + `gh` take through `api_url`, authenticated with the
+/// job token a step would see as `GITHUB_TOKEN`.
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    bearer: Option<&str>,
+) -> axum::response::Response {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(t) = bearer {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    app.clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn v4_rest_artifact_facade_list_get_zip_delete() {
+    let (app, db, dir) = app_db().await;
+    // `permissions: actions: write` — the REST facade's ActionsRead/Write
+    // classes need an `actions` scope the default `read` token omits, the
+    // same `actions: read` requirement GitHub documents for this path.
+    let (token, run_id, job_id, job_token) = claim_full_yaml(
+        &app,
+        &db,
+        "rest",
+        b"name: CI\non: [push]\npermissions:\n  contents: read\n  actions: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    )
+    .await;
+    let artifacts_dir = dir.path().join("actions-artifacts");
+
+    let payload = b"PK\x03\x04 zip bytes";
+    let artifact_id = upload_one(&app, &token, &run_id, &job_id, "dist", payload).await;
+    let base = "/api/v1/repos/rest/rest";
+
+    // The cross-run list — GitHub shape, job-token auth.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/artifacts"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let list = body_json(res).await;
+    assert_eq!(list["total_count"], 1, "{list}");
+    let art = &list["artifacts"][0];
+    assert_eq!(art["name"], "dist");
+    assert_eq!(art["size_in_bytes"], payload.len() as i64);
+    assert_eq!(art["workflow_run"]["id"], run_id);
+    assert_eq!(art["expired"], false);
+    assert!(art["archive_download_url"]
+        .as_str()
+        .unwrap()
+        .ends_with(&format!("/{artifact_id}/zip")));
+
+    // Repo-wide list + `name` filter.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts?name=nope"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 0);
+
+    // Single-artifact metadata.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts/{artifact_id}"),
+        Some(&job_token),
+    )
+    .await;
+    let meta = body_json(res).await;
+    assert_eq!(meta["name"], "dist");
+
+    // The zip Octokit download — already-zip payloads pass through.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts/{artifact_id}/zip"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-type").unwrap(),
+        "application/zip"
+    );
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], payload);
+
+    // Builtin-uploaded tar.gz payloads repack to zip — `unzip` clients
+    // see GitHub's wire format.
+    let mut tgz = Vec::new();
+    {
+        let enc = flate2::write::GzEncoder::new(&mut tgz, flate2::Compression::default());
+        let mut tb = tar::Builder::new(enc);
+        let mut h = tar::Header::new_gnu();
+        h.set_size(3);
+        h.set_mode(0o644);
+        h.set_cksum();
+        tb.append_data(&mut h, "out.txt", &b"hi\n"[..]).unwrap();
+        tb.into_inner().unwrap().finish().unwrap();
+    }
+    let tgz_id = "tgz-rest-1";
+    let storage = format!("{run_id}/{tgz_id}");
+    db.upsert_action_artifact(&oxidean_db::actions::ActionArtifactRow {
+        id: tgz_id.into(),
+        repository_id: "r-rest".into(),
+        run_id: run_id.clone(),
+        job_id: Some(job_id.clone()),
+        name: "logs".into(),
+        storage_path: storage.clone(),
+        size_bytes: tgz.len() as i64,
+        digest_sha256: String::new(),
+        expires_at: None,
+        state: "committed".into(),
+        mime_type: "application/gzip".into(),
+        created_at: String::new(),
+    })
+    .await
+    .unwrap();
+    let dest = artifacts_dir.join(&storage);
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::write(&dest, &tgz).unwrap();
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts/{tgz_id}/zip"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let zipped = res.into_body().collect().await.unwrap().to_bytes();
+    let mut zr = zip::ZipArchive::new(std::io::Cursor::new(zipped)).unwrap();
+    let mut entry = zr.by_name("out.txt").unwrap();
+    let mut contents = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut contents).unwrap();
+    assert_eq!(contents, "hi\n");
+
+    // No credentials on a private repo → 404 (anti-enumeration, GitHub's
+    // convention) — then delete → 204 → gone.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts/{artifact_id}/zip"),
+        None,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // deleteArtifact requires a verified user — mirror the signup path.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at("u-rest", &now).await.unwrap();
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/artifacts/{artifact_id}"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/artifacts/{artifact_id}"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

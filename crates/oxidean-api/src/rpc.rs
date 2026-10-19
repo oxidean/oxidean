@@ -397,6 +397,8 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.approveJob",
     "repo.actions.reviewDeployment",
     "repo.actions.listArtifacts",
+    "repo.actions.listAllArtifacts",
+    "repo.actions.getArtifact",
     "repo.actions.deleteArtifact",
     "repo.actions.listCaches",
     "repo.actions.deleteCache",
@@ -1743,6 +1745,18 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.listArtifacts" => {
             match crate::actions::rpc::list_artifacts(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listAllArtifacts" => {
+            match crate::actions::rpc::list_all_artifacts(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.getArtifact" => {
+            match crate::actions::rpc::get_artifact(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

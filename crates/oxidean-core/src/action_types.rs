@@ -1047,6 +1047,27 @@ pub struct ActionArtifactsListResponse {
     pub artifacts: Vec<ActionArtifactPublic>,
 }
 
+/// `repo.actions.listAllArtifacts` — Read+; every committed artifact in the
+/// repository (the GitHub-compatible REST list is repo-wide).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoArtifactsListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `repo.actions.getArtifact` — Read+; one artifact's metadata by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactGetResponse {
+    pub artifact: ActionArtifactPublic,
+}
+
 /// `repo.actions.deleteArtifact` — Write+; removes the record and payload.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionArtifactDeleteRequest {

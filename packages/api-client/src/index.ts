@@ -2466,6 +2466,21 @@ export type ActionArtifactsListResponse = {
   artifacts: ActionArtifactPublic[];
 };
 
+export type ActionRepoArtifactsListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionArtifactGetRequest = {
+  owner: string;
+  name: string;
+  artifact_id: string;
+};
+
+export type ActionArtifactGetResponse = {
+  artifact: ActionArtifactPublic;
+};
+
 export type ActionArtifactDeleteRequest = {
   owner: string;
   name: string;
@@ -6024,6 +6039,14 @@ export function createClient(opts: CreateClientOptions) {
             "repo.actions.listArtifacts",
             input,
           ),
+        listAllArtifacts: (input: ActionRepoArtifactsListRequest) =>
+          rpcCall<ActionArtifactsListResponse>(
+            opts,
+            "repo.actions.listAllArtifacts",
+            input,
+          ),
+        getArtifact: (input: ActionArtifactGetRequest) =>
+          rpcCall<ActionArtifactGetResponse>(opts, "repo.actions.getArtifact", input),
         deleteArtifact: (input: ActionArtifactDeleteRequest) =>
           rpcCall<ActionArtifactDeleteResponse>(
             opts,

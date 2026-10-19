@@ -15,6 +15,7 @@
 //! Auth: the `oxidean_session` cookie wins; `Authorization: Bearer <pat>`
 //! applies when no cookie is present — same as `/api/rpc` (API-02).
 
+mod actions;
 mod admin;
 mod issues;
 pub mod openapi;

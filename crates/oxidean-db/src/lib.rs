@@ -5317,6 +5317,15 @@ impl Database {
         actions::commit_action_artifact(self.require_pool()?, id, size_bytes, digest_sha256).await
     }
 
+    /// Repo-wide committed artifact listing (GitHub REST facade), newest
+    /// first.
+    pub async fn list_action_artifacts_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_action_artifacts_for_repo(self.require_pool()?, repo_id).await
+    }
+
     /// 'pending' rows older than `cutoff` — abandoned Twirp reservations.
     pub async fn list_stale_pending_artifacts(
         &self,

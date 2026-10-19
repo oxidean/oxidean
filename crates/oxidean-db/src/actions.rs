@@ -3997,6 +3997,40 @@ pub async fn list_stale_pending_artifacts(
     }
 }
 
+/// Repo-wide committed artifact listing — the `/api/v1` artifacts facade
+/// (GitHub `GET /repos/{o}/{r}/actions/artifacts`), newest first.
+pub async fn list_action_artifacts_for_repo(
+    pool: &DbPool,
+    repo_id: &str,
+) -> Result<Vec<ActionArtifactRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE repository_id = ? AND state = 'committed' ORDER BY created_at DESC, id DESC"
+        )))
+        .bind(repo_id)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE repository_id = $1 AND state = 'committed' ORDER BY created_at DESC, id DESC"
+        )))
+        .bind(repo_id)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE repository_id = ? AND state = 'committed' ORDER BY created_at DESC, id DESC"
+        )))
+        .bind(repo_id)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+    }
+}
+
 /// Reap committed artifacts past `expires_at` — GitHub deletes artifacts
 /// hard at retention expiry. `expires_at` is bound as RFC3339 text on
 /// insert, so `now` compares cleanly on every dialect. Returns the

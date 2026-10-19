@@ -1317,6 +1317,299 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/artifacts:
+    get:
+      tags:
+      - actions
+      summary: List repo artifacts, GitHub shape (repo.actions.listAllArtifacts)
+      operationId: actions/listArtifacts
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          description: Page size — GitHub default 30, max 100.
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      - name: page
+        in: query
+        required: false
+        schema:
+          description: 1-based page number.
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  artifacts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {}
+                        name:
+                          type: string
+                        size_in_bytes:
+                          type: integer
+                        url:
+                          type: string
+                        archive_download_url:
+                          type: string
+                        expired:
+                          type: boolean
+                        created_at:
+                          type: string
+                        expires_at:
+                          type:
+                          - string
+                          - 'null'
+                        digest:
+                          type:
+                          - string
+                          - 'null'
+                        workflow_run:
+                          type: object
+                required:
+                - total_count
+                - artifacts
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts:
+    get:
+      tags:
+      - actions
+      summary: List a run's artifacts, GitHub shape (repo.actions.listArtifacts)
+      operationId: actions/listWorkflowRunArtifacts
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          description: Page size — GitHub default 30, max 100.
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      - name: page
+        in: query
+        required: false
+        schema:
+          description: 1-based page number.
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  artifacts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {}
+                        name:
+                          type: string
+                        size_in_bytes:
+                          type: integer
+                        url:
+                          type: string
+                        archive_download_url:
+                          type: string
+                        expired:
+                          type: boolean
+                        created_at:
+                          type: string
+                        expires_at:
+                          type:
+                          - string
+                          - 'null'
+                        digest:
+                          type:
+                          - string
+                          - 'null'
+                        workflow_run:
+                          type: object
+                required:
+                - total_count
+                - artifacts
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/artifacts/{artifact_id}:
+    get:
+      tags:
+      - actions
+      summary: One artifact's metadata, GitHub shape (repo.actions.getArtifact)
+      operationId: actions/getArtifact
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {}
+                  name:
+                    type: string
+                  size_in_bytes:
+                    type: integer
+                  url:
+                    type: string
+                  archive_download_url:
+                    type: string
+                  expired:
+                    type: boolean
+                  created_at:
+                    type: string
+                  expires_at:
+                    type:
+                    - string
+                    - 'null'
+                  digest:
+                    type:
+                    - string
+                    - 'null'
+                  workflow_run:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an artifact (repo.actions.deleteArtifact)
+      operationId: actions/deleteArtifact
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip:
+    get:
+      tags:
+      - actions
+      summary: Stream the artifact archive as zip (repo.actions.getArtifact)
+      operationId: actions/downloadArtifact
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/statuses/{sha}:
     get:
       tags:
