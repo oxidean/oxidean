@@ -74,7 +74,7 @@ describe("ActionsRerunMenu browser DOM races", () => {
           new MouseEvent("click", { bubbles: true }),
         );
       });
-      expect(onRerun).toHaveBeenCalledWith({});
+      expect(onRerun).toHaveBeenCalledWith({ debug: false });
 
       await openMenu();
       await act(async () => {
@@ -82,15 +82,22 @@ describe("ActionsRerunMenu browser DOM races", () => {
           new MouseEvent("click", { bubbles: true }),
         );
       });
-      expect(onRerun).toHaveBeenCalledWith({ failed_only: true });
+      expect(onRerun).toHaveBeenCalledWith({ failed_only: true, debug: false });
 
+      // GitHub parity: "Enable debug logging" carries through the rerun call.
+      await openMenu();
+      await act(async () => {
+        (await waitForTestId("actions-rerun-debug")).dispatchEvent(
+          new MouseEvent("click", { bubbles: true }),
+        );
+      });
       await openMenu();
       await act(async () => {
         (await waitForTestId("actions-rerun-job-build")).dispatchEvent(
           new MouseEvent("click", { bubbles: true }),
         );
       });
-      expect(onRerun).toHaveBeenCalledWith({ job_id: "job-1" });
+      expect(onRerun).toHaveBeenCalledWith({ job_id: "job-1", debug: true });
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

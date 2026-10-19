@@ -43,7 +43,7 @@ async fn test_app() -> T {
     let repos = dir.path().join("repos");
     let pages = dir.path().join("pages");
     let url = format!("sqlite:{}", dir.path().join("mq.db").display());
-    let db = Database::connect(&url).await.unwrap();
+    let db = support::connect_test_db(&url).await.unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let state = AppState::new(

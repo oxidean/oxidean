@@ -5,7 +5,9 @@
 -- a repo+base_ref. `state` is `queued` → `merged` | `dequeued` (removed —
 -- manual dequeue, failing checks, head moved, PR closed). A pull holds at
 -- most one `queued` row — MySQL has no partial indexes, so `queued_pull`
--- materializes pull_id only while queued (NULLs never collide).
+-- materializes pull_id only while queued (NULLs never collide). MySQL also
+-- rejects generated columns whose expression references an FK column (1215),
+-- so `queued_pull`/`checking_key` are maintained by the writer, not GENERATED.
 --
 -- `merge_groups` is the tested batch: the front group spans base_tip + every
 -- `queued` entry in position order, materialized on
@@ -32,8 +34,7 @@ CREATE TABLE IF NOT EXISTS merge_groups (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_merge_groups_state CHECK (state IN ('checking', 'merged', 'destroyed')),
-  checking_key VARCHAR(320) GENERATED ALWAYS AS
-    (IF(state = 'checking', CONCAT(repo_id, '/', base_ref), NULL)) STORED,
+  checking_key VARCHAR(320) NULL,
   CONSTRAINT fk_merge_groups_repo FOREIGN KEY (repo_id) REFERENCES repositories(id) ON DELETE CASCADE,
   UNIQUE KEY uk_merge_groups_checking (checking_key),
   KEY merge_groups_repo_state_idx (repo_id, base_ref, state)
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS merge_queue_entries (
   enqueued_by  CHAR(36) NOT NULL DEFAULT '',
   chain_sha    CHAR(40) NOT NULL DEFAULT '',
   dequeue_reason VARCHAR(255) NOT NULL DEFAULT '',
-  queued_pull  CHAR(36) GENERATED ALWAYS AS (IF(state = 'queued', pull_id, NULL)) STORED,
+  queued_pull  CHAR(36) NULL,
   created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_merge_queue_entries_state CHECK (state IN ('queued', 'merged', 'dequeued')),

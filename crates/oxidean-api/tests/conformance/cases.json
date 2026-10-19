@@ -1303,7 +1303,7 @@
     "build": "success"
    },
    "log_contains": [
-    "on.discussion: unsupported event",
+    "on.security_advisory: unsupported event",
     "ran-on-push"
    ]
   },

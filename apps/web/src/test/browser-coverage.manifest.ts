@@ -68,6 +68,9 @@ const FORGE_MIRROR = "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test
 const NEW_REPO = "apps/web/e2e/stack-browser/new-repo-template.stack.browser.test.tsx";
 const FORGE_ISSUES = "apps/web/e2e/stack-browser/forge-issues-releases.stack.browser.test.tsx";
 const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.test.tsx";
+const FORGE_ACTIONS_PIPELINE =
+  "apps/web/e2e/stack-browser/forge-actions-pipeline.stack.browser.test.tsx";
+const PAGES_SETTINGS_BROWSER = "apps/web/src/components/repo/pages-settings-panel.browser.test.tsx";
 const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test.tsx";
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
 const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
@@ -310,6 +313,36 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "browser",
         test: ACTIONS_FILTERS_BROWSER,
         subject: "actions-filters",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pages-settings-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: PAGES_SETTINGS_BROWSER,
+        subject: "pages-settings-panel",
+      },
+    ],
+  },
+  {
+    surface: "routes/$owner.$repo.actions.index.tsrx",
+    coverage: [
+      {
+        kind: "stack-browser",
+        test: FORGE_ACTIONS_PIPELINE,
+        subject: "actions-workflow-menu",
+      },
+    ],
+  },
+  {
+    surface: "routes/$owner.$repo.actions.$run.tsrx",
+    coverage: [
+      {
+        kind: "stack-browser",
+        test: FORGE_ACTIONS_PIPELINE,
+        subject: "actions-run-more",
       },
     ],
   },

@@ -213,11 +213,13 @@ pub async fn insert_merge_queue_entry(
         }
         DbPool::MySql(p) => {
             // MySQL bars the target table in the INSERT…SELECT source — the
-            // derived table materializes it first.
+            // derived table materializes it first. `queued_pull` is a
+            // maintained (not generated) column: generated expressions cannot
+            // reference FK columns on MySQL (error 1215).
             sqlx::query(
                 "INSERT INTO merge_queue_entries
-                   (id, repo_id, pull_id, pull_number, base_ref, position, state, enqueued_by)
-                 SELECT ?, ?, ?, ?, ?, COALESCE(m.pos, 0) + 1, 'queued', ?
+                   (id, repo_id, pull_id, pull_number, base_ref, position, state, enqueued_by, queued_pull)
+                 SELECT ?, ?, ?, ?, ?, COALESCE(m.pos, 0) + 1, 'queued', ?, ?
                  FROM (SELECT MAX(position) AS pos FROM merge_queue_entries
                        WHERE repo_id = ? AND base_ref = ?) m",
             )
@@ -227,6 +229,7 @@ pub async fn insert_merge_queue_entry(
             .bind(pull_number)
             .bind(base_ref)
             .bind(enqueued_by)
+            .bind(pull_id)
             .bind(repo_id)
             .bind(base_ref)
             .execute(p)
@@ -499,6 +502,8 @@ pub async fn list_merge_queue_entries(
             Ok(out)
         }
         DbPool::MySql(p) => {
+            // `?` placeholders are positional — unlike `?2`/`$2` each use
+            // needs its own bind.
             let sql = format!(
                 "{ENTRY_SELECT_MYSQL} WHERE e.repo_id = ? AND (? = '' OR e.base_ref = ?) \
                    AND (? = '' OR e.state = ?) ORDER BY e.position ASC"
@@ -507,6 +512,8 @@ pub async fn list_merge_queue_entries(
             for row in sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(base_ref)
+                .bind(base_ref)
+                .bind(state)
                 .bind(state)
                 .fetch_all(p)
                 .await
@@ -610,13 +617,17 @@ pub async fn set_merge_queue_entry_state(
                 .map_err(|e| format!("set mq entry state failed: {e}"))?;
         }
         DbPool::MySql(p) => {
+            // `queued_pull` is maintained (not generated — see insert): keep
+            // the live-entry uniqueness guard in sync with state transitions.
             let sql = format!(
                 "UPDATE merge_queue_entries SET state = ?, dequeue_reason = ?, \
+                   queued_pull = IF(? = 'queued', pull_id, NULL), \
                    updated_at = {now} WHERE id = ?"
             );
             sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(state)
                 .bind(dequeue_reason)
+                .bind(state)
                 .bind(id)
                 .execute(p)
                 .await
@@ -730,10 +741,13 @@ pub async fn insert_merge_group(
             .map_err(|e| format!("insert merge_group failed: {e}"))?;
         }
         DbPool::MySql(p) => {
+            // `checking_key` is maintained (not generated — MySQL 1215 bars
+            // generated expressions over FK columns): seed it with the
+            // repo/base pair so the live-checking unique guard holds.
             sqlx::query(
                 "INSERT INTO merge_groups \
-                   (id, repo_id, base_ref, base_sha, head_ref, head_sha, state) \
-                 VALUES (?, ?, ?, ?, ?, ?, 'checking')",
+                   (id, repo_id, base_ref, base_sha, head_ref, head_sha, state, checking_key) \
+                 VALUES (?, ?, ?, ?, ?, ?, 'checking', CONCAT(?, '/', ?))",
             )
             .bind(id)
             .bind(repo_id)
@@ -741,6 +755,8 @@ pub async fn insert_merge_group(
             .bind(base_sha)
             .bind(head_ref)
             .bind(head_sha)
+            .bind(repo_id)
+            .bind(base_ref)
             .execute(p)
             .await
             .map_err(|e| format!("insert merge_group failed: {e}"))?;
@@ -788,8 +804,15 @@ pub async fn set_merge_group_state(
                 .map_err(|e| format!("set merge_group state failed: {e}"))?;
         }
         DbPool::MySql(p) => {
-            let sql = format!("UPDATE merge_groups SET state = ?, updated_at = {now} WHERE id = ?");
+            // Clear the maintained `checking_key` on terminal transitions —
+            // the unique key only guards live `checking` groups.
+            let sql = format!(
+                "UPDATE merge_groups SET state = ?, \
+                   checking_key = IF(? = 'checking', checking_key, NULL), \
+                   updated_at = {now} WHERE id = ?"
+            );
             sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(state)
                 .bind(state)
                 .bind(id)
                 .execute(p)
@@ -1002,6 +1025,7 @@ pub async fn list_merge_groups(
             let mut out = Vec::new();
             for row in sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
+                .bind(base_ref)
                 .bind(base_ref)
                 .bind(limit)
                 .fetch_all(p)

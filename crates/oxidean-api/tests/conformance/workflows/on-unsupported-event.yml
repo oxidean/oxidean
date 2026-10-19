@@ -1,5 +1,5 @@
 name: on-unsupported-event
-on: [push, discussion]
+on: [push, security_advisory]
 jobs:
   build:
     runs-on: ubuntu-latest

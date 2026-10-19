@@ -2343,6 +2343,17 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
       throw new Error(`run list missing run number '#1': ${listText.slice(0, 400)}`);
     }
 
+    // Per-workflow dropdown (browser-coverage subject `actions-workflow-menu`):
+    // the trigger is `hidden` until row hover (`group-hover:inline-flex`), so
+    // hover the carrying `.group` row first — then open, assert, Escape-close.
+    const wfMenu = page.locator('[data-testid^="actions-workflow-menu-"]').first();
+    await wfMenu.waitFor({ state: "attached", timeout: 30_000 });
+    await page.locator('.group:has([data-testid^="actions-workflow-menu-"])').first().hover();
+    await wfMenu.click({ force: true });
+    const disableItem = page.locator('[data-testid^="actions-toggle-"]').first();
+    await disableItem.waitFor({ state: "visible", timeout: 15_000 });
+    await page.keyboard.press("Escape");
+
     await page.goto(`${webOrigin()}/${seed.owner}/${seed.repo}/actions/${run.id}`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
@@ -2375,6 +2386,15 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     if (!stepsText.includes("marker")) {
       throw new Error(`steps rail missing 'marker' step: ${stepsText.slice(0, 300)}`);
     }
+
+    // Run "more" dropdown (browser-coverage subject `actions-run-more`): open
+    // the portal, assert the log-archive item, Escape-close.
+    const moreMenu = page.getByTestId("actions-run-more");
+    await moreMenu.waitFor({ state: "visible", timeout: 30_000 });
+    await moreMenu.click();
+    await page.getByTestId("actions-download-logs").waitFor({ state: "visible", timeout: 15_000 });
+    await page.keyboard.press("Escape");
+
     assertNoOctaneOverlay(await page.content(), "actions run detail");
     return true;
   } finally {

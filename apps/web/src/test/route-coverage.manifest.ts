@@ -601,6 +601,35 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
 
+  // --- wiki / projects / discussions ---
+  {
+    route: "$owner.$repo.wiki.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.wiki.$.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.projects.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.projects.$.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.discussions.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.discussions.$.integration.test.ts",
+      },
+    ],
+  },
+
   // --- issues ---
   {
     route: "$owner.$repo.issues.index.tsrx",

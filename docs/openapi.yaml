@@ -1692,6 +1692,17 @@ paths:
           - string
           - 'null'
           default: null
+      - name: milestone
+        in: query
+        required: false
+        schema:
+          description: |-
+            Milestone filter — a milestone `#N`, `*` (any milestone), or `none`
+            (issues without one); GitHub REST semantics.
+          type:
+          - string
+          - 'null'
+          default: null
       - name: q
         in: query
         required: false
@@ -1758,6 +1769,13 @@ paths:
               description: Create-issue input (RPC wired in 11-03).
               type: object
               properties:
+                milestone:
+                  description: Milestone `#N` — assigns at create (fires `milestoned`).
+                  type:
+                  - integer
+                  - 'null'
+                  format: int64
+                  default: null
                 body:
                   type:
                   - string
@@ -3217,6 +3235,24 @@ components:
             Pull-requests unit enabled — gates `pull.*` RPCs + the Pulls tab (COL-13).
             Populated by `repo.get`; list endpoints may report the default `true`.
           default: true
+        wiki_enabled:
+          type: boolean
+          description: |-
+            Wiki unit enabled — gates `wiki.*` RPCs, `{name}.wiki.git` transport
+            access, and the Wiki tab (COL-13). Populated by `repo.get`.
+          default: true
+        projects_enabled:
+          type: boolean
+          description: |-
+            Projects unit enabled — gates `projects.*` RPCs and the Projects tab
+            (COL-13). Populated by `repo.get`.
+          default: true
+        discussions_enabled:
+          type: boolean
+          description: |-
+            Discussions unit enabled — gates `discussions.*` RPCs and the
+            Discussions tab. Populated by `repo.get`.
+          default: true
         fork_network_id:
           type:
           - string
@@ -3900,6 +3936,11 @@ components:
             $ref: '#/components/schemas/ReactionGroupPublic'
           description: Aggregated reaction counts (D-ISS-11).
           default: []
+        milestone:
+          anyOf:
+          - $ref: '#/components/schemas/MilestonePublic'
+          - type: 'null'
+          description: Milestone this issue belongs to (GitHub embeds the object).
         comment_count:
           type: integer
           format: int64
@@ -3951,6 +3992,64 @@ components:
       - count
       - viewerHasReacted
       description: Aggregated count for one reaction content value.
+    MilestonePublic:
+      type: object
+      properties:
+        id:
+          type: string
+        repo_id:
+          type: string
+        number:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+        due_on:
+          type:
+          - string
+          - 'null'
+          description: '`YYYY-MM-DD` when set.'
+        creator_id:
+          type:
+          - string
+          - 'null'
+        creator_username:
+          type:
+          - string
+          - 'null'
+          default: null
+        closed_at:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        open_issues:
+          type: integer
+          format: int64
+          default: 0
+        closed_issues:
+          type: integer
+          format: int64
+          default: 0
+      required:
+      - id
+      - repo_id
+      - number
+      - title
+      - description
+      - state
+      - created_at
+      - updated_at
+      description: |-
+        Public milestone shape (list/detail/issue embed). Counts follow GitHub's
+        milestone list: `open_issues` + `closed_issues`.
     IssueCommentsListResponse:
       type: object
       properties:

@@ -3,4 +3,7 @@
 -- expression context reads this; index is expansion-order (matrix leg
 -- ordinal), which cannot be re-derived at claim.
 
-ALTER TABLE action_jobs ADD COLUMN strategy_json TEXT NOT NULL DEFAULT '{}';
+-- MySQL forbids literal defaults on TEXT columns (expression defaults only);
+-- every writer binds strategy_json explicitly, so backfill instead.
+ALTER TABLE action_jobs ADD COLUMN strategy_json TEXT NOT NULL;
+UPDATE action_jobs SET strategy_json = '{}' WHERE strategy_json = '';

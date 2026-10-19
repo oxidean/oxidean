@@ -9,9 +9,15 @@ import { renderWithQueryClient } from "@/test/render-with-query";
  */
 
 const commitStatusListMock = vi.fn();
+const checkRunsListMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    check: {
+      runs: {
+        listForRef: (...args: unknown[]) => checkRunsListMock(...args),
+      },
+    },
     repo: {
       commitStatus: {
         list: (...args: unknown[]) => commitStatusListMock(...args),
@@ -64,6 +70,8 @@ const sampleStatuses = [
 beforeEach(() => {
   commitStatusListMock.mockReset();
   commitStatusListMock.mockResolvedValue({ ok: true, data: { statuses: sampleStatuses } });
+  checkRunsListMock.mockReset();
+  checkRunsListMock.mockResolvedValue({ ok: true, data: { check_runs: [] } });
 });
 
 afterEach(cleanup);
