@@ -3153,6 +3153,19 @@ const MCP_PROCS: &[&str] = &[
     "repo.listMine",
     "repo.search",
     "repo.tree",
+    "vcs.status",
+    "vcs.log",
+    "vcs.diff",
+    "vcs.tree",
+    "vcs.file_get",
+    "vcs.blame",
+    "vcs.path_history",
+    "vcs.merge_base",
+    "vcs.ref_list",
+    "vcs.changeset_get",
+    "vcs.changeset_create",
+    "vcs.merge",
+    "vcs.rebase",
 ];
 
 /// Classic-scope names that would unlock uncovered procedures — the

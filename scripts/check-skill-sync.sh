@@ -12,16 +12,18 @@
 # 3. Proc registries — every proc-shaped literal in commands.rs's
 #    required_procedures + CLI_PROCS/MCP_PROCS audit lists must be a proc
 #    rpc.rs actually dispatches, and the MCP audit list must equal the
-#    procs mcp.rs really routes (tool `procedure:` fields, build_rpc_input
-#    picks, resource dispatch — all captured as proc-shaped string
-#    literals intersected with the rpc.rs registry, so error codes like
-#    `mcp.internal` exclude themselves).
+#    procs the MCP surface really routes (tool `procedure:` fields,
+#    build_rpc_input picks, resource dispatch — all captured as proc-shaped
+#    string literals intersected with the rpc.rs registry, so error codes
+#    like `mcp.internal` exclude themselves). The `vcs.*` tool descriptors
+#    live in oxidean-vcs's client/mcp.rs, so it is scanned alongside
+#    oxidean-api's mcp.rs.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 SKILL=crates/oxidean-cli/skill/SKILL.md
-MCP_SRC=crates/oxidean-api/src/mcp.rs
+MCP_SRCS=(crates/oxidean-api/src/mcp.rs crates/oxidean-vcs/src/client/mcp.rs)
 CMDS_SRC=crates/oxidean-cli/src/commands.rs
 RPC_SRC=crates/oxidean-api/src/rpc.rs
 OX=${OX_BIN:-target/debug/ox}
@@ -46,7 +48,7 @@ grep -oE '^\s+"[a-zA-Z_.]+" =>' "$RPC_SRC" | tr -d ' "=>' | sort -u >"$REGISTERE
 # Proc-shaped literals inside mcp.rs; membership in the registry filters
 # out error-code strings (`mcp.internal`, `repo.not_found`, …).
 MCP_RAW="$(mktemp)"; trap 'rm -f "$TREE" "$GLOBAL_HELP" "$REGISTERED" "$MCP_ACTUAL" "$MCP_DECLARED" "$CLI_DECLARED" "$REQPROCS" "$SUSPECT" "$MCP_RAW"' EXIT
-grep -oE '"[a-z][a-z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+"' "$MCP_SRC" |
+grep -hoE '"[a-z][a-z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+"' "${MCP_SRCS[@]}" |
   tr -d '"' | sort -u >"$MCP_RAW"
 comm -12 "$MCP_RAW" "$REGISTERED" >"$MCP_ACTUAL"
 # Anything left over that isn't an error-code suffix is a suspicious
