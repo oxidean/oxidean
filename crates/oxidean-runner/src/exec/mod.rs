@@ -1188,7 +1188,7 @@ mod tests {
         assert_eq!(map["OXIDEAN_REPOSITORY"], "acme/demo");
         assert_eq!(map["OXIDEAN_REF_NAME"], "main");
         assert_eq!(map["OXIDEAN_REF_TYPE"], "branch");
-        assert_eq!(map["OXIDEAN_API_URL"], "https://oxidean.example/api");
+        assert_eq!(map["OXIDEAN_API_URL"], "https://oxidean.example/api/v1");
         assert_eq!(map["OXIDEAN_TOKEN"], "oxidean_job_deadbeef");
         assert_eq!(map["OXIDEAN_ENV_FILE"], "/tmp/rt/env");
         assert_eq!(map["GITHUB_ENV"], "/tmp/rt/env");

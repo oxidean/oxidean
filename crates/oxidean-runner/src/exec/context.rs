@@ -55,10 +55,10 @@ pub(crate) fn runner_context(
         "run_number": task.run_number.unwrap_or_default(),
         "run_attempt": task.run_attempt.unwrap_or_default(),
         "server_url": server_url,
-        "api_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api") },
+        "api_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api/v1") },
         // No GraphQL endpoint exists — the shape is present for expressions
         // that interpolate it, pointing where one would live.
-        "graphql_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api/graphql") },
+        "graphql_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api/v1/graphql") },
         "ref_protected": task.ref_protected.unwrap_or(false),
         "retention_days": task.retention_days.unwrap_or_default(),
         // Restamped-on-rerun divergence lives with GITHUB_TRIGGERING_ACTOR:
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(gh["workflow"], "CI");
         assert_eq!(gh["job"], "build");
         assert_eq!(gh["server_url"], "https://oxidean.example");
-        assert_eq!(gh["api_url"], "https://oxidean.example/api");
+        assert_eq!(gh["api_url"], "https://oxidean.example/api/v1");
         assert_eq!(gh["run_number"], 4);
         let runner = ctx.get_context("runner").unwrap();
         assert_eq!(runner["name"], "runner-1");

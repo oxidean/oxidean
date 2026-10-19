@@ -359,12 +359,12 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.github-actions` | `GITHUB_ACTIONS=true` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-actor` | `GITHUB_ACTOR` — triggering user | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-actor-id` | `GITHUB_ACTOR_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
-| `env.github-api-url` | `GITHUB_API_URL` — REST root | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | `{server_url}/api`. |
+| `env.github-api-url` | `GITHUB_API_URL` — REST root | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | `{server_url}/api/v1` — the GitHub-shaped REST root the `/api/v1` router mounts; `download-artifact`'s cross-run path, `gh`, and Octokit clients resolve `{api_url}/repos/…` against it. |
 | `env.github-base-ref` | `GITHUB_BASE_REF` — PR base, else empty | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_pull_request_head_ref | |
 | `env.github-env` | `GITHUB_ENV` — env file path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | Oxidean-side name is `OXIDEAN_ENV_FILE` (see section 9). |
 | `env.github-event-name` | `GITHUB_EVENT_NAME` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-event-path` | `GITHUB_EVENT_PATH` — event.json path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values, test:crates/oxidean-runner/src/exec/mod.rs::event_json_pull_request | |
-| `env.github-graphql-url` | `GITHUB_GRAPHQL_URL` | supported | case:ctx-github-extra | Emitted as `{server_url}/api/graphql` (paired `OXIDEAN_GRAPHQL_URL`) — no GraphQL endpoint exists, so the variable is a stable shape value for interpolation. |
+| `env.github-graphql-url` | `GITHUB_GRAPHQL_URL` | supported | case:ctx-github-extra | Emitted as `{server_url}/api/v1/graphql` (paired `OXIDEAN_GRAPHQL_URL`) — no GraphQL endpoint exists, so the variable is a stable shape value for interpolation. |
 | `env.github-head-ref` | `GITHUB_HEAD_REF` — PR source branch, else empty | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_pull_request_head_ref | |
 | `env.github-job` | `GITHUB_JOB` — job id | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-output` | `GITHUB_OUTPUT` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |

@@ -1794,7 +1794,7 @@
    },
    "log_contains": [
     "a=__run prot=false days=90 renv=self-hosted trig=cf-ctx-github-extra-",
-    "gql=http://localhost:8080/api/graphql",
+    "gql=http://localhost:8080/api/v1/graphql",
     "if-saw-own-name",
     "inside action=__github_actions_probe repo=./.github/actions/probe ref=",
     "d=__run_3 repo=cleared"

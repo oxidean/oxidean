@@ -140,7 +140,7 @@ pub(crate) fn job_env(
                 if server_url.is_empty() {
                     String::new()
                 } else {
-                    format!("{server_url}/api")
+                    format!("{server_url}/api/v1")
                 }
             }
             // No GraphQL endpoint exists — the variable carries where one
@@ -149,7 +149,7 @@ pub(crate) fn job_env(
                 if server_url.is_empty() {
                     String::new()
                 } else {
-                    format!("{server_url}/api/graphql")
+                    format!("{server_url}/api/v1/graphql")
                 }
             }
             "SERVER_URL" => server_url.clone(),
