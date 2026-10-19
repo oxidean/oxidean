@@ -1,0 +1,182 @@
+{
+  "stage": "code-generation",
+  "unit": "u6-vcs-git-interop",
+  "upstream_ids": [
+    "AC7.1.1",
+    "AC7.1.2",
+    "AC7.1.3",
+    "AC7.2.1",
+    "AC7.2.2",
+    "AC7.2.3",
+    "AC7.2.4",
+    "AC7.4.1",
+    "AC7.4.2",
+    "FR9.1",
+    "FR9.2",
+    "FR9.3",
+    "FR9.4",
+    "FR2.2",
+    "FR7.4",
+    "C3",
+    "NFR8",
+    "NFR10",
+    "US7.1",
+    "US7.2",
+    "US7.4",
+    "contract:vcs.git_import",
+    "contract:vcs.git_export",
+    "contract:git_interop",
+    "BR6.1-BR6.28",
+    "SR6.1-SR6.11",
+    "TD6.1-TD6.8",
+    "SD6.1-SD6.8",
+    "LC6.1-LC6.7"
+  ],
+  "coverage": [
+    {
+      "id": "AC7.1.1",
+      "status": "planned",
+      "target": "import_chain/import_one: one changeset per commit, parents-first links, name-status lists, sha256 blobs, git_oid<->cs queryable"
+    },
+    {
+      "id": "AC7.1.2",
+      "status": "planned",
+      "target": "lazy_import = same import_one code path; -r --name-status -M -z flags identical on both paths"
+    },
+    {
+      "id": "AC7.1.3",
+      "status": "planned",
+      "target": "authorship/timestamps/messages preserved via ident sidecars + committed_at; merge parents stored in order"
+    },
+    {
+      "id": "AC7.2.1",
+      "status": "planned",
+      "target": "export: write_object/write_commit plumbing + ONE ref move; never N pushes; per-node index.tree DAG trees"
+    },
+    {
+      "id": "AC7.2.2",
+      "status": "planned",
+      "target": "write->check->move ordering; ProtectionBlockReasons verbatim + push_hook encoding; two-phase ff gate; unlinked-never-clobbered under force; actor_capability threaded"
+    },
+    {
+      "id": "AC7.2.3",
+      "status": "planned",
+      "target": "export_one idents: sidecar raw bytes or author->both + committed_at UTC fallback; never rewritten to now"
+    },
+    {
+      "id": "AC7.2.4",
+      "status": "planned",
+      "target": "minted objects real git objects — fetch/log/show read normally; C3 invariant holds"
+    },
+    {
+      "id": "AC7.4.1",
+      "status": "planned",
+      "target": "byte-identical idents via RAW-byte b64 sidecars — survives sanitization"
+    },
+    {
+      "id": "AC7.4.2",
+      "status": "planned",
+      "target": "non-platform authors hash through canonical Name <email> compose; shared import_one converges ids"
+    },
+    {
+      "id": "FR9.1",
+      "status": "planned",
+      "target": "import path: one changeset per commit, mapped parents, name-status, VCS-hashed blobs, link pair"
+    },
+    {
+      "id": "FR9.2",
+      "status": "planned",
+      "target": "explicit-only export; same protection verdict path as push; never bypasses"
+    },
+    {
+      "id": "FR9.3",
+      "status": "planned",
+      "target": "authorship/timestamps/messages/merge-parent structure preserved both directions"
+    },
+    {
+      "id": "FR9.4",
+      "status": "planned",
+      "target": "lazy + explicit converge — single shared conversion function"
+    },
+    {
+      "id": "FR2.2",
+      "status": "planned",
+      "target": "canonical_changeset recipe unchanged — imports mint ids through the same hash inputs"
+    },
+    {
+      "id": "FR7.4",
+      "status": "planned",
+      "target": "atomicity per changeset inherited from ChangesetStore::create; idempotent re-import converges"
+    },
+    {
+      "id": "C3",
+      "status": "planned",
+      "target": "export moves refs only via hook-driven path; git behavior unchanged; no automatic mirroring"
+    },
+    {
+      "id": "NFR8",
+      "status": "planned",
+      "target": "tracing spans + gitlink/tip-drop warns; ids+counts only — no payload/stderr/auth in logs"
+    },
+    {
+      "id": "NFR10",
+      "status": "planned",
+      "target": "nextest suites on file-backed sqlite + real temp git repos; convergence + round-trip pins"
+    },
+    {
+      "id": "US7.1",
+      "status": "planned",
+      "target": "explicit + lazy import; u7 owns the trigger seam"
+    },
+    {
+      "id": "US7.2",
+      "status": "planned",
+      "target": "export + hooked ref move; u7 injects the real ProtectionChecker impl"
+    },
+    {
+      "id": "US7.4",
+      "status": "planned",
+      "target": "deterministic bridge both directions; sidecars close byte-identical gap"
+    },
+    {
+      "id": "contract:vcs.git_import",
+      "status": "planned",
+      "target": "ImportPage{imported,cursor,done,skipped_tips,heads}; <=cap; snapshot cursor + last_oid + byte cap; DTO amendments recorded"
+    },
+    {
+      "id": "contract:vcs.git_export",
+      "status": "planned",
+      "target": "ExportOutcome{branch,git_oid,commits_count,before_oid}; forbidden{verdicts} on denial; force=ff-override-only"
+    },
+    {
+      "id": "contract:git_interop",
+      "status": "planned",
+      "target": "import_chain/lazy_import/export signatures match the u6->u7 sketch incl. (.., force, actor_capability) order"
+    },
+    {
+      "id": "BR6.1-BR6.28",
+      "status": "planned",
+      "target": "full BR6.x register per rules.md + review corrections: BR6.4 same-link idempotence AND divergent-link Internal; BR6.19 caps; BR6.20 actor_capability through checker + both move callers; BR6.24 backend/subprocess pins"
+    },
+    {
+      "id": "SR6.1-SR6.11",
+      "status": "planned",
+      "target": "security register: SR6.1 bounded stdout sentinel; SR6.2 nonce claim; SR6.3 five-step cursor; SR6.4 fixed argv; SR6.5 total bridge; SR6.7 total refusal inventory incl. >64-parent/>65535-msg/OOO-ts/512-path/dotdot/control-byte/author-shapes/zero-mint; SR6.9 is_skipped FIRST all three entries; SR6.10 named residuals"
+    },
+    {
+      "id": "TD6.1-TD6.8",
+      "status": "planned",
+      "target": "server-gated module; oxidean-git+async-trait server deps; 8 backend methods; ProtectionChecker port; 0055 x3 + Option both sides; DTO amendments; in-crate mirrors; InteropError enum; real-git test posture"
+    },
+    {
+      "id": "SD6.1-SD6.8",
+      "status": "planned",
+      "target": "nfr-design security sections -> implementation pins (see plan Pinned corrections)"
+    },
+    {
+      "id": "LC6.1-LC6.7",
+      "status": "planned",
+      "target": "logical components -> implementation map incl. LC6.7 supersede list (IndexError bridge, ident-cs fallback, sentinel TooLarge)"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Rules — u6-vcs-git-interop
 
-BR6.x — binding rules for `GitInterop`. Wire/persistence invariants live in u1/u2/u4; store/merge mechanics in u4/u5; these govern the git↔changeset bridge only. *(Revision 2 — dev pass + architecture review pass-1 folded in: nullable covering amendment, parents-first enumeration, forward ff-gate lookup, consumed-window cursor, Option heads, nonce-verified release, force-intent checker.)*
+BR6.x — binding rules for `GitInterop`. Wire/persistence invariants live in u1/u2/u4; store/merge mechanics in u4/u5; these govern the git↔changeset bridge only. *(Revision 3 — architecture review pass-2 folded in: `ProtectionBlockReasons` verdicts, hook-parity intent derivation (no force flag on the checker), two-phase ff gate with git-side fallback, cursor byte cap, complete consumed-enum bridge, `top-level -c` position.)*
 
 ```yaml
 rules:
@@ -36,7 +36,7 @@ rules:
       AC7.1.2, AC7.4.2, FR9.4
   - id: BR6.3
     statement: >-
-      Name-status flags are pinned config-independent — `-r --name-status -M -z -c diff.renameLimit=10000`, `--root --no-commit-id` on roots — identical on both paths.
+      Name-status flags are pinned config-independent — `git -c diff.renameLimit=10000 diff-tree -r --name-status -M -z` (`-c` is a TOP-LEVEL git option before the subcommand — after it, git dies treating it as a diff-tree flag), `--root --no-commit-id` on roots — identical on both paths.
     category: >-
       constraint
     applies_to: >-
@@ -44,7 +44,7 @@ rules:
     trigger: >-
       every per-commit diff
     logic: >-
-      IF a commit's file delta is computed THEN the flags are exactly this set — `-M` at git's default similarity, `diff.renameLimit` pinned so per-repo config can't shift rename resolution between paths (dev 8); `--no-commit-id` required on the root form (it emits a leading commit-id record, dev 10); `-z` rename rows carry TWO path records consumed together (dev 20).
+      IF a commit's file delta is computed THEN the flags are exactly this set — `-M` at git's default similarity, `diff.renameLimit` pinned so per-repo config can't shift rename resolution between paths (dev 8); `--no-commit-id` required on the root form (it emits a leading commit-id record, dev 10); `-z` rename rows carry THREE records in pinned order `R<score>\0<src>\0<dst>\0` — FIRST path ⇒ `old_path`, SECOND ⇒ `path` (src-then-dst, same order as the non-`-z` form — empirically verified on `git diff-tree -z`, review3-F5).
     violation: >-
       caller-supplied flags, config-dependent rename limits, missing --no-commit-id.
     source: >-
@@ -104,7 +104,7 @@ rules:
     trigger: >-
       resume with cursor
     logic: >-
-      IF cursor decodes THEN its tip snapshot is re-derived (not live refs); `skip>0` ⇒ `list[skip-1] == last_oid` else ImportState — a git upgrade/GC between pages can re-derive a different topo order and a bare skip silently drops commits (dev 13); `skip` advances by the whole consumed window INCLUDING already-linked/skipped entries (review-major — `skip += imported` breaks resumes); `last_oid = list[new_skip-1]`; `out.imported` counts fresh conversions ONLY; `from`+`cursor` co-supplied ⇒ cursor authoritative, `from` ignored; tips > cursor_tips_max ⇒ TooLarge; malformed ⇒ ImportState (never invalid_input).
+      IF cursor decodes THEN its tip snapshot is re-derived (not live refs); `skip>0` ⇒ `list[skip-1] == last_oid` else ImportState — a git upgrade/GC between pages can re-derive a different topo order and a bare skip silently drops commits (dev 13); `skip` advances by the whole consumed window INCLUDING already-linked/skipped entries (review-major — `skip += imported` breaks resumes); `last_oid = list[new_skip-1]`; `out.imported` counts fresh conversions ONLY; `from`+`cursor` co-supplied ⇒ cursor authoritative, `from` ignored; tips > cursor_tips_max ⇒ TooLarge; serialized CursorState bytes > cursor_payload_max_bytes ⇒ TooLarge — never write an unresumable cursor (mysql `payload TEXT` = 64KiB, mysql/0053:77; F6); malformed ⇒ ImportState (never invalid_input).
     violation: >-
       resuming on a reordered list, resuming against moved refs, counting skipped entries as imported.
     source: >-
@@ -194,7 +194,7 @@ rules:
     trigger: >-
       per-commit conversion
     logic: >-
-      IF message bytes OR a path OR an author part fails UTF-8 THEN InvalidInput (the raw sidecar still preserves bytes for ident, but the changeset's own fields must be valid strings); author sanitizes {control,0x7f}→'?' identically on both paths.
+      IF message bytes OR a path OR an author part fails UTF-8 THEN InvalidInput (the raw sidecar still preserves bytes for ident, but the changeset's own fields must be valid strings); the IDENTITY pipeline ordering is pinned once (review3-F4): sanitize {control,0x7f}→'?' FIRST on both paths, THEN the refusal checks of BR6.23 run on the sanitized result — sanitize-then-refuse, never the reverse.
     violation: >-
       U+FFFD-collapse on paths (dev 6), lossy message conversion.
     source: >-
@@ -216,7 +216,7 @@ rules:
       AC7.2.1, dev 1, review-major 6
   - id: BR6.15
     statement: >-
-      Ordering is write-chain → check → move — the checker needs the minted tip to evaluate the real (old,new) pair; a denied export leaves only unreferenced objects PLUS link/linked rows pointing at them — both healed by the next walk's existence probe (BR6.14); zero ref change.
+      Ordering is write-chain → check → move — the checker needs the minted tip to evaluate the real (old,new) pair; `check(repo, refname, old, new, actor_capability)` returns `ProtectionBlockReasons` (the REAL wire-verbatim payload — protection_types.rs:265 — not an invented verdict struct); a denied export leaves only unreferenced objects PLUS link/linked rows pointing at them — both healed by the next walk's existence probe (BR6.14); zero ref change.
     category: >-
       authorization
     applies_to: >-
@@ -224,14 +224,14 @@ rules:
     trigger: >-
       after chain mint, before move
     logic: >-
-      IF checker.check denies THEN Forbidden{verdicts} — push-denial-identical payload; force never bypasses it. Objects write first because the verdict evaluates the real (old,new) pair (dev 3); concurrent `git gc --prune` can reap minted-unreferenced objects before the move — same exposure `commit_files` already carries; a re-export re-mints (review-nit g).
+      IF `reasons` is non-empty THEN Forbidden{verdicts} — the `ProtectionBlockReasons` struct verbatim (u1's `forbidden(message, verdicts)` constructor, vcs_types.rs:394); force never bypasses it. The checker carries NO force param — intent is derived `(old,new)`-side exactly like `check_ref_update` (BR6.25). Objects write first because the verdict evaluates the real (old,new) pair (dev 3); concurrent `git gc --prune` can reap minted-unreferenced objects before the move — same exposure `commit_files` already carries; a re-export re-mints (review-nit g).
     violation: >-
-      checking before the tip exists (unevaluable), moving before checking, claiming a denied export wrote nothing.
+      checking before the tip exists (unevaluable), moving before checking, claiming a denied export wrote nothing, surfacing an invented verdict shape the wire can't carry.
     source: >-
-      AC7.2.2, FR9.2, dev 3, review-major 6/nit g
+      AC7.2.2, FR9.2, dev 3, review-major 6/nit g, review2-BLOCKER 1
   - id: BR6.16
     statement: >-
-      force overrides fast-forward only — the ff gate resolves the existing tip via FORWARD `vcs_lookup_import_link(old_oid)` (review-BLOCKER: `linked:` is keyed on changeset ids and can never hit a git oid); an unlinked old tip (git-only history) is ALWAYS non-ff ⇒ RefConflict{actual} regardless of force; the protection check and hooked move never skip.
+      force overrides fast-forward only — the ff gate is TWO-PHASE: changeset-side pre-mint (FORWARD `vcs_lookup_import_link(old_oid)` hit ∧ (`old_cs ∈ set` OR `is_ancestor_cs(old_cs, head)` — a LOCAL in-crate helper over the same `vcs_changeset_parents` BFS; u5's is private — dev 18d) ⇒ ff) plus git-side post-mint fallback (`is_ancestor(old_oid, minted_tip)` — the EXISTING `GitBackend::is_ancestor`, backend.rs:735/cli.rs:3332, exit-code typed; review3-F1) for the hit-but-not-ancestor and miss cases; an unlinked old tip that fails the git-side test is a genuine git-only tip ⇒ RefConflict{actual: None} even under force — never clobbered.
     category: >-
       authorization
     applies_to: >-
@@ -239,11 +239,11 @@ rules:
     trigger: >-
       ff gate
     logic: >-
-      IF old exists THEN `link_lookup(old_oid)` miss ⇒ RefConflict; hit ⇒ `is_ancestor_cs(old_cs, head)` OR `old_cs ∈ set` (set-membership covers the healed-half-pair: forward link present, `linked:` absent ⇒ re-mint identical oid ⇒ verify-equal ⇒ `linked:` upsert heals); non-ff ⇒ force ? proceed : RefConflict. Empty-set fast-path: head already anchored AND old == anchored oid ⇒ early `{git_oid: old, commits_count: 0}` — no writes, no move (review-nit h).
+      IF old exists THEN `link_lookup(old_oid)` resolves old's changeset; hit-ancestor ⇒ ff. Hit-but-not-ancestor OR miss ⇒ defer to post-mint `is_ancestor` — covers the twin-alias holder (identical object ⇒ trivially ancestor) and unlinked-but-reachable tips whose link rows died (review2-F7; a miss alone is NOT RefConflict — a skipped pre-mint verdict would clobber legal ff's). Failing that: UNLINKED old ⇒ RefConflict{actual: None} even under force (git-only history is protected work, not a force-rewrite target); LINKED old ⇒ force ? proceed : RefConflict{actual: old_cs}. `actual` is `Option<ChangesetId>` (VcsRefConflictData.actual, vcs_types.rs:414) — never a git oid (F8). Empty-set fast-path: head already anchored AND old == anchored oid ⇒ early `{git_oid: old, commits_count: 0}` — no writes, no move (review-nit h).
     violation: >-
-      clobbering git-only commits; treating force as a protection bypass; reverse-direction lookups at the ff gate.
+      clobbering git-only commits; treating force as a protection bypass; reverse-direction lookups at the ff gate; carrying a git oid in the changeset-typed `actual` field.
     source: >-
-      AC7.2.2, contract limits, review-BLOCKER 3
+      AC7.2.2, contract limits, review-BLOCKER 3, review2-F7/F8
   - id: BR6.17
     statement: >-
       Exactly one hook-driven, actor-capable move — push stderr classified in-method; never update_ref, commit_files, push_to_url, or automatic mirroring.
@@ -269,7 +269,7 @@ rules:
     trigger: >-
       any error
     logic: >-
-      GitError: NotFound→NotFound, Denied→Forbidden{push_hook}, Conflict→RefConflict (move) else Internal, InvalidArg→InvalidInput for validation-shaped calls else Internal, Process/Io→Internal (FIXED message — stderr may carry paths). ChangesetError (changeset_store.rs:56-74 — `ParentNotFound|ObjectNotFound|ChangesetNotFound|InvalidInput|Internal|DbNotConfigured`, NO quota variant — review-minor): ParentNotFound/ChangesetNotFound→NotFound, InvalidInput→InvalidInput, ObjectNotFound→Internal (blob raced GC = integrity loss), DbNotConfigured→DbNotConfigured, Internal→Internal. IndexError: CursorMalformed→Internal (engine-minted = corruption), DbNotConfigured→DbNotConfigured, rest→Internal. ObjectStoreError: QuotaExceeded→QuotaExceeded(scope), InvalidHash/NotFound/Stream→Internal, DbNotConfigured→DbNotConfigured. Facade String→Internal.
+      GitError: NotFound→NotFound, Denied→Forbidden{verdicts:{reasons:["push_hook"],..Default}} + fixed detail (never stderr — it carries rejected values/paths), Conflict→RefConflict (move) else Internal, InvalidArg→InvalidInput for validation-shaped calls else Internal, Process/Io→Internal (FIXED message — stderr may carry paths). ChangesetError (changeset_store.rs:56-74 — `ParentNotFound|ObjectNotFound|ChangesetNotFound|InvalidInput|Internal|DbNotConfigured`, NO quota variant — review-minor): ParentNotFound/ChangesetNotFound→NotFound, InvalidInput→InvalidInput, ObjectNotFound→Internal (blob raced GC = integrity loss), DbNotConfigured→DbNotConfigured, Internal→Internal. IndexError: CursorMalformed→ImportState (it IS a cursor-shape error on this surface), DbNotConfigured→DbNotConfigured, rest→Internal. ObjectStoreError — EVERY variant named (review2-F3): QuotaExceeded→QuotaExceeded(scope), DbNotConfigured→DbNotConfigured, Config/Db/Io/InvalidHash/NotFound/Stream/Internal→Internal. Facade String→Internal.
     violation: >-
       unmapped variants; raw stderr/rejected-value echo in error text (devsecops-8 convention).
     source: >-
@@ -284,7 +284,7 @@ rules:
     trigger: >-
       construction + each cap site
     logic: >-
-      IF a cap trips THEN TooLarge (or InvalidInput for limit>cap); fields: import_commit_cap(1000), rev_list_max(250_000), cursor_tips_max(512), import_tree_max(10_000), import_blob_max, export_chain_max(10_000), export_blob_max, export_ancestor_probe_max(250_000), import_lock_ttl_secs(900).
+      IF a cap trips THEN TooLarge (or InvalidInput for limit>cap); fields: import_commit_cap(1000), rev_list_max(250_000), cursor_tips_max(512), cursor_payload_max_bytes(32_768), import_tree_max(10_000), import_blob_max, export_chain_max(10_000), export_blob_max, export_ancestor_probe_max(250_000), import_lock_ttl_secs(900).
     violation: >-
       silent clamping; missing export_ancestor_probe_max for the ff BFS (dev 18b).
     source: >-
@@ -336,7 +336,7 @@ rules:
       NFR8
   - id: BR6.23
     statement: >-
-      Deterministic-refusal inventory — commits with >64 parents, >65535-byte messages, unrepresentable timestamps (`from_timestamp` `None` ⇒ InvalidInput, never panic — review-nit c), >512-char paths, `.`/`..` segments or control bytes in paths (validate_path:241-266 full set), author name/email containing `<`/`>`/control bytes/DEL or empty post-sanitize (compose_author:446-455 — email unsanitized), or non-UTF8 paths/messages/idents refuse via InvalidInput on BOTH paths.
+      Deterministic-refusal inventory — commits with >64 parents, >65535-byte messages, unrepresentable timestamps (`from_timestamp` `None` ⇒ InvalidInput, never panic — review-nit c), >512-char paths, `.`/`..` segments or control bytes in paths (`validate_path`:241-266 full set — `pub(crate)`, called directly), author name/email containing `<`/`>` AFTER {control,0x7f}→'?' sanitize or empty post-sanitize, AND composed `Name <email>` > MAX_AUTHOR_LEN(255) (`compose_author`:439-461 is the reference set but PRIVATE — the guards are MIRRORED in-crate pre-create, no u4 edit — review3-F6 — so a store-side refusal never escapes mid-batch untyped), or non-UTF8 paths/messages/idents refuse via InvalidInput on BOTH paths.
     category: >-
       validation
     applies_to: >-
@@ -366,7 +366,7 @@ rules:
       dev findings 4,7,9,11,16,19
   - id: BR6.25
     statement: >-
-      The protection check carries force-intent — `checker.check(..., force)` maps to the evaluator's Push-vs-ForcePush split (`allow_force_pushes` bites only under ForcePush).
+      The protection check derives intent from the (old,new) pair — hook-parity with check_ref_update (protection/mod.rs:842-856): `new==zeros` ⇒ Delete, `old` absent/zeros ⇒ Push, else `git_is_fast_forward` ⇒ Push|ForcePush. The trait carries NO `force` param — `force` is interop-local gate intent only.
     category: >-
       authorization
     applies_to: >-
@@ -374,11 +374,11 @@ rules:
     trigger: >-
       verdict evaluation
     logic: >-
-      IF force is requested THEN the check evaluates the ForcePush rule branch — a check that ignores intent would deny-force or pass-force incorrectly vs real `git push --force` behavior.
+      IF the impl evaluates the real (old,minted_tip) pair THEN intent is what a real `git push` of that pair would face — `allow_force_pushes` bites exactly when the move genuinely isn't ff (review2-F2: passing the caller's flag would eval ForcePush on an ff move — the OPPOSITE of parity). Export's `force` arg lives only at the interop ff gate (BR6.16) where it picks the move method after the check.
     violation: >-
-      intent-blind checks diverge from push parity.
+      flag-driven intent — evaluating ForcePush on an actually-ff move denies what a real push allows; Push on a non-ff move allows what it denies.
     source: >-
-      review-MINOR 7, protection/mod.rs:216-229
+      review2-F2 (supersedes review-MINOR 7's force param), protection/mod.rs:216-229/842-856
   - id: BR6.26
     statement: >-
       Same-oid export alias proceeds — two distinct changesets can mint the same git oid (identical tree+parents+idents+message); `link_insert` false with stored≠ours on EXPORT is a content-identical alias, not corruption — still write `linked:{ours}→oid` and proceed.
@@ -396,7 +396,7 @@ rules:
       review-MINOR 11
   - id: BR6.27
     statement: >-
-      `heads[].changeset_id` is Optional — `link_lookup(tip)` may miss mid-import when independent tips exceed the page (`--topo-order` interleaves unrelated tips by commit-date); unresolved tips emit `null` — contract errata for u7 (`changeset_id|null` while unresolved, all resolved once `done`).
+      `heads[].changeset_id` is Optional — `link_lookup(tip)` may miss mid-import when independent tips exceed the page (`--topo-order` interleaves unrelated tips by commit-date); unresolved tips emit `null` — requires widening `VcsGitImportHead.changeset_id` to `Option<ChangesetId>` (vcs_types.rs:884 — recorded u1/u7 wire-DTO amendment, review3-F3), all resolved once `done`.
     category: >-
       constraint
     applies_to: >-
@@ -411,7 +411,7 @@ rules:
       review-MAJOR 5, contract errata
   - id: BR6.28
     statement: >-
-      `tree_flat` is cap-bounded AND tag targets peel honestly — `flat.len() > import_tree_max ⇒ TooLarge`; tips resolving to non-commit objects (tag→tree/blob) drop + `tracing::warn`, never abort the import.
+      `tree_flat` is cap-bounded AND tag targets peel honestly — `flat.len() > import_tree_max ⇒ TooLarge`; tips resolving to non-commit objects (tag→tree/blob) drop + `tracing::warn` counted in `skipped_tips`, never abort the import; surfacing `skipped_tips` on the wire requires the recorded `VcsGitImportResponse` DTO amendment (review3-F3).
     category: >-
       constraint
     applies_to: >-
@@ -433,6 +433,6 @@ rules:
 | BR6.1–BR6.4 | write-path + convergence | `create` only; shared `import_one`; links + `linked:` reverse map |
 | BR6.5–BR6.8 | order, claim, cursor, enumeration | topo invariant; nonce-verified claim/release; consumed-window `skip`+`last_oid`; parents-first `RevList`, honest single-cone bound |
 | BR6.9–BR6.13 | conversion fidelity | first-parent diffs; `tree_flat` modes+sizes; gitlink skip; RAW ident sidecars; UTF-8 refusals |
-| BR6.14–BR6.17 | export integrity | existence-probed `linked:` anchors; forward `link_lookup` ff gate; write→check→move; classified hooked move; empty-set fast-path |
-| BR6.18–BR6.22 | errors, caps, actor, state, observability | total bridge incl. all consumed enums (real ChangesetError set); typed caps; actor threading; NULL-covering marker state; tracing |
-| BR6.23–BR6.28 | refusals + plumbing + edge semantics | deterministic InvalidInput set; config-independent plumbing; force-intent check; same-oid alias; Option heads; flat cap + tag peel |
+| BR6.14–BR6.17 | export integrity | existence-probed `linked:` anchors; two-phase ff gate (forward `link_lookup` + existing `is_ancestor` fallback, `Option<ChangesetId>` actual); write→check→move; classified hooked move; empty-set fast-path |
+| BR6.18–BR6.22 | errors, caps, actor, state, observability | total bridge incl. all consumed enums (every ObjectStoreError variant named); typed caps; actor threading; NULL-covering marker state; tracing |
+| BR6.23–BR6.28 | refusals + plumbing + edge semantics | deterministic InvalidInput set (incl. composed-author bound); config-independent plumbing; hook-parity intent check (no force flag); same-oid alias; Option heads; flat cap + tag peel |

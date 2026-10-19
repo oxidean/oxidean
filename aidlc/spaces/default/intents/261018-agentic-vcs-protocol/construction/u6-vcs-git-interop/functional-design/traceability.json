@@ -25,8 +25,7 @@
     "US7.4",
     "contract:vcs.git_import",
     "contract:vcs.git_export",
-    "contract:git_interop",
-    "BR6.1-BR6.28"
+    "contract:git_interop"
   ],
   "coverage": [
     {
@@ -56,8 +55,8 @@
     {
       "id": "AC7.2.2",
       "status": "OK",
-      "target": "WF4.4-7 + BR6.15/BR6.16/BR6.17/BR6.20",
-      "note": "write->check->move ordering (checker needs the minted tip); verdict payload verbatim + classified hook denial as second line; force=ff-override-only; actor capability + force-intent threaded to check; ff gate resolves old tip via forward link_lookup; empty-set fast-path"
+      "target": "WF4.4-8 + BR6.15/BR6.16/BR6.17/BR6.20/BR6.25",
+      "note": "write->check->move ordering (checker needs the minted tip); ProtectionBlockReasons verbatim + hook denial as {reasons:[push_hook]}; two-phase ff gate: forward link_lookup pre-mint + existing GitBackend::is_ancestor git-side fallback post-mint; unlinked git-only tip RefConflict{actual:None} even under force (actual is Option<ChangesetId>, never a git oid); force=ff-override-only; actor capability threaded; intent derived (old,new)-side like check_ref_update — no force flag on the checker; empty-set fast-path"
     },
     {
       "id": "AC7.2.3",
@@ -159,13 +158,13 @@
       "id": "contract:vcs.git_import",
       "status": "OK",
       "target": "WF1 + entities ImportPage + BR6.6/BR6.7/BR6.19",
-      "note": "in/out shape {imported,cursor,done,heads}; <=1000 cap; snapshot cursor advances by consumed window (imported=fresh only) + last_oid continuity + import_state semantics bound; heads[].changeset_id|null while a tip is unimported (contract errata for u7)"
+      "note": "in/out shape {imported,cursor,done,skipped_tips,heads}; <=1000 cap; snapshot cursor advances by consumed window (imported=fresh only) + last_oid continuity + byte-capped payload + import_state semantics bound; recorded wire-DTO amendments (review3-F3): widen VcsGitImportHead.changeset_id to Option<ChangesetId> (vcs_types.rs:884) + add VcsGitImportResponse.skipped_tips (vcs_types.rs:901-908) — u6 deviations on the u1-claimed file, mapped by u7"
     },
     {
       "id": "contract:vcs.git_export",
       "status": "OK",
-      "target": "WF4 + entities ExportOutcome + BR6.15-6.17",
-      "note": "{branch,git_oid} out; forbidden{verdicts} on denial; force=ff-only"
+      "target": "WF4 + entities ExportOutcome + BR6.15-6.17/BR6.25",
+      "note": "{branch,git_oid} out; forbidden{verdicts:ProtectionBlockReasons} on denial; force=ff-only (intent derived pair-side); C7 sketch's ProtectionVerdict resolved to ProtectionBlockReasons at u1 landing (errata for u7)"
     },
     {
       "id": "contract:git_interop",

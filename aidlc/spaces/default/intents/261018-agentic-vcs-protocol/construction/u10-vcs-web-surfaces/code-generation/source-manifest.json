@@ -1,0 +1,34 @@
+{
+  "stage": "code-generation",
+  "unit": "u10-vcs-web-surfaces",
+  "version": 1,
+  "writes": [
+    {
+      "path": "apps/web/src/components/repo/vcs-settings-panel.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/repo/repo-activity-row.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/repo/repo-settings-nav.tsrx"
+    },
+    {
+      "path": "apps/web/src/routes/$owner.$repo.settings.tsrx"
+    },
+    {
+      "path": "apps/web/src/routes/$owner.$repo.activity.tsrx"
+    },
+    {
+      "path": "apps/web/src/test/browser-coverage.manifest.ts"
+    },
+    {
+      "path": "apps/web/src/components/repo/vcs-settings-panel.integration.test.ts"
+    },
+    {
+      "path": "apps/web/src/components/repo/vcs-settings-panel.browser.test.tsx"
+    },
+    {
+      "path": "apps/web/src/components/repo/repo-activity-row.integration.test.tsx"
+    }
+  ]
+}

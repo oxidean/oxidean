@@ -1,0 +1,16 @@
+{
+  "stage": "code-generation",
+  "unit": "u9-vcs-mcp",
+  "version": 1,
+  "writes": [
+    {
+      "path": "crates/oxidean-vcs/src/client/mcp.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/mod.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/mcp.rs"
+    }
+  ]
+}

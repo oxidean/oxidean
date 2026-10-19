@@ -1,0 +1,58 @@
+{
+  "stage": "code-generation",
+  "unit": "u6-vcs-git-interop",
+  "version": 1,
+  "writes": [
+    {
+      "path": "crates/oxidean-vcs/src/git_interop.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/changeset_store.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/read_index.rs"
+    },
+    {
+      "path": "crates/oxidean-core/src/vcs_types.rs"
+    },
+    {
+      "path": "crates/oxidean-db/src/vcs.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_vcs.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0055_vcs_derived_index_nullable_covering.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0055_vcs_derived_index_nullable_covering.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0055_vcs_derived_index_nullable_covering.sql"
+    },
+    {
+      "path": "crates/oxidean-git/src/backend.rs"
+    },
+    {
+      "path": "crates/oxidean-git/src/cli.rs"
+    },
+    {
+      "path": "crates/oxidean-git/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/mirror/engine.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/repo/sync_fork.rs"
+    },
+    {
+      "path": "Cargo.lock"
+    }
+  ]
+}

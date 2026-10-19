@@ -1,0 +1,124 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "u6-vcs-git-interop",
+ "artifacts": [
+  "security-requirements.md",
+  "tech-stack-decisions.md"
+ ],
+ "coverage": [
+  {
+   "id": "SR6.1",
+   "kind": "sec-req",
+   "source": "BR6.8/BR6.19/NFR1",
+   "note": "all InteropCaps named+injectable; rev_list 250k single-cone bound; cursor byte cap under mysql TEXT 65,535; blob_max<=max_object_bytes at validate; subprocess stdout bounded via per-call max_bytes derived from import_tree_max (devsecops-M2)"
+  },
+  {
+   "id": "SR6.2",
+   "kind": "sec-req",
+   "source": "BR6.6/BR6.4",
+   "note": "nonce claim/re-read/release + 900s TTL; best-effort mutex honest — insert-if-absent+idem convergence is the backstop"
+  },
+  {
+   "id": "SR6.3",
+   "kind": "sec-req",
+   "source": "BR6.6/BR6.7",
+   "note": "untrusted cursor: inbound byte cap pre-parse, v/tips.len/tip-oid-shape/dash-led/skip<=len revalidation =>ImportState (devsecops-M1/9); last_oid continuity; consumed-skip; cursor authoritative over from"
+  },
+  {
+   "id": "SR6.4",
+   "kind": "sec-req",
+   "source": "BR6.24/BR6.3",
+   "note": "fixed argv, -c before subcommand, dash-led rejected pre-argv, stdin messages+mktree, gpgSign=false, six ident envs, check-ref-format oracle"
+  },
+  {
+   "id": "SR6.5",
+   "kind": "sec-req",
+   "source": "BR6.18/BR6.22/NFR8",
+   "note": "classify_push_error typed; fixed messages; no stderr/value/auth echo; total bridge — ObjectStoreError 9 + ChangesetError 6 + IndexError 8 (CursorMalformed=>ImportState)"
+  },
+  {
+   "id": "SR6.6",
+   "kind": "sec-req",
+   "source": "BR6.15/BR6.16/BR6.17/AC7.2.2",
+   "note": "write->check->move ordering; ProtectionBlockReasons verbatim; intent f(old,new) no force flag; unlinked-never-clobbered under force; one hooked actor-capable move; Option<ChangesetId> actual"
+  },
+  {
+   "id": "SR6.7",
+   "kind": "sec-req",
+   "source": "BR6.23/AC7.1.3",
+   "note": "total deterministic InvalidInput inventory incl. composed-author bound; degradation forbidden; private guards mirrored not edited"
+  },
+  {
+   "id": "SR6.8",
+   "kind": "sec-req",
+   "source": "BR6.12/AC7.4.1",
+   "note": "ident sidecars share payload TEXT — >32KiB sidecar refuses pre-create; Some(cs) covering keeps FK cascade"
+  },
+  {
+   "id": "SR6.9",
+   "kind": "sec-req",
+   "source": "BR4.16/NFR9/G4",
+   "note": "is_skipped eager at all three entry points; zero auth inside; actor_capability threaded never defaulted — call-site literals keep existing behavior"
+  },
+  {
+   "id": "SR6.10",
+   "kind": "sec-req",
+   "source": "residuals",
+   "note": "best-effort mutex; unreferenced-object gc exposure; crash+TTL+idempotent resume; single-cone rev_list bound; chain_max staged-export escape; lazy tip-shadow pin; alias-twin forward-link provenance; verdict-verbatim parity; raced-push CAS; per-move full-clone cost (inherited); no subprocess timeout (inherited); derived-not-exact stdout bound"
+  },
+  {
+   "id": "SR6.11",
+   "kind": "sec-req",
+   "source": "NFR8/BR6.22",
+   "note": "unit=vcs.git_interop spans; warn on gitlink+non-commit drops; ids/counts only — no payload/stderr/auth in logs"
+  },
+  {
+   "id": "TD6.1",
+   "kind": "tech-dec",
+   "source": "TD-chain/NFR6",
+   "note": "git_interop.rs server-gated; oxidean-git + async-trait added under server feature only; client stays dep-free"
+  },
+  {
+   "id": "TD6.2",
+   "kind": "tech-dec",
+   "source": "Q2/BR6.24",
+   "note": "8 new backend methods in oxidean-git; is_ancestor REUSED (backend.rs:735) not duplicated; actor_capability on both move methods; classify_push_error shared with commit_files"
+  },
+  {
+   "id": "TD6.3",
+   "kind": "tech-dec",
+   "source": "ADR-006/Q1",
+   "note": "ProtectionChecker port in-crate; host impl in oxidean-api at dispatch (u7); repo:&Path per call — no host layout policy"
+  },
+  {
+   "id": "TD6.4",
+   "kind": "tech-dec",
+   "source": "Q3/NFR6",
+   "note": "0055 x3 dialects filename parity + BOTH vcs.rs sides (upsert Option<&str> + row Option<String> decode); sqlite rebuild recreates idx_vcs_derived_index_covering; u2 deviation recorded"
+  },
+  {
+   "id": "TD6.5",
+   "kind": "tech-dec",
+   "source": "review3-F3/NFR5",
+   "note": "Option<changeset_id> + skipped_tips DTO amendments on u1-claimed vcs_types.rs — wire-superset safe under rpc-gen lockstep + SemVer gate"
+  },
+  {
+   "id": "TD6.6",
+   "kind": "tech-dec",
+   "source": "review3-F6/BR5.19-discipline",
+   "note": "manifest_diff/compose_author/full_tree-accumulate/is_ancestor-cs mirrored in-crate; validate_path pub(crate) called directly; no u4/u5 edits"
+  },
+  {
+   "id": "TD6.7",
+   "kind": "tech-dec",
+   "source": "Q7",
+   "note": "InteropError single enum; From at consumption; total variant maps; wire mapping for u7"
+  },
+  {
+   "id": "TD6.8",
+   "kind": "tech-dec",
+   "source": "NFR10",
+   "note": "nextest vcs+git crates; real temp-dir git repos; forged-cursor/dash-led/claim-contention/skipped_tips/modified-move-classify/CAS-conflict cases named; NULL-covering row round-trip; clippy; zero-test=failure"
+  }
+ ]
+}

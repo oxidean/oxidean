@@ -1,0 +1,55 @@
+{
+  "stage": "code-generation",
+  "unit": "u9-vcs-mcp",
+  "version": 1,
+  "upstream": [
+    {
+      "id": "contract-C3",
+      "source": "inception/contract-design/contract-summary.md#C3",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs", "crates/oxidean-api/src/mcp.rs"],
+      "notes": "13 tools incl. vcs_changeset_get; separate owner/name args; deliberate absences enforced"
+    },
+    {
+      "id": "contract-C1",
+      "source": "inception/contract-design/contract-summary.md#C1",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs"],
+      "notes": "input schemas mirror wire DTO field names and required parity; access tags mirror proc_classes tiers"
+    },
+    {
+      "id": "FR13.1",
+      "source": "inception/requirements-analysis/requirements.md#FR13.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs"],
+      "notes": "12 named tools each thin-map to the same-named vcs.* procedure"
+    },
+    {
+      "id": "FR13.2",
+      "source": "inception/requirements-analysis/requirements.md#FR13.2",
+      "covered_by": ["crates/oxidean-api/src/mcp.rs"],
+      "notes": "Access::{RepoRead,RepoWrite} gating via existing enforce_pat_scope; domain denials map to isError via existing tool_error"
+    },
+    {
+      "id": "FR13.3",
+      "source": "inception/requirements-analysis/requirements.md#FR13.3",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs", "crates/oxidean-api/src/mcp.rs"],
+      "notes": "crate emits descriptors; host wraps — no oxidean-api-private types cross the seam"
+    },
+    {
+      "id": "AC8.3.1",
+      "source": "inception/user-stories/stories.md#AC8.3.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs"],
+      "notes": "twelve FR13.1 tools + contract-added vcs_changeset_get, each thin-mapped to its vcs.* procedure"
+    },
+    {
+      "id": "AC8.3.2",
+      "source": "inception/user-stories/stories.md#AC8.3.2",
+      "covered_by": ["crates/oxidean-api/src/mcp.rs"],
+      "notes": "RepoRead/RepoWrite classes asserted per tool; OXIDEAN_MCP_ENABLED/admin.mcp.* overrides unchanged"
+    },
+    {
+      "id": "AC8.3.3",
+      "source": "inception/user-stories/stories.md#AC8.3.3",
+      "covered_by": ["crates/oxidean-vcs/src/client/mcp.rs"],
+      "notes": "McpAccess is crate-local; host maps it — dependency direction stays host→crate"
+    }
+  ]
+}

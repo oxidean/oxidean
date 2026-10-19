@@ -1,0 +1,307 @@
+{
+  "stage": "code-generation",
+  "unit": null,
+  "version": 1,
+  "upstream": [
+    {
+      "id": "FR1.2",
+      "source": "inception/requirements-analysis/requirements.md#FR1.2",
+      "covered_by": ["crates/oxidean-db/src/vcs.rs", "crates/oxidean-vcs/src/api.rs"],
+      "notes": "all VCS rows keyed by repo_id resolved from owner/name; Git and VCS serve the same repo simultaneously"
+    },
+    {
+      "id": "FR1.3",
+      "source": "inception/requirements-analysis/requirements.md#FR1.3",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs", "crates/oxidean-db/src/vcs.rs"],
+      "notes": "vcs.repo_enable flips vcs_enabled; surface usable immediately with empty history; Git import is explicit/lazy per FR9"
+    },
+    {
+      "id": "FR4.1",
+      "source": "inception/requirements-analysis/requirements.md#FR4.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs", "crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "want-based fetch: client requests objects by hash; no have/want negotiation exists on the wire"
+    },
+    {
+      "id": "FR4.2",
+      "source": "inception/requirements-analysis/requirements.md#FR4.2",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs", "crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "changeset -> manifest -> blob hash -> bounded local cache -> missing-object requests; all targets immutable"
+    },
+    {
+      "id": "FR4.3",
+      "source": "inception/requirements-analysis/requirements.md#FR4.3",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs", "crates/oxidean-vcs/src/object_store/mod.rs"],
+      "notes": "per-object GETs resume independently; no packfile-equivalent monolithic response"
+    },
+    {
+      "id": "FR4.4",
+      "source": "inception/requirements-analysis/requirements.md#FR4.4",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "PathFilter sparse-by-default; empty filter is the degenerate full-checkout case"
+    },
+    {
+      "id": "FR7.1",
+      "source": "inception/requirements-analysis/requirements.md#FR7.1",
+      "covered_by": ["crates/oxidean-vcs/src/changeset_store.rs", "crates/oxidean-vcs/src/api.rs"],
+      "notes": "objects then changeset row then derived index; create is lock-free wrt other commits (concurrency tests)"
+    },
+    {
+      "id": "FR7.2",
+      "source": "inception/requirements-analysis/requirements.md#FR7.2",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "merge-base + diff3; machine-readable conflict list; two-pass shape writes zero rows on deterministic abort"
+    },
+    {
+      "id": "FR7.3",
+      "source": "inception/requirements-analysis/requirements.md#FR7.3",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "rebase replays changed files onto new parent and creates the resulting changeset"
+    },
+    {
+      "id": "FR9.1",
+      "source": "inception/requirements-analysis/requirements.md#FR9.1",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "one changeset per Git commit; parents mapped; diffs computed; blobs under VCS hash; git_oid<->changeset link rows"
+    },
+    {
+      "id": "FR9.2",
+      "source": "inception/requirements-analysis/requirements.md#FR9.2",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "export materializes commits + moves branch through the injected protection-verdict port (same path as push); never bare update_ref"
+    },
+    {
+      "id": "FR9.3",
+      "source": "inception/requirements-analysis/requirements.md#FR9.3",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "authorship/timestamps/messages preserved both directions incl. ident sidecars; merge parent structure kept"
+    },
+    {
+      "id": "FR10.2",
+      "source": "inception/requirements-analysis/requirements.md#FR10.2",
+      "covered_by": ["crates/oxidean-vcs/src/lib.rs", "crates/oxidean-cli/src/commands.rs", "packages/api-client/src/index.ts"],
+      "notes": "17 procedures registered in PROCEDURES+dispatch+types+proc_classes+rpc-gen; required_procedures/CLI_PROCS/MCP_PROCS fail-closed; OXIDEAN_VCS_* vars in .env.example + docs/CONFIGURATION.md"
+    },
+    {
+      "id": "FR10.3",
+      "source": "inception/requirements-analysis/requirements.md#FR10.3",
+      "covered_by": ["crates/oxidean-api/src/lib.rs"],
+      "notes": "system.manifest advertises the vcs family; Oxidean-RPC-Version gate unchanged"
+    },
+    {
+      "id": "FR11.3",
+      "source": "inception/requirements-analysis/requirements.md#FR11.3",
+      "covered_by": ["crates/oxidean-api/src/app.rs"],
+      "notes": "object routes mounted under existing /api/ prefix; no proxy table changes"
+    },
+    {
+      "id": "FR12.2",
+      "source": "inception/requirements-analysis/requirements.md#FR12.2",
+      "covered_by": ["crates/oxidean-vcs/src/client/cli.rs", "crates/oxidean-cli/src/commands.rs", "crates/oxidean-cli/src/args.rs"],
+      "notes": "CliSurface owns command logic; oxidean-cli is argv-parse -> call glue only"
+    },
+    {
+      "id": "FR12.3",
+      "source": "inception/requirements-analysis/requirements.md#FR12.3",
+      "covered_by": ["crates/oxidean-cli/src/args.rs", "packages/api-client/src/index.ts"],
+      "notes": "ox api vcs.* raw-RPC escape hatch works; vcs.* methods present in generated client (rpc-sync-check green)"
+    },
+    {
+      "id": "FR14.1",
+      "source": "inception/requirements-analysis/requirements.md#FR14.1",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "object routes accept PAT (Basic/Bearer) + OAuth access tokens; no session cookies; sha256 PAT lookup + FailedAuthLimiter reused"
+    },
+    {
+      "id": "FR14.2",
+      "source": "inception/requirements-analysis/requirements.md#FR14.2",
+      "covered_by": ["crates/oxidean-api/src/lib.rs"],
+      "notes": "explicit proc_classes entries: read/write/admin split mirroring repo permissions; unlisted names fail closed SessionOnly"
+    },
+    {
+      "id": "FR14.3",
+      "source": "inception/requirements-analysis/requirements.md#FR14.3",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "owner/collaborator/read-write permission model reused; no new credential type or per-directory ACLs"
+    },
+    {
+      "id": "FR14.4",
+      "source": "inception/requirements-analysis/requirements.md#FR14.4",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs", "crates/oxidean-vcs/src/object_store/config.rs"],
+      "notes": "FailedAuthLimiter + request-size limits on object PUT; max_object_bytes enforced mid-stream"
+    },
+    {
+      "id": "FR15.1",
+      "source": "inception/requirements-analysis/requirements.md#FR15.1",
+      "covered_by": ["crates/oxidean-vcs/src/lib.rs"],
+      "notes": "one crate owns domain logic, vcs.* handlers, /api/vcs/* routes, ox vcs surface, MCP descriptors"
+    },
+    {
+      "id": "FR15.2",
+      "source": "inception/requirements-analysis/requirements.md#FR15.2",
+      "covered_by": ["crates/oxidean-api/src/app.rs", "crates/oxidean-api/src/lib.rs"],
+      "notes": "engine slot on AppState + dispatch delegation + route mounting, GitBackend precedent"
+    },
+    {
+      "id": "FR15.3",
+      "source": "inception/requirements-analysis/requirements.md#FR15.3",
+      "covered_by": ["crates/oxidean-cli/src/commands.rs", "crates/oxidean-api/src/mcp.rs"],
+      "notes": "CLI and MCP consume crate surfaces as thin shells"
+    },
+    {
+      "id": "FR15.4",
+      "source": "inception/requirements-analysis/requirements.md#FR15.4",
+      "covered_by": ["versioning.toml", "docs/ARCHITECTURE.md"],
+      "notes": "component + scope registered; public surface cites decision IDs"
+    },
+    {
+      "id": "FR16.2",
+      "source": "inception/requirements-analysis/requirements.md#FR16.2",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs", "crates/oxidean-vcs/src/activity.rs"],
+      "notes": "repo_activity vcs.* rows on mutations only; no audit_events writes; reads unrecorded"
+    },
+    {
+      "id": "NFR2",
+      "source": "inception/requirements-analysis/requirements.md#NFR2",
+      "covered_by": ["crates/oxidean-vcs/src/changeset_store.rs", "crates/oxidean-vcs/src/ref_registry.rs"],
+      "notes": "concurrent changesets on one parent succeed; CAS refs coordinate without global write lock"
+    },
+    {
+      "id": "NFR3",
+      "source": "inception/requirements-analysis/requirements.md#NFR3",
+      "covered_by": ["crates/oxidean-vcs/src/object_store/mod.rs", "crates/oxidean-vcs/src/changeset_store.rs"],
+      "notes": "all objects + changesets content-addressed and immutable; hash-verified on read"
+    },
+    {
+      "id": "NFR4",
+      "source": "inception/requirements-analysis/requirements.md#NFR4",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "object/read routes hold no per-request shared mutable state beyond Database pool + config"
+    },
+    {
+      "id": "NFR5",
+      "source": "inception/requirements-analysis/requirements.md#NFR5",
+      "covered_by": ["crates/oxidean-api/src/lib.rs", "crates/oxidean-vcs/src/lib.rs"],
+      "notes": "vcs.* rides the existing Oxidean-RPC-Version SemVer gate; names/codes/shapes wire-stable"
+    },
+    {
+      "id": "AC1.1.3",
+      "source": "inception/user-stories/stories.md#AC1.1.3",
+      "covered_by": ["crates/oxidean-db/src/vcs.rs", "crates/oxidean-vcs/src/api.rs"],
+      "notes": "repo_id keying; Git + VCS coexist on one repo"
+    },
+    {
+      "id": "AC2.4.2",
+      "source": "inception/user-stories/stories.md#AC2.4.2",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "merge3 diff regions; clean/union/conflict classification"
+    },
+    {
+      "id": "AC2.4.3",
+      "source": "inception/user-stories/stories.md#AC2.4.3",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "vcs.no_common_ancestor; ancestor/descendant fast-path; typed rebase-onto-descendant/cycle failure"
+    },
+    {
+      "id": "AC2.5.1",
+      "source": "inception/user-stories/stories.md#AC2.5.1",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "rebase replay per changed file onto new parent"
+    },
+    {
+      "id": "AC2.5.2",
+      "source": "inception/user-stories/stories.md#AC2.5.2",
+      "covered_by": ["crates/oxidean-vcs/src/merge_engine.rs"],
+      "notes": "rebase conflicts emit the same VcsConflictEntry list shape as merge"
+    },
+    {
+      "id": "AC6.1.2",
+      "source": "inception/user-stories/stories.md#AC6.1.2",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "skipped_outside_filter counter; blobs outside the filter never fetched"
+    },
+    {
+      "id": "AC6.1.3",
+      "source": "inception/user-stories/stories.md#AC6.1.3",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "temp-write-then-rename per file; non-empty/conflicting target dir fails typed unless marker present"
+    },
+    {
+      "id": "AC6.2.1",
+      "source": "inception/user-stories/stories.md#AC6.2.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "content-hash keyed <root>/<2-hex>/<rest>.bin layout; bounded"
+    },
+    {
+      "id": "AC6.2.2",
+      "source": "inception/user-stories/stories.md#AC6.2.2",
+      "covered_by": ["crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "configurable bound; hash-verify on read; corrupted entries refetched (test-covered)"
+    },
+    {
+      "id": "AC6.3.1",
+      "source": "inception/user-stories/stories.md#AC6.3.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "modes/exec bit/symlinks materialized per VcsFileMode; Windows degradation explicit"
+    },
+    {
+      "id": "AC7.1.1",
+      "source": "inception/user-stories/stories.md#AC7.1.1",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "lazy import on first oid resolution + explicit backfill converge on identical changeset ids; pinned rename flags"
+    },
+    {
+      "id": "AC7.1.3",
+      "source": "inception/user-stories/stories.md#AC7.1.3",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "authorship/timestamps/messages preserved; >=2-parent merge structure mapped"
+    },
+    {
+      "id": "AC7.2.1",
+      "source": "inception/user-stories/stories.md#AC7.2.1",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "export is explicit; branch move goes through the protection-verdict port"
+    },
+    {
+      "id": "AC7.2.2",
+      "source": "inception/user-stories/stories.md#AC7.2.2",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "protected denials block export like a push; fast-forward required unless force passed"
+    },
+    {
+      "id": "AC7.2.3",
+      "source": "inception/user-stories/stories.md#AC7.2.3",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "committer fields honored from the changeset; no forge-identity/now rewrite"
+    },
+    {
+      "id": "AC7.2.4",
+      "source": "inception/user-stories/stories.md#AC7.2.4",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "exported commits read normally via git fetch/log/show on the moved branch"
+    },
+    {
+      "id": "AC7.4.1",
+      "source": "inception/user-stories/stories.md#AC7.4.1",
+      "covered_by": ["crates/oxidean-vcs/src/git_interop.rs"],
+      "notes": "ident sidecar rows preserve raw author/committer bytes for byte-identical round trip"
+    },
+    {
+      "id": "AC8.5.2",
+      "source": "inception/user-stories/stories.md#AC8.5.2",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "repo ACL enforced on object routes beyond token validity; existing size/rate limits on PUT"
+    },
+    {
+      "id": "AC8.6.2",
+      "source": "inception/user-stories/stories.md#AC8.6.2",
+      "covered_by": ["crates/oxidean-api/src/lib.rs"],
+      "notes": "read-class PAT denied on vcs.changeset_create; succeeds on reads (proc_classes split)"
+    },
+    {
+      "id": "AC8.6.3",
+      "source": "inception/user-stories/stories.md#AC8.6.3",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "owner/collaborator/read-write model; no new credential type"
+    }
+  ]
+}

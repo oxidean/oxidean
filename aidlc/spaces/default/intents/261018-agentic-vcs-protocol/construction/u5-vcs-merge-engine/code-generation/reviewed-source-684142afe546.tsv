@@ -1,0 +1,7 @@
+manifest	ca934378a572520f266bb0b0d2dbdfc9fc3311fe88f26049ef36ea13a9fada2e	-
+	crates/oxidean-vcs/src/changeset_store.rs	100644	903cc85bfc9fc0836539a6cb41a246aa1b92148e487db6732093c1402f1b4770
+	crates/oxidean-vcs/src/lib.rs	100644	4d603009559ffce15cff367d9aa6ce7bd132857db3fd1b2205a30253ec9922e4
+	crates/oxidean-vcs/src/merge_engine.rs	100644	ffcc182a3e14303b42de4ba08cde025ce06dfe9a1385eed177df946b7a7aeb2a
+	crates/oxidean-vcs/src/read_index.rs	100644	d8b7e84519957e584593129110729a6c7f4bb64524c2533e4ae2cc56105714c1
+	crates/oxidean-vcs/src/ref_registry.rs	100644	b37d3b5b1b0334164eacae81c1c3f74f5de01c559a04e330bcdf3c96368ff8fa
+	crates/oxidean-vcs/src/text_diff.rs	100644	21475877799adbd7ba9f293dcbb66f8aad12937e903818a1f25f63ea88910191

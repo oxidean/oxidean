@@ -1,13 +1,13 @@
 # Functional Specification — u6-vcs-git-interop
 
-Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + lazy, converging), changeset→Git export (object-mint + exactly one hook-gated ref move), `ProtectionChecker` trait port, actor-capability propagation. *(Revision 2 — dev pass + architecture review pass-1 integrated.)*
+Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + lazy, converging), changeset→Git export (object-mint + exactly one hook-gated ref move), `ProtectionChecker` trait port, actor-capability propagation. *(Revision 3 — architecture review pass-2 integrated: `ProtectionBlockReasons` verdicts, hook-parity intent, git-side ff fallback, lazy pagination loop, cursor byte cap.)*
 
 ## Workflow table
 
 | ID | Workflow | In | Out |
 |----|----------|----|-----|
 | WF0 | Import claim/cursor state | derived `active`/`cursor` rows | `active: bool`, resumable position |
-| WF1 | `import_chain` — explicit entry | `repo_id, repo, from, cursor, limit` | `ImportPage{imported,cursor?,done,heads}` |
+| WF1 | `import_chain` — explicit entry | `repo_id, repo, from, cursor, limit` | `ImportPage{imported,cursor?,done,skipped_tips,heads}` |
 | WF2 | `lazy_import` — entry | `repo_id, repo, git_oid` | `ImportPage{done:true,cursor:None}` |
 | WF3 | `import_one` — per-commit conversion | `RawCommit` | `ChangesetId` (or prior id) |
 | WF4 | `export` — entry | `repo_id, repo, head, branch, force, actor_capability` | `ExportOutcome` |
@@ -32,7 +32,8 @@ Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + 
        All None ⇒ NotFound. dash-led from ⇒ InvalidInput.
        TipSnapshot.name = resolved shortname (or literal from).
      none ⇒ list_refs (heads+tags) each verify_commit_oid-peeled;
-       peel None (tag→tree/blob) ⇒ drop + warn.
+       peel None (tag→tree/blob) ⇒ drop + warn (logged AND counted —
+       skipped_tips surfaced on the page, never silently absent).
      tips.len() > 512 ⇒ TooLarge.
 4. cursor: present ⇒ parse ⇒ ImportState on malformed; absent ⇒ {v:1,tips,skip:0}.
 5. rev_list(tips, 250_000) → parents-first oids (backend reverses).
@@ -43,9 +44,12 @@ Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + 
      + linked: row.
    NEW skip += consumed window; last_oid = list[new_skip-1];
    imported counts fresh conversions only.
-7. upsert cursor (nonce re-verify; covering_changeset = last cs or None);
+7. upsert cursor (nonce re-verify; covering_changeset = cumulative
+   last-imported cs — stays None on a zero-import page;
+   serialized CursorState bytes > cursor_payload_max_bytes ⇒ TooLarge,
+   never write an unresumable cursor);
    release (nonce-verified);
-   return ImportPage{imported, cursor iff !done, done,
+   return ImportPage{imported, cursor iff !done, done, skipped_tips,
                      heads[{name,git_oid,changeset_id:Option}]}.
 8. error ⇒ release (nonce-verified) still runs.
 ```
@@ -55,9 +59,18 @@ Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + 
 ```text
 1. is_skipped; is_git_oid else InvalidInput; link_lookup ⇒ early {done:true}.
 2. verify_commit_oid(oid) ⇒ None ⇒ NotFound.
-3. import_chain(from=oid-as-tip, cursor=None, limit=cap) — same traversal,
-   claims, early-skip, create, sidecars, link pair ⇒ identical cs ids.
-   Lazy exits when the target oid is linked (done=true, cursor=None).
+3. LOOP: import_chain(tips=[oid], cursor=carry, limit=cap) — the lazy
+   path seeds tips with the verified oid DIRECTLY, bypassing the
+   heads→tags→raw `from` resolution (a branch literally named a
+   40-hex oid would otherwise shadow the target — review3-F7).
+   Same traversal, claims, early-skip, create, sidecars, link pair ⇒
+   identical cs ids. Claim+release once per call (the claim cadence is
+   per import_chain invocation — the loop inherits it per page).
+   After each page: link_lookup(oid) hit ⇒ break {done:true,cursor:None};
+   page.done ∧ target still unlinked ⇒ Internal (enumeration drift —
+   the target was inside the tip cone yet never converted).
+   page.cursor ⇒ carry forward and continue — a target deeper than one
+   import_commit_cap window needs the loop, never a silent early-done (F4).
 ```
 
 ## WF3 `import_one` — per-commit
@@ -71,8 +84,11 @@ Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + 
 4. rows → FileChange[] (A⇒add M/T⇒modify D⇒delete R⇒rename);
    either-side gitlink ⇒ skip+warn; size>blob_max ⇒ TooLarge;
    cat_blob → objects.put → VCS sha256.
-5. validate message UTF-8; refusal inventory (BR6.23); author empty
-   after sanitize ⇒ refuse; rfc3339(a.unix) unrepresentable ⇒ InvalidInput.
+5. validate message UTF-8; refusal inventory (BR6.23); identity
+   ordering pinned ONCE (review3-F4): name/email sanitize
+   {control,0x7f}→'?' FIRST, then refuse `<`/`>` in the sanitized
+   part OR empty post-sanitize; rfc3339(a.unix) unrepresentable
+   ⇒ InvalidInput.
 6. store.create{parents,author,message,committed_at} ⇒ id.
 7. ident:{oid}+ident-cs:{cs} sidecars (Some(cs) covering).
 8. caller: link_insert(oid→cs) + linked:{cs}→oid.
@@ -89,33 +105,57 @@ Unit: `u6-vcs-git-interop` — deterministic Git→changeset import (explicit + 
    topo-order parents-first.
 3. Empty-set fast-path: head already anchored ⇒ old==anchored ⇒ early
    {git_oid:old, commits_count:0}; else continue ff gate w/ anchored tip.
-4. FF gate: old = verify_commit_oid(refs/heads/{branch}):
+4. FF gate (changeset-side, pre-mint): old = verify_commit_oid(refs/heads/{branch}):
    None ⇒ create path.
    Some ⇒ old_cs = link_lookup(old_oid) [FORWARD direction]:
-     miss ⇒ git-only tip ⇒ RefConflict{actual:old}.
-     hit ⇒ is_ancestor_cs(old_cs, head) OR old_cs ∈ set;
-       non-ff ⇒ force ? continue : RefConflict.
+     hit ∧ (old_cs ∈ set OR is_ancestor_cs(old_cs, head)) ⇒ ff.
+     hit-but-not-ancestor OR miss ⇒ defer to git-side test at step 6
+       (a miss is NOT yet RefConflict — an old tip minted by an earlier
+       export whose link row died, or held by an alias twin, is still a
+       legal ff; F7).
 5. Write chain (pre-check — checker needs minted tip): per changeset
    topo-order ⇒ export_one ⇒ link_insert + linked: row.
    link_insert false+stored≠ours (same-oid alias) ⇒ still linked:{ours},
    proceed.
-6. checker.check(repo, refname, old, minted_tip, actor, force)
-   → deny ⇒ Forbidden{verdicts} (surviving link rows point at
-   unreferenced objects — healed by step-2 probe on next run).
-7. Move: !force ⇒ fast_forward_ref(…, actor); force ⇒ force_update_ref.
-   Classified stderr: Denied ⇒ Forbidden{[push_hook]};
-   Conflict ⇒ RefConflict{actual:re-read}.
-8. Return {branch, git_oid:tip, commits_count, before_oid:old}.
+6. FF gate (git-side, post-mint — only when step 4 didn't pass):
+   is_ancestor(old_oid, minted_tip) ⇒ ff (the EXISTING GitBackend::
+   is_ancestor, backend.rs:735 — review3-F1; covers twin-alias holder
+   and unlinked-but-reachable tips; F7). Else the move is non-ff and
+   splits on old's provenance: UNLINKED old ⇒ RefConflict{actual: None}
+   even under force — a genuine git-only tip is never clobbered
+   (force overrides ff-ness, not provenance-blindness). LINKED old ⇒
+   force ? continue : RefConflict{actual: old_cs}. actual NEVER carries
+   a git oid — wire type is Option<ChangesetId> (F8).
+7. checker.check(repo, refname, old, minted_tip, actor) — NO force
+   param; the impl derives intent from (old,new) like check_ref_update
+   (old absent/ZERO⇒Push, else ff-probe⇒Push|ForcePush; F2).
+   → reasons non-empty ⇒ Forbidden{verdicts} (ProtectionBlockReasons
+   verbatim; surviving link rows point at unreferenced objects —
+   healed by step-2 probe on next run).
+8. Move: !force ⇒ fast_forward_ref(…, actor); force ⇒ force_update_ref.
+   Classified stderr: Denied ⇒ Forbidden{verdicts:{reasons:[push_hook]}}
+   + fixed message (never stderr echo);
+   Conflict ⇒ RefConflict{actual: re-read tip's forward-link cs}.
+9. Return {branch, git_oid:tip, commits_count, before_oid:old}.
    gc --prune may reap minted objects pre-move — same exposure as
    commit_files; re-export heals.
+   export_chain_max is an honest bound — deeper chains export by staging
+   through an ancestor head (export an intermediate head first, then
+   re-export; the earlier head anchors the chain).
 ```
 
 ## WF5 `export_one` — per-changeset
 
 ```text
 1. parent oids: cs.parents → linked_lookup each ⇒ Internal on miss.
-2. Build tree: fold manifest_diff(parent-tree, cs-tree) over base_tree;
+2. Build tree: fold a manifest diff (parent-tree vs cs-tree) over
+   base_tree — `manifest_diff` is PRIVATE in merge_engine.rs:1059, so
+   the diff semantics are MIRRORED in-crate (no u5 edit; review3-F6,
+   same discipline as the local is_ancestor_cs);
    nested writes via write_commit recursion (mktree -z, {:06o} modes).
+   index.tree pages accumulate mid-fold — entry count > import_tree_max
+   trips DURING accumulation (u5 full_tree precedent; a per-page check
+   against a per-page limit would never trip; F10).
    Unseen blobs ⇒ objects.get (take blob_max+1) → write_object;
    seen-map keyed by VCS blob hash (dedup — same content one write).
 3. Idents: sidecar hit ⇒ raw bytes; miss ⇒ author→both
@@ -134,8 +174,8 @@ erDiagram
     GitInterop ||--|| ProtectionChecker : "in-crate port (u7 impl)"
     GitInterop ||--o{ ImportLink : "writes (insert-if-absent)"
     GitInterop ||--o{ DerivedIndexRow : "linked/ident/state rows"
-    ImportPage ||--o{ ImportHead : "1..512"
-    ExportOutcome ||--o{ ProtectionVerdict : "denials surface"
+    ImportPage ||--o{ ImportHead : "0..512"
+    ExportOutcome ||--o{ ProtectionBlockReasons : "denials surface"
     Changeset ||--o{ Changeset : "parents (max 64)"
 ```
 
