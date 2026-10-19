@@ -213,6 +213,70 @@ describe("computePlan", () => {
     expect(core.commits.map((c) => c.sha)).toEqual([after]);
   });
 
+  test("beta holds the pending line after a higher prerelease tag", () => {
+    // core-v0.2.0-beta.1 already shipped the pending feat; a later fix-only
+    // cut must continue the pending line (0.2.0-beta.2), never regress to the
+    // carrier's patch line (0.1.1-beta.*).
+    const featSha = "a".repeat(40);
+    const fixSha = "b".repeat(40);
+    const git: Git = {
+      ...FAKE_GIT,
+      prefixedTags: (p) =>
+        p === "core-v"
+          ? [
+              { tag: "core-v0.1.0", version: "0.1.0", commit: "s".repeat(40) },
+              { tag: "core-v0.2.0-beta.1", version: "0.2.0-beta.1", commit: featSha },
+            ]
+          : [],
+    };
+    const plan = computePlan(
+      REGISTRY,
+      [
+        commit(fixSha, "fix(core): y", ["crates/core/b.rs"]),
+        commit(featSha, "feat(core): x", ["crates/core/a.rs"]),
+      ],
+      {
+        rootDir: ROOT,
+        git,
+        channel: "beta",
+        componentBounds: new Map([["core", new Set([fixSha])]]),
+        levelBounds: new Map([["core", new Set([featSha, fixSha])]]),
+      },
+    );
+    const core = plan.entries.find((e) => e.component === "core")!;
+    expect(core.toVersion).toBe("0.2.0-beta.2");
+    expect(core.bump).toBe("minor");
+    expect(core.commits.map((c) => c.sha)).toEqual([fixSha]);
+  });
+
+  test("beta does not ratchet the base off a prerelease tag already inside the stable range", () => {
+    // The feat behind core-v0.2.0-beta.1 already shipped inside stable 0.1.0 —
+    // the pending work is patch-only, so the beta line resumes at 0.1.1-beta.
+    const fixSha = "c".repeat(40);
+    const git: Git = {
+      ...FAKE_GIT,
+      prefixedTags: (p) =>
+        p === "core-v"
+          ? [
+              { tag: "core-v0.1.0", version: "0.1.0", commit: "s".repeat(40) },
+              { tag: "core-v0.2.0-beta.1", version: "0.2.0-beta.1", commit: "t".repeat(40) },
+            ]
+          : [],
+    };
+    const plan = computePlan(
+      REGISTRY,
+      [commit(fixSha, "fix(core): y", ["crates/core/b.rs"])],
+      {
+        rootDir: ROOT,
+        git,
+        channel: "beta",
+        componentBounds: new Map([["core", new Set([fixSha])]]),
+        levelBounds: new Map([["core", new Set([fixSha])]]),
+      },
+    );
+    expect(plan.entries.find((e) => e.component === "core")!.toVersion).toBe("0.1.1-beta.1");
+  });
+
   test("channel alpha → -alpha.1 suffix, counting prior tags", () => {
     const git: Git = {
       ...FAKE_GIT,
@@ -290,5 +354,16 @@ describe("collectRange component bounds", () => {
   test("no channel (detect) keeps the newest tag regardless of prerelease", () => {
     const range = collectRange(ROOT, gitWithTags(), REGISTRY);
     expect(range.componentBounds.get("core")).toEqual(new Set(["t".repeat(40)]));
+  });
+
+  test("beta level bound sits at the latest stable tag, evidence at the newest tag", () => {
+    const range = collectRange(ROOT, gitWithTags(), REGISTRY, undefined, "beta");
+    expect(range.componentBounds.get("core")).toEqual(new Set(["t".repeat(40)]));
+    expect(range.levelBounds.get("core")).toEqual(new Set(["s".repeat(40)]));
+  });
+
+  test("stable channel: level bound is the evidence bound", () => {
+    const range = collectRange(ROOT, gitWithTags(), REGISTRY, undefined, "stable");
+    expect(range.levelBounds).toBe(range.componentBounds);
   });
 });
