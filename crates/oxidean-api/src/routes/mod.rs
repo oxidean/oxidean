@@ -8,6 +8,7 @@ pub mod cli_dist;
 pub mod feeds;
 pub mod git_lfs;
 pub mod git_smart_http;
+pub mod pages_serve;
 pub mod release_assets;
 pub mod repo_raw;
 pub mod template_packs;

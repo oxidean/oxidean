@@ -32,6 +32,7 @@ pub mod notify;
 pub mod oauth;
 pub mod org;
 pub mod packages;
+pub mod pages;
 pub mod pat;
 pub mod project;
 pub mod protection;

@@ -36,6 +36,7 @@ const ALLOWED_EVENTS: &[&str] = &[
     "project_card",
     "discussion",
     "discussion_comment",
+    "page_build",
     "pull_request_review_comment",
     "release",
     "star",

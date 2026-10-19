@@ -98,6 +98,9 @@ pub struct RpcCtx {
     pub actions_artifacts_dir: PathBuf,
     /// `actions/cache` payload root — delete handlers unlink blobs here.
     pub actions_cache_dir: PathBuf,
+    /// Pages site trees (`OXIDEAN_PAGES_DIR`, default `var/pages`) — the
+    /// materialized per-repo sites `/pages/{owner}/{repo}` serves.
+    pub pages_dir: PathBuf,
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
@@ -487,6 +490,14 @@ pub const PROCEDURES: &[&str] = &[
     "discussions.comments.create",
     "discussions.comments.update",
     "discussions.comments.delete",
+    "pages.get",
+    "pages.enable",
+    "pages.update",
+    "pages.disable",
+    "pages.builds.list",
+    "pages.builds.get",
+    "pages.builds.request",
+    "pages.deploys.create",
     "repo.discussions.getEnabled",
     "repo.discussions.setEnabled",
     "issue.assigneeCandidates",
@@ -2135,6 +2146,38 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        "pages.get" => match crate::pages::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.enable" => match crate::pages::enable(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.update" => match crate::pages::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.disable" => match crate::pages::disable(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.builds.list" => match crate::pages::builds_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.builds.get" => match crate::pages::builds_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.builds.request" => match crate::pages::builds_request(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pages.deploys.create" => match crate::pages::deploys_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "issue.assigneeCandidates" => match issue::assignee_candidates(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),

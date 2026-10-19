@@ -16,6 +16,9 @@ use axum::response::{IntoResponse, Response};
 const API_PREFIXES: &[&str] = &[
     "/api/",
     "/uploads",
+    // Pages site trees (`pages.*` materialized sites) — user HTML/JS
+    // forwards verbatim; the API's CSP sandbox carries the hardening.
+    "/pages",
     // Package registry surfaces (D-PKG-01).
     "/v2",
     "/npm",

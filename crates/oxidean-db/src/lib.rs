@@ -28,6 +28,7 @@ pub mod org_invites;
 pub mod org_members;
 pub mod organizations;
 pub mod packages;
+pub mod pages;
 pub mod pat_settings;
 pub mod pats;
 pub mod pool;
@@ -93,6 +94,7 @@ pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
 pub use oxidean_core::DbProbeResponse;
 pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
+pub use pages::{PagesBuildRow, RepoPagesRow};
 pub use pats::PatRow;
 pub use pool::DbPool;
 use pool::DbPool as Pool;
@@ -2316,6 +2318,106 @@ impl Database {
         discussion_id: &str,
     ) -> Result<Vec<String>, String> {
         discussions::list_discussion_label_ids(self.require_pool()?, discussion_id).await
+    }
+
+    pub async fn find_repo_pages(&self, repo_id: &str) -> Result<Option<RepoPagesRow>, String> {
+        pages::find_repo_pages(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_repo_pages(
+        &self,
+        repo_id: &str,
+        build_type: &str,
+        source_branch: &str,
+        source_path: &str,
+        cname: &str,
+        https_enforced: bool,
+    ) -> Result<RepoPagesRow, String> {
+        pages::upsert_repo_pages(
+            self.require_pool()?,
+            repo_id,
+            build_type,
+            source_branch,
+            source_path,
+            cname,
+            https_enforced,
+        )
+        .await
+    }
+
+    pub async fn delete_repo_pages(&self, repo_id: &str) -> Result<(), String> {
+        pages::delete_repo_pages(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_pages_build(
+        &self,
+        id: &str,
+        repo_id: &str,
+        build_type: &str,
+        commit_sha: &str,
+        branch: &str,
+        path: &str,
+        pusher_id: Option<&str>,
+        run_id: Option<&str>,
+    ) -> Result<PagesBuildRow, String> {
+        pages::insert_pages_build(
+            self.require_pool()?,
+            id,
+            repo_id,
+            build_type,
+            commit_sha,
+            branch,
+            path,
+            pusher_id,
+            run_id,
+        )
+        .await
+    }
+
+    pub async fn finish_pages_build(
+        &self,
+        id: &str,
+        status: &str,
+        url: &str,
+        error_message: &str,
+        duration_ms: i64,
+    ) -> Result<Option<PagesBuildRow>, String> {
+        pages::finish_pages_build(
+            self.require_pool()?,
+            id,
+            status,
+            url,
+            error_message,
+            duration_ms,
+        )
+        .await
+    }
+
+    pub async fn find_pages_build(&self, id: &str) -> Result<Option<PagesBuildRow>, String> {
+        pages::find_pages_build(self.require_pool()?, id).await
+    }
+
+    pub async fn latest_pages_build(
+        &self,
+        repo_id: &str,
+        status: Option<&str>,
+    ) -> Result<Option<PagesBuildRow>, String> {
+        pages::latest_pages_build(self.require_pool()?, repo_id, status).await
+    }
+
+    pub async fn list_pages_builds(
+        &self,
+        repo_id: &str,
+        status: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<PagesBuildRow>, String> {
+        pages::list_pages_builds(self.require_pool()?, repo_id, status, limit).await
+    }
+
+    pub async fn delete_pages_builds_for_repo(&self, repo_id: &str) -> Result<(), String> {
+        pages::delete_pages_builds_for_repo(self.require_pool()?, repo_id).await
     }
 
     pub async fn insert_issue_revision(
@@ -5222,6 +5324,13 @@ impl Database {
         token_hash: &str,
     ) -> Result<Option<ActionJobTokenRow>, String> {
         actions::find_action_job_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_action_job_token_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_action_job_token_by_id(self.require_pool()?, id).await
     }
 
     /// Bind the per-job OIDC request-token hash (`ACTIONS_ID_TOKEN_REQUEST_TOKEN`).

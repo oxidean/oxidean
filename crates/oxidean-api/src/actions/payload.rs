@@ -658,6 +658,41 @@ pub fn discussion_payload(
     payload
 }
 
+/// `page_build` payload — GitHub's event is typeless (no `action` key): the
+/// `build` embed carries the completed build's final `status`
+/// (`built` | `errored`), `error.message`, `commit`, `duration`, `pusher`.
+pub fn page_build_payload(
+    build: &oxidean_db::PagesBuildRow,
+    pusher_login: Option<&str>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let error = if build.status == "errored" {
+        json!({ "message": build.error_message })
+    } else {
+        json!({ "message": JsonValue::Null })
+    };
+    let pusher = match pusher_login {
+        Some(login) => json!({ "login": login }),
+        None => JsonValue::Null,
+    };
+    json!({
+        "id": build.id,
+        "build": {
+            "url": build.url,
+            "status": build.status,
+            "error": error,
+            "commit": build.commit_sha,
+            "duration": build.duration_ms,
+            "created_at": build.created_at,
+            "updated_at": build.updated_at,
+            "pusher": pusher,
+        },
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
 /// `discussion_comment` payload — `action` is `created`/`edited`/`deleted`;
 /// `discussion` carries the same embed as `discussion_payload`.
 #[allow(clippy::too_many_arguments)]

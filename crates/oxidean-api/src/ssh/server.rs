@@ -431,7 +431,24 @@ impl Handler for SshHandler {
                                     false,
                                 )
                                 .await;
+                                // GitHub Pages parity: pushes to the
+                                // configured legacy source branch rebuild
+                                // the site + emit `page_build`.
                                 let actions_enabled = crate::actions::env_actions_enabled();
+                                crate::pages::rebuild_after_push(
+                                    &db,
+                                    git.as_ref(),
+                                    &repos_dir,
+                                    &crate::pages::resolve_pages_dir(),
+                                    &env_name,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &user.id,
+                                    &updates,
+                                    false,
+                                    actions_enabled,
+                                )
+                                .await;
                                 let git_mirror = git.clone();
                                 crate::actions::notify_push_actions(
                                     &db,

@@ -724,8 +724,11 @@ async fn authorize_and_cgi(
                         let updates_wh = updates.clone();
                         let updates_pull = updates.clone();
                         let updates_act = updates.clone();
+                        let updates_pages = updates.clone();
                         let git_act = state.git.clone();
                         let git_ref = state.git.clone();
+                        let git_pages = state.git.clone();
+                        let pages_dir = state.pages_dir.clone();
                         let suppress_actions = auth.is_job_token;
                         let is_wiki_push = resolved.is_wiki;
                         let base_name = resolved.row.name.clone();
@@ -810,6 +813,23 @@ async fn authorize_and_cgi(
                                 &updates_pull,
                                 &env_name,
                                 suppress_actions,
+                            )
+                            .await;
+                            // GitHub Pages parity: pushes to the configured
+                            // legacy source branch rebuild the site + emit
+                            // `page_build`.
+                            crate::pages::rebuild_after_push(
+                                &db,
+                                git_pages.as_ref(),
+                                &repos_dir,
+                                &pages_dir,
+                                &env_name,
+                                &repo_id,
+                                &owner_slug,
+                                &uid,
+                                &updates_pages,
+                                suppress_actions,
+                                actions_enabled,
                             )
                             .await;
                         });

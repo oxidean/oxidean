@@ -25,6 +25,7 @@ const EVENT_OPTIONS = [
   { id: "project_card", label: "project_card" },
   { id: "discussion", label: "discussion" },
   { id: "discussion_comment", label: "discussion_comment" },
+  { id: "page_build", label: "page_build" },
   { id: "pull_request_review_comment", label: "pull_request_review_comment" },
   { id: "release", label: "release" },
   { id: "star", label: "star" },

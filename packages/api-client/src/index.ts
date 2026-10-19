@@ -3359,6 +3359,101 @@ export type DiscussionCommentUpdateRequest = {
   body: string;
 };
 
+export type PagesSourcePublic = {
+  branch: string;
+  /** `/` (repo root) or `/docs` — GitHub's only legacy subtrees. */
+  path: string;
+};
+
+export type RepoPagesPublic = {
+  repo_id: string;
+  /** `legacy` | `workflow`. */
+  build_type: string;
+  source: PagesSourcePublic;
+  /** `built` | `building` | `errored` — the newest build's state. */
+  status?: string;
+  cname: string;
+  custom_404: boolean;
+  https_enforced: boolean;
+  /** `/pages/{owner}/{repo}/` — the served site root. */
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PagesBuildPublic = {
+  id: string;
+  repo_id: string;
+  /** `building` | `built` | `errored`. */
+  status: string;
+  /** `legacy` | `workflow`. */
+  build_type: string;
+  commit: string;
+  branch: string;
+  path: string;
+  url: string;
+  error_message?: string;
+  duration_ms: number;
+  pusher_id?: string;
+  pusher_username?: string;
+  run_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PagesRepoRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoPagesEnableRequest = {
+  owner: string;
+  name: string;
+  /** `legacy` (default) | `workflow`. */
+  build_type?: string;
+  source?: PagesSourcePublic;
+};
+
+export type RepoPagesUpdateRequest = {
+  owner: string;
+  name: string;
+  build_type?: string;
+  source?: PagesSourcePublic;
+  cname?: string;
+  https_enforced?: boolean;
+};
+
+export type RepoPagesDeleteResponse = {
+  ok: boolean;
+};
+
+export type PagesBuildsListRequest = {
+  owner: string;
+  name: string;
+  /** `built` | `errored` | `building` filter. */
+  status?: string;
+  /** Page size cap (server clamps to 100, default 30 like GitHub). */
+  limit?: number;
+};
+
+export type PagesBuildsListResponse = {
+  builds: PagesBuildPublic[];
+};
+
+export type PagesBuildGetRequest = {
+  owner: string;
+  name: string;
+  /** Build id, or `"latest"` for the newest build of any status. */
+  build: string;
+};
+
+export type PagesDeployCreateRequest = {
+  owner: string;
+  name: string;
+  /** Artifact name to publish (default `github-pages`). */
+  artifact?: string;
+};
+
 export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
@@ -5821,6 +5916,28 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<DiscussionCommentPublic>(opts, "discussions.comments.update", input),
         delete: (input: DiscussionCommentRefRequest) =>
           rpcCall<DiscussionDeleteResponse>(opts, "discussions.comments.delete", input),
+      },
+    },
+    pages: {
+      get: (input: PagesRepoRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.get", input),
+      enable: (input: RepoPagesEnableRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.enable", input),
+      update: (input: RepoPagesUpdateRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.update", input),
+      disable: (input: PagesRepoRequest) =>
+        rpcCall<RepoPagesDeleteResponse>(opts, "pages.disable", input),
+      builds: {
+        list: (input: PagesBuildsListRequest) =>
+          rpcCall<PagesBuildsListResponse>(opts, "pages.builds.list", input),
+        get: (input: PagesBuildGetRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.builds.get", input),
+        request: (input: PagesRepoRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.builds.request", input),
+      },
+      deploys: {
+        create: (input: PagesDeployCreateRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.deploys.create", input),
       },
     },
     pull: {

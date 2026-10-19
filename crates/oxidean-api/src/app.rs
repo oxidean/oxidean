@@ -26,7 +26,7 @@ use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
 use crate::routes::{
     action_badge, action_downloads, auth_callbacks, avatar, cli_dist, feeds, git_lfs,
-    git_smart_http, release_assets, repo_raw, template_packs,
+    git_smart_http, pages_serve, release_assets, repo_raw, template_packs,
 };
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
@@ -62,6 +62,9 @@ pub struct AppState {
     /// Per-repo cache ceiling (`OXIDEAN_ACTIONS_CACHE_MAX_BYTES`, default
     /// 10 GiB) — LRU eviction past this point.
     pub actions_cache_max_bytes: u64,
+    /// Pages materialized site trees (`OXIDEAN_PAGES_DIR`, default
+    /// `var/pages`) — `pages.*` builds publish here, `pages_serve` reads.
+    pub pages_dir: PathBuf,
     /// Max bytes for a single artifact upload (default 2 GiB).
     pub actions_artifact_max_bytes: u64,
     /// Days an artifact is retained (default 90 — GitHub's own default).
@@ -198,6 +201,7 @@ impl AppState {
             actions_artifacts_dir,
             actions_cache_dir: crate::actions::cache::resolve_cache_dir(),
             actions_cache_max_bytes: crate::actions::cache::default_cache_max_bytes(),
+            pages_dir: crate::pages::resolve_pages_dir(),
             actions_artifact_max_bytes,
             actions_artifact_retention_days,
             actions_enabled,
@@ -265,6 +269,11 @@ impl AppState {
 
     pub fn with_actions_cache_max_bytes(mut self, max: u64) -> Self {
         self.actions_cache_max_bytes = max;
+        self
+    }
+
+    pub fn with_pages_dir(mut self, dir: PathBuf) -> Self {
+        self.pages_dir = dir;
         self
     }
 
@@ -426,6 +435,13 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/repos/{owner}/{repo}/actions/workflows/{workflow}/badge.svg",
             get(action_badge::workflow_badge),
         )
+        // Pages sites — /pages/{owner}/{repo}/{*path} serves the materialized
+        // tree (edge routes the reserved `/pages` prefix here; the web tier
+        // proxies it too). Same-origin user HTML is sandboxed via CSP inside
+        // the handler.
+        .route("/pages/{owner}/{repo}", get(pages_serve::redirect_root))
+        .route("/pages/{owner}/{repo}/", get(pages_serve::serve_index))
+        .route("/pages/{owner}/{repo}/{*path}", get(pages_serve::serve))
         // Smart HTTP — D-18/D-22: only on /{owner}/{repo}.git (segment includes .git suffix)
         .route(
             "/{owner}/{repo_git}/info/refs",
@@ -588,6 +604,7 @@ pub(crate) fn build_rpc_ctx_with_session(
         actions_log_dir: state.actions_log_dir.clone(),
         actions_artifacts_dir: state.actions_artifacts_dir.clone(),
         actions_cache_dir: state.actions_cache_dir.clone(),
+        pages_dir: state.pages_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
@@ -702,6 +719,7 @@ pub(crate) async fn build_rpc_ctx(
         actions_log_dir: state.actions_log_dir.clone(),
         actions_artifacts_dir: state.actions_artifacts_dir.clone(),
         actions_cache_dir: state.actions_cache_dir.clone(),
+        pages_dir: state.pages_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,

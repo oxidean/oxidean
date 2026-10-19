@@ -681,10 +681,11 @@ fn apply_event(
         // Lifecycle events dispatched from domain mutations — the shared
         // `LifecycleEvent` fan-out. `types` narrows the activity types the
         // workflow fires on; empty = GitHub's default (all).
-        // `gollum` has no activity types on GitHub — a `types:` list is
-        // ignored, not an error, so the lifecycle entry carries no filter.
-        "gollum" => {
-            t.lifecycle.insert("gollum".to_string(), Vec::new());
+        // `gollum`/`page_build` have no activity types on GitHub — a `types:`
+        // list is ignored, not an error, so the lifecycle entry carries no
+        // filter.
+        name @ ("gollum" | "page_build") => {
+            t.lifecycle.insert(name.to_string(), Vec::new());
         }
         name @ ("release"
         | "issues"
@@ -1816,8 +1817,8 @@ jobs:
 name: CI
 on:
   push:
-  page_build:
   merge_group:
+  unfamiliar_event:
     types: [checks_requested]
 jobs:
   a:
@@ -1833,12 +1834,14 @@ jobs:
         assert!(
             doc.warnings
                 .iter()
-                .any(|w| w.contains("on.page_build") && w.contains("unsupported event")),
+                .any(|w| w.contains("on.merge_group") && w.contains("unsupported event")),
             "missing unsupported-event warning: {:?}",
             doc.warnings
         );
         assert!(
-            doc.warnings.iter().any(|w| w.contains("on.merge_group")),
+            doc.warnings
+                .iter()
+                .any(|w| w.contains("on.unfamiliar_event")),
             "map entry with filters warns too: {:?}",
             doc.warnings
         );

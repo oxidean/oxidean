@@ -3626,6 +3626,56 @@ pub async fn find_action_job_token_by_hash(
     }
 }
 
+pub async fn find_action_job_token_by_id(
+    pool: &DbPool,
+    id: &str,
+) -> Result<Option<ActionJobTokenRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, perms_json, oidc_request_hash, token_hash,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
+                        expires_at,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', revoked_at) AS revoked_at
+                 FROM action_job_tokens WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, perms_json, oidc_request_hash, token_hash,
+                        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+                        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
+                        to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS revoked_at
+                 FROM action_job_tokens WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, perms_json, oidc_request_hash, token_hash,
+                        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+                        DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
+                        DATE_FORMAT(revoked_at, '%Y-%m-%dT%H:%i:%sZ') AS revoked_at
+                 FROM action_job_tokens WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+    }
+}
+
 /// Revoke a job's token (terminal status or re-mint replacement). Idempotent —
 /// already-revoked rows are untouched.
 pub async fn revoke_action_job_token_for_job(pool: &DbPool, job_id: &str) -> Result<(), String> {

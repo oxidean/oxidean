@@ -674,6 +674,9 @@ const RESERVED_USERNAMES: &[&str] = &[
     "v2",
     "npm",
     "generic",
+    // Pages site serving prefix — `/pages/{owner}/{repo}` is API-owned; an
+    // owner named `pages` would claim the namespace.
+    "pages",
     // Static-asset dirs under apps/web/dist — an owner named e.g. `brand`
     // would claim `/brand/*` asset space and its own dotted repos would 404
     // (`/{owner}/{repo}` prefers existing dist entries). `_astro` needs no

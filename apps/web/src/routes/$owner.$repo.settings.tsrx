@@ -16,6 +16,7 @@ import { GitQuotaSettingsPanel } from "@/components/repo/git-quota-settings-pane
 import { LfsSettingsPanel } from "@/components/repo/lfs-settings-panel";
 import { TemplateRepoSettingsPanel } from "@/components/repo/template-repo-settings-panel";
 import { MergeSettingsPanel } from "@/components/repo/merge-settings-panel";
+import { PagesSettingsPanel } from "@/components/repo/pages-settings-panel";
 import { OwnerLookup } from "@/components/repo/owner-lookup";
 import { TopicChipsInput } from "@/components/repo/topics-input";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
@@ -398,6 +399,9 @@ function RepoSettingsPageContent() @{
           </div>
           <div id="repo-settings-actions" className="scroll-mt-28">
             <ActionsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+          <div id="repo-settings-pages" className="scroll-mt-28">
+            <PagesSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
           </div>
 
           <div id="repo-settings-merge" className="scroll-mt-28">

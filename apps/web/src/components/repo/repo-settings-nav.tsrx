@@ -19,6 +19,7 @@ const REPO_SETTINGS_SECTIONS: RepoSettingsSection[] = [
   { id: "repo-settings-template", label: "Template repository" },
   { id: "repo-settings-features", label: "Features" },
   { id: "repo-settings-actions", label: "Actions" },
+  { id: "repo-settings-pages", label: "Pages" },
   { id: "repo-settings-merge", label: "Pull request merges" },
   { id: "repo-settings-webhooks", label: "Webhooks" },
   { id: "repo-settings-mirror", label: "Two-way mirror" },

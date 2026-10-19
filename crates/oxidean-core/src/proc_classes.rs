@@ -66,6 +66,12 @@ pub enum PatProc {
     /// Discussion/category/comment mutations (GitHub Discussions surface).
     /// Classic `repo`; FG `discussions:write`.
     DiscussionsWrite,
+    /// Pages site config + build history reads. Classic `repo`; FG `pages`.
+    PagesRead,
+    /// Pages config mutations, manual builds, and the `deploys.create`
+    /// job-token publish seam (GitHub `pages` perm). Classic `repo`; FG
+    /// `pages:write`.
+    PagesWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -363,6 +369,13 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "discussions.comments.update"
         | "discussions.comments.delete" => DiscussionsWrite,
 
+        "pages.get" | "pages.builds.list" | "pages.builds.get" => PagesRead,
+        "pages.enable"
+        | "pages.update"
+        | "pages.disable"
+        | "pages.builds.request"
+        | "pages.deploys.create" => PagesWrite,
+
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
         "repo.actions.workflows.create" => ActionsWrite,
@@ -522,8 +535,8 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
         | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
         | ChecksRead | ChecksWrite | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite
-        | ProjectsRead | ProjectsWrite | DiscussionsRead | DiscussionsWrite | RepoAdminRead
-        | RepoAdminWrite => &[S::Repo],
+        | ProjectsRead | ProjectsWrite | DiscussionsRead | DiscussionsWrite | PagesRead
+        | PagesWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -574,6 +587,7 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         ChecksRead | ChecksWrite => "checks",
         ProjectsRead | ProjectsWrite => "repository_projects",
         DiscussionsRead | DiscussionsWrite => "discussions",
+        PagesRead | PagesWrite => "pages",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",
