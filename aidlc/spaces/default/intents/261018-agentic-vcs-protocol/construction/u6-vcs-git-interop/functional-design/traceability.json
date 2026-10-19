@@ -1,0 +1,177 @@
+{
+  "stage": "functional-design",
+  "unit": "u6-vcs-git-interop",
+  "upstream_ids": [
+    "AC7.1.1",
+    "AC7.1.2",
+    "AC7.1.3",
+    "AC7.2.1",
+    "AC7.2.2",
+    "AC7.2.3",
+    "AC7.2.4",
+    "AC7.4.1",
+    "AC7.4.2",
+    "FR9.1",
+    "FR9.2",
+    "FR9.3",
+    "FR9.4",
+    "FR2.2",
+    "FR7.4",
+    "C3",
+    "NFR8",
+    "NFR10",
+    "US7.1",
+    "US7.2",
+    "US7.4",
+    "contract:vcs.git_import",
+    "contract:vcs.git_export",
+    "contract:git_interop",
+    "BR6.1-BR6.28"
+  ],
+  "coverage": [
+    {
+      "id": "AC7.1.1",
+      "status": "OK",
+      "target": "WF1 + WF3 + BR6.1/BR6.10",
+      "note": "one changeset per git commit; parents-first enumeration maps parents via links; name-status file lists; blobs under VCS sha256; git_oid↔changeset_id queryable (u2 link facades + derived linked: reverse rows)"
+    },
+    {
+      "id": "AC7.1.2",
+      "status": "OK",
+      "target": "WF2 + WF3 + BR6.2/BR6.3",
+      "note": "lazy = same import_one code path (structural convergence); -r --name-status -M -z flags pinned in the backend, identical on both paths"
+    },
+    {
+      "id": "AC7.1.3",
+      "status": "OK",
+      "target": "WF3 + BR6.5/BR6.9/BR6.13",
+      "note": "authorship/timestamps/messages preserved (ident sidecars + committed_at); >=2-parent merges keep all parents in stored order, changes vs parents[0]"
+    },
+    {
+      "id": "AC7.2.1",
+      "status": "OK",
+      "target": "WF4 + BR6.14/BR6.17",
+      "note": "write_object/write_commit plumbing into the bare repo + ONE ref move; never N pushes, never automatic mirroring; per-node index.tree for correct DAG trees"
+    },
+    {
+      "id": "AC7.2.2",
+      "status": "OK",
+      "target": "WF4.4-7 + BR6.15/BR6.16/BR6.17/BR6.20",
+      "note": "write->check->move ordering (checker needs the minted tip); verdict payload verbatim + classified hook denial as second line; force=ff-override-only; actor capability + force-intent threaded to check; ff gate resolves old tip via forward link_lookup; empty-set fast-path"
+    },
+    {
+      "id": "AC7.2.3",
+      "status": "OK",
+      "target": "WF5 + BR6.12",
+      "note": "author/committer honored from changeset (+ ident sidecar restore for imported history); not rewritten to forge-identity/now"
+    },
+    {
+      "id": "AC7.2.4",
+      "status": "OK",
+      "target": "WF4.8 + BR6.17",
+      "note": "plumbing writes real objects — fetch/log/show read normally; C3 invariant holds (git path untouched)"
+    },
+    {
+      "id": "AC7.4.1",
+      "status": "OK",
+      "target": "WF5.2 + BR6.12/BR6.13",
+      "note": "byte-identical author/timestamps/messages via RAW-byte ident sidecars (base64 author+committer) — survives sanitization, not just instant-identical"
+    },
+    {
+      "id": "AC7.4.2",
+      "status": "OK",
+      "target": "WF3.5-7 + BR6.2",
+      "note": "non-platform authors hash through canonical 'Name <email>' compose; shared import_one makes lazy/backfill ids converge by construction"
+    },
+    {
+      "id": "FR9.1",
+      "status": "OK",
+      "target": "WF1/WF3 + BR6.1-6.13",
+      "note": "import: one changeset per commit, mapped parents, name-status lists, VCS-hashed blobs, mapping table"
+    },
+    {
+      "id": "FR9.2",
+      "status": "OK",
+      "target": "WF4 + BR6.14-6.17",
+      "note": "explicit-only export; same protection verdict path as push; never bypasses"
+    },
+    {
+      "id": "FR9.3",
+      "status": "OK",
+      "target": "WF3/WF5 + BR6.12/BR6.13",
+      "note": "authorship, timestamps, messages, merge parent structure preserved both directions"
+    },
+    {
+      "id": "FR9.4",
+      "status": "OK",
+      "target": "WF2 + BR6.2",
+      "note": "lazy + explicit converge — single shared conversion function"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "WF3.7 + BR6.2",
+      "note": "canonical_changeset recipe unchanged — imports mint ids through the same hash inputs"
+    },
+    {
+      "id": "FR7.4",
+      "status": "OK",
+      "target": "WF3.7 + BR6.1/BR6.4",
+      "note": "atomicity per changeset inherited from ChangesetStore::create's single tx; idempotent re-import converges"
+    },
+    {
+      "id": "C3",
+      "status": "OK",
+      "target": "WF4.7 + BR6.17",
+      "note": "export moves refs only via hook-driven push path; git behavior unchanged; no automatic mirroring"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "BR6.22",
+      "note": "tracing spans + gitlink warns + typed errors, no content/path leakage"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "Q4/WF3 + testing notes",
+      "note": "convergence + round-trip pins are the test strategy's spine (nextest, real SQLite, temp git repos)"
+    },
+    {
+      "id": "US7.1",
+      "status": "OK",
+      "target": "WF1/WF2/WF3",
+      "note": "explicit + lazy import own the story; u7 owns the trigger seam"
+    },
+    {
+      "id": "US7.2",
+      "status": "OK",
+      "target": "WF4/WF5",
+      "note": "export + hooked ref move; u7 injects the real ProtectionChecker"
+    },
+    {
+      "id": "US7.4",
+      "status": "OK",
+      "target": "BR6.2/BR6.12/BR6.13",
+      "note": "deterministic bridge both directions; sidecars close the byte-identical gap"
+    },
+    {
+      "id": "contract:vcs.git_import",
+      "status": "OK",
+      "target": "WF1 + entities ImportPage + BR6.6/BR6.7/BR6.19",
+      "note": "in/out shape {imported,cursor,done,heads}; <=1000 cap; snapshot cursor advances by consumed window (imported=fresh only) + last_oid continuity + import_state semantics bound; heads[].changeset_id|null while a tip is unimported (contract errata for u7)"
+    },
+    {
+      "id": "contract:vcs.git_export",
+      "status": "OK",
+      "target": "WF4 + entities ExportOutcome + BR6.15-6.17",
+      "note": "{branch,git_oid} out; forbidden{verdicts} on denial; force=ff-only"
+    },
+    {
+      "id": "contract:git_interop",
+      "status": "OK",
+      "target": "Q1 + WF1/WF2/WF4",
+      "note": "import_chain/lazy_import/export signatures match the u6->u7 trait sketch"
+    }
+  ]
+}
