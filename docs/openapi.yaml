@@ -2332,6 +2332,1747 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/secrets:
+    get:
+      tags:
+      - actions
+      summary: List repo secrets, GitHub shape (repo.actions.secrets.list)
+      operationId: actions/listRepoSecrets
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  secrets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - secrets
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/secrets/public-key:
+    get:
+      tags:
+      - actions
+      summary: Repo sealed-box public key (repo.actions.secrets.publicKey)
+      operationId: actions/getRepoPublicKey
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_id:
+                    type: string
+                  key:
+                    type: string
+                required:
+                - key_id
+                - key
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/secrets/{secret_name}:
+    get:
+      tags:
+      - actions
+      summary: One repo secret's metadata (repo.actions.secrets.list)
+      operationId: actions/getRepoSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Create/update a repo secret (repo.actions.secrets.put)
+      operationId: actions/createOrUpdateRepoSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encrypted_value:
+                  type: string
+                key_id:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete a repo secret (repo.actions.secrets.delete)
+      operationId: actions/deleteRepoSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}/secrets:
+    get:
+      tags:
+      - actions
+      summary: List environment secrets (repo.actions.environments.secretsList)
+      operationId: actions/listEnvironmentSecrets
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  secrets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - secrets
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key:
+    get:
+      tags:
+      - actions
+      summary: Environment sealed-box public key (repo.actions.environments.secretsPublicKey)
+      operationId: actions/getEnvironmentPublicKey
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_id:
+                    type: string
+                  key:
+                    type: string
+                required:
+                - key_id
+                - key
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}:
+    get:
+      tags:
+      - actions
+      summary: One environment secret's metadata (repo.actions.environments.secretsList)
+      operationId: actions/getEnvironmentSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Create/update an environment secret (repo.actions.environments.secretsPut)
+      operationId: actions/createOrUpdateEnvironmentSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encrypted_value:
+                  type: string
+                key_id:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an environment secret (repo.actions.environments.secretsDelete)
+      operationId: actions/deleteEnvironmentSecret
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/secrets:
+    get:
+      tags:
+      - actions
+      summary: List org secrets (org.actions.secrets.list)
+      operationId: actions/listOrgSecrets
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  secrets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - secrets
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/secrets/public-key:
+    get:
+      tags:
+      - actions
+      summary: Org sealed-box public key (org.actions.secrets.publicKey)
+      operationId: actions/getOrgPublicKey
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_id:
+                    type: string
+                  key:
+                    type: string
+                required:
+                - key_id
+                - key
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/secrets/{secret_name}:
+    get:
+      tags:
+      - actions
+      summary: One org secret's metadata (org.actions.secrets.list)
+      operationId: actions/getOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+                  visibility:
+                    type: string
+                  selected_repositories_url:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Create/update an org secret (org.actions.secrets.put)
+      operationId: actions/createOrUpdateOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encrypted_value:
+                  type: string
+                key_id:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an org secret (org.actions.secrets.delete)
+      operationId: actions/deleteOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/secrets/{secret_name}/selected-repositories:
+    get:
+      tags:
+      - actions
+      summary: Repos a 'selected' org secret reaches (org.actions.secrets.listRepos)
+      operationId: actions/listSelectedReposForOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  repositories:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Replace an org secret's selected repo set (org.actions.secrets.setRepos)
+      operationId: actions/setSelectedReposForOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+              required:
+              - selected_repository_ids
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/secrets/{secret_name}/selected-repositories/{repository_id}:
+    put:
+      tags:
+      - actions
+      summary: Add a repo to an org secret's selected set (org.actions.secrets.setRepos)
+      operationId: actions/addSelectedRepoToOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repository_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Remove a repo from an org secret's selected set (org.actions.secrets.setRepos)
+      operationId: actions/removeSelectedRepoFromOrgSecret
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repository_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/variables:
+    get:
+      tags:
+      - actions
+      summary: List repo variables (repo.actions.variables.list)
+      operationId: actions/listRepoVariables
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  variables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - variables
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Create a repo variable — 409 on duplicate (repo.actions.variables.put)
+      operationId: actions/createRepoVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/variables/{variable_name}:
+    get:
+      tags:
+      - actions
+      summary: One repo variable (repo.actions.variables.list)
+      operationId: actions/getRepoVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - actions
+      summary: Update a repo variable (repo.actions.variables.put)
+      operationId: actions/updateRepoVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete a repo variable (repo.actions.variables.delete)
+      operationId: actions/deleteRepoVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}/variables:
+    get:
+      tags:
+      - actions
+      summary: List environment variables (repo.actions.environments.variablesList)
+      operationId: actions/listEnvironmentVariables
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  variables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - variables
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Create an environment variable (repo.actions.environments.variablesPut)
+      operationId: actions/createEnvironmentVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}/variables/{variable_name}:
+    get:
+      tags:
+      - actions
+      summary: One environment variable (repo.actions.environments.variablesList)
+      operationId: actions/getEnvironmentVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - actions
+      summary: Update an environment variable (repo.actions.environments.variablesPut)
+      operationId: actions/updateEnvironmentVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an environment variable (repo.actions.environments.variablesDelete)
+      operationId: actions/deleteEnvironmentVariable
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/variables:
+    get:
+      tags:
+      - actions
+      summary: List org variables (org.actions.variables.list)
+      operationId: actions/listOrgVariables
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  variables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                required:
+                - total_count
+                - variables
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Create an org variable (org.actions.variables.put)
+      operationId: actions/createOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/variables/{variable_name}:
+    get:
+      tags:
+      - actions
+      summary: One org variable (org.actions.variables.list)
+      operationId: actions/getOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+                  visibility:
+                    type: string
+                  selected_repositories_url:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - actions
+      summary: Update an org variable (org.actions.variables.put)
+      operationId: actions/updateOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                value:
+                  type: string
+                visibility:
+                  type: string
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an org variable (org.actions.variables.delete)
+      operationId: actions/deleteOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/variables/{variable_name}/selected-repositories:
+    get:
+      tags:
+      - actions
+      summary: Repos a 'selected' org variable reaches (org.actions.variables.listRepos)
+      operationId: actions/listSelectedReposForOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  repositories:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Replace an org variable's selected repo set (org.actions.variables.setRepos)
+      operationId: actions/setSelectedReposForOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                selected_repository_ids:
+                  type: array
+                  items:
+                    type: string
+              required:
+              - selected_repository_ids
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/actions/variables/{variable_name}/selected-repositories/{repository_id}:
+    put:
+      tags:
+      - actions
+      summary: Add a repo to an org variable's selected set (org.actions.variables.setRepos)
+      operationId: actions/addSelectedRepoToOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repository_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Remove a repo from an org variable's selected set (org.actions.variables.setRepos)
+      operationId: actions/removeSelectedRepoFromOrgVariable
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: variable_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repository_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments:
+    get:
+      tags:
+      - actions
+      summary: List environments (repo.actions.environments.list)
+      operationId: actions/listEnvironments
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  environments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {}
+                        name:
+                          type: string
+                        url:
+                          type: string
+                        html_url:
+                          type: string
+                        created_at:
+                          type: string
+                        updated_at:
+                          type: string
+                        protection_rules:
+                          type: array
+                          items:
+                            type: object
+                        deployment_branch_policy:
+                          type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/environments/{environment_name}:
+    get:
+      tags:
+      - actions
+      summary: One environment (repo.actions.environments.get)
+      operationId: actions/getEnvironment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {}
+                  name:
+                    type: string
+                  url:
+                    type: string
+                  html_url:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+                  protection_rules:
+                    type: array
+                    items:
+                      type: object
+                  deployment_branch_policy:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Create/update an environment (repo.actions.environments.upsert)
+      operationId: actions/createOrUpdateEnvironment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wait_timer:
+                  type: integer
+                prevent_self_review:
+                  type: boolean
+                reviewers:
+                  type: array
+                  items:
+                    type: object
+                deployment_branch_policy:
+                  type: object
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {}
+                  name:
+                    type: string
+                  url:
+                    type: string
+                  html_url:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+                  protection_rules:
+                    type: array
+                    items:
+                      type: object
+                  deployment_branch_policy:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete an environment (repo.actions.environments.delete)
+      operationId: actions/deleteEnvironment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: environment_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/statuses/{sha}:
     get:
       tags:

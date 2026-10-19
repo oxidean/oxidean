@@ -20,22 +20,23 @@ use oxidean_core::{
     ActionRepoArtifactsListRequest, ActionRunGetRequest, ActionRunGetResponse,
     ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
     ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
-    ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionSetWorkflowEnabledRequest,
-    ActionVariablePublic, ActionVariablesDeleteRequest, ActionVariablesListRequest,
-    ActionVariablesListResponse, ActionVariablesPutRequest, ActionWorkflowFileError,
-    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
-    RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
-    RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
-    RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
-    RepoActionsEnvironmentSecretDeleteRequest, RepoActionsEnvironmentSecretPutRequest,
-    RepoActionsEnvironmentSecretsListRequest, RepoActionsEnvironmentUpsertRequest,
-    RepoActionsEnvironmentVariableDeleteRequest, RepoActionsEnvironmentVariablePutRequest,
-    RepoActionsEnvironmentVariablesListRequest, RepoActionsEnvironmentsListRequest,
-    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
-    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
-    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
-    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
+    ActionSecretKeyPublic, ActionSecretMetaPublic, ActionSecretPutRequest,
+    ActionSecretsListRequest, ActionSecretsListResponse, ActionSetEnabledRequest,
+    ActionSetWorkflowEnabledRequest, ActionVariablePublic, ActionVariablesDeleteRequest,
+    ActionVariablesListRequest, ActionVariablesListResponse, ActionVariablesPutRequest,
+    ActionWorkflowFileError, ActionWorkflowPublic, ActionWorkflowsListRequest,
+    ActionWorkflowsListResponse, AppError, RepoActionsDefaultPermissionsRequest,
+    RepoActionsDefaultPermissionsResponse, RepoActionsEnvironmentDeleteRequest,
+    RepoActionsEnvironmentDeleteResponse, RepoActionsEnvironmentGetRequest,
+    RepoActionsEnvironmentResponse, RepoActionsEnvironmentSecretDeleteRequest,
+    RepoActionsEnvironmentSecretPutRequest, RepoActionsEnvironmentSecretsListRequest,
+    RepoActionsEnvironmentUpsertRequest, RepoActionsEnvironmentVariableDeleteRequest,
+    RepoActionsEnvironmentVariablePutRequest, RepoActionsEnvironmentVariablesListRequest,
+    RepoActionsEnvironmentsListRequest, RepoActionsEnvironmentsListResponse,
+    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
+    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
+    RepoActionsSetDefaultPermissionsRequest, RepoActionsSetForkPrApprovalRequest,
+    RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -638,10 +639,55 @@ pub async fn list_secrets(
             .into_iter()
             .map(|r| ActionSecretMetaPublic {
                 name: r.name,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),
     })
+}
+
+/// `repo.actions.secrets.publicKey` — Admin; the libsodium `crypto_box_seal`
+/// receiver public key GitHub-shaped clients encrypt secrets against
+/// (`{key_id, key}` — `gh secret set`, `actions/github-script`, web forms).
+pub async fn repo_secret_public_key(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionSecretKeyPublic, AppError> {
+    let req: ActionSecretsListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.secrets.publicKey input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    crate::crypto::seal_public_key(
+        crate::actions::secrets::KEY_ENVS,
+        &format!("repo:{}", accessible.row.id),
+    )
+    .map(|(key_id, key)| ActionSecretKeyPublic { key_id, key })
+    .map_err(|e| AppError::new("repo.actions.secret_key_failed", e))
+}
+
+/// `repo.actions.environments.secretsPublicKey` — Admin; the same
+/// sealed-box receiver scoped to one environment.
+pub async fn environment_secret_public_key(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionSecretKeyPublic, AppError> {
+    let req: RepoActionsEnvironmentSecretsListRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.secretsPublicKey input: {e}"),
+            )
+        })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    crate::crypto::seal_public_key(
+        crate::actions::secrets::KEY_ENVS,
+        &format!("env:{}:{}", accessible.row.id, req.environment),
+    )
+    .map(|(key_id, key)| ActionSecretKeyPublic { key_id, key })
+    .map_err(|e| AppError::new("repo.actions.secret_key_failed", e))
 }
 
 /// `repo.actions.secrets.put` — Admin; value never returned on read (D-ACT-17).
@@ -728,6 +774,7 @@ pub async fn list_variables(
             .map(|r| ActionVariablePublic {
                 name: r.name,
                 value: r.value,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),
@@ -818,6 +865,7 @@ pub async fn list_environment_variables(
             .map(|r| ActionVariablePublic {
                 name: r.name,
                 value: r.value,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),
@@ -1125,6 +1173,7 @@ fn environment_public(r: &oxidean_db::ActionEnvironmentRow) -> ActionEnvironment
             .unwrap_or_default(),
     };
     ActionEnvironmentPublic {
+        id: r.id.clone(),
         name: r.name.clone(),
         protection,
         created_at: r.created_at.clone(),
@@ -1367,6 +1416,7 @@ pub async fn list_environment_secrets(
             .into_iter()
             .map(|r| ActionSecretMetaPublic {
                 name: r.name,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),

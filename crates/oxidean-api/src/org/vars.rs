@@ -6,7 +6,8 @@
 use oxidean_core::{
     AppError, OrgActionsVariableDeleteRequest, OrgActionsVariablePutRequest,
     OrgActionsVariableReposRequest, OrgActionsVariableReposResponse,
-    OrgActionsVariablesListRequest, OrgActionsVariablesListResponse, OrgVariablePublic,
+    OrgActionsVariableSetReposRequest, OrgActionsVariablesListRequest,
+    OrgActionsVariablesListResponse, OrgVariablePublic,
 };
 use uuid::Uuid;
 
@@ -55,6 +56,7 @@ pub async fn list(
                 name: r.name,
                 value: r.value,
                 visibility: r.visibility,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),
@@ -178,4 +180,32 @@ pub async fn list_repos(
         .await
         .map_err(db_err)?;
     Ok(OrgActionsVariableReposResponse { repository_ids })
+}
+
+/// `org.actions.variables.setRepos` — Admin+; replaces the variable's
+/// `visibility = 'selected'` allow set.
+pub async fn set_repos(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let caller = require_verified(ctx).await?;
+    let req: OrgActionsVariableSetReposRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.actions.variables.setRepos input: {e}"),
+        )
+    })?;
+    let org = load_org_by_slug(ctx, &req.slug).await?;
+    let _ = require_admin_plus(ctx, &org, &caller).await?;
+    let variable = ctx
+        .db
+        .find_action_org_variable(&org.id, &req.variable_name)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("org.actions.variable_not_found", "variable not found"))?;
+    ctx.db
+        .set_action_org_variable_repos(&variable.id, &req.repository_ids)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true }))
 }

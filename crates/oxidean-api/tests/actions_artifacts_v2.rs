@@ -663,6 +663,26 @@ async fn rest(
         .unwrap()
 }
 
+async fn rest_json(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    bearer: Option<&str>,
+    body: &str,
+) -> axum::response::Response {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json");
+    if let Some(t) = bearer {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    app.clone()
+        .oneshot(b.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn v4_rest_artifact_facade_list_get_zip_delete() {
     let (app, db, dir) = app_db().await;
@@ -1125,4 +1145,506 @@ async fn rest_actions_runs_jobs_workflows_surface() {
         "delete: {}",
         res.status()
     );
+}
+
+/// `/api/v1` secrets / variables / environments — the `gh secret set` /
+/// `gh variable` surface: sealed-box `crypto_box_seal` uploads through the
+/// `public-key` endpoints, GitHub create/update status codes, and the
+/// org-scope twins.
+#[tokio::test]
+async fn rest_actions_secrets_variables_environments_surface() {
+    std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "rest-secrets-test-key");
+    let (app, db, _dir) = app_db().await;
+    let owner = db
+        .create_user(
+            "u-sec",
+            "sec@example.com",
+            "sec",
+            Some("h"),
+            "F",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo = db
+        .insert_repository("r-sec", &owner.id, "user", "sec", "private", "", "main")
+        .await
+        .unwrap();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at("u-sec", &now).await.unwrap();
+    let pat = "oxidean_pat_sec_roundtrip";
+    db.create_pat(
+        "pat-sec",
+        "u-sec",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let base = "/api/v1/repos/sec/sec";
+
+    // public-key → libsodium sealed box → PUT — exactly `gh secret set`'s flow.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/secrets/public-key"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "public-key: {}", res.status());
+    let key = body_json(res).await;
+    let pk_raw = base64::engine::general_purpose::STANDARD
+        .decode(key["key"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(pk_raw.len(), 32);
+    assert!(!key["key_id"].as_str().unwrap_or_default().is_empty());
+    let pk = crypto_box::PublicKey::try_from(pk_raw.as_slice()).unwrap();
+    let sealed = pk.seal(&mut crypto_box::aead::OsRng, b"hunter2").unwrap();
+    let sealed_b64 = base64::engine::general_purpose::STANDARD.encode(&sealed);
+
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/secrets/API_TOKEN"),
+        Some(pat),
+        &format!(
+            r#"{{"encrypted_value":"{sealed_b64}","key_id":"{}"}}"#,
+            key["key_id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "sealed put: {}",
+        res.status()
+    );
+    // The stored ciphertext decrypts back to the sealed plaintext.
+    let rows = db.list_action_secret_ciphertexts(&repo.id).await.unwrap();
+    let row = rows.iter().find(|r| r.name == "API_TOKEN").unwrap();
+    assert_eq!(
+        oxidean_api::actions::secrets::decrypt_secret(&row.ciphertext).unwrap(),
+        "hunter2"
+    );
+
+    // Plaintext `value` (first-party shape) → update path answers 204.
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/secrets/API_TOKEN"),
+        Some(pat),
+        r#"{"value":"rotated"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = rest(&app, "GET", &format!("{base}/actions/secrets"), Some(pat)).await;
+    let list = body_json(res).await;
+    assert_eq!(list["total_count"], 1, "{list}");
+    assert_eq!(list["secrets"][0]["name"], "API_TOKEN");
+    assert!(!list["secrets"][0]["created_at"]
+        .as_str()
+        .unwrap_or_default()
+        .is_empty());
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/secrets/API_TOKEN"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/secrets/NOPE"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // A garbage sealed blob answers 400, not 500.
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/secrets/BROKEN"),
+        Some(pat),
+        r#"{"encrypted_value":"aGVsbG8="}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/secrets/API_TOKEN"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // ---- repo variables ----
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/actions/variables"),
+        Some(pat),
+        r#"{"name":"REGION","value":"us-east"}"#,
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "var create: {}",
+        res.status()
+    );
+    // duplicate create → 409 like GitHub
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/actions/variables"),
+        Some(pat),
+        r#"{"name":"REGION","value":"x"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/variables/REGION"),
+        Some(pat),
+    )
+    .await;
+    let v = body_json(res).await;
+    assert_eq!(v["value"], "us-east", "{v}");
+    assert!(!v["created_at"].as_str().unwrap_or_default().is_empty());
+
+    let res = rest_json(
+        &app,
+        "PATCH",
+        &format!("{base}/actions/variables/REGION"),
+        Some(pat),
+        r#"{"value":"eu-west"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/variables/REGION"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["value"], "eu-west");
+    // PATCH on a missing name → 404 (no upsert)
+    let res = rest_json(
+        &app,
+        "PATCH",
+        &format!("{base}/actions/variables/NOPE"),
+        Some(pat),
+        r#"{"value":"x"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/variables/REGION"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // ---- environments ----
+    let res = rest_json(&app, "PUT", &format!("{base}/environments/prod"), Some(pat), &format!(
+                    r#"{{"wait_timer":5,"prevent_self_review":true,"reviewers":[{{"type":"User","id":"{}"}}]}}"#,
+                    owner.id
+                )).await;
+    assert_eq!(res.status(), StatusCode::OK, "env upsert: {}", res.status());
+    let env = body_json(res).await;
+    assert_eq!(env["name"], "prod");
+    assert!(env["protection_rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["type"] == "wait_timer" && r["wait_timer"] == 5));
+    assert!(env["protection_rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["type"] == "required_reviewers"));
+
+    let res = rest(&app, "GET", &format!("{base}/environments"), Some(pat)).await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+    let res = rest(&app, "GET", &format!("{base}/environments/prod"), Some(pat)).await;
+    assert_eq!(body_json(res).await["name"], "prod");
+    let res = rest(&app, "GET", &format!("{base}/environments/nope"), Some(pat)).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // environment-scoped sealed secret + variable
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/environments/prod/secrets/public-key"),
+        Some(pat),
+    )
+    .await;
+    let ekey = body_json(res).await;
+    let epk_raw = base64::engine::general_purpose::STANDARD
+        .decode(ekey["key"].as_str().unwrap())
+        .unwrap();
+    // the env keypair differs from the repo one — scope isolation
+    assert_ne!(epk_raw, pk_raw);
+    let epk = crypto_box::PublicKey::try_from(epk_raw.as_slice()).unwrap();
+    let esecret = epk.seal(&mut crypto_box::aead::OsRng, b"env-only").unwrap();
+    let esecret_b64 = base64::engine::general_purpose::STANDARD.encode(&esecret);
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/environments/prod/secrets/ENV_KEY"),
+        Some(pat),
+        &format!(r#"{{"encrypted_value":"{esecret_b64}"}}"#),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/environments/prod/secrets"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/environments/prod/variables"),
+        Some(pat),
+        r#"{"name":"EURL","value":"https://prod"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/environments/prod/variables/EURL"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["value"], "https://prod");
+
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/environments/prod"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(&app, "GET", &format!("{base}/environments/prod"), Some(pat)).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // ---- org scope ----
+    let org = db
+        .insert_organization("o-sec", "sec-org", "Sec Org", "read")
+        .await
+        .unwrap();
+    db.insert_org_member(&org.id, &owner.id, "owner")
+        .await
+        .unwrap();
+    let orgbase = "/api/v1/orgs/sec-org";
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets/public-key"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let okey = body_json(res).await;
+    let opk_raw = base64::engine::general_purpose::STANDARD
+        .decode(okey["key"].as_str().unwrap())
+        .unwrap();
+    assert_ne!(opk_raw, pk_raw);
+    let opk = crypto_box::PublicKey::try_from(opk_raw.as_slice()).unwrap();
+    let osecret = opk
+        .seal(&mut crypto_box::aead::OsRng, b"org-secret")
+        .unwrap();
+    let osecret_b64 = base64::engine::general_purpose::STANDARD.encode(&osecret);
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{orgbase}/actions/secrets/ORG_KEY"),
+        Some(pat),
+        &format!(r#"{{"encrypted_value":"{osecret_b64}","visibility":"all"}}"#),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets"),
+        Some(pat),
+    )
+    .await;
+    let olist = body_json(res).await;
+    assert_eq!(olist["total_count"], 1, "{olist}");
+    assert_eq!(olist["secrets"][0]["visibility"], "all");
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets/ORG_KEY/selected-repositories"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_json(res).await["total_count"], 0);
+
+    // selected-repositories set-management: visibility=selected via the PUT
+    // body, then the granular replace/add/remove routes.
+    let repo2 = db
+        .insert_repository("r-sec2", &owner.id, "user", "sec2", "private", "", "main")
+        .await
+        .unwrap();
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{orgbase}/actions/secrets/ORG_KEY/selected-repositories"),
+        Some(pat),
+        &format!(r#"{{"selected_repository_ids":["{}"]}}"#, repo.id),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets/ORG_KEY/selected-repositories"),
+        Some(pat),
+    )
+    .await;
+    let sel = body_json(res).await;
+    assert_eq!(sel["total_count"], 1, "{sel}");
+    assert_eq!(sel["repositories"][0]["name"], "sec");
+    let res = rest(
+        &app,
+        "PUT",
+        &format!(
+            "{orgbase}/actions/secrets/ORG_KEY/selected-repositories/{}",
+            repo2.id
+        ),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets/ORG_KEY/selected-repositories"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 2);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!(
+            "{orgbase}/actions/secrets/ORG_KEY/selected-repositories/{}",
+            repo.id
+        ),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/secrets/ORG_KEY/selected-repositories"),
+        Some(pat),
+    )
+    .await;
+    let sel = body_json(res).await;
+    assert_eq!(sel["total_count"], 1, "{sel}");
+    assert_eq!(sel["repositories"][0]["name"], "sec2");
+
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{orgbase}/actions/variables"),
+        Some(pat),
+        r#"{"name":"TIER","value":"gold","visibility":"all"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/variables/TIER"),
+        Some(pat),
+    )
+    .await;
+    let ov = body_json(res).await;
+    assert_eq!(ov["value"], "gold", "{ov}");
+    assert_eq!(ov["visibility"], "all");
+    // Variable selected-set mutations ride the same three routes.
+    let res = rest(
+        &app,
+        "PUT",
+        &format!(
+            "{orgbase}/actions/variables/TIER/selected-repositories/{}",
+            repo.id
+        ),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{orgbase}/actions/variables/TIER/selected-repositories"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!(
+            "{orgbase}/actions/variables/TIER/selected-repositories/{}",
+            repo.id
+        ),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{orgbase}/actions/variables/TIER"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{orgbase}/actions/secrets/ORG_KEY"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }

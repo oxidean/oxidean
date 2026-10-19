@@ -4,9 +4,9 @@
 //! 'selected' (the explicit repo allow-set).
 
 use oxidean_core::{
-    AppError, OrgActionsSecretDeleteRequest, OrgActionsSecretPutRequest,
-    OrgActionsSecretReposRequest, OrgActionsSecretReposResponse, OrgActionsSecretsListRequest,
-    OrgActionsSecretsListResponse, OrgSecretMetaPublic,
+    ActionSecretKeyPublic, AppError, OrgActionsSecretDeleteRequest, OrgActionsSecretPutRequest,
+    OrgActionsSecretReposRequest, OrgActionsSecretReposResponse, OrgActionsSecretSetReposRequest,
+    OrgActionsSecretsListRequest, OrgActionsSecretsListResponse, OrgSecretMetaPublic,
 };
 use uuid::Uuid;
 
@@ -54,10 +54,34 @@ pub async fn list(
             .map(|r| OrgSecretMetaPublic {
                 name: r.name,
                 visibility: r.visibility,
+                created_at: r.created_at,
                 updated_at: r.updated_at,
             })
             .collect(),
     })
+}
+
+/// `org.actions.secrets.publicKey` — Admin+; the sealed-box receiver key for
+/// org secrets (`crypto_box_seal` against the derived `org:{slug}` keypair).
+pub async fn public_key(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionSecretKeyPublic, AppError> {
+    let caller = require_verified(ctx).await?;
+    let req: OrgActionsSecretsListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.actions.secrets.publicKey input: {e}"),
+        )
+    })?;
+    let org = load_org_by_slug(ctx, &req.slug).await?;
+    let _ = require_admin_plus(ctx, &org, &caller).await?;
+    crate::crypto::seal_public_key(
+        crate::actions::secrets::KEY_ENVS,
+        &format!("org:{}", org.id),
+    )
+    .map(|(key_id, key)| ActionSecretKeyPublic { key_id, key })
+    .map_err(|e| AppError::new("org.actions.secret_key_failed", e))
 }
 
 /// `org.actions.secrets.put` — Admin+. Creates or replaces a secret;
@@ -183,4 +207,32 @@ pub async fn list_repos(
         .await
         .map_err(db_err)?;
     Ok(OrgActionsSecretReposResponse { repository_ids })
+}
+
+/// `org.actions.secrets.setRepos` — Admin+; replaces the secret's
+/// `visibility = 'selected'` allow set.
+pub async fn set_repos(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let caller = require_verified(ctx).await?;
+    let req: OrgActionsSecretSetReposRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.actions.secrets.setRepos input: {e}"),
+        )
+    })?;
+    let org = load_org_by_slug(ctx, &req.slug).await?;
+    let _ = require_admin_plus(ctx, &org, &caller).await?;
+    let secret = ctx
+        .db
+        .find_action_org_secret(&org.id, &req.secret_name)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("org.actions.secret_not_found", "secret not found"))?;
+    ctx.db
+        .set_action_org_secret_repos(&secret.id, &req.repository_ids)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true }))
 }

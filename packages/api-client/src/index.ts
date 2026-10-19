@@ -2262,7 +2262,14 @@ export type ActionRunMutationResponse = {
 
 export type ActionSecretMetaPublic = {
   name: string;
+  created_at: string;
   updated_at: string;
+};
+
+export type ActionSecretKeyPublic = {
+  key_id: string;
+  /** base64 X25519 public key for libsodium `crypto_box_seal`. */
+  key: string;
 };
 
 export type ActionSecretsListRequest = {
@@ -2290,6 +2297,7 @@ export type ActionSecretDeleteRequest = {
 export type ActionVariablePublic = {
   name: string;
   value: string;
+  created_at: string;
   updated_at: string;
 };
 
@@ -2340,6 +2348,7 @@ export type OrgVariablePublic = {
   name: string;
   value: string;
   visibility: string;
+  created_at: string;
   updated_at: string;
 };
 
@@ -2362,6 +2371,12 @@ export type OrgActionsVariablePutRequest = {
 export type OrgActionsVariableDeleteRequest = {
   slug: string;
   variable_name: string;
+};
+
+export type OrgActionsVariableSetReposRequest = {
+  slug: string;
+  variable_name: string;
+  repository_ids: string[];
 };
 
 export type OrgActionsVariableReposRequest = {
@@ -3594,6 +3609,7 @@ export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
   visibility: string;
+  created_at: string;
   updated_at: string;
 };
 
@@ -3618,6 +3634,12 @@ export type OrgActionsSecretPutRequest = {
 export type OrgActionsSecretDeleteRequest = {
   slug: string;
   secret_name: string;
+};
+
+export type OrgActionsSecretSetReposRequest = {
+  slug: string;
+  secret_name: string;
+  repository_ids: string[];
 };
 
 export type OrgActionsSecretReposRequest = {
@@ -6000,6 +6022,12 @@ export function createClient(opts: CreateClientOptions) {
               "repo.actions.environments.secretsList",
               input,
             ),
+          secretsPublicKey: (input: RepoActionsEnvironmentSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(
+              opts,
+              "repo.actions.environments.secretsPublicKey",
+              input,
+            ),
           secretsPut: (input: RepoActionsEnvironmentSecretPutRequest) =>
             rpcCall<{ ok: boolean }>(
               opts,
@@ -6080,6 +6108,8 @@ export function createClient(opts: CreateClientOptions) {
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),
+          publicKey: (input: ActionSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(opts, "repo.actions.secrets.publicKey", input),
           put: (input: ActionSecretPutRequest) =>
             rpcCall<{ ok: boolean }>(opts, "repo.actions.secrets.put", input),
           delete: (input: ActionSecretDeleteRequest) =>
@@ -6191,6 +6221,12 @@ export function createClient(opts: CreateClientOptions) {
               "org.actions.secrets.list",
               input,
             ),
+          publicKey: (input: OrgActionsSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(
+              opts,
+              "org.actions.secrets.publicKey",
+              input,
+            ),
           put: (input: OrgActionsSecretPutRequest) =>
             rpcCall<{ ok: boolean }>(opts, "org.actions.secrets.put", input),
           delete: (input: OrgActionsSecretDeleteRequest) =>
@@ -6199,6 +6235,12 @@ export function createClient(opts: CreateClientOptions) {
             rpcCall<OrgActionsSecretReposResponse>(
               opts,
               "org.actions.secrets.listRepos",
+              input,
+            ),
+          setRepos: (input: OrgActionsSecretSetReposRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "org.actions.secrets.setRepos",
               input,
             ),
         },
@@ -6217,6 +6259,12 @@ export function createClient(opts: CreateClientOptions) {
             rpcCall<OrgActionsVariableReposResponse>(
               opts,
               "org.actions.variables.listRepos",
+              input,
+            ),
+          setRepos: (input: OrgActionsVariableSetReposRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "org.actions.variables.setRepos",
               input,
             ),
         },

@@ -330,7 +330,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.environments.variablesDelete" => SecretsWrite,
 
         "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
-        "repo.actions.environments.secretsList" => SecretsRead,
+        "repo.actions.environments.secretsList" | "repo.actions.environments.secretsPublicKey" => {
+            SecretsRead
+        }
         "repo.actions.environments.upsert" | "repo.actions.environments.delete" => {
             EnvironmentsWrite
         }
@@ -402,7 +404,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "repo.commitStatus.list" => StatusesRead,
         "repo.commitStatus.create" => StatusesWrite,
 
-        "repo.actions.secrets.list" => SecretsRead,
+        "repo.actions.secrets.list" | "repo.actions.secrets.publicKey" => SecretsRead,
         "repo.actions.secrets.put" | "repo.actions.secrets.delete" => SecretsWrite,
 
         "release.list" | "release.get" => ReleasesRead,
@@ -488,10 +490,16 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "label.listForOrg" | "org.listMine" | "org.members.list" | "org.invites.list" => OrgRead,
         // Org Actions secrets — classified with the secrets families like
         // their repo-level siblings (FG `secrets` perm).
-        "org.actions.secrets.list" | "org.actions.secrets.listRepos" => SecretsRead,
-        "org.actions.secrets.put" | "org.actions.secrets.delete" => SecretsWrite,
+        "org.actions.secrets.list"
+        | "org.actions.secrets.listRepos"
+        | "org.actions.secrets.publicKey" => SecretsRead,
+        "org.actions.secrets.put"
+        | "org.actions.secrets.delete"
+        | "org.actions.secrets.setRepos" => SecretsWrite,
         "org.actions.variables.list" | "org.actions.variables.listRepos" => SecretsRead,
-        "org.actions.variables.put" | "org.actions.variables.delete" => SecretsWrite,
+        "org.actions.variables.put"
+        | "org.actions.variables.delete"
+        | "org.actions.variables.setRepos" => SecretsWrite,
         "org.create"
         | "org.updateSettings"
         | "org.members.add"

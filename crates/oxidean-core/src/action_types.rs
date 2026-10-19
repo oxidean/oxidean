@@ -360,10 +360,21 @@ pub struct ActionRunMutationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretPublic {
     pub name: String,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
 }
 
 pub type ActionSecretMetaPublic = ActionSecretPublic;
+
+/// `*.actions.*.secrets.publicKey` — libsodium `crypto_box_seal` receiver key
+/// (`gh secret set` encrypts client-side against this before PUT).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionSecretKeyPublic {
+    pub key_id: String,
+    /// base64 X25519 public key.
+    pub key: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsListRequest {
@@ -763,6 +774,7 @@ pub struct ActionEnvironmentProtection {
 /// Public environment record (`repo.actions.environments.*`).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionEnvironmentPublic {
+    pub id: String,
     pub name: String,
     pub protection: ActionEnvironmentProtection,
     pub created_at: String,
@@ -1175,6 +1187,8 @@ pub struct OrgSecretMetaPublic {
     pub name: String,
     /// 'all' | 'private' | 'selected'.
     pub visibility: String,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
 }
 
@@ -1222,6 +1236,15 @@ pub struct OrgActionsSecretReposResponse {
     pub repository_ids: Vec<String>,
 }
 
+/// `org.actions.secrets.setRepos` — Admin+; replaces the secret's
+/// `visibility = 'selected'` allow set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretSetReposRequest {
+    pub slug: String,
+    pub secret_name: String,
+    pub repository_ids: Vec<String>,
+}
+
 // --- configuration variables (`vars` context) — plaintext, values ARE
 // returned on GET (they are not secrets). ---
 
@@ -1230,6 +1253,8 @@ pub struct OrgActionsSecretReposResponse {
 pub struct ActionVariablePublic {
     pub name: String,
     pub value: String,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
 }
 
@@ -1296,6 +1321,8 @@ pub struct OrgVariablePublic {
     pub value: String,
     /// 'all' | 'private' | 'selected'.
     pub visibility: String,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
 }
 
@@ -1339,6 +1366,15 @@ pub struct OrgActionsVariableReposRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgActionsVariableReposResponse {
+    pub repository_ids: Vec<String>,
+}
+
+/// `org.actions.variables.setRepos` — Admin+; replaces the variable's
+/// `visibility = 'selected'` allow set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableSetReposRequest {
+    pub slug: String,
+    pub variable_name: String,
     pub repository_ids: Vec<String>,
 }
 

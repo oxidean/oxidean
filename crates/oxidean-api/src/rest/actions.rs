@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use schemars::SchemaGenerator;
 use serde::Deserialize;
@@ -22,6 +22,8 @@ use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{call, call_map, ctx_for, dispatch, repo_ref, status_for_error, RepoPath};
 use crate::app::AppState;
 use crate::routes::release_assets::sanitize_filename;
+use crate::rpc::RpcCtx;
+use oxidean_core::RpcResponse;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct ArtifactsQuery {
@@ -110,6 +112,113 @@ impl ArtifactPath {
             "artifact_id": self.artifact_id,
         })
     }
+}
+
+#[derive(Deserialize)]
+struct SecretPath {
+    owner: String,
+    repo: String,
+    secret_name: String,
+}
+
+#[derive(Deserialize)]
+struct VarPath {
+    owner: String,
+    repo: String,
+    variable_name: String,
+}
+
+#[derive(Deserialize)]
+struct EnvPath {
+    owner: String,
+    repo: String,
+    environment_name: String,
+}
+
+#[derive(Deserialize)]
+struct EnvSecretPath {
+    owner: String,
+    repo: String,
+    environment_name: String,
+    secret_name: String,
+}
+
+#[derive(Deserialize)]
+struct EnvVarPath {
+    owner: String,
+    repo: String,
+    environment_name: String,
+    variable_name: String,
+}
+
+#[derive(Deserialize)]
+struct OrgPath {
+    org: String,
+}
+
+#[derive(Deserialize)]
+struct OrgSecretPath {
+    org: String,
+    secret_name: String,
+}
+
+#[derive(Deserialize)]
+struct OrgVarPath {
+    org: String,
+    variable_name: String,
+}
+
+#[derive(Deserialize)]
+struct OrgSecretRepoPath {
+    org: String,
+    secret_name: String,
+    repository_id: String,
+}
+
+#[derive(Deserialize)]
+struct OrgVarRepoPath {
+    org: String,
+    variable_name: String,
+    repository_id: String,
+}
+
+/// `PUT …/secrets/{name}` body — GitHub sends `{encrypted_value, key_id}`
+/// sealed against the `public-key` endpoint; `value` stays accepted for
+/// first-party/plaintext clients.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct SecretPutBody {
+    encrypted_value: Option<String>,
+    /// Accepted for wire compatibility — one derived keypair per scope means
+    /// the id is informational.
+    #[allow(dead_code)]
+    key_id: Option<String>,
+    value: Option<String>,
+    /// org-only: 'all' | 'private' | 'selected'.
+    visibility: Option<String>,
+    /// org-only: repo ids for 'selected' visibility.
+    selected_repository_ids: Option<Vec<String>>,
+}
+
+/// `POST/PATCH …/variables[/name]` body.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct VariableBody {
+    name: Option<String>,
+    value: Option<String>,
+    visibility: Option<String>,
+    selected_repository_ids: Option<Vec<String>>,
+}
+
+/// `PUT …/environments/{name}` body — GitHub's protection-rule shape mapped
+/// onto our `protection` object.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct EnvUpsertBody {
+    wait_timer: Option<i64>,
+    prevent_self_review: Option<bool>,
+    /// `[{type: "User"|"Team", id}]` — ids may be numbers or login strings.
+    reviewers: Option<Vec<Value>>,
+    /// `{protected_branches, custom_branch_policies, branches?}` — `branches`
+    /// is an Oxidean extension carrying the allowlist itself.
+    deployment_branch_policy: Option<Value>,
 }
 
 pub const ROUTES: &[RouteDef] = &[
@@ -457,6 +566,639 @@ pub const ROUTES: &[RouteDef] = &[
         body: None,
         response: None,
         mount: || put(disable_workflow),
+    },
+    // ---- secrets / variables / environments — the `gh secret|variable`
+    // and environment-admin surface ----
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/secrets",
+        tags: &["actions"],
+        operation_id: "actions/listRepoSecrets",
+        summary: "List repo secrets, GitHub shape (repo.actions.secrets.list)",
+        procedure: "repo.actions.secrets.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(secrets_list_schema)),
+        mount: || get(list_repo_secrets),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/secrets/public-key",
+        tags: &["actions"],
+        operation_id: "actions/getRepoPublicKey",
+        summary: "Repo sealed-box public key (repo.actions.secrets.publicKey)",
+        procedure: "repo.actions.secrets.publicKey",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(public_key_schema)),
+        mount: || get(repo_public_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/getRepoSecret",
+        summary: "One repo secret's metadata (repo.actions.secrets.list)",
+        procedure: "repo.actions.secrets.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "secret_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(secret_schema)),
+        mount: || get(get_repo_secret),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/createOrUpdateRepoSecret",
+        summary: "Create/update a repo secret (repo.actions.secrets.put)",
+        procedure: "repo.actions.secrets.put",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "secret_name"],
+        query: None,
+        body: Some(BodySpec::Json(secret_put_body_schema)),
+        response: None,
+        mount: || put(put_repo_secret),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteRepoSecret",
+        summary: "Delete a repo secret (repo.actions.secrets.delete)",
+        procedure: "repo.actions.secrets.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "secret_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_repo_secret),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/secrets",
+        tags: &["actions"],
+        operation_id: "actions/listEnvironmentSecrets",
+        summary: "List environment secrets (repo.actions.environments.secretsList)",
+        procedure: "repo.actions.environments.secretsList",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(secrets_list_schema)),
+        mount: || get(list_env_secrets),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key",
+        tags: &["actions"],
+        operation_id: "actions/getEnvironmentPublicKey",
+        summary: "Environment sealed-box public key (repo.actions.environments.secretsPublicKey)",
+        procedure: "repo.actions.environments.secretsPublicKey",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(public_key_schema)),
+        mount: || get(env_public_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/getEnvironmentSecret",
+        summary: "One environment secret's metadata (repo.actions.environments.secretsList)",
+        procedure: "repo.actions.environments.secretsList",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "secret_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(secret_schema)),
+        mount: || get(get_env_secret),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/createOrUpdateEnvironmentSecret",
+        summary: "Create/update an environment secret (repo.actions.environments.secretsPut)",
+        procedure: "repo.actions.environments.secretsPut",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "secret_name"],
+        query: None,
+        body: Some(BodySpec::Json(secret_put_body_schema)),
+        response: None,
+        mount: || put(put_env_secret),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteEnvironmentSecret",
+        summary: "Delete an environment secret (repo.actions.environments.secretsDelete)",
+        procedure: "repo.actions.environments.secretsDelete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "secret_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_env_secret),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/secrets",
+        tags: &["actions"],
+        operation_id: "actions/listOrgSecrets",
+        summary: "List org secrets (org.actions.secrets.list)",
+        procedure: "org.actions.secrets.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(secrets_list_schema)),
+        mount: || get(list_org_secrets),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/secrets/public-key",
+        tags: &["actions"],
+        operation_id: "actions/getOrgPublicKey",
+        summary: "Org sealed-box public key (org.actions.secrets.publicKey)",
+        procedure: "org.actions.secrets.publicKey",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(public_key_schema)),
+        mount: || get(org_public_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/getOrgSecret",
+        summary: "One org secret's metadata (org.actions.secrets.list)",
+        procedure: "org.actions.secrets.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "secret_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(org_secret_schema)),
+        mount: || get(get_org_secret),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/orgs/{org}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/createOrUpdateOrgSecret",
+        summary: "Create/update an org secret (org.actions.secrets.put)",
+        procedure: "org.actions.secrets.put",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "secret_name"],
+        query: None,
+        body: Some(BodySpec::Json(secret_put_body_schema)),
+        response: None,
+        mount: || put(put_org_secret),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{org}/actions/secrets/{secret_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteOrgSecret",
+        summary: "Delete an org secret (org.actions.secrets.delete)",
+        procedure: "org.actions.secrets.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "secret_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_org_secret),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/secrets/{secret_name}/selected-repositories",
+        tags: &["actions"],
+        operation_id: "actions/listSelectedReposForOrgSecret",
+        summary: "Repos a 'selected' org secret reaches (org.actions.secrets.listRepos)",
+        procedure: "org.actions.secrets.listRepos",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "secret_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(selected_repos_schema)),
+        mount: || get(org_secret_selected_repos),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/orgs/{org}/actions/secrets/{secret_name}/selected-repositories",
+        tags: &["actions"],
+        operation_id: "actions/setSelectedReposForOrgSecret",
+        summary: "Replace an org secret's selected repo set (org.actions.secrets.setRepos)",
+        procedure: "org.actions.secrets.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "secret_name"],
+        query: None,
+        body: Some(BodySpec::Json(selected_repos_body_schema)),
+        response: None,
+        mount: || put(org_secret_set_selected_repos),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/orgs/{org}/actions/secrets/{secret_name}/selected-repositories/{repository_id}",
+        tags: &["actions"],
+        operation_id: "actions/addSelectedRepoToOrgSecret",
+        summary: "Add a repo to an org secret's selected set (org.actions.secrets.setRepos)",
+        procedure: "org.actions.secrets.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "secret_name", "repository_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || put(org_secret_add_selected_repo),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{org}/actions/secrets/{secret_name}/selected-repositories/{repository_id}",
+        tags: &["actions"],
+        operation_id: "actions/removeSelectedRepoFromOrgSecret",
+        summary: "Remove a repo from an org secret's selected set (org.actions.secrets.setRepos)",
+        procedure: "org.actions.secrets.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "secret_name", "repository_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(org_secret_remove_selected_repo),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/variables",
+        tags: &["actions"],
+        operation_id: "actions/listRepoVariables",
+        summary: "List repo variables (repo.actions.variables.list)",
+        procedure: "repo.actions.variables.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(variables_list_schema)),
+        mount: || get(list_repo_variables),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/actions/variables",
+        tags: &["actions"],
+        operation_id: "actions/createRepoVariable",
+        summary: "Create a repo variable — 409 on duplicate (repo.actions.variables.put)",
+        procedure: "repo.actions.variables.put",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || post(create_repo_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/getRepoVariable",
+        summary: "One repo variable (repo.actions.variables.list)",
+        procedure: "repo.actions.variables.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "variable_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(variable_schema)),
+        mount: || get(get_repo_variable),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/updateRepoVariable",
+        summary: "Update a repo variable (repo.actions.variables.put)",
+        procedure: "repo.actions.variables.put",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "variable_name"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || patch(update_repo_variable),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteRepoVariable",
+        summary: "Delete a repo variable (repo.actions.variables.delete)",
+        procedure: "repo.actions.variables.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "variable_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_repo_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/variables",
+        tags: &["actions"],
+        operation_id: "actions/listEnvironmentVariables",
+        summary: "List environment variables (repo.actions.environments.variablesList)",
+        procedure: "repo.actions.environments.variablesList",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(variables_list_schema)),
+        mount: || get(list_env_variables),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/variables",
+        tags: &["actions"],
+        operation_id: "actions/createEnvironmentVariable",
+        summary: "Create an environment variable (repo.actions.environments.variablesPut)",
+        procedure: "repo.actions.environments.variablesPut",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || post(create_env_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/getEnvironmentVariable",
+        summary: "One environment variable (repo.actions.environments.variablesList)",
+        procedure: "repo.actions.environments.variablesList",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "variable_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(variable_schema)),
+        mount: || get(get_env_variable),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/updateEnvironmentVariable",
+        summary: "Update an environment variable (repo.actions.environments.variablesPut)",
+        procedure: "repo.actions.environments.variablesPut",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "variable_name"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || patch(update_env_variable),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteEnvironmentVariable",
+        summary: "Delete an environment variable (repo.actions.environments.variablesDelete)",
+        procedure: "repo.actions.environments.variablesDelete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment", "variable_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_env_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/variables",
+        tags: &["actions"],
+        operation_id: "actions/listOrgVariables",
+        summary: "List org variables (org.actions.variables.list)",
+        procedure: "org.actions.variables.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(variables_list_schema)),
+        mount: || get(list_org_variables),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/orgs/{org}/actions/variables",
+        tags: &["actions"],
+        operation_id: "actions/createOrgVariable",
+        summary: "Create an org variable (org.actions.variables.put)",
+        procedure: "org.actions.variables.put",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || post(create_org_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/getOrgVariable",
+        summary: "One org variable (org.actions.variables.list)",
+        procedure: "org.actions.variables.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "variable_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(org_variable_schema)),
+        mount: || get(get_org_variable),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/orgs/{org}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/updateOrgVariable",
+        summary: "Update an org variable (org.actions.variables.put)",
+        procedure: "org.actions.variables.put",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "variable_name"],
+        query: None,
+        body: Some(BodySpec::Json(variable_body_schema)),
+        response: None,
+        mount: || patch(update_org_variable),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{org}/actions/variables/{variable_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteOrgVariable",
+        summary: "Delete an org variable (org.actions.variables.delete)",
+        procedure: "org.actions.variables.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "variable_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_org_variable),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/variables/{variable_name}/selected-repositories",
+        tags: &["actions"],
+        operation_id: "actions/listSelectedReposForOrgVariable",
+        summary: "Repos a 'selected' org variable reaches (org.actions.variables.listRepos)",
+        procedure: "org.actions.variables.listRepos",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "variable_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(selected_repos_schema)),
+        mount: || get(org_variable_selected_repos),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/orgs/{org}/actions/variables/{variable_name}/selected-repositories",
+        tags: &["actions"],
+        operation_id: "actions/setSelectedReposForOrgVariable",
+        summary: "Replace an org variable's selected repo set (org.actions.variables.setRepos)",
+        procedure: "org.actions.variables.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "variable_name"],
+        query: None,
+        body: Some(BodySpec::Json(selected_repos_body_schema)),
+        response: None,
+        mount: || put(org_variable_set_selected_repos),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/orgs/{org}/actions/variables/{variable_name}/selected-repositories/{repository_id}",
+        tags: &["actions"],
+        operation_id: "actions/addSelectedRepoToOrgVariable",
+        summary: "Add a repo to an org variable's selected set (org.actions.variables.setRepos)",
+        procedure: "org.actions.variables.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "variable_name", "repository_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || put(org_variable_add_selected_repo),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{org}/actions/variables/{variable_name}/selected-repositories/{repository_id}",
+        tags: &["actions"],
+        operation_id: "actions/removeSelectedRepoFromOrgVariable",
+        summary:
+            "Remove a repo from an org variable's selected set (org.actions.variables.setRepos)",
+        procedure: "org.actions.variables.setRepos",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "variable_name", "repository_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(org_variable_remove_selected_repo),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments",
+        tags: &["actions"],
+        operation_id: "actions/listEnvironments",
+        summary: "List environments (repo.actions.environments.list)",
+        procedure: "repo.actions.environments.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(environments_list_schema)),
+        mount: || get(list_environments),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}",
+        tags: &["actions"],
+        operation_id: "actions/getEnvironment",
+        summary: "One environment (repo.actions.environments.get)",
+        procedure: "repo.actions.environments.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(environment_schema)),
+        mount: || get(get_environment),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}",
+        tags: &["actions"],
+        operation_id: "actions/createOrUpdateEnvironment",
+        summary: "Create/update an environment (repo.actions.environments.upsert)",
+        procedure: "repo.actions.environments.upsert",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: Some(BodySpec::Json(env_upsert_body_schema)),
+        response: Some(RespSpec::Json(environment_schema)),
+        mount: || put(put_environment),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/environments/{environment_name}",
+        tags: &["actions"],
+        operation_id: "actions/deleteEnvironment",
+        summary: "Delete an environment (repo.actions.environments.delete)",
+        procedure: "repo.actions.environments.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "environment"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_environment),
     },
 ];
 
@@ -1074,8 +1816,8 @@ async fn rerun_job(
     let input = json!({"owner": p.owner, "name": p.repo, "job_id": p.job_id});
     let resp = dispatch(&mut ctx, "repo.actions.getJob", input).await;
     let job = match resp {
-        oxidean_core::RpcResponse::Ok { data, .. } => data["job"].clone(),
-        oxidean_core::RpcResponse::Err { error, .. } => {
+        RpcResponse::Ok { data, .. } => data["job"].clone(),
+        RpcResponse::Err { error, .. } => {
             return (status_for_error(&error), Json(error)).into_response();
         }
     };
@@ -1197,8 +1939,8 @@ async fn get_workflow(
     )
     .await;
     let data = match resp {
-        oxidean_core::RpcResponse::Ok { data, .. } => data,
-        oxidean_core::RpcResponse::Err { error, .. } => {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
             return (status_for_error(&error), Json(error)).into_response();
         }
     };
@@ -1235,8 +1977,8 @@ async fn list_workflow_runs(
     )
     .await;
     let data = match resp {
-        oxidean_core::RpcResponse::Ok { data, .. } => data,
-        oxidean_core::RpcResponse::Err { error, .. } => {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
             return (status_for_error(&error), Json(error)).into_response();
         }
     };
@@ -1316,8 +2058,8 @@ async fn set_workflow_enabled(
     )
     .await;
     let data = match resp {
-        oxidean_core::RpcResponse::Ok { data, .. } => data,
-        oxidean_core::RpcResponse::Err { error, .. } => {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
             return (status_for_error(&error), Json(error)).into_response();
         }
     };
@@ -1352,4 +2094,1645 @@ async fn disable_workflow(
     headers: HeaderMap,
 ) -> Response {
     set_workflow_enabled(&state, &headers, &p, false).await
+}
+
+// ======================= secrets / variables / environments ===============
+//
+// GitHub's `gh secret`/`gh variable`/environment-admin REST shape over the
+// repo/org RPC procs. Secret PUT accepts either plaintext `value` (our RPC
+// shape) or `{encrypted_value, key_id}` sealed with libsodium
+// `crypto_box_seal` against the matching `…/public-key` endpoint — the wire
+// format `gh secret set`, `actions/github-script`, and GitHub's web UI emit.
+
+fn secrets_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "secrets": {"type": "array", "items": secret_schema_value(false)},
+        },
+        "required": ["total_count", "secrets"],
+    })
+}
+
+fn secret_schema(_gen: &mut SchemaGenerator) -> Value {
+    secret_schema_value(false)
+}
+
+fn org_secret_schema(_gen: &mut SchemaGenerator) -> Value {
+    secret_schema_value(true)
+}
+
+fn secret_schema_value(org: bool) -> Value {
+    let mut props = json!({
+        "name": {"type": "string"},
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"},
+    });
+    if org {
+        props["visibility"] = json!({"type": "string"});
+        props["selected_repositories_url"] = json!({"type": "string"});
+    }
+    json!({"type": "object", "properties": props})
+}
+
+fn public_key_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {"key_id": {"type": "string"}, "key": {"type": "string"}},
+        "required": ["key_id", "key"],
+    })
+}
+
+fn variables_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "variables": {"type": "array", "items": variable_schema_value(false)},
+        },
+        "required": ["total_count", "variables"],
+    })
+}
+
+fn variable_schema(_gen: &mut SchemaGenerator) -> Value {
+    variable_schema_value(false)
+}
+
+fn org_variable_schema(_gen: &mut SchemaGenerator) -> Value {
+    variable_schema_value(true)
+}
+
+fn variable_schema_value(org: bool) -> Value {
+    let mut props = json!({
+        "name": {"type": "string"},
+        "value": {"type": "string"},
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"},
+    });
+    if org {
+        props["visibility"] = json!({"type": "string"});
+        props["selected_repositories_url"] = json!({"type": "string"});
+    }
+    json!({"type": "object", "properties": props})
+}
+
+fn selected_repos_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "repositories": {"type": "array", "items": {"type": "object"}},
+        },
+    })
+}
+
+fn environments_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "environments": {"type": "array", "items": environment_schema_value()},
+        },
+    })
+}
+
+fn environment_schema(_gen: &mut SchemaGenerator) -> Value {
+    environment_schema_value()
+}
+
+fn environment_schema_value() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {}, "name": {"type": "string"},
+            "url": {"type": "string"}, "html_url": {"type": "string"},
+            "created_at": {"type": "string"}, "updated_at": {"type": "string"},
+            "protection_rules": {"type": "array", "items": {"type": "object"}},
+            "deployment_branch_policy": {"type": "object"},
+        },
+    })
+}
+
+fn secret_put_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "encrypted_value": {"type": "string"},
+            "key_id": {"type": "string"},
+            "value": {"type": "string"},
+            "visibility": {"type": "string"},
+            "selected_repository_ids": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn variable_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"}, "value": {"type": "string"},
+            "visibility": {"type": "string"},
+            "selected_repository_ids": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn env_upsert_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "wait_timer": {"type": "integer"},
+            "prevent_self_review": {"type": "boolean"},
+            "reviewers": {"type": "array", "items": {"type": "object"}},
+            "deployment_branch_policy": {"type": "object"},
+        },
+    })
+}
+
+// ---- reshapers ----
+
+fn gh_secret(s: &Value) -> Value {
+    json!({
+        "name": s["name"],
+        "created_at": s["created_at"],
+        "updated_at": s["updated_at"],
+    })
+}
+
+fn gh_org_secret(origin: &str, org: &str, s: &Value) -> Value {
+    let name = s["name"].as_str().unwrap_or_default();
+    json!({
+        "name": s["name"],
+        "visibility": s["visibility"],
+        "created_at": s["created_at"],
+        "updated_at": s["updated_at"],
+        "selected_repositories_url":
+            format!("{origin}/api/v1/orgs/{org}/actions/secrets/{name}/selected-repositories"),
+    })
+}
+
+fn gh_variable(v: &Value) -> Value {
+    json!({
+        "name": v["name"],
+        "value": v["value"],
+        "created_at": v["created_at"],
+        "updated_at": v["updated_at"],
+    })
+}
+
+fn gh_org_variable(origin: &str, org: &str, v: &Value) -> Value {
+    let name = v["name"].as_str().unwrap_or_default();
+    json!({
+        "name": v["name"],
+        "value": v["value"],
+        "visibility": v["visibility"],
+        "created_at": v["created_at"],
+        "updated_at": v["updated_at"],
+        "selected_repositories_url":
+            format!("{origin}/api/v1/orgs/{org}/actions/variables/{name}/selected-repositories"),
+    })
+}
+
+/// GitHub's environment object — our `protection` fields map onto the
+/// `protection_rules` array + `deployment_branch_policy` flags.
+fn gh_environment(origin: &str, owner: &str, repo: &str, e: &Value) -> Value {
+    let name = e["name"].as_str().unwrap_or_default();
+    let p = &e["protection"];
+    let mut rules = Vec::new();
+    let wait = p["wait_timer_minutes"].as_i64().unwrap_or(0);
+    if wait > 0 {
+        rules.push(json!({"type": "wait_timer", "wait_timer": wait}));
+    }
+    let reviewers = p["required_reviewers"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let usernames = p["required_reviewer_usernames"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !reviewers.is_empty() {
+        let rs: Vec<Value> = reviewers
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let login = usernames.get(i).cloned().unwrap_or(Value::Null);
+                json!({"type": "User", "reviewer": {"id": id, "login": login}})
+            })
+            .collect();
+        rules.push(json!({
+            "type": "required_reviewers",
+            "prevent_self_review": p["prevent_self_review"].as_bool().unwrap_or(false),
+            "reviewers": rs,
+        }));
+    }
+    let branches = p["deployment_branches"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !branches.is_empty() {
+        rules.push(json!({"type": "branch_policy"}));
+    }
+    json!({
+        "id": num_or_str(e["id"].as_str().unwrap_or_default()),
+        "name": name,
+        "url": format!("{origin}/api/v1/repos/{owner}/{repo}/environments/{name}"),
+        "html_url": format!("{origin}/{owner}/{repo}/settings/environments/{name}"),
+        "created_at": e["created_at"],
+        "updated_at": e["updated_at"],
+        "protection_rules": rules,
+        "deployment_branch_policy": {
+            "protected_branches": branches.is_empty(),
+            "custom_branch_policies": !branches.is_empty(),
+        },
+    })
+}
+
+// ---- shared plumbing ----
+
+/// Resolve the sealed-box plaintext for a secret PUT — `encrypted_value`
+/// wins, falling back to plaintext `value` for first-party clients.
+fn secret_value_from_body(body: &SecretPutBody, scope: &str) -> Result<String, Box<Response>> {
+    if let Some(ev) = &body.encrypted_value {
+        return crate::crypto::seal_open(crate::actions::secrets::KEY_ENVS, scope, ev)
+            .map_err(|e| Box::new(err_json(StatusCode::BAD_REQUEST, &e)));
+    }
+    body.value.clone().ok_or_else(|| {
+        Box::new(err_json(
+            StatusCode::BAD_REQUEST,
+            "value or encrypted_value is required",
+        ))
+    })
+}
+
+/// Dispatch a proc and render `{ok_status, Json(data)}` or the mapped error.
+async fn call_dispatch(
+    ctx: &mut RpcCtx,
+    procedure: &str,
+    input: Value,
+    ok_status: StatusCode,
+) -> Response {
+    match dispatch(ctx, procedure, input).await {
+        RpcResponse::Ok { data, .. } => (ok_status, Json(data)).into_response(),
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// Dispatch a proc; on success run `f` over `data` and render.
+async fn call_dispatch_map<F>(
+    ctx: &mut RpcCtx,
+    procedure: &str,
+    input: Value,
+    ok_status: StatusCode,
+    f: F,
+) -> Response
+where
+    F: FnOnce(Value) -> Value,
+{
+    match dispatch(ctx, procedure, input).await {
+        RpcResponse::Ok { data, .. } => (ok_status, Json(f(data))).into_response(),
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// Fetch one array member by `field == want` out of a list-proc response —
+/// shared by the single-secret/variable GETs and the create-conflict checks.
+async fn list_member_named(
+    ctx: &mut RpcCtx,
+    procedure: &str,
+    input: Value,
+    collection: &str,
+    field: &str,
+    want: &str,
+) -> Result<Option<Value>, Box<Response>> {
+    match dispatch(ctx, procedure, input).await {
+        RpcResponse::Ok { data, .. } => Ok(data[collection]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .find(|m| m[field].as_str() == Some(want))
+            .cloned()),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+/// `resolve_repo_for_admin` under the edge ctx — the seal scope and the
+/// proc's own gate share the same capability floor.
+async fn admin_repo_id(ctx: &RpcCtx, owner: &str, repo: &str) -> Result<String, Box<Response>> {
+    crate::repo::resolve_repo_for_admin(ctx, owner, repo)
+        .await
+        .map(|a| a.row.id)
+        .map_err(|e| Box::new((status_for_error(&e), Json(e)).into_response()))
+}
+
+// ---- repo secrets ----
+
+async fn list_repo_secrets(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.secrets.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |data| {
+            let secrets: Vec<Value> = data["secrets"]
+                .as_array()
+                .map(|a| a.iter().map(gh_secret).collect())
+                .unwrap_or_default();
+            json!({"total_count": secrets.len(), "secrets": secrets})
+        },
+    )
+    .await
+}
+
+async fn repo_public_key(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.actions.secrets.publicKey",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn get_repo_secret(
+    State(state): State<AppState>,
+    Path(p): Path<SecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.secrets.list",
+        repo_ref(&p.owner, &p.repo),
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    {
+        Ok(Some(s)) => (StatusCode::OK, Json(gh_secret(&s))).into_response(),
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Secret not found"),
+        Err(r) => *r,
+    }
+}
+
+async fn put_repo_secret(
+    State(state): State<AppState>,
+    Path(p): Path<SecretPath>,
+    headers: HeaderMap,
+    Json(body): Json<SecretPutBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let repo_id = match admin_repo_id(&ctx, &p.owner, &p.repo).await {
+        Ok(id) => id,
+        Err(r) => return *r,
+    };
+    // GitHub answers 201 on create, 204 on update.
+    let existed = list_member_named(
+        &mut ctx,
+        "repo.actions.secrets.list",
+        repo_ref(&p.owner, &p.repo),
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    .map(|o| o.is_some());
+    let existed = match existed {
+        Ok(e) => e,
+        Err(r) => return *r,
+    };
+    let value = match secret_value_from_body(&body, &format!("repo:{repo_id}")) {
+        Ok(v) => v,
+        Err(r) => return *r,
+    };
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["secret_name"] = json!(p.secret_name);
+    input["value"] = json!(value);
+    let status = if existed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
+    };
+    call_dispatch(&mut ctx, "repo.actions.secrets.put", input, status).await
+}
+
+async fn delete_repo_secret(
+    State(state): State<AppState>,
+    Path(p): Path<SecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["secret_name"] = json!(p.secret_name);
+    call(
+        &state,
+        &headers,
+        "repo.actions.secrets.delete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- environment secrets ----
+
+fn env_ref(p: &EnvPath) -> Value {
+    json!({"owner": p.owner, "name": p.repo, "environment": p.environment_name})
+}
+
+async fn list_env_secrets(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.environments.secretsList",
+        env_ref(&p),
+        StatusCode::OK,
+        |data| {
+            let secrets: Vec<Value> = data["secrets"]
+                .as_array()
+                .map(|a| a.iter().map(gh_secret).collect())
+                .unwrap_or_default();
+            json!({"total_count": secrets.len(), "secrets": secrets})
+        },
+    )
+    .await
+}
+
+async fn env_public_key(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.actions.environments.secretsPublicKey",
+        env_ref(&p),
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn get_env_secret(
+    State(state): State<AppState>,
+    Path(p): Path<EnvSecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let input = json!({"owner": p.owner, "name": p.repo, "environment": p.environment_name});
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.environments.secretsList",
+        input,
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    {
+        Ok(Some(s)) => (StatusCode::OK, Json(gh_secret(&s))).into_response(),
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Secret not found"),
+        Err(r) => *r,
+    }
+}
+
+async fn put_env_secret(
+    State(state): State<AppState>,
+    Path(p): Path<EnvSecretPath>,
+    headers: HeaderMap,
+    Json(body): Json<SecretPutBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let repo_id = match admin_repo_id(&ctx, &p.owner, &p.repo).await {
+        Ok(id) => id,
+        Err(r) => return *r,
+    };
+    let input = json!({"owner": p.owner, "name": p.repo, "environment": p.environment_name});
+    let existed = list_member_named(
+        &mut ctx,
+        "repo.actions.environments.secretsList",
+        input.clone(),
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    .map(|o| o.is_some());
+    let existed = match existed {
+        Ok(e) => e,
+        Err(r) => return *r,
+    };
+    let scope = format!("env:{repo_id}:{}", p.environment_name);
+    let value = match secret_value_from_body(&body, &scope) {
+        Ok(v) => v,
+        Err(r) => return *r,
+    };
+    let mut input = input;
+    input["secret_name"] = json!(p.secret_name);
+    input["value"] = json!(value);
+    let status = if existed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
+    };
+    call_dispatch(
+        &mut ctx,
+        "repo.actions.environments.secretsPut",
+        input,
+        status,
+    )
+    .await
+}
+
+async fn delete_env_secret(
+    State(state): State<AppState>,
+    Path(p): Path<EnvSecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = json!({
+        "owner": p.owner, "name": p.repo,
+        "environment": p.environment_name, "secret_name": p.secret_name,
+    });
+    let _ = &mut input;
+    call(
+        &state,
+        &headers,
+        "repo.actions.environments.secretsDelete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- org secrets ----
+
+fn org_ref(org: &str) -> Value {
+    json!({"slug": org})
+}
+
+async fn list_org_secrets(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let org = p.org.clone();
+    call_dispatch_map(
+        &mut ctx,
+        "org.actions.secrets.list",
+        org_ref(&p.org),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            let secrets: Vec<Value> = data["secrets"]
+                .as_array()
+                .map(|a| a.iter().map(|s| gh_org_secret(&origin, &org, s)).collect())
+                .unwrap_or_default();
+            json!({"total_count": secrets.len(), "secrets": secrets})
+        },
+    )
+    .await
+}
+
+async fn org_public_key(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "org.actions.secrets.publicKey",
+        org_ref(&p.org),
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn get_org_secret(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "org.actions.secrets.list",
+        org_ref(&p.org),
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    {
+        Ok(Some(s)) => {
+            let origin = crate::public_origin::resolve_public_origin();
+            (StatusCode::OK, Json(gh_org_secret(&origin, &p.org, &s))).into_response()
+        }
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Secret not found"),
+        Err(r) => *r,
+    }
+}
+
+async fn put_org_secret(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretPath>,
+    headers: HeaderMap,
+    Json(body): Json<SecretPutBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let org = match crate::org::load_org_by_slug(&ctx, &p.org).await {
+        Ok(o) => o,
+        Err(e) => return (status_for_error(&e), Json(e)).into_response(),
+    };
+    let existed = list_member_named(
+        &mut ctx,
+        "org.actions.secrets.list",
+        org_ref(&p.org),
+        "secrets",
+        "name",
+        &p.secret_name,
+    )
+    .await
+    .map(|o| o.is_some());
+    let existed = match existed {
+        Ok(e) => e,
+        Err(r) => return *r,
+    };
+    let value = match secret_value_from_body(&body, &format!("org:{}", org.id)) {
+        Ok(v) => v,
+        Err(r) => return *r,
+    };
+    let mut input = org_ref(&p.org);
+    input["secret_name"] = json!(p.secret_name);
+    input["value"] = json!(value);
+    if let Some(v) = &body.visibility {
+        input["visibility"] = json!(v);
+    }
+    if let Some(ids) = &body.selected_repository_ids {
+        input["repository_ids"] = json!(ids);
+    }
+    let status = if existed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
+    };
+    call_dispatch(&mut ctx, "org.actions.secrets.put", input, status).await
+}
+
+async fn delete_org_secret(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = org_ref(&p.org);
+    input["secret_name"] = json!(p.secret_name);
+    call(
+        &state,
+        &headers,
+        "org.actions.secrets.delete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// Shared by the two org `…/selected-repositories` GETs — resolves each repo
+/// id into GitHub's minimal `{id, name, full_name, private}` member shape.
+async fn org_selected_repos(
+    ctx: &mut RpcCtx,
+    org: &str,
+    procedure: &str,
+    field: &str,
+    name: &str,
+) -> Response {
+    let mut input = org_ref(org);
+    input[field] = json!(name);
+    match dispatch(ctx, procedure, input).await {
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+        RpcResponse::Ok { data, .. } => {
+            let ids = data["repository_ids"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let mut repos = Vec::with_capacity(ids.len());
+            for id in ids.iter().filter_map(|i| i.as_str()) {
+                match ctx.db.find_repository_by_id(id).await {
+                    Ok(Some(r)) => repos.push(json!({
+                        "id": num_or_str(&r.id),
+                        "name": r.name,
+                        "full_name": format!("{org}/{}", r.name),
+                        "private": r.visibility == "private",
+                    })),
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e, repo_id = %id, "selected-repo lookup failed")
+                    }
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(json!({"total_count": repos.len(), "repositories": repos})),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn org_secret_selected_repos(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos(
+        &mut ctx,
+        &p.org,
+        "org.actions.secrets.listRepos",
+        "secret_name",
+        &p.secret_name,
+    )
+    .await
+}
+
+async fn org_variable_selected_repos(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos(
+        &mut ctx,
+        &p.org,
+        "org.actions.variables.listRepos",
+        "variable_name",
+        &p.variable_name,
+    )
+    .await
+}
+
+// ---- repo variables ----
+
+async fn list_repo_variables(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.variables.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |data| {
+            let vars: Vec<Value> = data["variables"]
+                .as_array()
+                .map(|a| a.iter().map(gh_variable).collect())
+                .unwrap_or_default();
+            json!({"total_count": vars.len(), "variables": vars})
+        },
+    )
+    .await
+}
+
+/// `POST …/variables` — GitHub answers 409 when the name is taken.
+async fn create_repo_variable(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let name = body.name.clone().unwrap_or_default();
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.variables.list",
+        repo_ref(&p.owner, &p.repo),
+        "variables",
+        "name",
+        &name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(Some(_)) => return err_json(StatusCode::CONFLICT, "Variable already exists"),
+        Ok(None) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["variable_name"] = json!(name);
+    input["value"] = json!(value);
+    call_dispatch(
+        &mut ctx,
+        "repo.actions.variables.put",
+        input,
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+async fn get_repo_variable(
+    State(state): State<AppState>,
+    Path(p): Path<VarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.variables.list",
+        repo_ref(&p.owner, &p.repo),
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Ok(Some(v)) => (StatusCode::OK, Json(gh_variable(&v))).into_response(),
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Err(r) => *r,
+    }
+}
+
+/// `PATCH …/variables/{name}` — 404 on a missing name (GitHub doesn't
+/// upsert on PATCH).
+async fn update_repo_variable(
+    State(state): State<AppState>,
+    Path(p): Path<VarPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.variables.list",
+        repo_ref(&p.owner, &p.repo),
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(None) => return err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Ok(Some(_)) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["variable_name"] = json!(p.variable_name);
+    input["value"] = json!(value);
+    call_dispatch(
+        &mut ctx,
+        "repo.actions.variables.put",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn delete_repo_variable(
+    State(state): State<AppState>,
+    Path(p): Path<VarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["variable_name"] = json!(p.variable_name);
+    call(
+        &state,
+        &headers,
+        "repo.actions.variables.delete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- environment variables ----
+
+async fn list_env_variables(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.environments.variablesList",
+        env_ref(&p),
+        StatusCode::OK,
+        |data| {
+            let vars: Vec<Value> = data["variables"]
+                .as_array()
+                .map(|a| a.iter().map(gh_variable).collect())
+                .unwrap_or_default();
+            json!({"total_count": vars.len(), "variables": vars})
+        },
+    )
+    .await
+}
+
+async fn create_env_variable(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let name = body.name.clone().unwrap_or_default();
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.environments.variablesList",
+        env_ref(&p),
+        "variables",
+        "name",
+        &name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(Some(_)) => return err_json(StatusCode::CONFLICT, "Variable already exists"),
+        Ok(None) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = env_ref(&p);
+    input["variable_name"] = json!(name);
+    input["value"] = json!(value);
+    call_dispatch(
+        &mut ctx,
+        "repo.actions.environments.variablesPut",
+        input,
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+async fn get_env_variable(
+    State(state): State<AppState>,
+    Path(p): Path<EnvVarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let input = json!({"owner": p.owner, "name": p.repo, "environment": p.environment_name});
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.environments.variablesList",
+        input,
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Ok(Some(v)) => (StatusCode::OK, Json(gh_variable(&v))).into_response(),
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Err(r) => *r,
+    }
+}
+
+async fn update_env_variable(
+    State(state): State<AppState>,
+    Path(p): Path<EnvVarPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let input = json!({"owner": p.owner, "name": p.repo, "environment": p.environment_name});
+    match list_member_named(
+        &mut ctx,
+        "repo.actions.environments.variablesList",
+        input.clone(),
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(None) => return err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Ok(Some(_)) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = input;
+    input["variable_name"] = json!(p.variable_name);
+    input["value"] = json!(value);
+    call_dispatch(
+        &mut ctx,
+        "repo.actions.environments.variablesPut",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn delete_env_variable(
+    State(state): State<AppState>,
+    Path(p): Path<EnvVarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let input = json!({
+        "owner": p.owner, "name": p.repo,
+        "environment": p.environment_name, "variable_name": p.variable_name,
+    });
+    call(
+        &state,
+        &headers,
+        "repo.actions.environments.variablesDelete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- org variables ----
+
+async fn list_org_variables(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let org = p.org.clone();
+    call_dispatch_map(
+        &mut ctx,
+        "org.actions.variables.list",
+        org_ref(&p.org),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            let vars: Vec<Value> = data["variables"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|v| gh_org_variable(&origin, &org, v))
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({"total_count": vars.len(), "variables": vars})
+        },
+    )
+    .await
+}
+
+async fn create_org_variable(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let name = body.name.clone().unwrap_or_default();
+    match list_member_named(
+        &mut ctx,
+        "org.actions.variables.list",
+        org_ref(&p.org),
+        "variables",
+        "name",
+        &name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(Some(_)) => return err_json(StatusCode::CONFLICT, "Variable already exists"),
+        Ok(None) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = org_ref(&p.org);
+    input["variable_name"] = json!(name);
+    input["value"] = json!(value);
+    if let Some(v) = &body.visibility {
+        input["visibility"] = json!(v);
+    }
+    if let Some(ids) = &body.selected_repository_ids {
+        input["repository_ids"] = json!(ids);
+    }
+    call_dispatch(
+        &mut ctx,
+        "org.actions.variables.put",
+        input,
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+async fn get_org_variable(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "org.actions.variables.list",
+        org_ref(&p.org),
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Ok(Some(v)) => {
+            let origin = crate::public_origin::resolve_public_origin();
+            (StatusCode::OK, Json(gh_org_variable(&origin, &p.org, &v))).into_response()
+        }
+        Ok(None) => err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Err(r) => *r,
+    }
+}
+
+async fn update_org_variable(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarPath>,
+    headers: HeaderMap,
+    Json(body): Json<VariableBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match list_member_named(
+        &mut ctx,
+        "org.actions.variables.list",
+        org_ref(&p.org),
+        "variables",
+        "name",
+        &p.variable_name,
+    )
+    .await
+    {
+        Err(r) => return *r,
+        Ok(None) => return err_json(StatusCode::NOT_FOUND, "Variable not found"),
+        Ok(Some(_)) => {}
+    }
+    let value = match body.value.clone() {
+        Some(v) => v,
+        None => return err_json(StatusCode::BAD_REQUEST, "value is required"),
+    };
+    let mut input = org_ref(&p.org);
+    input["variable_name"] = json!(p.variable_name);
+    input["value"] = json!(value);
+    if let Some(v) = &body.visibility {
+        input["visibility"] = json!(v);
+    }
+    if let Some(ids) = &body.selected_repository_ids {
+        input["repository_ids"] = json!(ids);
+    }
+    call_dispatch(
+        &mut ctx,
+        "org.actions.variables.put",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn delete_org_variable(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = org_ref(&p.org);
+    input["variable_name"] = json!(p.variable_name);
+    call(
+        &state,
+        &headers,
+        "org.actions.variables.delete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- environments ----
+
+async fn list_environments(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let owner = p.owner.clone();
+    let repo = p.repo.clone();
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.environments.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            let envs: Vec<Value> = data["environments"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|e| gh_environment(&origin, &owner, &repo, e))
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({"total_count": envs.len(), "environments": envs})
+        },
+    )
+    .await
+}
+
+async fn get_environment(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let owner = p.owner.clone();
+    let repo = p.repo.clone();
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.environments.get",
+        env_ref(&p),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            gh_environment(&origin, &owner, &repo, &data["environment"])
+        },
+    )
+    .await
+}
+
+async fn put_environment(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+    Json(body): Json<EnvUpsertBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let mut protection = json!({});
+    if let Some(w) = body.wait_timer {
+        protection["wait_timer_minutes"] = json!(w.max(0));
+    }
+    if let Some(v) = body.prevent_self_review {
+        protection["prevent_self_review"] = json!(v);
+    }
+    if let Some(reviewers) = &body.reviewers {
+        let ids: Vec<String> = reviewers
+            .iter()
+            .filter_map(|r| {
+                // GitHub reviewers look like `{type: "User", id: 42}` —
+                // accept numeric ids, string ids, or `{reviewer: {login}}`.
+                r["id"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| r["id"].as_i64().map(|n| n.to_string()))
+                    .or_else(|| r["reviewer"]["login"].as_str().map(str::to_string))
+            })
+            .collect();
+        protection["required_reviewers"] = json!(ids);
+    }
+    if let Some(dbp) = &body.deployment_branch_policy {
+        if dbp["protected_branches"].as_bool() == Some(true) {
+            protection["deployment_branches"] = json!([]);
+        } else if let Some(branches) = dbp["branches"].as_array() {
+            protection["deployment_branches"] = json!(branches);
+        }
+    }
+    let mut input = env_ref(&p);
+    input["protection"] = protection;
+    let owner = p.owner.clone();
+    let repo = p.repo.clone();
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.environments.upsert",
+        input,
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            gh_environment(&origin, &owner, &repo, &data["environment"])
+        },
+    )
+    .await
+}
+
+async fn delete_environment(
+    State(state): State<AppState>,
+    Path(p): Path<EnvPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.actions.environments.delete",
+        env_ref(&p),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn selected_repos_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "selected_repository_ids": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["selected_repository_ids"],
+    })
+}
+
+#[derive(Deserialize)]
+struct SelectedReposBody {
+    selected_repository_ids: Option<Vec<String>>,
+}
+
+/// `PUT …/selected-repositories` — full replace of the allow set.
+async fn org_selected_repos_replace(
+    ctx: &mut RpcCtx,
+    org: &str,
+    set_proc: &str,
+    field: &str,
+    name: &str,
+    ids: Vec<String>,
+) -> Response {
+    let mut input = org_ref(org);
+    input[field] = json!(name);
+    input["repository_ids"] = json!(ids);
+    call_dispatch(ctx, set_proc, input, StatusCode::NO_CONTENT).await
+}
+
+/// Which org-scoped selected-repos set an add/remove call targets.
+struct OrgSelTarget<'a> {
+    org: &'a str,
+    list_proc: &'a str,
+    set_proc: &'a str,
+    field: &'a str,
+    name: &'a str,
+}
+
+/// `PUT/DELETE …/selected-repositories/{repository_id}` — add/remove one repo:
+/// list the set, union or subtract, then write the replacement.
+async fn org_selected_repos_one(
+    ctx: &mut RpcCtx,
+    t: &OrgSelTarget<'_>,
+    repository_id: &str,
+    add: bool,
+) -> Response {
+    let mut input = org_ref(t.org);
+    input[t.field] = json!(t.name);
+    let mut ids = match dispatch(ctx, t.list_proc, input).await {
+        RpcResponse::Ok { data, .. } => data["repository_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|i| i.as_str().map(String::from))
+            .collect::<Vec<_>>(),
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    if add {
+        if !ids.iter().any(|i| i == repository_id) {
+            ids.push(repository_id.to_string());
+        }
+    } else {
+        ids.retain(|i| i != repository_id);
+    }
+    org_selected_repos_replace(ctx, t.org, t.set_proc, t.field, t.name, ids).await
+}
+
+async fn org_secret_set_selected_repos(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretPath>,
+    headers: HeaderMap,
+    Json(body): Json<SelectedReposBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_replace(
+        &mut ctx,
+        &p.org,
+        "org.actions.secrets.setRepos",
+        "secret_name",
+        &p.secret_name,
+        body.selected_repository_ids.unwrap_or_default(),
+    )
+    .await
+}
+
+async fn org_secret_add_selected_repo(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretRepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_one(
+        &mut ctx,
+        &OrgSelTarget {
+            org: &p.org,
+            list_proc: "org.actions.secrets.listRepos",
+            set_proc: "org.actions.secrets.setRepos",
+            field: "secret_name",
+            name: &p.secret_name,
+        },
+        &p.repository_id,
+        true,
+    )
+    .await
+}
+
+async fn org_secret_remove_selected_repo(
+    State(state): State<AppState>,
+    Path(p): Path<OrgSecretRepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_one(
+        &mut ctx,
+        &OrgSelTarget {
+            org: &p.org,
+            list_proc: "org.actions.secrets.listRepos",
+            set_proc: "org.actions.secrets.setRepos",
+            field: "secret_name",
+            name: &p.secret_name,
+        },
+        &p.repository_id,
+        false,
+    )
+    .await
+}
+
+async fn org_variable_set_selected_repos(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarPath>,
+    headers: HeaderMap,
+    Json(body): Json<SelectedReposBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_replace(
+        &mut ctx,
+        &p.org,
+        "org.actions.variables.setRepos",
+        "variable_name",
+        &p.variable_name,
+        body.selected_repository_ids.unwrap_or_default(),
+    )
+    .await
+}
+
+async fn org_variable_add_selected_repo(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarRepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_one(
+        &mut ctx,
+        &OrgSelTarget {
+            org: &p.org,
+            list_proc: "org.actions.variables.listRepos",
+            set_proc: "org.actions.variables.setRepos",
+            field: "variable_name",
+            name: &p.variable_name,
+        },
+        &p.repository_id,
+        true,
+    )
+    .await
+}
+
+async fn org_variable_remove_selected_repo(
+    State(state): State<AppState>,
+    Path(p): Path<OrgVarRepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    org_selected_repos_one(
+        &mut ctx,
+        &OrgSelTarget {
+            org: &p.org,
+            list_proc: "org.actions.variables.listRepos",
+            set_proc: "org.actions.variables.setRepos",
+            field: "variable_name",
+            name: &p.variable_name,
+        },
+        &p.repository_id,
+        false,
+    )
+    .await
 }

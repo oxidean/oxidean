@@ -259,13 +259,16 @@ pub const PROCEDURES: &[&str] = &[
     "org.invites.accept",
     "org.invites.createLink",
     "org.actions.secrets.list",
+    "org.actions.secrets.publicKey",
     "org.actions.secrets.put",
     "org.actions.secrets.delete",
     "org.actions.secrets.listRepos",
+    "org.actions.secrets.setRepos",
     "org.actions.variables.list",
     "org.actions.variables.put",
     "org.actions.variables.delete",
     "org.actions.variables.listRepos",
+    "org.actions.variables.setRepos",
     "invites.accept",
     "invites.get",
     "repo.listMine",
@@ -371,6 +374,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.deleteRun",
     "repo.actions.approveRun",
     "repo.actions.secrets.list",
+    "repo.actions.secrets.publicKey",
     "repo.actions.secrets.put",
     "repo.actions.secrets.delete",
     "repo.actions.variables.list",
@@ -389,6 +393,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.environments.upsert",
     "repo.actions.environments.delete",
     "repo.actions.environments.secretsList",
+    "repo.actions.environments.secretsPublicKey",
     "repo.actions.environments.secretsPut",
     "repo.actions.environments.secretsDelete",
     "repo.actions.environments.variablesList",
@@ -1114,6 +1119,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "org.actions.secrets.publicKey" => match org::secrets_public_key(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "org.actions.secrets.put" => match org::secrets_put(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1123,6 +1132,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "org.actions.secrets.listRepos" => match org::secrets_list_repos(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.secrets.setRepos" => match org::secrets_set_repos(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -1139,6 +1152,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "org.actions.variables.listRepos" => match org::vars::list_repos(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.variables.setRepos" => match org::vars::set_repos(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -1594,6 +1611,12 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.secrets.publicKey" => {
+            match crate::actions::rpc::repo_secret_public_key(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.secrets.list" => {
             match crate::actions::rpc::list_secrets(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
@@ -1692,6 +1715,12 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.environments.delete" => {
             match crate::actions::rpc::delete_environment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.secretsPublicKey" => {
+            match crate::actions::rpc::environment_secret_public_key(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

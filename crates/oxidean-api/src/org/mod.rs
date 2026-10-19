@@ -15,7 +15,7 @@ pub use members::{
 };
 pub use secrets::{
     delete as secrets_delete, list as secrets_list, list_repos as secrets_list_repos,
-    put as secrets_put,
+    public_key as secrets_public_key, put as secrets_put, set_repos as secrets_set_repos,
 };
 
 use oxidean_core::{

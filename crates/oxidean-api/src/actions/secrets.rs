@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use oxidean_db::Database;
 
 /// Actions secret key chain — dedicated var first, session secret fallback.
-const KEY_ENVS: &[&str] = &["OXIDEAN_ACTIONS_SECRETS_KEY", "OXIDEAN_SESSION_SECRET"];
+pub(crate) const KEY_ENVS: &[&str] = &["OXIDEAN_ACTIONS_SECRETS_KEY", "OXIDEAN_SESSION_SECRET"];
 
 /// GitHub's secret value cap — 48 KiB per secret.
 pub const MAX_SECRET_VALUE_BYTES: usize = 48 * 1024;

@@ -11,6 +11,7 @@
 use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
+use base64::Engine as _;
 use sha2::{Digest, Sha256};
 
 /// Resolve the 32-byte key from the first set var in `env_keys`.
@@ -75,6 +76,55 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
+// ---- libsodium `crypto_box_seal` receiver ----------------------------------
+//
+// GitHub's secrets endpoints serve `{key_id, key}` (an X25519 public key) and
+// clients sealed-box encrypt the value client-side before PUT — `gh secret
+// set`, `actions/github-script`, and web forms all rely on it. The keypair is
+// derived deterministically from the same env key material used for at-rest
+// encryption plus a scope tag, so repo/env/org surfaces get distinct keys
+// without storing anything new, and the pair rotates whenever the operator
+// rotates the at-rest key.
+
+/// Deterministic X25519 secret key for `env_keys` + `scope`.
+fn seal_secret_key(env_keys: &[&str], scope: &str) -> Result<crypto_box::SecretKey, String> {
+    let base = key_bytes(env_keys)?;
+    let mut h = Sha256::new();
+    h.update(b"oxidean-secrets-seal-v1:");
+    h.update(scope.as_bytes());
+    h.update(base);
+    Ok(crypto_box::SecretKey::from(<[u8; 32]>::from(h.finalize())))
+}
+
+/// `key_id` for a scope's derived key — stable while the key material is.
+fn seal_key_id(env_keys: &[&str], scope: &str) -> Result<String, String> {
+    let pk = seal_secret_key(env_keys, scope)?.public_key();
+    let mut h = Sha256::new();
+    h.update(b"oxidean-secrets-keyid-v1:");
+    h.update(pk.as_bytes());
+    Ok(hex_encode(&h.finalize()[..16]))
+}
+
+/// `GET …/secrets/public-key` payload: `{key_id, key}` (base64 X25519).
+pub fn seal_public_key(env_keys: &[&str], scope: &str) -> Result<(String, String), String> {
+    let pk = seal_secret_key(env_keys, scope)?.public_key();
+    let key = base64::engine::general_purpose::STANDARD.encode(pk.as_bytes());
+    Ok((seal_key_id(env_keys, scope)?, key))
+}
+
+/// Open a base64 `crypto_box_seal` blob against a scope's derived key.
+/// Returns the UTF-8 plaintext.
+pub fn seal_open(env_keys: &[&str], scope: &str, sealed_b64: &str) -> Result<String, String> {
+    let sealed = base64::engine::general_purpose::STANDARD
+        .decode(sealed_b64.trim())
+        .map_err(|e| format!("bad base64 sealed box: {e}"))?;
+    let sk = seal_secret_key(env_keys, scope)?;
+    let pt = sk
+        .unseal(&sealed)
+        .map_err(|_| "sealed box did not open".to_string())?;
+    String::from_utf8(pt).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +149,31 @@ mod tests {
         ct.replace_range(0..2, "ff");
         assert!(decrypt(keys, &ct).is_err());
         std::env::remove_var("OXIDEAN_TEST_SECRET_KEY_TAMPER");
+    }
+
+    #[test]
+    fn sealed_box_roundtrip_per_scope() {
+        std::env::set_var("OXIDEAN_TEST_SECRET_KEY_SEAL", "crypto-unit-key");
+        let keys = &["OXIDEAN_TEST_SECRET_KEY_SEAL"];
+
+        let (key_id, key_b64) = seal_public_key(keys, "repo:r1").unwrap();
+        assert_eq!(key_id.len(), 32);
+        let pk_raw = base64::engine::general_purpose::STANDARD
+            .decode(&key_b64)
+            .unwrap();
+        let pk = crypto_box::PublicKey::try_from(pk_raw.as_slice()).unwrap();
+        let sealed = pk
+            .seal(&mut crypto_box::aead::OsRng, b"hunter2")
+            .expect("seal");
+        let sealed_b64 = base64::engine::general_purpose::STANDARD.encode(&sealed);
+        assert_eq!(seal_open(keys, "repo:r1", &sealed_b64).unwrap(), "hunter2");
+
+        // Distinct scopes derive distinct keypairs — a repo box does not
+        // open under the environment scope.
+        assert!(seal_open(keys, "env:r1:prod", &sealed_b64).is_err());
+        let (other_id, other_key) = seal_public_key(keys, "org:acme").unwrap();
+        assert_ne!(key_id, other_id);
+        assert_ne!(key_b64, other_key);
+        std::env::remove_var("OXIDEAN_TEST_SECRET_KEY_SEAL");
     }
 }
