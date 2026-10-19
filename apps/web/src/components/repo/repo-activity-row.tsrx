@@ -27,6 +27,22 @@ function actionCopy(item: RepoActivityItem): string {
         return `merged pull request #${item.pr_number} into ${branch}`;
       }
       return `merged into ${branch}`;
+    case "vcs.repo_enable":
+      return "updated the VCS protocol flag";
+    case "vcs.changeset_create":
+      return "created a VCS changeset";
+    case "vcs.merge":
+      return "merged VCS changesets";
+    case "vcs.rebase":
+      return "rebased a VCS changeset";
+    case "vcs.ref_update":
+      if (!hasCommitOid(item.before)) return `created VCS ref ${branch}`;
+      if (!hasCommitOid(item.after)) return `deleted VCS ref ${branch}`;
+      return `updated VCS ref ${branch}`;
+    case "vcs.git_import":
+      return "imported Git history into VCS";
+    case "vcs.git_export":
+      return `exported VCS to Git ref ${branch}`;
     default:
       return `pushed to ${branch}`;
   }
@@ -41,6 +57,16 @@ function hasCommitOid(oid: string | null): boolean {
   return oid != null && oid.length > 0 && !oid.split("").every((c) => c === "0");
 }
 
+/**
+ * `after` carries a git oid only for git-flow rows (`push`, `vcs.git_export`,
+ * branch ops). VCS changeset rows carry `cs_<ulid>` ids — never a git oid,
+ * never linkable to `/commit/{sha}` (contract C4 rendering note).
+ */
+const GIT_OID_RE = /^[0-9a-f]{40}$/;
+function isGitOid(oid: string | null): boolean {
+  return oid != null && GIT_OID_RE.test(oid) && hasCommitOid(oid);
+}
+
 type RepoActivityRowProps = {
   owner: string;
   repoName: string;
@@ -53,7 +79,7 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
   const action = actionCopy(item);
   const when = relativeActivityTime(item.pushed_at);
   const initial = actorInitial(item);
-  const showCommitLink = !!item.commit_message && item.after != null && hasCommitOid(item.after);
+  const showCommitLink = !!item.commit_message && isGitOid(item.after);
   const commitCountLabel =
     (item.commits_count ?? 0) > 1 ? `${String(item.commits_count)} commits` : "";
 

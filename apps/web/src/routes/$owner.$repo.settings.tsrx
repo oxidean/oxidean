@@ -23,6 +23,7 @@ import { RepoSettingsNav } from "@/components/repo/repo-settings-nav";
 import { RepoFeaturesPanel } from "@/components/repo/repo-features-panel";
 import { WebhooksPanel } from "@/components/repo/webhooks-panel";
 import { MirrorSettingsPanel } from "@/components/repo/mirror-settings-panel";
+import { VcsSettingsPanel } from "@/components/repo/vcs-settings-panel";
 import { TypeToConfirmDialog } from "@/components/repo/type-to-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -389,6 +390,14 @@ function RepoSettingsPageContent() @{
 
           <div id="repo-settings-lfs" className="scroll-mt-28">
             <LfsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+          <div id="repo-settings-vcs" className="scroll-mt-28">
+            <VcsSettingsPanel
+              owner={owner}
+              name={repoName}
+              can_admin={canAdmin}
+              archived={archived}
+            />
           </div>
           <div id="repo-settings-template" className="scroll-mt-28">
             <TemplateRepoSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
