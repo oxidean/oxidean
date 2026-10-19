@@ -1604,7 +1604,13 @@ export const expectChromeCreateAndAccountMenusFlow: BrowserCommand<[]> = async (
     await page.getByRole("button", { name: /account menu/i }).click();
     await page.getByRole("menu").waitFor({ state: "visible", timeout: 15_000 });
     await page.keyboard.press("Escape");
-    await page.getByRole("link", { name: "Notifications", exact: true }).first().click();
+    // The bell's aria-label carries the unread count ("Notifications (N
+    // unread)") once any earlier test in the shared stack leaves a
+    // notification — an exact-name locator never resolves then.
+    await page
+      .getByRole("link", { name: /^Notifications/ })
+      .first()
+      .click();
     await page.waitForURL("**/notifications", { timeout: 30_000 });
     await page.getByRole("button", { name: /account menu/i }).click();
     await page.getByRole("menu").waitFor({ state: "visible", timeout: 15_000 });
