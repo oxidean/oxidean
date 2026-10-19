@@ -43,8 +43,9 @@ use super::cache::{
     find_cache_row_by_id, lookup_hash, storage_rel, CacheScope,
 };
 
-/// Twirp JSON error body — `{"code": "<twirp-code>", "msg": "..."}`.
-fn twirp_err(status: StatusCode, code: &str, msg: impl Into<String>) -> Response {
+/// Twirp JSON error body — `{"code": "<twirp-code>", "msg": "..."}`. Shared
+/// by the artifact Twirp surface.
+pub(crate) fn twirp_err(status: StatusCode, code: &str, msg: impl Into<String>) -> Response {
     (
         status,
         Json(serde_json::json!({ "code": code, "msg": msg.into() })),
@@ -52,7 +53,7 @@ fn twirp_err(status: StatusCode, code: &str, msg: impl Into<String>) -> Response
         .into_response()
 }
 
-fn twirp_unauthenticated() -> Response {
+pub(crate) fn twirp_unauthenticated() -> Response {
     twirp_err(
         StatusCode::UNAUTHORIZED,
         "unauthenticated",
@@ -60,7 +61,7 @@ fn twirp_unauthenticated() -> Response {
     )
 }
 
-fn twirp_internal() -> Response {
+pub(crate) fn twirp_internal() -> Response {
     twirp_err(
         StatusCode::INTERNAL_SERVER_ERROR,
         "internal",
@@ -69,7 +70,8 @@ fn twirp_internal() -> Response {
 }
 
 /// Map the shared `StatusCode` auth/lookup failures onto Twirp error JSON.
-fn twirp_status(e: StatusCode) -> Response {
+/// Shared by the artifact Twirp surface.
+pub(crate) fn twirp_status(e: StatusCode) -> Response {
     match e {
         StatusCode::UNAUTHORIZED => twirp_unauthenticated(),
         StatusCode::FORBIDDEN => twirp_err(StatusCode::FORBIDDEN, "permission_denied", "forbidden"),
@@ -95,7 +97,9 @@ struct EntryRef {
     size_bytes: i64,
 }
 
-fn de_i64_maybe_string<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+/// int64 arrives as a JSON string under protobuf-JSON mapping; accept plain
+/// numbers too. Shared by the artifact Twirp surface (`size` field).
+pub(crate) fn de_i64_maybe_string<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     let v = serde_json::Value::deserialize(d)?;
     match v {
         serde_json::Value::Number(n) => n
@@ -318,23 +322,24 @@ fn blob_url(cache_id: &str, token: &str) -> String {
 
 /// Hex-encode the client's opaque `blockid` (base64 in practice) into a
 /// filename-safe segment — `/` and `+` are legal Azure block id chars and must
-/// never reach the filesystem verbatim.
-fn block_file(blocks_dir: &std::path::Path, block_id: &str) -> std::path::PathBuf {
+/// never reach the filesystem verbatim. Shared by the artifact blob plane.
+pub(crate) fn block_file(blocks_dir: &std::path::Path, block_id: &str) -> std::path::PathBuf {
     blocks_dir.join(hex::encode(block_id))
 }
 
-fn blocks_dir(
-    state: &AppState,
-    row: &oxidean_db::actions_cache::ActionCacheRow,
-) -> std::path::PathBuf {
-    state
-        .actions_cache_dir
-        .join(&row.storage_path)
-        .with_extension("blocks")
+/// `{storage_path}.blocks/` staging dir under the given store root —
+/// shared by the artifact blob plane (`actions_artifacts_dir`).
+pub(crate) fn blocks_dir(root: &std::path::Path, storage_path: &str) -> std::path::PathBuf {
+    root.join(storage_path).with_extension("blocks")
 }
 
-/// Stream a request body to `dest`, enforcing the per-entry cap.
-async fn write_body_to(dest: &std::path::Path, body: Body, max: u64) -> Result<u64, StatusCode> {
+/// Stream a request body to `dest`, enforcing the per-entry cap. Shared by
+/// the artifact blob plane.
+pub(crate) async fn write_body_to(
+    dest: &std::path::Path,
+    body: Body,
+    max: u64,
+) -> Result<u64, StatusCode> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
@@ -360,8 +365,8 @@ async fn write_body_to(dest: &std::path::Path, body: Body, max: u64) -> Result<u
 
 /// Ordered block ids out of a Put Block List XML body — entries may carry
 /// `Latest`, `Committed`, or `Uncommitted` tags; document order is preserved
-/// (the earliest opening tag wins each step).
-fn parse_block_list(xml: &str) -> Vec<String> {
+/// (the earliest opening tag wins each step). Shared by the artifact plane.
+pub(crate) fn parse_block_list(xml: &str) -> Vec<String> {
     let mut ids = Vec::new();
     let mut rest = xml;
     loop {
@@ -406,7 +411,7 @@ async fn put_blob(
                 .get("blockid")
                 .filter(|b| !b.is_empty())
                 .ok_or(StatusCode::BAD_REQUEST)?;
-            let dir = blocks_dir(&state, &row);
+            let dir = blocks_dir(&state.actions_cache_dir, &row.storage_path);
             write_body_to(&block_file(&dir, block_id), body, max)
                 .await
                 .map(|_| StatusCode::CREATED)
@@ -426,7 +431,7 @@ async fn put_blob(
             if ids.is_empty() {
                 return Err(StatusCode::BAD_REQUEST);
             }
-            let dir = blocks_dir(&state, &row);
+            let dir = blocks_dir(&state.actions_cache_dir, &row.storage_path);
             let dest = state
                 .actions_cache_dir
                 .join(&row.storage_path)

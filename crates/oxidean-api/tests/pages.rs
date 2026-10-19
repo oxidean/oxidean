@@ -804,6 +804,8 @@ async fn pages_workflow_deploy_job_token_seam() {
         size_bytes: 1,
         digest_sha256: "d".into(),
         expires_at: None,
+        state: "committed".into(),
+        mime_type: "application/gzip".into(),
         created_at: chrono::Utc::now().to_rfc3339(),
     })
     .await

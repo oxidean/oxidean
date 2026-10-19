@@ -5307,6 +5307,24 @@ impl Database {
         actions::delete_action_artifact(self.require_pool()?, id).await
     }
 
+    /// 'pending' → 'committed' once the Twirp blob upload verifies.
+    pub async fn commit_action_artifact(
+        &self,
+        id: &str,
+        size_bytes: i64,
+        digest_sha256: &str,
+    ) -> Result<bool, String> {
+        actions::commit_action_artifact(self.require_pool()?, id, size_bytes, digest_sha256).await
+    }
+
+    /// 'pending' rows older than `cutoff` — abandoned Twirp reservations.
+    pub async fn list_stale_pending_artifacts(
+        &self,
+        cutoff: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_stale_pending_artifacts(self.require_pool()?, cutoff).await
+    }
+
     // --- actions/cache service (0062) ----------------------------------------
 
     /// Exact committed-entry lookup by (repo, key, version, scope) hash.

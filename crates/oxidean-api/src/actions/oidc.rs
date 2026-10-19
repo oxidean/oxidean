@@ -161,9 +161,13 @@ async fn signing_key(db: &oxidean_db::Database) -> Result<(String, Vec<u8>), Str
 /// private key — aws-lc-rs signs (constant-time); `rsa`-crate code paths are
 /// never touched for private-key operations.
 fn encode_rs256(claims: &OidcClaims, kid: &str, pkcs8_der: &[u8]) -> Result<String, String> {
-    let header = serde_json::json!({ "alg": SIGNING_ALG, "typ": "JWT", "kid": kid }).to_string();
     let payload = serde_json::to_vec(claims).map_err(|e| e.to_string())?;
-    let signing_input = format!("{}.{}", b64u(header.as_bytes()), b64u(&payload));
+    encode_rs256_compact(&payload, kid, pkcs8_der)
+}
+
+fn encode_rs256_compact(payload: &[u8], kid: &str, pkcs8_der: &[u8]) -> Result<String, String> {
+    let header = serde_json::json!({ "alg": SIGNING_ALG, "typ": "JWT", "kid": kid }).to_string();
+    let signing_input = format!("{}.{}", b64u(header.as_bytes()), b64u(payload));
     let key_pair = aws_lc_rs::rsa::KeyPair::from_pkcs8(pkcs8_der)
         .map_err(|_| "oidc signing key is not a valid RSA PKCS#8 key".to_string())?;
     let mut signature = vec![0u8; key_pair.public_modulus_len()];
@@ -176,6 +180,19 @@ fn encode_rs256(claims: &OidcClaims, kid: &str, pkcs8_der: &[u8]) -> Result<Stri
         )
         .map_err(|_| "oidc token signing failed".to_string())?;
     Ok(format!("{signing_input}.{}", b64u(&signature)))
+}
+
+/// Sign an arbitrary JSON claims map as a compact RS256 JWT under the
+/// instance OIDC key. The per-job `ACTIONS_RUNTIME_TOKEN` uses this — the
+/// results-API toolkits (`actions/cache@v4`, `upload-artifact@v4`)
+/// `jwtDecode` the payload for backend ids, so a real signed JWT keeps the
+/// token verifiable through the JWKS endpoint.
+pub(crate) async fn sign_jwt(
+    db: &oxidean_db::Database,
+    claims: &serde_json::Value,
+) -> Result<String, String> {
+    let (kid, pkcs8) = signing_key(db).await?;
+    encode_rs256_compact(claims.to_string().as_bytes(), &kid, &pkcs8)
 }
 
 // ── discovery endpoints (public, no auth) ─────────────────────────────────

@@ -70,6 +70,7 @@ pub fn router() -> Router<AppState> {
         // plane (`signed_{upload,download}_url` targets, `?t=` authed).
         .merge(crate::actions::cache::router())
         .merge(crate::actions::cache_v2::blob_router())
+        .merge(crate::actions::artifacts_v2::blob_router())
 }
 
 pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -569,8 +570,13 @@ async fn fetch_task(
             // Per-job `ACTIONS_RUNTIME_TOKEN` for the `actions/cache` service —
             // failures degrade to "cache unavailable" rather than failing the
             // claim (the action treats missing env as a skip).
-            let cache_token =
-                crate::actions::cache::mint_cache_token(&state, &j.id, &run.repository_id).await;
+            let cache_token = crate::actions::cache::mint_cache_token(
+                &state,
+                &j.run_id,
+                &j.id,
+                &run.repository_id,
+            )
+            .await;
             let cache_url = cache_token
                 .as_ref()
                 .map(|_| format!("{server_url}/api/actions/_apis/artifactcache"));

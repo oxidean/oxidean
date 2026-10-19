@@ -28,6 +28,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
+use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,7 +66,7 @@ fn token_ttl_hours() -> i64 {
 /// How long an uncommitted reservation survives (minutes) before the sweeper
 /// reaps it — abandoned `POST /caches` rows would otherwise pin a key
 /// forever. `OXIDEAN_ACTIONS_CACHE_RESERVE_MINS`; default 30.
-fn reserve_ttl_minutes() -> i64 {
+pub(crate) fn reserve_ttl_minutes() -> i64 {
     std::env::var("OXIDEAN_ACTIONS_CACHE_RESERVE_MINS")
         .ok()
         .and_then(|s| s.parse::<i64>().ok())
@@ -101,6 +102,10 @@ pub(crate) struct CacheScope {
     /// The presented runtime token — v2 signs blob URLs with it (the data
     /// plane carries `?t=` instead of an Authorization header).
     pub token: String,
+    /// Claimed job + parent run the token was minted for — the v2
+    /// ArtifactService cross-checks requests' `workflow_*_backend_id`s.
+    pub job_id: String,
+    pub run_id: String,
 }
 
 /// Bearer `ACTIONS_RUNTIME_TOKEN` → job/repo/branch scope. 401 on unknown or
@@ -171,17 +176,51 @@ pub(crate) async fn cache_scope_from_token(
         scope: normalize_scope(&run.head_ref),
         default_scope: normalize_scope(&default_scope),
         token: raw.to_string(),
+        job_id: tok.job_id,
+        run_id: job.run_id,
     })
 }
 
-/// Mint a fresh runtime token for `job_id` — called from `fetch_task` at
-/// claim. Returns the plaintext (handed to the runner env) or None on a
-/// persistence error (cache stays unusable for the job rather than failing
-/// the claim — actions/cache tolerates missing env by skipping).
-pub async fn mint_cache_token(state: &AppState, job_id: &str, repo_id: &str) -> Option<String> {
-    let plaintext = format!("oxrt_{}", Uuid::new_v4());
-    let expires_at = (chrono::Utc::now() + chrono::Duration::hours(token_ttl_hours()))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+/// Mint a fresh per-job `ACTIONS_RUNTIME_TOKEN` at claim — the Bearer both
+/// the v1 cache endpoints and the Twirp results APIs (cache v2, artifacts)
+/// authorize on. The token is a compact JWT whose `scp` claim carries
+/// `Actions.Results:{run_id}:{job_id}` — the backend ids the v4 toolkits
+/// `jwtDecode` client-side to build Twirp requests. RS256-signed with the
+/// instance OIDC key when the secrets key is configured; degrades to an
+/// unsigned `alg:"none"` compact JWT otherwise (server-side auth always keys
+/// on the stored token hash, never on the JWT signature). Returns None on a
+/// persistence error — actions tolerate the missing env by skipping.
+pub async fn mint_cache_token(
+    state: &AppState,
+    run_id: &str,
+    job_id: &str,
+    repo_id: &str,
+) -> Option<String> {
+    let now = chrono::Utc::now();
+    let expires_at = now + chrono::Duration::hours(token_ttl_hours());
+    let origin = crate::public_origin::resolve_public_origin();
+    let claims = serde_json::json!({
+        "iss": origin,
+        "aud": origin,
+        "iat": now.timestamp(),
+        "nbf": now.timestamp(),
+        "exp": expires_at.timestamp(),
+        "jti": Uuid::new_v4().to_string(),
+        "scp": format!("Actions.Results:{run_id}:{job_id}"),
+    });
+    let plaintext = match crate::actions::oidc::sign_jwt(&state.db, &claims).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "runtime token fell back to unsigned jwt");
+            let b64 = |b: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b);
+            format!(
+                "{}.{}.",
+                b64(br#"{"alg":"none","typ":"JWT"}"#),
+                b64(claims.to_string().as_bytes())
+            )
+        }
+    };
+    let expires_at = expires_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     state
         .db
         .insert_action_cache_token(

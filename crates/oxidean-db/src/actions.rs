@@ -3728,12 +3728,19 @@ pub struct ActionArtifactRow {
     pub size_bytes: i64,
     pub digest_sha256: String,
     pub expires_at: Option<String>,
+    /// 'pending' = Twirp `CreateArtifact` reservation awaiting
+    /// `FinalizeArtifact`; 'committed' = downloadable. Builtin runner-proto
+    /// uploads always write 'committed'. Column added by 0082.
+    pub state: String,
+    /// Content type the signed-URL download echoes (the v4 client picks
+    /// zip-extract vs raw on it). Column added by 0082.
+    pub mime_type: String,
     pub created_at: String,
 }
 
-const ARTIFACT_COLS: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, expires_at, created_at";
+const ARTIFACT_COLS: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, expires_at, state, mime_type, created_at";
 /// MySQL TIMESTAMP columns do not decode into String — project RFC3339 text.
-const ARTIFACT_COLS_MYSQL: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at";
+const ARTIFACT_COLS_MYSQL: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at, state, mime_type, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at";
 
 macro_rules! map_artifact_row {
     ($row:expr) => {{
@@ -3752,6 +3759,12 @@ macro_rules! map_artifact_row {
                 .unwrap_or(0),
             digest_sha256: r.try_get("digest_sha256").unwrap_or_default(),
             expires_at: r.try_get("expires_at").unwrap_or(None),
+            state: r
+                .try_get("state")
+                .unwrap_or_else(|_| "committed".to_string()),
+            mime_type: r
+                .try_get("mime_type")
+                .unwrap_or_else(|_| "application/zip".to_string()),
             created_at: r.try_get("created_at").unwrap_or_default(),
         }
     }};
@@ -3763,37 +3776,38 @@ pub async fn upsert_action_artifact(pool: &DbPool, a: &ActionArtifactRow) -> Res
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(sqlx::AssertSqlSafe(format!(
-                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%S','now')) \
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%S','now')) \
                  ON CONFLICT(run_id, name) DO UPDATE SET job_id=excluded.job_id, storage_path=excluded.storage_path, \
                  size_bytes=excluded.size_bytes, digest_sha256=excluded.digest_sha256, expires_at=excluded.expires_at, \
-                 updated_at=strftime('%Y-%m-%d %H:%M:%S','now')"
+                 state=excluded.state, mime_type=excluded.mime_type, updated_at=strftime('%Y-%m-%d %H:%M:%S','now')"
             )))
             .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
             .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
-            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .bind(&a.digest_sha256).bind(&a.expires_at).bind(&a.state).bind(&a.mime_type)
             .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
             sqlx::query(sqlx::AssertSqlSafe(format!(
-                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,now()) \
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,$10,$11,now()) \
                  ON CONFLICT(run_id, name) DO UPDATE SET job_id=excluded.job_id, storage_path=excluded.storage_path, \
                  size_bytes=excluded.size_bytes, digest_sha256=excluded.digest_sha256, expires_at=excluded.expires_at, \
-                 updated_at=now()"
+                 state=excluded.state, mime_type=excluded.mime_type, updated_at=now()"
             )))
             .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
             .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
-            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .bind(&a.digest_sha256).bind(&a.expires_at).bind(&a.state).bind(&a.mime_type)
             .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query(sqlx::AssertSqlSafe(format!(
-                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),NOW()) \
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),?,?,NOW()) \
                  ON DUPLICATE KEY UPDATE job_id=VALUES(job_id), storage_path=VALUES(storage_path), \
-                 size_bytes=VALUES(size_bytes), digest_sha256=VALUES(digest_sha256), expires_at=VALUES(expires_at)"
+                 size_bytes=VALUES(size_bytes), digest_sha256=VALUES(digest_sha256), expires_at=VALUES(expires_at), \
+                 state=VALUES(state), mime_type=VALUES(mime_type)"
             )))
             .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
             .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
-            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .bind(&a.digest_sha256).bind(&a.expires_at).bind(&a.state).bind(&a.mime_type)
             .execute(p).await.map_err(|e| e.to_string())?;
         }
     }
@@ -3842,7 +3856,7 @@ pub async fn list_action_artifacts_for_run(
 ) -> Result<Vec<ActionArtifactRow>, String> {
     match pool {
         DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? ORDER BY name"
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? AND state = 'committed' ORDER BY name"
         )))
         .bind(run_id)
         .fetch_all(p)
@@ -3850,7 +3864,7 @@ pub async fn list_action_artifacts_for_run(
         .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
         .map_err(|e| e.to_string()),
         DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = $1 ORDER BY name"
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = $1 AND state = 'committed' ORDER BY name"
         )))
         .bind(run_id)
         .fetch_all(p)
@@ -3858,7 +3872,7 @@ pub async fn list_action_artifacts_for_run(
         .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
         .map_err(|e| e.to_string()),
         DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE run_id = ? ORDER BY name"
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE run_id = ? AND state = 'committed' ORDER BY name"
         )))
         .bind(run_id)
         .fetch_all(p)
@@ -3898,6 +3912,84 @@ pub async fn find_action_artifact_by_id(
         .fetch_optional(p)
         .await
         .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Flip a 'pending' artifact to 'committed' after the Twirp blob upload is
+/// verified — `FinalizeArtifact`'s write side. Returns false when no pending
+/// row owns the id (already committed or unknown).
+pub async fn commit_action_artifact(
+    pool: &DbPool,
+    id: &str,
+    size_bytes: i64,
+    digest_sha256: &str,
+) -> Result<bool, String> {
+    let affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE action_artifacts SET state = 'committed', size_bytes = ?, digest_sha256 = ?, \
+             updated_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ? AND state = 'pending'",
+        )
+        .bind(size_bytes)
+        .bind(digest_sha256)
+        .bind(id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE action_artifacts SET state = 'committed', size_bytes = $1, digest_sha256 = $2, \
+             updated_at = now() WHERE id = $3 AND state = 'pending'",
+        )
+        .bind(size_bytes)
+        .bind(digest_sha256)
+        .bind(id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::MySql(p) => sqlx::query(
+            "UPDATE action_artifacts SET state = 'committed', size_bytes = ?, digest_sha256 = ?, \
+             updated_at = NOW() WHERE id = ? AND state = 'pending'",
+        )
+        .bind(size_bytes)
+        .bind(digest_sha256)
+        .bind(id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(affected > 0)
+}
+
+/// 'pending' artifacts older than `cutoff` — the Twirp reservation sweep.
+pub async fn list_stale_pending_artifacts(
+    pool: &DbPool,
+    cutoff: &str,
+) -> Result<Vec<ActionArtifactRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE state = 'pending' AND updated_at < ?"
+        )))
+        .bind(cutoff)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE state = 'pending' AND updated_at < $1::timestamptz"
+        )))
+        .bind(cutoff)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE state = 'pending' AND updated_at < STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s')"
+        )))
+        .bind(cutoff)
+        .fetch_all(p)
+        .await
+        .map(|rows| rows.into_iter().map(|r| map_artifact_row!(r)).collect())
         .map_err(|e| e.to_string()),
     }
 }

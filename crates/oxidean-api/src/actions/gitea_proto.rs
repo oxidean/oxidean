@@ -574,7 +574,7 @@ pub(crate) async fn claim_context(
     // Per-job `ACTIONS_RUNTIME_TOKEN` for the `actions/cache` service —
     // failure degrades to "cache unavailable" rather than failing the claim.
     let cache_token =
-        crate::actions::cache::mint_cache_token(state, &j.id, &run.repository_id).await;
+        crate::actions::cache::mint_cache_token(state, &j.run_id, &j.id, &run.repository_id).await;
     let cache_url = cache_token
         .as_ref()
         .map(|_| format!("{server_url}/api/actions/_apis/artifactcache"));

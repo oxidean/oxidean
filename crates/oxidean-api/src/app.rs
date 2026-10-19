@@ -334,7 +334,11 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         // `new URL("/twirp/<svc>/<m>", ACTIONS_RESULTS_URL)`, so the service
         // lives at the origin root regardless of the env var's path. Bearer
         // is the same per-job runtime token as the v1 surface.
-        .nest("/twirp", crate::actions::cache_v2::twirp_router())
+        .nest(
+            "/twirp",
+            crate::actions::cache_v2::twirp_router()
+                .merge(crate::actions::artifacts_v2::twirp_router()),
+        )
         // OIDC issuer for `id-token: write` jobs — the request token itself
         // is the credential, so these paths carry no session middleware.
         .nest("/api/actions/oidc", crate::actions::oidc::router())

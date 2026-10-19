@@ -56,7 +56,7 @@ download, annotations, `workflow_job` webhook.
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 17 | 0 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
-| 13. Artifacts | 13 | 0 | 0 | 0 |
+| 13. Artifacts | 14 | 0 | 0 | 0 |
 | 14. Dependency caching | 6 | 0 | 0 | 0 |
 | 15. Concurrency | 5 | 0 | 0 | 0 |
 | 16. Environments & deployments | 11 | 0 | 0 | 0 |
@@ -473,6 +473,7 @@ needed. Search-path semantics follow upstream `findFilesToUpload`
 | `art.download-missing` | Missing artifact name fails the step | supported | case:artifact-missing | |
 | `art.cross-repo` | `github-token`/`repository`/`run-id` download from another repo/run | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::artifacts_token_matrix_and_repository_param, test:crates/oxidean-api/tests/actions_runner_protocol.rs::artifacts_runner_and_unauthenticated_reads, test:crates/oxidean-runner/src/exec/artifacts.rs::download_cross_run_sends_supplied_credentials_and_ids | `github-token` defaults to `github.token` (job token, repo-pinned + `actions:read`); PATs authorize on scope + repo ACL (outsiders 404). `repository` must resolve to the run's repo — mismatch 404s like GitHub. |
 | `art.digest` | `outputs.digest` — artifact SHA-256 | supported | case:artifact-upload-download | Emitted as `artifact-digest` (`sha256:<hex>` of the tar.gz). GitHub v4.4+ also emits `artifact-id`/`artifact-url`; digest hex vs upstream base64 differs cosmetically. |
+| `art.action-v4` | `upload-artifact@v4`/`download-artifact@v4` Twirp `ArtifactService` | supported | test:crates/oxidean-api/tests/actions_artifacts_v2.rs::v4_roundtrip_putblob_then_download | JSON-RPC at `/twirp/github.actions.results.api.v1.ArtifactService/*` (CreateArtifact → `signed_upload_url` → FinalizeArtifact; ListArtifacts; GetSignedArtifactURL → `signed_url`; DeleteArtifact). Blob plane `/_apis/artifactblobs/{id}` accepts PutBlob + `comp=block`/`blocklist` staging; the runtime token is a JWT whose `scp` carries `Actions.Results:<run>:<job>` backend ids the toolkit decodes. Our own runner still uses the builtin uploader — the Twirp surface is what stock `act_runner`/third-party runners hit. |
 
 ## 14. Dependency caching (`cache.`)
 

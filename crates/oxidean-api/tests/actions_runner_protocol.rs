@@ -1167,6 +1167,8 @@ jobs:
         size_bytes: 9,
         digest_sha256: "ab".repeat(32),
         expires_at: None,
+        state: "committed".into(),
+        mime_type: "application/gzip".into(),
         created_at: String::new(),
     })
     .await

@@ -166,6 +166,8 @@ pub async fn upload(
         size_bytes: size as i64,
         digest_sha256: hex::encode(hasher.finalize()),
         expires_at: expires_at.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        state: "committed".into(),
+        mime_type: "application/gzip".into(),
         created_at: String::new(),
     };
     state.db.upsert_action_artifact(&row).await.map_err(|e| {

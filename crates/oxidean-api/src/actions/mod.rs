@@ -1,6 +1,7 @@
 //! Actions control plane (Phase 19) — parse/discover/dispatch/protocol; no in-process job execution.
 
 pub mod artifacts;
+pub mod artifacts_v2;
 pub mod cache;
 pub mod cache_v2;
 pub mod cron;

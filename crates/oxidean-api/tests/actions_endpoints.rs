@@ -712,6 +712,8 @@ async fn rerun_and_cancel_run() {
             size_bytes: 4,
             digest_sha256: "deadbeef".into(),
             expires_at: None,
+            state: "committed".into(),
+            mime_type: "application/gzip".into(),
             created_at: String::new(),
         })
         .await
