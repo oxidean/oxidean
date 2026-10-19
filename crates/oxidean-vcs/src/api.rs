@@ -520,7 +520,8 @@ impl VcsApi {
             .map(|t| VcsPathHistoryEntry {
                 changeset_id: t.changeset_id.clone(),
                 kind: change_kind_to_wire(t.kind),
-                path: t.old_path.clone().unwrap_or_else(|| t.path.clone()),
+                path: t.path.clone(),
+                old_path: t.old_path.clone(),
                 committed_at: t.committed_at.clone(),
             })
             .collect();
@@ -1875,6 +1876,63 @@ mod tests {
         assert_eq!(res.entries.len(), 1);
         assert_eq!(res.entries[0].changeset_id, id);
         assert_eq!(res.entries[0].kind, ManifestEntryKind::Add);
+
+        // rename: the queried path is reported as `path`; the rename source
+        // rides `old_path` — never swapped into `path` (SR4.10 rows).
+        let file = r
+            .api
+            .file_get(
+                &r.repo_id,
+                VcsFileGetRequest {
+                    owner: "o".into(),
+                    name: "n".into(),
+                    changeset_id: id.clone(),
+                    path: "dir/p.rs".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let c2 = r
+            .api
+            .changeset_create(
+                &r.repo_id,
+                "u-api",
+                &actor(),
+                create_req(
+                    vec![id],
+                    "ren",
+                    vec![ManifestEntry {
+                        path: "dir/q.rs".into(),
+                        kind: ManifestEntryKind::Rename,
+                        mode: VcsFileMode::Regular,
+                        old_path: Some("dir/p.rs".into()),
+                        blob: Some(file.blob),
+                        content_b64: None,
+                    }],
+                ),
+            )
+            .await
+            .unwrap()
+            .changeset_id;
+        let res = r
+            .api
+            .path_history(
+                &r.repo_id,
+                VcsPathHistoryRequest {
+                    owner: "o".into(),
+                    name: "n".into(),
+                    path: "dir/q.rs".into(),
+                    limit: None,
+                    cursor: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.entries.len(), 1);
+        assert_eq!(res.entries[0].changeset_id, c2);
+        assert_eq!(res.entries[0].kind, ManifestEntryKind::Rename);
+        assert_eq!(res.entries[0].path, "dir/q.rs");
+        assert_eq!(res.entries[0].old_path.as_deref(), Some("dir/p.rs"));
     }
 
     // ---------------- merge_base / merge / rebase ----------------

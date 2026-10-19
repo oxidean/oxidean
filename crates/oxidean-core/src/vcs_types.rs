@@ -758,6 +758,8 @@ pub struct VcsPathHistoryEntry {
     pub changeset_id: ChangesetId,
     pub kind: ManifestEntryKind,
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
     pub committed_at: String,
 }
 

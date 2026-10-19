@@ -3975,6 +3975,7 @@ export type VcsPathHistoryEntry = {
   changeset_id: ChangesetId;
   kind: ManifestEntryKind;
   path: string;
+  old_path?: string | null;
   committed_at: string;
 };
 
