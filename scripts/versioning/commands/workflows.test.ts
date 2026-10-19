@@ -156,6 +156,21 @@ describe("release-beta.yml channel lane", () => {
   });
 });
 
+describe("release tag pushes", () => {
+  // Per-tag `git push` loops race GitHub's ref backend and intermittently come
+  // back `remote: fatal error in commit_refs` — run 39315353804 pushed 6/8
+  // beta tags before the rejection, and `set -e` orphaned the rest. Every cut
+  // lane must push its tag set through the single-transaction helper instead.
+  for (const name of ["release-beta.yml", "release.yml", "production-deploy.yml"]) {
+    test(`${name} pushes tags atomically via push-tags.sh`, () => {
+      const yml = wf(name);
+      expect(yml).toContain("scripts/push-tags.sh");
+      expect(yml).not.toContain('git push origin "$t"');
+      expect(yml).not.toContain("for t in $NEW");
+    });
+  }
+});
+
 describe("production-deploy.yml stable cut", () => {
   const yml = wf("production-deploy.yml");
 

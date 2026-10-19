@@ -137,9 +137,11 @@ jobs:
           # its release lane. RELEASE_TOKEN makes these pushes fire them.
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --plan /tmp/plan.json
-          for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
-            git push origin "$t"
-          done
+          # One atomic push — per-tag loops race GitHub's ref backend and come
+          # back `remote: fatal error in commit_refs`, orphaning later tags.
+          NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
+          # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
+          scripts/push-tags.sh $NEW
       # No gh-release step here: the pushed tags trigger the push lanes above
       # (generic lane / ox-cli.yml / images.yml) — that is exactly what
       # RELEASE_TOKEN is for. Prerelease marking happens in those lanes.
