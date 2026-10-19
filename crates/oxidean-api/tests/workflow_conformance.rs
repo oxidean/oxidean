@@ -495,6 +495,17 @@ async fn all_logs(fx: &Fixture, run_id: &str) -> String {
     out
 }
 
+/// `##[step…]`/`##[post]` lines are structural UI markers — a skipped step
+/// still announces its declared title via `##[step-plan]` — so an
+/// absent-needle on user content must not count them as output (if the step
+/// really ran, its output lands on plain lines).
+fn scrub_structural_markers(logs: &str) -> String {
+    logs.lines()
+        .filter(|l| !l.starts_with("##[step") && !l.starts_with("##[post]"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn assert_logs(case: &Case, logs: &str) {
     for needle in case.log_contains.clone().unwrap_or_default() {
         assert!(
@@ -503,9 +514,19 @@ fn assert_logs(case: &Case, logs: &str) {
             case.id
         );
     }
+    // Needles that target marker lines themselves keep the raw wire view.
+    let mut scrubbed = String::new();
     for needle in case.log_absent.clone().unwrap_or_default() {
+        let view = if needle.starts_with("##[") {
+            logs
+        } else {
+            if scrubbed.is_empty() {
+                scrubbed = scrub_structural_markers(logs);
+            }
+            &scrubbed
+        };
         assert!(
-            !logs.contains(&needle),
+            !view.contains(&needle),
             "{}: job logs must not contain '{needle}'\n--- logs ---\n{logs}",
             case.id
         );
@@ -1021,7 +1042,7 @@ async fn running_job_aborts_on_supersede() {
         "runner must abort remaining steps; log:\n{log1}"
     );
     assert!(
-        !log1.contains("s4-final"),
+        !scrub_structural_markers(&log1).contains("s4-final"),
         "last step must never run; log:\n{log1}"
     );
 
