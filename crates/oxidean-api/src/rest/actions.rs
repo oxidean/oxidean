@@ -1563,6 +1563,67 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Json(cache_usage_schema)),
         mount: || get(get_cache_usage),
     },
+    // --- self-hosted runners (repo scope) ---
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runners",
+        tags: &["actions"],
+        operation_id: "actions/listSelfHostedRunnersForRepo",
+        summary: "List self-hosted runners visible to the repo (repo.actions.listRunners)",
+        procedure: "repo.actions.listRunners",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(runners_list_schema)),
+        mount: || get(list_runners_rest),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/actions/runners/registration-token",
+        tags: &["actions"],
+        operation_id: "actions/createRunnerRegistrationToken",
+        summary: "Mint a repo-scoped registration token (repo.actions.createRegistrationToken)",
+        procedure: "repo.actions.createRegistrationToken",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(registration_token_schema)),
+        mount: || post(create_runner_registration_token),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runners/{runner_id}",
+        tags: &["actions"],
+        operation_id: "actions/getSelfHostedRunnerForRepo",
+        summary: "One runner, GitHub shape (repo.actions.getRunner)",
+        procedure: "repo.actions.getRunner",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "runner_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(runner_schema)),
+        mount: || get(get_runner_rest),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/runners/{runner_id}",
+        tags: &["actions"],
+        operation_id: "actions/deleteSelfHostedRunnerFromRepo",
+        summary: "Remove a repo-bound runner (repo.actions.deleteRunner)",
+        procedure: "repo.actions.deleteRunner",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "runner_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_runner_rest),
+    },
 ];
 
 fn artifacts_list_schema(_gen: &mut SchemaGenerator) -> Value {
@@ -5153,4 +5214,212 @@ async fn get_cache_usage(
         },
     )
     .await
+}
+
+// --- self-hosted runners (repo scope) ---
+
+#[derive(Deserialize)]
+struct RunnerPath {
+    owner: String,
+    repo: String,
+    runner_id: String,
+}
+
+impl RunnerPath {
+    fn ref_input(&self) -> Value {
+        json!({
+            "owner": self.owner,
+            "name": self.repo,
+            "runner_id": self.runner_id,
+        })
+    }
+}
+
+fn runners_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "runners": {"type": "array", "items": runner_schema(_gen)},
+        },
+        "required": ["total_count", "runners"],
+    })
+}
+
+fn runner_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "os": {"type": "string"},
+            "status": {"type": "string", "enum": ["online", "offline"]},
+            "busy": {"type": "boolean"},
+            "ephemeral": {"type": "boolean"},
+            "labels": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "name": {"type": "string"},
+                    "type": {"type": "string"},
+                },
+            }},
+            "repository_id": {"type": "string"},
+            "created_at": {"type": "string"},
+        },
+        "required": ["id", "name", "os", "status", "busy", "labels"],
+    })
+}
+
+fn registration_token_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "token": {"type": "string"},
+            "expires_at": {"type": ["string", "null"]},
+        },
+        "required": ["token"],
+    })
+}
+
+/// Online = heartbeat within the last 5 minutes (matches the runner liveness
+/// window `touch_action_runner_online` maintains).
+fn runner_online(last_online: Option<&str>) -> bool {
+    last_online
+        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+        .is_some_and(|t| {
+            chrono::Utc::now() - t.with_timezone(&chrono::Utc) < chrono::Duration::minutes(5)
+        })
+}
+
+/// Reshape `ActionRunnerPublic` to the GitHub runner object — `id` stays a
+/// string (ours are uuids), labels gain GitHub's `{id, name, type}` entries.
+fn gh_runner(origin: &str, owner: &str, repo: &str, r: &Value, busy: bool) -> Value {
+    let id = r["id"].as_str().unwrap_or_default();
+    let labels: Vec<Value> = r["labels"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            json!({
+                "id": i as i64 + 1,
+                "name": l.as_str().unwrap_or_default(),
+                "type": "custom",
+            })
+        })
+        .collect();
+    let mut out = json!({
+        "id": id,
+        "name": r["name"],
+        "os": r["os"].as_str().unwrap_or("unknown"),
+        "status": if runner_online(r["last_online"].as_str()) { "online" } else { "offline" },
+        "busy": busy,
+        "ephemeral": r["ephemeral"].as_bool().unwrap_or(false),
+        "labels": labels,
+        "url": format!("{origin}/api/v1/repos/{owner}/{repo}/actions/runners/{id}"),
+        "created_at": r["created_at"],
+    });
+    if let Some(rid) = r["repository_id"].as_str() {
+        out["repository_id"] = json!(rid);
+    }
+    out
+}
+
+async fn gh_runner_full(state: &AppState, owner: &str, repo: &str, r: &Value) -> Value {
+    let busy = state
+        .db
+        .action_runner_busy(r["id"].as_str().unwrap_or_default())
+        .await
+        .unwrap_or(false);
+    gh_runner(
+        &crate::public_origin::resolve_public_origin(),
+        owner,
+        repo,
+        r,
+        busy,
+    )
+}
+
+/// GET /repos/{o}/{r}/actions/runners — `{total_count, runners}`.
+async fn list_runners_rest(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    let resp = dispatch(
+        &mut ctx,
+        "repo.actions.listRunners",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    let mut runners = Vec::new();
+    for r in data["runners"].as_array().cloned().unwrap_or_default() {
+        runners.push(gh_runner_full(&state, &p.owner, &p.repo, &r).await);
+    }
+    Json(json!({"total_count": runners.len(), "runners": runners})).into_response()
+}
+
+/// POST /repos/{o}/{r}/actions/runners/registration-token → 201 `{token}`.
+async fn create_runner_registration_token(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.createRegistrationToken",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::CREATED,
+        move |data| json!({"token": data["token"], "expires_at": Value::Null}),
+    )
+    .await
+}
+
+/// GET /repos/{o}/{r}/actions/runners/{id}.
+async fn get_runner_rest(
+    State(state): State<AppState>,
+    Path(p): Path<RunnerPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    let resp = dispatch(&mut ctx, "repo.actions.getRunner", p.ref_input()).await;
+    match resp {
+        RpcResponse::Ok { data, .. } => {
+            let r = gh_runner_full(&state, &p.owner, &p.repo, &data["runner"]).await;
+            Json(r).into_response()
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// DELETE /repos/{o}/{r}/actions/runners/{id} → 204.
+async fn delete_runner_rest(
+    State(state): State<AppState>,
+    Path(p): Path<RunnerPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    match dispatch(&mut ctx, "repo.actions.deleteRunner", p.ref_input()).await {
+        RpcResponse::Ok { .. } => StatusCode::NO_CONTENT.into_response(),
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
 }

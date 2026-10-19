@@ -2438,6 +2438,7 @@ export type ActionRunnerPublic = {
   id: string;
   name: string;
   labels: string[];
+  repository_id?: string;
   ephemeral: boolean;
   last_online?: string | null;
   created_at: string;
@@ -2445,6 +2446,30 @@ export type ActionRunnerPublic = {
 
 export type ActionListRunnersResponse = {
   runners: ActionRunnerPublic[];
+};
+
+export type ActionRepoRunnersListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionRunnerRequest = {
+  owner: string;
+  name: string;
+  runner_id: string;
+};
+
+export type ActionRunnerGetResponse = {
+  runner: ActionRunnerPublic;
+};
+
+export type ActionRunnerDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionRepoRegistrationTokenRequest = {
+  owner: string;
+  name: string;
 };
 
 export type ActionJobApproveRequest = {
@@ -6105,6 +6130,22 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionCacheDeleteResponse>(
             opts,
             "repo.actions.deleteCache",
+            input,
+          ),
+        listRunners: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<ActionListRunnersResponse>(opts, "repo.actions.listRunners", input),
+        getRunner: (input: ActionRunnerRequest) =>
+          rpcCall<ActionRunnerGetResponse>(opts, "repo.actions.getRunner", input),
+        deleteRunner: (input: ActionRunnerRequest) =>
+          rpcCall<ActionRunnerDeleteResponse>(
+            opts,
+            "repo.actions.deleteRunner",
+            input,
+          ),
+        createRegistrationToken: (input: ActionRepoRegistrationTokenRequest) =>
+          rpcCall<ActionRegistrationTokenResponse>(
+            opts,
+            "repo.actions.createRegistrationToken",
             input,
           ),
         secrets: {

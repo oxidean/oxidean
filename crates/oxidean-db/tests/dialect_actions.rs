@@ -332,6 +332,143 @@ async fn dialect_actions_schema_presence() {
     assert!(payload.payload_json.contains("echo hi"));
 }
 
+/// Repo-scoped claim isolation: a runner bound to repo A never claims repo
+/// B's queued jobs; an unscoped (`None`) claim still sees the global queue.
+#[tokio::test]
+async fn dialect_actions_claim_repo_scope() {
+    let (db, _tmp) = match std::env::var("DATABASE_URL") {
+        Ok(url) => (Database::connect(&url).await.expect("connect"), None),
+        Err(_) => {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let db = Database::connect(&format!(
+                "sqlite:{}",
+                dir.path().join("claim-scope.db").display()
+            ))
+            .await
+            .expect("connect");
+            (db, Some(dir))
+        }
+    };
+    db.migrate().await.expect("migrate");
+
+    let tag = format!(
+        "{:x}-{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let label = format!("scoped-{tag}");
+
+    let owner = db
+        .create_user(
+            &format!("u-scope-{tag}"),
+            &format!("scope-{tag}@example.com"),
+            &format!("scope-{tag}"),
+            Some("hash"),
+            "Scope",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("owner");
+    let repo_a = db
+        .insert_repository(
+            &format!("r-sca-{tag}"),
+            &owner.id,
+            "user",
+            "sca",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo a");
+    let repo_b = db
+        .insert_repository(
+            &format!("r-scb-{tag}"),
+            &owner.id,
+            "user",
+            "scb",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo b");
+    for (repo, run_id) in [
+        (&repo_a, format!("run-sca-{tag}")),
+        (&repo_b, format!("run-scb-{tag}")),
+    ] {
+        db.insert_action_run(
+            &run_id,
+            &repo.id,
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            &format!("sha-{tag}"),
+            "refs/heads/main",
+            "CI",
+            Some(&owner.id),
+            None,
+            None,
+        )
+        .await
+        .expect("run");
+        db.insert_action_job(oxidean_db::JobInsert::basic(
+            &format!("job-{}", &run_id[4..]),
+            &run_id,
+            "build",
+            "build",
+            &format!(r#"["{label}"]"#),
+        ))
+        .await
+        .expect("job");
+    }
+
+    // Runner rows exist so the claim's runner_id FK holds.
+    for rid in ["runner-scoped", "runner-global"] {
+        db.insert_action_runner(&format!("{rid}-{tag}"), rid, "hash", "[]", None, false)
+            .await
+            .expect("runner");
+    }
+    let scoped_runner = format!("runner-scoped-{tag}");
+    let global_runner = format!("runner-global-{tag}");
+
+    // Repo-A scope claims repo A's job only.
+    let claimed = db
+        .claim_queued_action_job_for_labels_scoped(
+            &scoped_runner,
+            std::slice::from_ref(&label),
+            Some(&repo_a.id),
+        )
+        .await
+        .expect("claim")
+        .expect("repo A job claimable");
+    assert_eq!(claimed.run_id, format!("run-sca-{tag}"));
+
+    // Repo B's job is invisible to the repo-A scope.
+    let miss = db
+        .claim_queued_action_job_for_labels_scoped(
+            &scoped_runner,
+            std::slice::from_ref(&label),
+            Some(&repo_a.id),
+        )
+        .await
+        .expect("scoped miss");
+    assert!(miss.is_none(), "repo-scoped claim crossed repositories");
+
+    // The unscoped claim still reaches repo B's queued job.
+    let claimed = db
+        .claim_queued_action_job_for_labels_scoped(&global_runner, &[label], None)
+        .await
+        .expect("claim")
+        .expect("global claim sees repo B");
+    assert_eq!(claimed.run_id, format!("run-scb-{tag}"));
+}
+
 /// 0053 claim atomicity: N jobs × M concurrent claimers — every job is
 /// claimed exactly once (no double-claim) and no runner returns a phantom.
 /// Runs against DATABASE_URL under `make db-matrix` (Postgres/MySQL legs);

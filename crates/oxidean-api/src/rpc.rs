@@ -409,6 +409,10 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.deleteArtifact",
     "repo.actions.listCaches",
     "repo.actions.deleteCache",
+    "repo.actions.listRunners",
+    "repo.actions.getRunner",
+    "repo.actions.deleteRunner",
+    "repo.actions.createRegistrationToken",
     "repo.actions.workflowTemplates.list",
     "repo.actions.workflowTemplates.get",
     "repo.actions.workflows.create",
@@ -1814,6 +1818,28 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         },
         "repo.actions.deleteCache" => {
             match crate::actions::rpc::delete_cache(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listRunners" => {
+            match crate::actions::rpc::list_runners(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.getRunner" => match crate::actions::rpc::get_runner(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.actions.deleteRunner" => {
+            match crate::actions::rpc::delete_runner(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.createRegistrationToken" => {
+            match crate::actions::rpc::create_registration_token(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

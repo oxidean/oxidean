@@ -4390,6 +4390,24 @@ impl Database {
         actions::list_runners(self.require_pool()?).await
     }
 
+    /// Runners scoped to the repo plus instance-wide shared runners.
+    pub async fn list_action_runners_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::ActionRunnerRow>, String> {
+        actions::list_runners_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    /// Delete a runner row by id; false when absent.
+    pub async fn delete_action_runner(&self, runner_id: &str) -> Result<bool, String> {
+        actions::delete_runner(self.require_pool()?, runner_id).await
+    }
+
+    /// True while the runner executes a job (`status = in_progress`).
+    pub async fn action_runner_busy(&self, runner_id: &str) -> Result<bool, String> {
+        actions::runner_busy(self.require_pool()?, runner_id).await
+    }
+
     pub async fn insert_action_runner_token(
         &self,
         id: &str,
@@ -5088,10 +5106,12 @@ impl Database {
         repo_units::set_discussions_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
+    /// Consume a registration token, returning `(scope_type, scope_id)` so
+    /// the caller can bind the runner to the token's scope.
     pub async fn consume_action_runner_registration_token(
         &self,
         token_hash: &str,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<(String, Option<String>)>, String> {
         actions::consume_registration_token(self.require_pool()?, token_hash).await
     }
 
@@ -5108,6 +5128,23 @@ impl Database {
         labels: &[String],
     ) -> Result<Option<actions::ActionJobRow>, String> {
         actions::claim_queued_job_for_labels(self.require_pool()?, runner_id, labels).await
+    }
+
+    /// Claim with runner repo-scope — repo-bound runners only see their
+    /// repo's jobs; `None` keeps the global queue.
+    pub async fn claim_queued_action_job_for_labels_scoped(
+        &self,
+        runner_id: &str,
+        labels: &[String],
+        repo_scope: Option<&str>,
+    ) -> Result<Option<actions::ActionJobRow>, String> {
+        actions::claim_queued_job_for_labels_scoped(
+            self.require_pool()?,
+            runner_id,
+            labels,
+            repo_scope,
+        )
+        .await
     }
 
     pub async fn list_action_runs_for_repo(

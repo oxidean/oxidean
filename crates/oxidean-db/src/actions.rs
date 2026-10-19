@@ -1803,38 +1803,125 @@ pub async fn list_actions_enabled_repo_ids(pool: &DbPool) -> Result<Vec<String>,
     }
 }
 
-pub async fn consume_registration_token(pool: &DbPool, token_hash: &str) -> Result<bool, String> {
+/// Consume one active registration token; on success returns its
+/// `(scope_type, scope_id)` so registration can bind the runner (repo-scoped
+/// tokens → `action_runners.repository_id`).
+pub async fn consume_registration_token(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<(String, Option<String>)>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let res = sqlx::query(
-                "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1",
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
+                "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1 \
+                 RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
-            .execute(p)
+            .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(res.rows_affected() > 0)
+            Ok(row)
         }
         DbPool::Postgres(p) => {
-            let res = sqlx::query(
-                "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true",
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
+                "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true \
+                 RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
-            .execute(p)
+            .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(res.rows_affected() > 0)
+            Ok(row)
         }
         DbPool::MySql(p) => {
-            let res = sqlx::query(
+            // No UPDATE…RETURNING — read the scope, then deactivate.
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
+                "SELECT scope_type, scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            if row.is_none() {
+                return Ok(None);
+            }
+            sqlx::query(
                 "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1",
             )
             .bind(token_hash)
             .execute(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(res.rows_affected() > 0)
+            Ok(row)
         }
+    }
+}
+
+/// Remove a runner row — GitHub `DELETE /actions/runners/{id}` semantics.
+/// Callers scope the id themselves (repo routes only pass repo-bound rows).
+pub async fn delete_runner(pool: &DbPool, runner_id: &str) -> Result<bool, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM action_runners WHERE id = $1")
+            .bind(runner_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|r| r.rows_affected() > 0),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM action_runners WHERE id = ?")
+            .bind(runner_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|r| r.rows_affected() > 0),
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM action_runners WHERE id = ?")
+            .bind(runner_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|r| r.rows_affected() > 0),
+    }
+}
+
+/// Runners bound to one repo (`repository_id = $repo`) plus instance-wide
+/// (`repository_id IS NULL`) — GitHub's repo runner list also shows the
+/// shared scopes that can serve the repo.
+pub async fn list_runners_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<ActionRunnerRow>, String> {
+    Ok(list_runners(pool)
+        .await?
+        .into_iter()
+        .filter(|r| r.repository_id.as_deref() == Some(repository_id) || r.repository_id.is_none())
+        .collect())
+}
+
+/// Whether the runner currently executes a job — GitHub's `busy` field.
+pub async fn runner_busy(pool: &DbPool, runner_id: &str) -> Result<bool, String> {
+    let sql = match pool {
+        DbPool::Postgres(_) => {
+            "SELECT EXISTS(SELECT 1 FROM action_jobs WHERE runner_id = $1 AND status = 'in_progress')"
+        }
+        _ => "SELECT EXISTS(SELECT 1 FROM action_jobs WHERE runner_id = ? AND status = 'in_progress')",
+    };
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, bool>(sql)
+            .bind(runner_id)
+            .fetch_one(p)
+            .await
+            .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, i64>(sql)
+            .bind(runner_id)
+            .fetch_one(p)
+            .await
+            .map(|v| v != 0)
+            .map_err(|e| e.to_string()),
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, i64>(sql)
+            .bind(runner_id)
+            .fetch_one(p)
+            .await
+            .map(|v| v != 0)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -1976,6 +2063,19 @@ pub async fn claim_queued_job_for_labels(
     runner_id: &str,
     runner_labels: &[String],
 ) -> Result<Option<ActionJobRow>, String> {
+    claim_queued_job_for_labels_scoped(pool, runner_id, runner_labels, None).await
+}
+
+/// `claim_queued_job_for_labels` plus runner repo-scope isolation — a
+/// repo-bound runner (`repository_id` set at registration) only claims jobs
+/// belonging to that repo; instance-wide runners pass `None` and keep the
+/// global queue.
+pub async fn claim_queued_job_for_labels_scoped(
+    pool: &DbPool,
+    runner_id: &str,
+    runner_labels: &[String],
+    repo_scope: Option<&str>,
+) -> Result<Option<ActionJobRow>, String> {
     let bases: Vec<String> = runner_labels
         .iter()
         .map(|l| label_base(l).to_string())
@@ -1996,10 +2096,12 @@ pub async fn claim_queued_job_for_labels(
                          WHERE j.status = 'queued' AND j.approval_hold = false AND NOT EXISTS ( \
                            SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                            AND NOT (l.base = ANY($1::text[]))) \
+                           AND ($2::text IS NULL OR rj.repository_id = $2) \
                            {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                          ORDER BY j.created_at, j.matrix_key LIMIT 1 FOR UPDATE OF j SKIP LOCKED"
                     )))
                     .bind(&bases)
+                    .bind(repo_scope)
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2077,10 +2179,13 @@ pub async fn claim_queued_job_for_labels(
                            SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                            AND l.base NOT IN (SELECT value FROM JSON_TABLE(?, '$[*]' \
                              COLUMNS (value VARCHAR(255) PATH '$')) AS lb)) \
+                           AND (? IS NULL OR rj.repository_id = ?) \
                            {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                          ORDER BY j.created_at, j.matrix_key LIMIT 5",
                     )))
                     .bind(&bases_json)
+                    .bind(repo_scope)
+                    .bind(repo_scope)
                     .fetch_all(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2182,6 +2287,7 @@ pub async fn claim_queued_job_for_labels(
                    WHERE j.status = 'queued' AND j.approval_hold = 0 AND NOT EXISTS ( \
                      SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                      AND l.base NOT IN (SELECT value FROM json_each(?2))) \
+                   AND (?4 IS NULL OR rj.repository_id = ?4) \
                    {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                    ORDER BY j.created_at, j.matrix_key LIMIT 1) \
                  AND status = 'queued' AND approval_hold = 0 RETURNING {JOB_COLS_SQLITE}"
@@ -2189,6 +2295,7 @@ pub async fn claim_queued_job_for_labels(
             .bind(runner_id)
             .bind(bases_json)
             .bind(&heartbeat)
+            .bind(repo_scope)
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;

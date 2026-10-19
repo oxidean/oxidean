@@ -17,8 +17,10 @@ use oxidean_core::{
     ActionJobAnnotationsResponse, ActionJobApproveRequest, ActionJobApproveResponse,
     ActionJobGetRequest, ActionJobGetResponse, ActionJobLogRequest, ActionJobLogResponse,
     ActionJobPublic, ActionListRunnersResponse, ActionRegistrationTokenResponse,
-    ActionRepoArtifactsListRequest, ActionRunGetRequest, ActionRunGetResponse,
-    ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
+    ActionRepoArtifactsListRequest, ActionRepoRegistrationTokenRequest,
+    ActionRepoRunnersListRequest, ActionRunGetRequest, ActionRunGetResponse,
+    ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
+    ActionRunnerDeleteResponse, ActionRunnerGetResponse, ActionRunnerPublic, ActionRunnerRequest,
     ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretKeyPublic, ActionSecretMetaPublic, ActionSecretPutRequest,
     ActionSecretsListRequest, ActionSecretsListResponse, ActionSetEnabledRequest,
@@ -1784,6 +1786,127 @@ pub async fn admin_list_runners(
     let rows = ctx.db.list_action_runners().await.map_err(db_err)?;
     Ok(ActionListRunnersResponse {
         runners: rows.iter().map(runner_public).collect(),
+    })
+}
+
+/// `repo.actions.listRunners` — Read+; repo-bound runners plus instance-wide
+/// shared runners (both serve the repo's queue — GitHub's repo list shows
+/// repo + org/enterprise scopes for the same reason).
+pub async fn list_runners(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionListRunnersResponse, AppError> {
+    let req: ActionRepoRunnersListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.listRunners input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_runners_for_repo(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionListRunnersResponse {
+        runners: rows.iter().map(runner_public).collect(),
+    })
+}
+
+/// `repo.actions.getRunner` — Read+; the runner must be visible to the repo
+/// (bound or instance-wide).
+pub async fn get_runner(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRunnerGetResponse, AppError> {
+    let req: ActionRunnerRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.getRunner input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let runner = ctx
+        .db
+        .list_action_runners_for_repo(&accessible.row.id)
+        .await
+        .map_err(db_err)?
+        .into_iter()
+        .find(|r| r.id == req.runner_id)
+        .ok_or_else(not_found)?;
+    Ok(ActionRunnerGetResponse {
+        runner: runner_public(&runner),
+    })
+}
+
+/// `repo.actions.deleteRunner` — Admin; only repo-bound runners — shared
+/// instance runners are deleted through the admin surface, not a repo route.
+pub async fn delete_runner(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRunnerDeleteResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionRunnerRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.deleteRunner input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Admin) {
+        return Err(not_found());
+    }
+    let runner = ctx
+        .db
+        .find_action_runner_by_id(&req.runner_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if runner.repository_id.as_deref() != Some(accessible.row.id.as_str()) {
+        return Err(not_found());
+    }
+    let deleted = ctx
+        .db
+        .delete_action_runner(&req.runner_id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionRunnerDeleteResponse { deleted })
+}
+
+/// `repo.actions.createRegistrationToken` — Admin; one-shot repo-scoped
+/// token. The runner it registers is bound to the repo and its job claims
+/// isolate to this repository's queue.
+pub async fn create_registration_token(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRegistrationTokenResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionRepoRegistrationTokenRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.createRegistrationToken input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Admin) {
+        return Err(not_found());
+    }
+    let token = crate::actions::tokens::mint_registration_token_for_scope(
+        &ctx.db,
+        "repo",
+        Some(&accessible.row.id),
+    )
+    .await
+    .map_err(|e| AppError::new("repo.actions.token_failed", e))?;
+    Ok(ActionRegistrationTokenResponse {
+        token,
+        scope: "repo".into(),
     })
 }
 

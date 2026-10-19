@@ -43,7 +43,7 @@ pub use parse::{
     WorkflowTriggers,
 };
 pub use statuses::{job_status_to_commit_state, publish_from_job_update, status_context};
-pub use tokens::mint_registration_token;
+pub use tokens::{mint_registration_token, mint_registration_token_for_scope};
 pub use workflow::{
     discover_workflows, DiscoverError, DiscoveredWorkflow, DiscoveryFileError, WorkflowDiscovery,
     MAX_WORKFLOW_BYTES,

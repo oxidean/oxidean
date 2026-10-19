@@ -332,11 +332,11 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, body: B
             "missing runner token, name",
         );
     }
-    match accept_registration_token(&state.db, &req.token).await {
-        Ok(true) => {}
-        Ok(false) => return unauthorized("runner registration token not found"),
+    let scope = match accept_registration_token(&state.db, &req.token).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return unauthorized("runner registration token not found"),
         Err(e) => return internal_err(e),
-    }
+    };
     let runner_token = format!("ort_{}", Uuid::new_v4());
     let runner_hash = hash_token(&runner_token);
     let labels = if req.labels.is_empty() {
@@ -346,9 +346,21 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, body: B
         serde_json::to_string(&req.labels).unwrap_or_else(|_| "[]".into())
     };
     let id = Uuid::new_v4().to_string();
+    let repository_id = if scope.scope_type == "repo" {
+        scope.scope_id.as_deref()
+    } else {
+        None
+    };
     if let Err(e) = state
         .db
-        .insert_action_runner(&id, &req.name, &runner_hash, &labels, None, req.ephemeral)
+        .insert_action_runner(
+            &id,
+            &req.name,
+            &runner_hash,
+            &labels,
+            repository_id,
+            req.ephemeral,
+        )
         .await
     {
         return internal_err(e);
@@ -878,7 +890,11 @@ pub async fn fetch_task(
         let labels: Vec<String> = serde_json::from_str(&runner.labels_json).unwrap_or_default();
         let job = match state
             .db
-            .claim_queued_action_job_for_labels(&runner.id, &labels)
+            .claim_queued_action_job_for_labels_scoped(
+                &runner.id,
+                &labels,
+                runner.repository_id.as_deref(),
+            )
             .await
         {
             Ok(j) => j,

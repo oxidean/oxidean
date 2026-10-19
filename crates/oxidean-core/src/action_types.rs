@@ -504,6 +504,42 @@ pub struct AdminActionsListRunnersResponse {
 
 pub type ActionListRunnersResponse = AdminActionsListRunnersResponse;
 
+/// `repo.actions.listRunners` — Read+; runners bound to the repo plus
+/// instance-wide shared runners (GitHub's repo runner list surfaces both).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoRunnersListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `repo.actions.getRunner` / `repo.actions.deleteRunner` — the runner must
+/// be bound to the repo (`repository_id`); shared instance runners are
+/// read-only through this surface and deletable only via admin routes.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerRequest {
+    pub owner: String,
+    pub name: String,
+    pub runner_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerGetResponse {
+    pub runner: ActionRunnerPublic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerDeleteResponse {
+    pub deleted: bool,
+}
+
+/// `repo.actions.createRegistrationToken` — Admin; mints a one-shot
+/// repo-scoped token (registering runner claims only this repo's jobs).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoRegistrationTokenRequest {
+    pub owner: String,
+    pub name: String,
+}
+
 /// Provenance of a workflow template in the `repo.actions.workflowTemplates`
 /// catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

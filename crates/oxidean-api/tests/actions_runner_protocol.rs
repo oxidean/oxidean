@@ -15,6 +15,7 @@ use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_core::Role;
 use oxidean_db::Database;
 use oxidean_git::CliGitBackend;
+use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 
 async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
@@ -1594,4 +1595,374 @@ async fn artifacts_token_matrix_and_repository_param() {
         artifact_list_status(&app, &run_id, None, None).await,
         StatusCode::UNAUTHORIZED
     );
+}
+
+/// Repo-scoped registration tokens bind the runner to the repo — its claims
+/// isolate to that repo's queue while instance runners keep the global one.
+#[tokio::test]
+async fn actions_runner_repo_scope_claim_isolation() {
+    let (app, db, _dir) = app_db().await;
+    let owner = db
+        .create_user(
+            "u-scope",
+            "scope@example.com",
+            "scope",
+            Some("h"),
+            "S",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo_a = db
+        .insert_repository("r-sca", &owner.id, "user", "sca", "private", "", "main")
+        .await
+        .unwrap();
+    let repo_b = db
+        .insert_repository("r-scb", &owner.id, "user", "scb", "private", "", "main")
+        .await
+        .unwrap();
+    let doc = parse_workflow_yaml(
+        br#"name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    // One queued job per repo.
+    for repo in [&repo_a, &repo_b] {
+        enqueue_run(
+            &db,
+            &repo.id,
+            ".github/workflows/ci.yml",
+            &doc,
+            "push",
+            "deadbeef",
+            "refs/heads/main",
+            Some(&owner.id),
+            None,
+            None,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Repo-scoped token (as `POST …/actions/runners/registration-token`
+    // mints) → the registered runner binds to repo A.
+    let reg =
+        oxidean_api::actions::mint_registration_token_for_scope(&db, "repo", Some(&repo_a.id))
+            .await
+            .unwrap();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "r-scoped",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reg_res.status(), StatusCode::OK);
+    let reg_body = reg_res.into_body().collect().await.unwrap().to_bytes();
+    let reg_v: serde_json::Value = serde_json::from_slice(&reg_body).unwrap();
+    let scoped_runner_id = reg_v["runner_id"].as_str().unwrap().to_string();
+    let scoped_token = reg_v["runner_token"].as_str().unwrap().to_string();
+    let row = db
+        .find_action_runner_by_id(&scoped_runner_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.repository_id.as_deref(), Some(repo_a.id.as_str()));
+
+    // The scoped runner claims repo A's job.
+    let fetch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {scoped_token}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_slice(&fetch.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let claimed_job = v["job_id"].as_str().unwrap().to_string();
+    let claimed = db
+        .find_action_job_by_id(&claimed_job)
+        .await
+        .unwrap()
+        .unwrap();
+    let run_a = db
+        .find_action_run_by_id(&claimed.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run_a.repository_id, repo_a.id);
+
+    // A second repo-A runner finds nothing — only repo B's job remains and
+    // cross-repo claims are refused.
+    let reg2 =
+        oxidean_api::actions::mint_registration_token_for_scope(&db, "repo", Some(&repo_a.id))
+            .await
+            .unwrap();
+    let reg_res2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "r-scoped-2",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg2
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let tok2 = serde_json::from_slice::<serde_json::Value>(
+        &reg_res2.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["runner_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let fetch2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {tok2}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v2: serde_json::Value =
+        serde_json::from_slice(&fetch2.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(
+        v2["job_id"].is_null(),
+        "scoped runner claimed cross-repo job"
+    );
+
+    // An instance-scoped runner still claims globally — picks up repo B.
+    let reg3 = mint_registration_token(&db).await.unwrap();
+    let reg_res3 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "r-global",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg3
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let tok3 = serde_json::from_slice::<serde_json::Value>(
+        &reg_res3.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["runner_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let fetch3 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {tok3}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v3: serde_json::Value =
+        serde_json::from_slice(&fetch3.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(v3["job_id"].as_str().is_some());
+}
+
+/// REST `/actions/runners` surface — registration-token mint binds the runner
+/// to the repo; list/get reshape to GitHub's runner object; delete 204.
+#[tokio::test]
+async fn actions_runner_repo_rest_surface() {
+    let (app, db, _dir) = app_db().await;
+    let owner = db
+        .create_user(
+            "u-rrr",
+            "rrr@example.com",
+            "rrr",
+            Some("h"),
+            "R",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    db.insert_repository("r-rrr", &owner.id, "user", "rrr", "private", "", "main")
+        .await
+        .unwrap();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at("u-rrr", &now).await.unwrap();
+    let pat = "oxidean_pat_runner_rest".to_string();
+    db.create_pat(
+        "pat-rrr",
+        "u-rrr",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    let base = "/api/v1/repos/rrr/rrr/actions/runners";
+
+    // Mint a repo-scoped registration token via the REST route.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{base}/registration-token"))
+                .header("authorization", format!("Bearer {pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let reg = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Register — the runner binds to the repo.
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "rest-runner",
+                        "labels": ["self-hosted", "linux"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reg_v: serde_json::Value =
+        serde_json::from_slice(&reg_res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let runner_id = reg_v["runner_id"].as_str().unwrap().to_string();
+
+    // List — GitHub `{total_count, runners}` shape.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(base)
+                .header("authorization", format!("Bearer {pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let list: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(list["total_count"], 1);
+    assert_eq!(list["runners"][0]["name"], "rest-runner");
+    assert_eq!(list["runners"][0]["status"], "offline");
+    assert_eq!(list["runners"][0]["busy"], false);
+    assert_eq!(list["runners"][0]["labels"][0]["name"], "self-hosted");
+
+    // Get one, then delete — 204 → gone.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("{base}/{runner_id}"))
+                .header("authorization", format!("Bearer {pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{base}/{runner_id}"))
+                .header("authorization", format!("Bearer {pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("{base}/{runner_id}"))
+                .header("authorization", format!("Bearer {pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

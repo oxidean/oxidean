@@ -134,19 +134,24 @@ async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, StatusCode> {
     let _ = headers.get(axum::http::header::COOKIE);
-    let ok = accept_registration_token(&state.db, &req.token)
+    let scope = accept_registration_token(&state.db, &req.token)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if !ok {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let runner_token = format!("ort_{}", Uuid::new_v4());
     let runner_hash = hash_token(&runner_token);
     let labels = serde_json::to_string(&req.labels).unwrap_or_else(|_| "[]".into());
     let id = Uuid::new_v4().to_string();
+    // Repo-scoped registration tokens bind the runner to the repo — its job
+    // claims then isolate to that repository's queue.
+    let repository_id = if scope.scope_type == "repo" {
+        scope.scope_id.as_deref()
+    } else {
+        None
+    };
     state
         .db
-        .insert_action_runner(&id, &req.name, &runner_hash, &labels, None, false)
+        .insert_action_runner(&id, &req.name, &runner_hash, &labels, repository_id, false)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     // Touch prost types so codegen stays linked.
@@ -382,7 +387,11 @@ async fn fetch_task(
         notified.as_mut().enable();
         let job = state
             .db
-            .claim_queued_action_job_for_labels(&runner.id, &labels)
+            .claim_queued_action_job_for_labels_scoped(
+                &runner.id,
+                &labels,
+                runner.repository_id.as_deref(),
+            )
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if job.is_some() || wait == 0 || std::time::Instant::now() >= deadline {
