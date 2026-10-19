@@ -5909,6 +5909,53 @@ pub async fn list_org_secret_ciphertexts_for_repo(
     }
 }
 
+/// Same repo-visibility predicate as `list_org_secret_ciphertexts_for_repo`,
+/// returning metadata rows for GitHub's `organization-secrets` repo listing —
+/// never ciphertext.
+pub async fn list_org_secret_metas_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<OrgSecretRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query("SELECT s.id, s.owner_id, s.name, s.visibility, s.created_at, s.updated_at FROM action_org_secrets s
+              WHERE s.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = ? AND r.owner_type = 'org')
+                AND (s.visibility = 'all'
+                  OR (s.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = ?) = 'private')
+                  OR (s.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_secret_repos x WHERE x.secret_id = s.id AND x.repository_id = ?)))
+              ORDER BY s.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_secret!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query("SELECT s.id, s.owner_id, s.name, s.visibility, s.created_at::text, s.updated_at::text FROM action_org_secrets s
+              WHERE s.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = $1 AND r.owner_type = 'org')
+                AND (s.visibility = 'all'
+                  OR (s.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = $2) = 'private')
+                  OR (s.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_secret_repos x WHERE x.secret_id = s.id AND x.repository_id = $3)))
+              ORDER BY s.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_secret!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query("SELECT s.id, s.owner_id, s.name, s.visibility, CAST(s.created_at AS CHAR), CAST(s.updated_at AS CHAR) FROM action_org_secrets s
+              WHERE s.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = ? AND r.owner_type = 'org')
+                AND (s.visibility = 'all'
+                  OR (s.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = ?) = 'private')
+                  OR (s.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_secret_repos x WHERE x.secret_id = s.id AND x.repository_id = ?)))
+              ORDER BY s.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_secret!(r)).collect())
+        }
+    }
+}
+
 // ---- environment secrets -----------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -6548,6 +6595,53 @@ pub async fn list_org_variables_for_repo(
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(rows)
+        }
+    }
+}
+
+/// Same repo-visibility predicate as `list_org_variables_for_repo`, returning
+/// full rows for GitHub's `organization-variables` repo listing — variable
+/// `value` is plaintext config by design (GitHub serves it too).
+pub async fn list_org_variable_rows_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<OrgVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query("SELECT v.id, v.owner_id, v.name, v.value, v.visibility, v.created_at, v.updated_at FROM action_org_variables v
+              WHERE v.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = ? AND r.owner_type = 'org')
+                AND (v.visibility = 'all'
+                  OR (v.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = ?) = 'private')
+                  OR (v.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_variable_repos x WHERE x.variable_id = v.id AND x.repository_id = ?)))
+              ORDER BY v.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_variable!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query("SELECT v.id, v.owner_id, v.name, v.value, v.visibility, v.created_at::text, v.updated_at::text FROM action_org_variables v
+              WHERE v.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = $1 AND r.owner_type = 'org')
+                AND (v.visibility = 'all'
+                  OR (v.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = $2) = 'private')
+                  OR (v.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_variable_repos x WHERE x.variable_id = v.id AND x.repository_id = $3)))
+              ORDER BY v.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_variable!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query("SELECT v.id, v.owner_id, v.name, v.value, v.visibility, CAST(v.created_at AS CHAR), CAST(v.updated_at AS CHAR) FROM action_org_variables v
+              WHERE v.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = ? AND r.owner_type = 'org')
+                AND (v.visibility = 'all'
+                  OR (v.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = ?) = 'private')
+                  OR (v.visibility = 'selected' AND EXISTS (
+                        SELECT 1 FROM action_org_variable_repos x WHERE x.variable_id = v.id AND x.repository_id = ?)))
+              ORDER BY v.name")
+                .bind(repository_id).bind(repository_id).bind(repository_id)
+                .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.iter().map(|r| map_org_variable!(r)).collect())
         }
     }
 }

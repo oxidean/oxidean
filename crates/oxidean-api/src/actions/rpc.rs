@@ -27,18 +27,19 @@ use oxidean_core::{
     ActionSetWorkflowEnabledRequest, ActionVariablePublic, ActionVariablesDeleteRequest,
     ActionVariablesListRequest, ActionVariablesListResponse, ActionVariablesPutRequest,
     ActionWorkflowFileError, ActionWorkflowPublic, ActionWorkflowsListRequest,
-    ActionWorkflowsListResponse, AppError, RepoActionsDefaultPermissionsRequest,
-    RepoActionsDefaultPermissionsResponse, RepoActionsEnvironmentDeleteRequest,
-    RepoActionsEnvironmentDeleteResponse, RepoActionsEnvironmentGetRequest,
-    RepoActionsEnvironmentResponse, RepoActionsEnvironmentSecretDeleteRequest,
-    RepoActionsEnvironmentSecretPutRequest, RepoActionsEnvironmentSecretsListRequest,
-    RepoActionsEnvironmentUpsertRequest, RepoActionsEnvironmentVariableDeleteRequest,
-    RepoActionsEnvironmentVariablePutRequest, RepoActionsEnvironmentVariablesListRequest,
-    RepoActionsEnvironmentsListRequest, RepoActionsEnvironmentsListResponse,
-    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
-    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
-    RepoActionsSetDefaultPermissionsRequest, RepoActionsSetForkPrApprovalRequest,
-    RepoActionsSetPullRequestTargetRequest,
+    ActionWorkflowsListResponse, AppError, OrgActionsSecretsListResponse,
+    OrgActionsVariablesListResponse, OrgSecretMetaPublic, OrgVariablePublic,
+    RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
+    RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
+    RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
+    RepoActionsEnvironmentSecretDeleteRequest, RepoActionsEnvironmentSecretPutRequest,
+    RepoActionsEnvironmentSecretsListRequest, RepoActionsEnvironmentUpsertRequest,
+    RepoActionsEnvironmentVariableDeleteRequest, RepoActionsEnvironmentVariablePutRequest,
+    RepoActionsEnvironmentVariablesListRequest, RepoActionsEnvironmentsListRequest,
+    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
+    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
+    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
+    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -1907,6 +1908,77 @@ pub async fn create_registration_token(
     Ok(ActionRegistrationTokenResponse {
         token,
         scope: "repo".into(),
+    })
+}
+
+/// `repo.actions.organizationSecrets` — Read+; org secrets whose visibility
+/// reaches this repo (all / private when the repo is private / selected).
+/// GitHub's `GET /repos/{o}/{r}/actions/organization-secrets` — names +
+/// visibility metadata, never values.
+pub async fn organization_secrets(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgActionsSecretsListResponse, AppError> {
+    let req: ActionRepoRunnersListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.organizationSecrets input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_org_secret_metas_for_repo(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(OrgActionsSecretsListResponse {
+        secrets: rows
+            .into_iter()
+            .map(|r| OrgSecretMetaPublic {
+                name: r.name,
+                visibility: r.visibility,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            })
+            .collect(),
+    })
+}
+
+/// `repo.actions.organizationVariables` — Read+; same visibility predicate.
+/// Variables carry plaintext `value` — GitHub serves it on this route too.
+pub async fn organization_variables(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgActionsVariablesListResponse, AppError> {
+    let req: ActionRepoRunnersListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.organizationVariables input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_org_variable_rows_for_repo(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(OrgActionsVariablesListResponse {
+        variables: rows
+            .into_iter()
+            .map(|r| OrgVariablePublic {
+                name: r.name,
+                value: r.value,
+                visibility: r.visibility,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            })
+            .collect(),
     })
 }
 

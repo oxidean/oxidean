@@ -5029,6 +5029,24 @@ impl Database {
         actions::list_org_secret_ciphertexts_for_repo(self.require_pool()?, repository_id).await
     }
 
+    /// Org-secret metadata visible to this repo (all/private/selected
+    /// visibility) — GitHub's repo `organization-secrets` listing.
+    pub async fn list_action_org_secret_metas_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::OrgSecretRow>, String> {
+        actions::list_org_secret_metas_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    /// Org variables (plaintext value + visibility) visible to this repo —
+    /// GitHub's repo `organization-variables` listing.
+    pub async fn list_action_org_variable_rows_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::OrgVariableRow>, String> {
+        actions::list_org_variable_rows_for_repo(self.require_pool()?, repository_id).await
+    }
+
     pub async fn upsert_action_environment_secret(
         &self,
         id: &str,

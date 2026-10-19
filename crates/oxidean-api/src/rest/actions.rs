@@ -1610,6 +1610,36 @@ pub const ROUTES: &[RouteDef] = &[
         mount: || get(get_runner_rest),
     },
     RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/organization-secrets",
+        tags: &["actions"],
+        operation_id: "actions/listRepoOrganizationSecrets",
+        summary: "Org secrets visible to this repo (repo.actions.organizationSecrets)",
+        procedure: "repo.actions.organizationSecrets",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(org_secrets_list_schema)),
+        mount: || get(list_org_secrets_for_repo),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/organization-variables",
+        tags: &["actions"],
+        operation_id: "actions/listRepoOrganizationVariables",
+        summary: "Org variables visible to this repo (repo.actions.organizationVariables)",
+        procedure: "repo.actions.organizationVariables",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(org_variables_list_schema)),
+        mount: || get(list_org_variables_for_repo),
+    },
+    RouteDef {
         method: "DELETE",
         path: "/repos/{owner}/{repo}/actions/runners/{runner_id}",
         tags: &["actions"],
@@ -5422,4 +5452,105 @@ async fn delete_runner_rest(
         RpcResponse::Ok { .. } => StatusCode::NO_CONTENT.into_response(),
         RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
     }
+}
+
+// --- repo-visible organization secrets/variables ---
+
+fn org_secrets_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "secrets": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "visibility": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "updated_at": {"type": "string"},
+                    "selected_repositories_url": {"type": "string"},
+                },
+            }},
+        },
+        "required": ["total_count", "secrets"],
+    })
+}
+
+fn org_variables_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "variables": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "value": {"type": "string"},
+                    "visibility": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "updated_at": {"type": "string"},
+                    "selected_repositories_url": {"type": "string"},
+                },
+            }},
+        },
+        "required": ["total_count", "variables"],
+    })
+}
+
+/// GET /repos/{o}/{r}/actions/organization-secrets — `{total_count, secrets}`
+/// of the org secrets whose visibility covers this repo. Never values.
+async fn list_org_secrets_for_repo(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let org = p.owner.clone();
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.organizationSecrets",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            let secrets: Vec<Value> = data["secrets"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|s| gh_org_secret(&origin, &org, s))
+                .collect();
+            json!({"total_count": secrets.len(), "secrets": secrets})
+        },
+    )
+    .await
+}
+
+/// GET /repos/{o}/{r}/actions/organization-variables — `{total_count,
+/// variables}`; `value` is plaintext by design (as on GitHub).
+async fn list_org_variables_for_repo(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let org = p.owner.clone();
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.organizationVariables",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        move |data| {
+            let origin = crate::public_origin::resolve_public_origin();
+            let variables: Vec<Value> = data["variables"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|v| gh_org_variable(&origin, &org, v))
+                .collect();
+            json!({"total_count": variables.len(), "variables": variables})
+        },
+    )
+    .await
 }

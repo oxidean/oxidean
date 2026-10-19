@@ -6148,6 +6148,18 @@ export function createClient(opts: CreateClientOptions) {
             "repo.actions.createRegistrationToken",
             input,
           ),
+        organizationSecrets: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<OrgActionsSecretsListResponse>(
+            opts,
+            "repo.actions.organizationSecrets",
+            input,
+          ),
+        organizationVariables: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<OrgActionsVariablesListResponse>(
+            opts,
+            "repo.actions.organizationVariables",
+            input,
+          ),
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),

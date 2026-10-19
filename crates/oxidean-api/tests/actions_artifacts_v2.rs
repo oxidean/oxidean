@@ -1648,6 +1648,103 @@ async fn rest_actions_secrets_variables_environments_surface() {
     )
     .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // ---- repo-visible org secrets/variables (organization-secrets /
+    // organization-variables) — an org-owned private repo sees `all`,
+    // `private`, and `selected` rows whose allow-set contains it.
+    let org_repo = db
+        .insert_repository("r-osec", &org.id, "org", "osec", "private", "", "main")
+        .await
+        .unwrap();
+    db.upsert_action_org_secret("os-all", &org.id, "ORG_ALL", "ct", "all")
+        .await
+        .unwrap();
+    db.upsert_action_org_secret("os-priv", &org.id, "ORG_PRIV", "ct", "private")
+        .await
+        .unwrap();
+    db.upsert_action_org_secret("os-sel", &org.id, "ORG_SEL", "ct", "selected")
+        .await
+        .unwrap();
+    db.set_action_org_secret_repos("os-sel", &[org_repo.id.clone()])
+        .await
+        .unwrap();
+    db.upsert_action_org_secret("os-selno", &org.id, "ORG_SELNO", "ct", "selected")
+        .await
+        .unwrap();
+    db.upsert_action_org_variable("ov-all", &org.id, "VAR_ALL", "gold", "all")
+        .await
+        .unwrap();
+    db.upsert_action_org_variable("ov-sel", &org.id, "VAR_SEL", "silver", "selected")
+        .await
+        .unwrap();
+    db.set_action_org_variable_repos("ov-sel", &[org_repo.id.clone()])
+        .await
+        .unwrap();
+    db.upsert_action_org_variable("ov-selno", &org.id, "VAR_SELNO", "no", "selected")
+        .await
+        .unwrap();
+
+    let repobase = "/api/v1/repos/sec-org/osec";
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{repobase}/actions/organization-secrets"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let vis = body_json(res).await;
+    let names: Vec<&str> = vis["secrets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert_eq!(names, ["ORG_ALL", "ORG_PRIV", "ORG_SEL"], "{vis}");
+    // Metadata only — never a value or ciphertext field.
+    assert!(vis["secrets"][0].get("value").is_none());
+    assert!(vis["secrets"][0].get("encrypted_value").is_none());
+    assert_eq!(
+        vis["secrets"][2]["visibility"], "selected",
+        "selected visibility is surfaced"
+    );
+    assert!(vis["secrets"][2]["selected_repositories_url"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("/orgs/sec-org/actions/secrets/ORG_SEL/selected-repositories"));
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{repobase}/actions/organization-variables"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let vlist = body_json(res).await;
+    let vnames: Vec<&str> = vlist["variables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v["name"].as_str())
+        .collect();
+    assert_eq!(vnames, ["VAR_ALL", "VAR_SEL"], "{vlist}");
+    // Variables carry their plaintext value on this route (as on GitHub).
+    assert_eq!(vlist["variables"][0]["value"], "gold");
+
+    // A public repo does NOT see `private`-visibility rows.
+    let pub_repo = db
+        .insert_repository("r-opub", &org.id, "org", "opub", "public", "", "main")
+        .await
+        .unwrap();
+    let metas = db
+        .list_action_org_secret_metas_for_repo(&pub_repo.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        metas.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        ["ORG_ALL"]
+    );
 }
 
 /// `/api/v1` deployments + statuses + `repository_dispatch` + the

@@ -328,7 +328,13 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
 
         // Configuration variables mirror the secrets families — GitHub
         // groups both under the actions_variables fine-grained permission.
-        "repo.actions.variables.list" | "repo.actions.environments.variablesList" => SecretsRead,
+        "repo.actions.variables.list"
+        | "repo.actions.environments.variablesList"
+        // Repo-visible org secrets/variables listings ride the same family —
+        // GitHub gates `organization-secrets`/`organization-variables` on the
+        // secrets/variables fine-grained read too.
+        | "repo.actions.organizationSecrets"
+        | "repo.actions.organizationVariables" => SecretsRead,
         "repo.actions.variables.put"
         | "repo.actions.variables.delete"
         | "repo.actions.environments.variablesPut"
