@@ -2737,6 +2737,23 @@ pub async fn delete_run(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+/// `repo.actions.deleteRunLogs` — Write+; drops a run's stored logs but
+/// keeps the run/job rows (GitHub `DELETE /actions/runs/{id}/logs` — 204,
+/// subsequent log reads 404).
+pub async fn delete_run_logs(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let (req, _accessible, _run) = run_mutation_target(ctx, input, "deleteRunLogs").await?;
+    let log_dir = ctx.actions_log_dir.join(&req.run_id);
+    if let Err(e) = tokio::fs::remove_dir_all(&log_dir).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(error = %e, run_id = %req.run_id, "run log dir removal failed");
+        }
+    }
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 async fn run_mutation_target(
     ctx: &RpcCtx,
     input: serde_json::Value,

@@ -317,6 +317,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.approveJob"
         | "repo.actions.reviewDeployment"
         | "repo.actions.deleteRun"
+        | "repo.actions.deleteRunLogs"
         | "repo.actions.setWorkflowEnabled"
         | "repo.actions.deleteArtifact"
         | "repo.actions.deleteCache" => ActionsWrite,

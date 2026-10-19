@@ -1533,6 +1533,36 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || get(download_attempt_logs),
     },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+        tags: &["actions"],
+        operation_id: "actions/deleteWorkflowRunLogs",
+        summary: "Delete a run's stored logs (repo.actions.deleteRunLogs)",
+        procedure: "repo.actions.deleteRunLogs",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_run_logs_rest),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/cache/usage",
+        tags: &["actions"],
+        operation_id: "actions/getActionsCacheUsage",
+        summary: "Repo cache usage rollup (repo.actions.listCaches totals)",
+        procedure: "repo.actions.listCaches",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(cache_usage_schema)),
+        mount: || get(get_cache_usage),
+    },
 ];
 
 fn artifacts_list_schema(_gen: &mut SchemaGenerator) -> Value {
@@ -5068,6 +5098,59 @@ async fn download_attempt_logs(
         State(state),
         axum::extract::Path((p.owner, p.repo, p.run_id)),
         headers,
+    )
+    .await
+}
+
+fn cache_usage_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "full_name": {"type": "string"},
+            "active_caches_count": {"type": "integer"},
+            "active_caches_size_in_bytes": {"type": "integer"},
+        },
+        "required": ["full_name", "active_caches_count", "active_caches_size_in_bytes"],
+    })
+}
+
+/// DELETE /actions/runs/{run_id}/logs — drops stored logs, keeps the run.
+async fn delete_run_logs_rest(
+    State(state): State<AppState>,
+    Path(p): Path<RunPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.actions.deleteRunLogs",
+        p.ref_input(),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// GET /actions/cache/usage — `{full_name, active_caches_count,
+/// active_caches_size_in_bytes}` off the listCaches rollup.
+async fn get_cache_usage(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let (owner, repo) = (p.owner.clone(), p.repo.clone());
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.listCaches",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        move |data| {
+            json!({
+                "full_name": format!("{owner}/{repo}"),
+                "active_caches_count": data["caches"].as_array().map(|c| c.len()).unwrap_or(0),
+                "active_caches_size_in_bytes": data["total_size_bytes"].as_i64().unwrap_or(0),
+            })
+        },
     )
     .await
 }

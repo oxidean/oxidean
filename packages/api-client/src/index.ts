@@ -5953,6 +5953,8 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.cancelRun", input),
         deleteRun: (input: ActionRunMutationRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.actions.deleteRun", input),
+        deleteRunLogs: (input: ActionRunMutationRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.actions.deleteRunLogs", input),
         approveRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.approveRun", input),
         getPullRequestTarget: (input: RepoActionsPullRequestTargetRequest) =>
@@ -7664,6 +7666,17 @@ export function actionsDeleteRunMutationOptions(client: OxideanClient) {
     mutationKey: ["repo", "actions", "deleteRun"] as const,
     mutationFn: async (input: ActionRunMutationRequest) => {
       const res = await client.repo.actions.deleteRun(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsDeleteRunLogsMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "deleteRunLogs"] as const,
+    mutationFn: async (input: ActionRunMutationRequest) => {
+      const res = await client.repo.actions.deleteRunLogs(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

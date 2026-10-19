@@ -40,6 +40,7 @@ async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
     )
     .with_actions_enabled(true)
     .with_actions_artifacts_dir(dir.path().join("actions-artifacts"))
+    .with_actions_log_dir(dir.path().join("actions-logs"))
     .with_repos_dir(dir.path().join("repos"));
     let app = router_with_state(state, build_cors("development", None).unwrap());
     (app, db, dir)
@@ -2215,6 +2216,20 @@ async fn rest_actions_caches_attempts_surface() {
     .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
+    // ---- cache/usage rollup ----
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/cache/usage"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let usage = body_json(res).await;
+    assert_eq!(usage["full_name"], "cax/cax");
+    assert_eq!(usage["active_caches_count"], 1);
+    assert_eq!(usage["active_caches_size_in_bytes"], 100);
+
     // ---- run attempts ----
     let res = rest(
         &app,
@@ -2250,7 +2265,15 @@ async fn rest_actions_caches_attempts_surface() {
     assert_eq!(jobs["total_count"], 1);
     assert_eq!(jobs["jobs"][0]["id"], job_id);
 
-    // attempt logs — the same zip archive the unqualified route serves
+    // attempt logs — the same zip archive the unqualified route serves.
+    // Seed a job log first: GitHub 404s runs with no log content, and so do we.
+    let log_dir = _dir.path().join("actions-logs").join(&run_id);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join(format!("{job_id}.log")),
+        "Job leg — build / 1 step(s) [host]\n##[step]run\necho hi\n##[step-done]run\njob concluded success\n",
+    )
+    .unwrap();
     let res = rest(
         &app,
         "GET",
@@ -2268,6 +2291,38 @@ async fn rest_actions_caches_attempts_surface() {
         &app,
         "GET",
         &format!("{base}/actions/runs/{run_id}/attempts/7/logs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // ---- DELETE runs/{id}/logs — files go, run row stays ----
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/runs/{run_id}/logs"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::NO_CONTENT,
+        "delete logs: {}",
+        res.status()
+    );
+    // run still reads; logs route now 404s.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/logs"),
         Some(&job_token),
     )
     .await;

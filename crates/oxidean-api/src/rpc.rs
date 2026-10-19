@@ -372,6 +372,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.rerunRun",
     "repo.actions.cancelRun",
     "repo.actions.deleteRun",
+    "repo.actions.deleteRunLogs",
     "repo.actions.approveRun",
     "repo.actions.secrets.list",
     "repo.actions.secrets.publicKey",
@@ -1597,6 +1598,12 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.deleteRunLogs" => {
+            match crate::actions::rpc::delete_run_logs(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.deleteRun" => match crate::actions::rpc::delete_run(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),

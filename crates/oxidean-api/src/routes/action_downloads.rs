@@ -566,6 +566,7 @@ pub async fn download_run_logs(
         }
     };
     let mut buf = std::io::Cursor::new(Vec::new());
+    let mut any_content = false;
     {
         let mut zip = zip::ZipWriter::new(&mut buf);
         let opts = zip::write::SimpleFileOptions::default()
@@ -583,6 +584,9 @@ pub async fn download_run_logs(
                 crate::actions::logs::read_job_log(&state.actions_log_dir, &run.id, &job.id, 0)
                     .await
                     .unwrap_or_default();
+            if !bytes.is_empty() {
+                any_content = true;
+            }
             // Unique, filesystem-safe entry names — matrix siblings share a name.
             let mut dir = sanitize_filename(&job.name);
             for n in 2.. {
@@ -628,6 +632,14 @@ pub async fn download_run_logs(
                 "archive build failed",
             );
         }
+    }
+    // GitHub 404s when the run has no log content — deleted or never written.
+    if !any_content {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.logs_not_found",
+            "No logs found for this run",
+        );
     }
     let mut res = Response::new(axum::body::Body::from(buf.into_inner()));
     *res.status_mut() = StatusCode::OK;
