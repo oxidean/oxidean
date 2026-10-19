@@ -1,0 +1,49 @@
+{
+  "stage": "code-generation",
+  "unit": "u4-vcs-changeset-core",
+  "version": 1,
+  "writes": [
+    {
+      "path": "crates/oxidean-vcs/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/changeset_store.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/ref_registry.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/read_index.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/text_diff.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0054_vcs_key_collation.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0054_vcs_key_collation.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0054_vcs_key_collation.sql"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_vcs.rs"
+    },
+    {
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "path": "docs/TESTING.md"
+    },
+    {
+      "path": "Cargo.lock"
+    },
+    {
+      "path": "crates/oxidean-db/src/vcs.rs"
+    }
+  ]
+}

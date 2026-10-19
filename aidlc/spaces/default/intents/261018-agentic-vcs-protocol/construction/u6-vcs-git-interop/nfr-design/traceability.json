@@ -1,0 +1,22 @@
+{
+ "stage": "nfr-design",
+ "unit": "u6-vcs-git-interop",
+ "artifacts": ["security-design.md", "logical-components.md"],
+ "coverage": [
+  {"id": "SD6.1", "kind": "sec-design", "source": "SR6.1/SR6.4/SR6.9", "note": "trust boundaries; subprocess boundary = primary attack surface; caps::validate blob-vs-object + usize::MAX pins"},
+  {"id": "SD6.2", "kind": "sec-design", "source": "SR6.3/devsecops-M1", "note": "five-step untrusted-cursor pipeline: pre-parse byte cap -> malformed -> field revalidation (v/tips/oid-shape/name) -> post-list skip<=len -> continuity; all before argv or indexing"},
+  {"id": "SD6.3", "kind": "sec-design", "source": "SR6.2/SR6.6/BR6.5", "note": "claim->work->nonce-verified-release ordering incl. error paths; write-chain before check (verdict needs minted tip); best-effort mutex + BR6.4 backstop"},
+  {"id": "SD6.4", "kind": "sec-design", "source": "SR6.4/BR6.24/devsecops-M2", "note": "run_git_stdout_bounded kill-child reader; per-method bounds (caller max_bytes on tree_flat/name_status; internal max*41 rev_list, CAT_COMMIT_MAX); top-level -c; stdin messages; check-ref-format oracle; folded-header parse"},
+  {"id": "SD6.5", "kind": "sec-design", "source": "SR6.6/BR6.15/BR6.16/AC7.2.2", "note": "two-phase ff gate ascii flow; unlinked=>RefConflict{None} even force; checker no-force intent f(old,new); single classified move; Option<ChangesetId> actual re-read"},
+  {"id": "SD6.6", "kind": "sec-design", "source": "SR6.1/SR6.8", "note": "full bound table incl. stdout byte bounds + sidecar payload bound; named uncapped residuals"},
+  {"id": "SD6.7", "kind": "sec-design", "source": "SR6.5/Q7/BR6.18", "note": "total bridge table: 9 ObjectStore + 6 Changeset + 8 Index variants + GitError classified + checker-Err opaque + facade/io; no PartialEq"},
+  {"id": "SD6.8", "kind": "sec-design", "source": "SR6.11/BR6.22", "note": "unit=vcs.git_interop spans; warn drops counted; ids/counts only"},
+  {"id": "LC6.1", "kind": "component", "source": "TD6.1/TD6.4/TD6.5", "note": "file/crate delta incl. 0055 x3, vcs.rs both sides, vcs_types.rs two-field amendment; no new tables/index kinds"},
+  {"id": "LC6.2", "kind": "component", "source": "WF1/WF2/WF4", "note": "three public entry points; caps::validate; lazy seeds tips=[oid] bypassing from-resolution; no forbidden moves"},
+  {"id": "LC6.3", "kind": "component", "source": "TD6.3/ADR-006", "note": "ProtectionChecker trait sig; host impl at u7; no force param; Err=>Internal opaque"},
+  {"id": "LC6.4", "kind": "component", "source": "WF3/WF5/Q4", "note": "eleven private primitives; sha2-minted nonce; mirrored compose_author/manifest_diff/is_ancestor_cs; validate_path pub(crate) direct; export_one ident-cs sidecar required"},
+  {"id": "LC6.5", "kind": "component", "source": "TD6.4/TD6.6", "note": "consumed surface enumeration; only 2 new deps (oxidean-git, async-trait) verified vs Cargo.toml; zero edits outside recorded deviations"},
+  {"id": "LC6.6", "kind": "component", "source": "Q7/TD6.5", "note": "variant->code table (the wire map lives in questions Q7, not a WF6); vcs.import_state exists (vcs_types.rs:331); amended DTOs; activity fields"},
+  {"id": "LC6.7", "kind": "component", "source": "support+review passes", "note": "supersedure relay: max_bytes arities (caller tree_flat/name_status vs internal rev_list/cat_commit); SD6.2 cursor pipeline; lazy direct-tips; sanitize-then-refuse ordering; import_state resolved"}
+ ]
+}

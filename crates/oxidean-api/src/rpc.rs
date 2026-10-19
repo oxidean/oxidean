@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
+use futures_util::FutureExt;
 use oxidean_core::{
     wire_compatible, AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities,
     ManifestResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
@@ -35,6 +36,7 @@ use crate::search;
 use crate::ssh_keys;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
+use crate::vcs;
 use crate::webhook;
 
 pub const VERSION_HEADER: &str = "Oxidean-RPC-Version";
@@ -111,6 +113,10 @@ pub struct RpcCtx {
     pub search_timeout_ms: u64,
     pub search_max_matches: u32,
     pub search_max_files: u32,
+    /// Agentic VCS slot — `None` when the `OXIDEAN_VCS_*` config is invalid
+    /// or the objects dir refused at boot; `vcs.*` procedures then answer
+    /// `vcs.disabled` (same wire shape as an unenabled repo).
+    pub vcs: Option<crate::vcs::SharedVcs>,
 }
 
 /// Wire-compat gate for `Oxidean-RPC-Version` (BR6.2). During the 0.x window
@@ -454,6 +460,24 @@ pub const PROCEDURES: &[&str] = &[
     "email.remove",
     "email.setPrimary",
     "email.resendVerify",
+    // Agentic VCS protocol (contract C1 — the pinned 17-name set, BR1.2).
+    "vcs.repo_enable",
+    "vcs.status",
+    "vcs.changeset_create",
+    "vcs.changeset_get",
+    "vcs.log",
+    "vcs.diff",
+    "vcs.tree",
+    "vcs.file_get",
+    "vcs.blame",
+    "vcs.path_history",
+    "vcs.merge_base",
+    "vcs.merge",
+    "vcs.rebase",
+    "vcs.ref_list",
+    "vcs.ref_update",
+    "vcs.git_import",
+    "vcs.git_export",
 ];
 
 /// `system.manifest` payload — the versioned capability contract (CLI-02).
@@ -1834,6 +1858,81 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        // Agentic VCS protocol — domain handlers in `crate::vcs`. One
+        // single-name arm per procedure: `procedures_list_matches_dispatch`
+        // scans `"name" =>` arm literals, so alternation arms are invisible
+        // to it. `.boxed()` on every arm: it statically enforces `Send` on
+        // each handler future AND keeps the deep VCS await graphs out of
+        // `dispatch`'s coroutine witness (rustc's Send-unroll overflows
+        // `recursion_depth_exceeding_limit` on the unboxed match).
+        "vcs.repo_enable" => match vcs::repo_enable(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.status" => match vcs::status(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.changeset_create" => match vcs::changeset_create(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.changeset_get" => match vcs::changeset_get(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.log" => match vcs::log(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.diff" => match vcs::diff(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.tree" => match vcs::tree(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.file_get" => match vcs::file_get(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.blame" => match vcs::blame(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.path_history" => match vcs::path_history(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.merge_base" => match vcs::merge_base(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.merge" => match vcs::merge(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.rebase" => match vcs::rebase(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.ref_list" => match vcs::ref_list(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.ref_update" => match vcs::ref_update(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.git_import" => match vcs::git_import(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.git_export" => match vcs::git_export(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         other => RpcResponse::err(AppError::new(
             "rpc.unknown_procedure",
             format!("unknown procedure: {other}"),
@@ -1942,5 +2041,98 @@ mod tests {
     fn legacy_alias_expires_at_1_0() {
         assert!(wire_compatible(LEGACY_WIRE_VERSION, WIRE_VERSION));
         assert!(!wire_compatible(LEGACY_WIRE_VERSION, "1.0.0"));
+    }
+
+    /// vcs.* registration completeness (BR1.2/BR1.8, SD1): every pinned name
+    /// is in `PROCEDURES` with a dispatch arm and a non-`SessionOnly` token
+    /// class; the two object-route aliases are classified yet absent from
+    /// `PROCEDURES` and dispatch.
+    #[test]
+    fn vcs_procedures_registered_and_classified() {
+        use oxidean_core::{classify_pat_proc, PatProc};
+
+        assert_eq!(oxidean_core::VCS_PROCEDURES.len(), 17);
+        let listed: std::collections::BTreeSet<&str> = PROCEDURES.iter().copied().collect();
+
+        let src = include_str!("rpc.rs");
+        let arms: std::collections::BTreeSet<&str> = src
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim_start();
+                if !line.starts_with('"') {
+                    return None;
+                }
+                let end = line[1..].find('"')?;
+                let rest = line[2 + end..].trim_start();
+                rest.starts_with("=>").then(|| &line[1..1 + end])
+            })
+            .collect();
+
+        for name in oxidean_core::VCS_PROCEDURES {
+            assert!(listed.contains(name), "{name} missing from PROCEDURES");
+            assert!(arms.contains(name), "{name} has no dispatch arm");
+            assert_ne!(
+                classify_pat_proc(name),
+                PatProc::SessionOnly,
+                "{name} must classify non-SessionOnly — only unlisted names fail closed"
+            );
+        }
+        for alias in oxidean_core::VCS_OBJECT_ROUTE_ALIASES {
+            assert!(
+                !listed.contains(alias),
+                "route alias {alias} must never appear in PROCEDURES"
+            );
+            assert!(
+                !arms.contains(alias),
+                "route alias {alias} must never gain a dispatch arm"
+            );
+            assert_ne!(
+                classify_pat_proc(alias),
+                PatProc::SessionOnly,
+                "route alias {alias} must classify for route authorization"
+            );
+        }
+
+        // Reverse closed-set (BR1.2): nothing `vcs.*` may appear in
+        // PROCEDURES or gain a dispatch arm without being in the pinned set —
+        // an unlisted name would classify SessionOnly yet stay invocable by
+        // cookie sessions, silently widening the surface.
+        let pinned: std::collections::BTreeSet<&str> =
+            oxidean_core::VCS_PROCEDURES.iter().copied().collect();
+        for name in listed.iter().chain(arms.iter()) {
+            if name.starts_with("vcs.") {
+                assert!(
+                    pinned.contains(name),
+                    "unlisted vcs.* name {name} reached the wire surface"
+                );
+            }
+        }
+    }
+
+    /// Each `vcs.*` arm must call its real `crate::vcs::<proc>` handler —
+    /// no `vcs.disabled` stub may remain (u7's `dispatch_real_arms` row; a
+    /// handler's own `vcs.disabled` errors are returned by the domain layer,
+    /// never by the arm itself).
+    #[test]
+    fn vcs_dispatch_arms_call_real_handlers() {
+        let src = include_str!("rpc.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        for name in oxidean_core::VCS_PROCEDURES {
+            let needle = format!("\"{name}\" =>");
+            let start = lines
+                .iter()
+                .position(|l| l.trim_start().starts_with(&needle))
+                .unwrap_or_else(|| panic!("no dispatch arm for {name}"));
+            let arm: String = lines[start..(start + 6).min(lines.len())].join("\n");
+            let handler = format!("vcs::{}(ctx, req.input)", &name["vcs.".len()..]);
+            assert!(
+                arm.contains(&handler),
+                "{name} arm must call the real handler ({handler}):\n{arm}"
+            );
+            assert!(
+                !arm.contains("VcsErrorCode::Disabled"),
+                "{name} arm still carries a disabled stub:\n{arm}"
+            );
+        }
     }
 }

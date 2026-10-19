@@ -1,0 +1,64 @@
+{
+  "stage": "code-generation",
+  "unit": "u8-vcs-cli",
+  "version": 1,
+  "writes": [
+    {
+      "path": "crates/oxidean-vcs/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/mod.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/transport.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/object_cache.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/working_copy.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/client/cli.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/git_interop.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/api.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-cli/src/args.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/commands.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/completion.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/http.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/main.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/tests/commands_e2e.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/tests/manifest_gate.rs"
+    },
+    {
+      "path": "Cargo.lock"
+    }
+  ]
+}

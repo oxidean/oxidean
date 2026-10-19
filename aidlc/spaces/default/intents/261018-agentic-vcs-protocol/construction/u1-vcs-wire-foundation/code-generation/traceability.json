@@ -1,0 +1,19 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-vcs-wire-foundation",
+  "upstream_ids": ["AC8.1.1","AC8.1.2","AC8.1.3","AC8.1.4","AC8.2.1","AC8.2.2","AC8.6.1","AC8.5.1","AC1.1.2","AC2.6.1","AC5.1.1","AC2.7.1"],
+  "coverage": [
+    {"id":"AC8.1.1","status":"OK","target":"vcs_types.rs DTOs + PROCEDURES + dispatch arms","note":"17 procedures callable over the envelope; stubs return vcs.disabled until u7"},
+    {"id":"AC8.1.2","status":"OK","target":"PROCEDURES + manifest_shape","note":"system.manifest advertises all 17"},
+    {"id":"AC8.1.3","status":"OK","target":"/api/vcs/* alias classification","note":"route aliases classified; routes land u7 — u1 share is the wire envelope they answer in"},
+    {"id":"AC8.1.4","status":"OK","target":"VcsErrorCode closed enum","note":"11 dotted codes, per-variant rename, typed payloads"},
+    {"id":"AC8.2.1","status":"OK","target":"rpc_gen.rs template + regenerated index.ts","note":"client namespace + generated-coverage test"},
+    {"id":"AC8.2.2","status":"OK","target":"crates/oxidean-vcs skeleton + versioning.toml [[component]] + proc_classes + rpc-gen","note":"required_procedures/CLI_PROCS/MCP_PROCS/env-doc clauses are u7/u8/u9 — partial share"},
+    {"id":"AC8.6.1","status":"OK","target":"proc_classes vcs.* block + coverage test","note":"10 read/6 write/1 admin/2 aliases; SessionOnly fail-closed"},
+    {"id":"AC8.5.1","status":"OK","target":"VcsErrorCode::Unauthenticated/Forbidden + object-route alias classification","note":"u1's share is the codes + classes; the route behavior is u7"},
+    {"id":"AC1.1.2","status":"OK","target":"VcsErrorCode::Disabled + stub arms","note":"the disabled-denial path exists end-to-end pre-enablement"},
+    {"id":"AC2.6.1","status":"OK","target":"VCS_ACTIVITY_* constants + RepoActivityItem widening","note":"constants are the feed-row source; insert-signature side is u2 — partial share"},
+    {"id":"AC5.1.1","status":"OK","target":"Nullable<T> CAS fields on VcsRefUpdateRequest","note":"required-nullable trichotomy pinned by test"},
+    {"id":"AC2.7.1","status":"OK","target":"error taxonomy + stub envelope","note":"u1 share: codes exist; behavioral denials are u7"}
+  ]
+}

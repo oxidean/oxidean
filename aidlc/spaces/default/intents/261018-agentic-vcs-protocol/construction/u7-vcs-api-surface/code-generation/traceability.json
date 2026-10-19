@@ -1,0 +1,85 @@
+{
+  "stage": "code-generation",
+  "unit": "u7-vcs-api-surface",
+  "version": 1,
+  "upstream": [
+    {
+      "id": "contract-C1",
+      "source": "inception/contract-design/contract-summary.md#C1",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs", "crates/oxidean-api/src/vcs.rs", "crates/oxidean-api/src/rpc.rs"],
+      "notes": "17 procedures, flag-gate two-case semantics, error taxonomy"
+    },
+    {
+      "id": "contract-C2",
+      "source": "inception/contract-design/contract-summary.md#C2",
+      "covered_by": ["crates/oxidean-api/src/vcs_routes.rs", "crates/oxidean-api/src/app.rs"],
+      "notes": "object GET/POST routes, cookie denial, raised DefaultBodyLimit, route aliases"
+    },
+    {
+      "id": "contract-C3",
+      "source": "inception/contract-design/contract-summary.md#C3",
+      "covered_by": ["crates/oxidean-api/src/mcp.rs"],
+      "notes": "Access-class gating only; descriptor set is u9's"
+    },
+    {
+      "id": "contract-C4",
+      "source": "inception/contract-design/contract-summary.md#C4",
+      "covered_by": ["crates/oxidean-vcs/src/activity.rs", "crates/oxidean-api/src/repo/activity.rs"],
+      "notes": "op-granular rows, nullable push columns, VALID_PUSH_TYPES from VCS_ACTIVITY_KINDS"
+    },
+    {
+      "id": "contract-C5",
+      "source": "inception/contract-design/contract-summary.md#C5",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "consumes persistence facades; skipped() -> db.not_configured"
+    },
+    {
+      "id": "contract-C7",
+      "source": "inception/contract-design/contract-summary.md#C7",
+      "covered_by": ["crates/oxidean-api/src/vcs_protection.rs", "crates/oxidean-api/src/app_state.rs"],
+      "notes": "host ProtectionChecker impl + Arc<dyn GitBackend> injection"
+    },
+    {
+      "id": "contract-C9",
+      "source": "inception/contract-design/contract-summary.md#C9",
+      "covered_by": ["packages/api-client"],
+      "notes": "rpc-gen regen if wire moved; wire types unchanged in u7"
+    },
+    {
+      "id": "contract-env-table",
+      "source": "inception/contract-design/contract-summary.md#OXIDEAN_VCS_*",
+      "covered_by": ["crates/oxidean-api/src/app_state.rs", ".env.example", "docs/CONFIGURATION.md", "docs/DEPLOYMENT.md", ".railway/railway.ts"],
+      "notes": "five vars, frozen defaults"
+    },
+    {
+      "id": "unit-of-work-U7",
+      "source": "inception/units-generation/unit-of-work.md#U7",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs", "crates/oxidean-vcs/src/activity.rs", "crates/oxidean-api/src/vcs.rs"],
+      "notes": "VcsApi orchestration + ActivityRecorder + all host wiring"
+    },
+    {
+      "id": "AC1.2.1",
+      "source": "inception/contract-design/contract-summary.md#C1",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "absent flag denies all; enabled:false denies writes only"
+    },
+    {
+      "id": "AC5.1.3",
+      "source": "inception/contract-design/contract-summary.md#C1",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "ref_update non-idempotent; ref_conflict{data:{actual}}"
+    },
+    {
+      "id": "AC7.1.2",
+      "source": "inception/contract-design/contract-summary.md#C6",
+      "covered_by": ["crates/oxidean-vcs/src/api.rs"],
+      "notes": "lazy-import trigger on 40-hex at/rev read misses, one retry"
+    },
+    {
+      "id": "AC8.5.1",
+      "source": "inception/contract-design/contract-summary.md#C2",
+      "covered_by": ["crates/oxidean-api/src/vcs_routes.rs"],
+      "notes": "cookie-only denied on /api/vcs/* object routes"
+    }
+  ]
+}

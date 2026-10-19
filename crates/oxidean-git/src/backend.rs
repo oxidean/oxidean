@@ -404,6 +404,95 @@ impl ArchiveFormat {
     }
 }
 
+// ---------------------------------------------------------------------------
+// VCS git-interop surface (u6) — plumbing for the side-by-side changeset
+// protocol's import/export path. Byte-tolerant: git permits non-UTF8 ident
+// and message bytes, and round-trip fidelity requires preserving them.
+// ---------------------------------------------------------------------------
+
+/// A raw `author`/`committer` line decoded from a commit object. Byte-exact —
+/// name/email may hold non-UTF8 or angle-bracket bytes git tolerates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitIdent {
+    pub name: Vec<u8>,
+    pub email: Vec<u8>,
+    pub unix: i64,
+    /// Timezone as written (`+0200`, `-0330`, `Z`); re-emitted verbatim.
+    pub tz: String,
+}
+
+/// A parsed `git cat-file commit` object — folded continuation headers are
+/// flattened away; everything after the blank line is the message verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawCommit {
+    pub tree: String,
+    pub parents: Vec<String>,
+    pub author: GitIdent,
+    pub committer: GitIdent,
+    pub message: Vec<u8>,
+}
+
+/// `git log --name-status` change kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameStatusKind {
+    Add,
+    Modify,
+    Delete,
+    Rename,
+    TypeChange,
+}
+
+impl NameStatusKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Modify => "modify",
+            Self::Delete => "delete",
+            Self::Rename => "rename",
+            Self::TypeChange => "typechange",
+        }
+    }
+}
+
+/// One row of a `diff-tree --name-status -z` read. Rename rows carry both
+/// paths — `old_path` is the `-z` first record (source).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameStatusRow {
+    pub status: NameStatusKind,
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
+/// One leaf of a `ls-tree -r -l -z --full-tree` walk — mode+kind+size per
+/// entry so callers can apply byte caps before touching blobs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlatTreeEntry {
+    /// Octal mode as git writes it (`100644`, `100755`, `120000`, `160000`).
+    pub mode: String,
+    pub kind: TreeEntryKind,
+    pub oid: String,
+    pub path: String,
+    /// `0` for non-blob kinds (trees/gitlinks report `-`).
+    pub size: u64,
+}
+
+/// One input row for `mktree -z` — full-snapshot semantics; `mode` is the
+/// zero-padded octal git accepts (`{:06o}` form).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeWriteEntry {
+    pub mode: String,
+    pub oid: String,
+    pub path: String,
+}
+
+/// `rev-list` page — `oids` arrive PARENTS-FIRST (the adapter reverses
+/// `--topo-order` output); `truncated` reports whether `max` cut the walk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevList {
+    pub oids: Vec<String>,
+    pub truncated: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Async forge git operations. API/RPC never shell out directly.
 #[async_trait::async_trait]
@@ -712,12 +801,15 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<(), GitError>;
 
     /// Force-update (or create) a local ref to `target_sha` via worktree push with `+`.
-    /// Heads use branch push; tags use force tag push.
+    /// Heads use branch push; tags use force tag push. `actor_capability`
+    /// threads into `OXIDEAN_ACTOR_CAPABILITY` for the protection hook —
+    /// system ref moves pass `"admin"` (they already passed API-side policy).
     async fn force_update_ref(
         &self,
         repo: &Path,
         refname: &str,
         target_sha: &str,
+        actor_capability: &str,
     ) -> Result<(), GitError>;
 
     /// Committer unix timestamp (`git log -1 --format=%ct`) for LWW tip comparison.
@@ -752,12 +844,15 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<(u64, u64), GitError>;
 
     /// Fast-forward (or create) `refname` to `target_sha` via a worktree push so
-    /// bare `hooks/update` runs. Non-FF → [`GitError::Process`].
+    /// bare `hooks/update` runs. Non-FF → [`GitError::Conflict`]; hook decline →
+    /// [`GitError::Denied`]. `actor_capability` threads into
+    /// `OXIDEAN_ACTOR_CAPABILITY` — system ref moves pass `"admin"`.
     async fn fast_forward_ref(
         &self,
         repo: &Path,
         refname: &str,
         target_sha: &str,
+        actor_capability: &str,
     ) -> Result<(), GitError>;
 
     /// Resolve a ref / SHA to a commit OID (`git rev-parse`).
@@ -768,6 +863,65 @@ pub trait GitBackend: Send + Sync {
     /// (e.g. `refs/pull/*` in API-06) that no push path may write; callers must
     /// ensure `sha` resolves to an object already present in `repo`.
     async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError>;
+
+    // ------------------------------------------------------------------
+    // VCS git-interop plumbing (u6 / TD6.2)
+    // ------------------------------------------------------------------
+
+    /// Resolve `rev` to a commit oid — `Ok(Some)` peels annotated tags and
+    /// accepts raw oids, `Ok(None)` when `rev` is missing or resolves to a
+    /// non-commit object (tree/blob). Never errors on an unresolvable rev.
+    async fn verify_commit_oid(&self, repo: &Path, rev: &str) -> Result<Option<String>, GitError>;
+
+    /// `git check-ref-format` validity for a fully-qualified `refs/heads/*`
+    /// refname — `Ok(true)` legal, `Ok(false)` rejected.
+    async fn check_refname(&self, repo: &Path, refname: &str) -> Result<bool, GitError>;
+
+    /// Raw `cat-file commit` parse. `sha` must verify as a commit first
+    /// ([`GitBackend::verify_commit_oid`]); malformed objects → `Process`.
+    async fn cat_commit(&self, repo: &Path, sha: &str) -> Result<RawCommit, GitError>;
+
+    /// `diff-tree --name-status -z -M` for `sha` against `base` (`None` diffs
+    /// against the empty tree — a root import). Bounded stdout: over
+    /// `max_bytes` → `Process("oxidean:stdout-bound-exceeded")`.
+    async fn commit_name_status(
+        &self,
+        repo: &Path,
+        base: Option<&str>,
+        sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<NameStatusRow>, GitError>;
+
+    /// `ls-tree -r -l -z --full-tree` at `sha` — every leaf with mode/kind/
+    /// oid/size. Bounded stdout: over `max_bytes` → the stdout-bound sentinel.
+    async fn tree_flat(
+        &self,
+        repo: &Path,
+        sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<FlatTreeEntry>, GitError>;
+
+    /// `rev-list --topo-order` over `tips` (children-first), reversed in-crate
+    /// to parents-first. `max` bounds both the walk and the returned page;
+    /// `truncated` reports the cut.
+    async fn rev_list(&self, repo: &Path, tips: &[String], max: usize)
+        -> Result<RevList, GitError>;
+
+    /// `hash-object -t blob -w --stdin` — mints a blob, returns its oid.
+    async fn write_object(&self, repo: &Path, bytes: &[u8]) -> Result<String, GitError>;
+
+    /// Mint a commit deterministically: `entries` fold into nested trees via
+    /// `mktree -z` (full snapshot, dirs synthesized), then `commit-tree` with
+    /// the supplied raw idents and message — no signing, no ref movement.
+    async fn write_commit(
+        &self,
+        repo: &Path,
+        entries: &[TreeWriteEntry],
+        parents: &[String],
+        author: &GitIdent,
+        committer: &GitIdent,
+        message: &[u8],
+    ) -> Result<String, GitError>;
 }
 
 #[cfg(test)]

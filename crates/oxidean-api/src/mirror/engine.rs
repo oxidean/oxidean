@@ -533,7 +533,10 @@ async fn exact_force_local(
             }
         }
     }
-    match git.force_update_ref(bare, local_ref, target_sha).await {
+    match git
+        .force_update_ref(bare, local_ref, target_sha, "admin")
+        .await
+    {
         Ok(()) => RefOutcome {
             outcome: "ff_in".into(),
             local_oid: target_sha.into(),
@@ -860,7 +863,10 @@ async fn sync_tag(
     remote_oid: &str,
 ) -> RefOutcome {
     match local_oid {
-        None => match git.fast_forward_ref(bare, local_ref, remote_oid).await {
+        None => match git
+            .fast_forward_ref(bare, local_ref, remote_oid, "admin")
+            .await
+        {
             // Tags: create via update — fast_forward_ref uses refs/heads path.
             // For tags, push into bare with update-ref via a dedicated path:
             Ok(()) => RefOutcome {
@@ -988,7 +994,7 @@ async fn apply_local_ff(
                 .await;
         }
     }
-    git.fast_forward_ref(bare, local_ref, target_sha)
+    git.fast_forward_ref(bare, local_ref, target_sha, "admin")
         .await
         .map_err(|e| e.to_string())
 }

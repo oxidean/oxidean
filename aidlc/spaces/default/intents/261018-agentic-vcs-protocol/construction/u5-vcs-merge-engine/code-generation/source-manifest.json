@@ -1,0 +1,25 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-vcs-merge-engine",
+  "version": 1,
+  "writes": [
+    {
+      "path": "crates/oxidean-vcs/src/merge_engine.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/changeset_store.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/ref_registry.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/read_index.rs"
+    },
+    {
+      "path": "crates/oxidean-vcs/src/text_diff.rs"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+manifest	8ee0f9951e282e860bda4c8912a78a86806438cbe20e6cd63e8ddf13abefc3c5	-
+	apps/web/src/components/repo/repo-activity-row.integration.test.tsx	100644	b34de65bdc0b6be5572d427747c3c690fdd27b78b22efddaf697cbf2f219faa3
+	apps/web/src/components/repo/repo-activity-row.tsrx	100644	4dc283d662be5db764ad7216669b41b26cdeca65c2c6540ee5332d62724113b6
+	apps/web/src/components/repo/repo-settings-nav.tsrx	100644	4131159c55e216b6a583f62f05d317dfc2f798cbc86c047212a00eb0ddea9a20
+	apps/web/src/components/repo/vcs-settings-panel.browser.test.tsx	100644	fe1358723f0afe82a52ab732a0f049e682b48a72313316fe87f028def905e842
+	apps/web/src/components/repo/vcs-settings-panel.integration.test.ts	100644	62e3105be116918d99617f3ddbb61f4d6cc1c90e450465d102fffee2ae3cf3e3
+	apps/web/src/components/repo/vcs-settings-panel.tsrx	100644	7d74245dd77bc6a230b07f109633b351648fc60a3c5ccad479e032e3d1287dc9
+	apps/web/src/routes/$owner.$repo.activity.tsrx	100644	f4d77899aa0cd1d6e3484089570b4a2cf5aeb128b0ad4a99207adcd59de5bb43
+	apps/web/src/routes/$owner.$repo.settings.tsrx	100644	a59a5840af51ad580fdc33c2a9709db68a65b90bbd6d14e5d1888a4579903040
+	apps/web/src/test/browser-coverage.manifest.ts	100644	18812fa2e4505f02a91ef218862aa02cee7f51f4bed67b8c36cc4cb82bd404d6

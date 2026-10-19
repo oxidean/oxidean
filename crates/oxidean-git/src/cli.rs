@@ -8,8 +8,9 @@ use tokio::process::Command;
 use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
     CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
-    FileChange, FilesCommit, GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind,
-    RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
+    FileChange, FilesCommit, FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit,
+    GrepResult, NameStatusKind, NameStatusRow, RawCommit, RemoteAuthKind, RemoteCredentials,
+    RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry, ARCHIVE_TIMEOUT,
     BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
@@ -382,6 +383,125 @@ async fn run_git_stdout_env_stdin(
             format!(" | {}", stdout.trim())
         }
     )))
+}
+
+/// Fixed `Process` payload emitted when a bounded stdout reader overflows —
+/// the ONLY message the VCS git-interop layer maps to a too-large failure
+/// (SR6.1/SD6.6). Keep this string stable; matching is by exact contents.
+pub(crate) const STDOUT_BOUND_SENTINEL: &str = "oxidean:stdout-bound-exceeded";
+
+/// `run_git_stdout_env` variant that bounds collected stdout (SR6.1): over
+/// `max_bytes` the child is killed and the failure is the
+/// [`STDOUT_BOUND_SENTINEL`] — an unbounded reader beneath the object caps
+/// would let one oversized object/listing wedge the forge. stderr drains
+/// concurrently (bounded) so a chatty child can never deadlock on a full
+/// pipe, and an optional stdin payload feeds `hash-object`/`mktree`/`commit-tree`.
+async fn run_git_stdout_env_bounded(
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    stdin_bytes: Option<&[u8]>,
+    max_bytes: usize,
+) -> Result<Vec<u8>, GitError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut cmd = Command::new("git");
+    cmd.args(args)
+        .env("GIT_AUTHOR_NAME", "Oxidean")
+        .env("GIT_AUTHOR_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_COMMITTER_NAME", "Oxidean")
+        .env("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(if stdin_bytes.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+    if let Some(bytes) = stdin_bytes {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| GitError::Process("failed to open git stdin".into()))?;
+        stdin.write_all(bytes).await.map_err(GitError::Io)?;
+        drop(stdin);
+    }
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| GitError::Process("failed to open git stdout".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| GitError::Process("failed to open git stderr".into()))?;
+    const STDERR_DRAIN_MAX: u64 = 65_536;
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        let _ = stderr
+            .take(STDERR_DRAIN_MAX + 1)
+            .read_to_end(&mut buf)
+            .await;
+        buf.truncate(STDERR_DRAIN_MAX as usize);
+        buf
+    });
+    let mut out = Vec::new();
+    if let Err(e) = stdout
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut out)
+        .await
+    {
+        let _ = child.kill().await;
+        let _ = stderr_task.await;
+        return Err(GitError::Io(e));
+    }
+    if out.len() > max_bytes {
+        let _ = child.kill().await;
+        let _ = stderr_task.await;
+        return Err(GitError::Process(STDOUT_BOUND_SENTINEL.into()));
+    }
+    let stderr_buf = stderr_task.await.unwrap_or_default();
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| GitError::Process(format!("failed to wait on git: {e}")))?;
+    if status.success() {
+        return Ok(out);
+    }
+    let stderr = String::from_utf8_lossy(&stderr_buf);
+    Err(GitError::Process(format!(
+        "git {} failed (status {:?}): {}",
+        args.join(" "),
+        status.code(),
+        stderr.trim()
+    )))
+}
+
+/// Shared push-failure typing for the three hook-gated push paths
+/// (`commit_files`, `fast_forward_ref`, `force_update_ref` — u6 / TD6.2):
+/// a non-FF rejection is a tip race → `Conflict(conflict_msg)` (fixed text —
+/// subprocess stderr never reaches the caller); a `hooks/update` decline is
+/// a protection denial → `Denied`; anything else stays opaque `Process`.
+fn classify_push_error(err: GitError, conflict_msg: &'static str) -> GitError {
+    match err {
+        GitError::Process(msg) => {
+            if msg.contains("non-fast-forward")
+                || msg.contains("fetch first")
+                || msg.contains("stale info")
+            {
+                GitError::Conflict(conflict_msg.into())
+            } else if msg.contains("hook declined") || msg.contains("protected") {
+                GitError::Denied(msg)
+            } else {
+                GitError::Process(msg)
+            }
+        }
+        other => other,
+    }
 }
 
 fn looks_like_missing_ssh(combined: &str) -> bool {
@@ -1726,26 +1846,16 @@ impl GitBackend for CliGitBackend {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         let refspec = format!("{sha}:refs/heads/{branch}");
-        match run_git_with_env(&["-C", work_str, "push", bare_str, &refspec], &hook_pairs).await {
+        match run_git_with_env(&["-C", work_str, "push", bare_str, &refspec], &hook_pairs)
+            .await
+            .map_err(|e| {
+                classify_push_error(e, "branch tip moved while committing — retry the change")
+            }) {
             Ok(()) => Ok(FilesCommit {
                 sha,
                 base_sha,
                 branch: branch.to_string(),
             }),
-            Err(GitError::Process(msg)) => {
-                if msg.contains("non-fast-forward")
-                    || msg.contains("fetch first")
-                    || msg.contains("stale info")
-                {
-                    Err(GitError::Conflict(
-                        "branch tip moved while committing — retry the change".into(),
-                    ))
-                } else if msg.contains("hook declined") || msg.contains("protected") {
-                    Err(GitError::Denied(msg))
-                } else {
-                    Err(GitError::Process(msg))
-                }
-            }
             Err(other) => Err(other),
         }
     }
@@ -3247,6 +3357,7 @@ impl GitBackend for CliGitBackend {
         repo: &Path,
         refname: &str,
         target_sha: &str,
+        actor_capability: &str,
     ) -> Result<(), GitError> {
         let refname = validate_treeish(refname)?;
         let target_sha = validate_treeish(target_sha)?;
@@ -3272,7 +3383,7 @@ impl GitBackend for CliGitBackend {
         run_git(&["clone", bare_s, work_s]).await?;
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
 
-        let hook_env = protection_hook_push_env("admin");
+        let hook_env = protection_hook_push_env(actor_capability);
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -3280,14 +3391,28 @@ impl GitBackend for CliGitBackend {
 
         if let Some(branch) = refname.strip_prefix("refs/heads/") {
             let refspec = format!("+HEAD:refs/heads/{branch}");
-            run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs).await?;
+            run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs)
+                .await
+                .map_err(|e| {
+                    classify_push_error(
+                        e,
+                        "ref tip moved while pushing — retry against the new tip",
+                    )
+                })?;
             return Ok(());
         }
         if let Some(tag) = refname.strip_prefix("refs/tags/") {
             // Force-move tag on bare via worktree.
             let _ = run_git(&["-C", work_s, "tag", "-f", tag, target_sha]).await;
             let refspec = format!("+refs/tags/{tag}:refs/tags/{tag}");
-            run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs).await?;
+            run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs)
+                .await
+                .map_err(|e| {
+                    classify_push_error(
+                        e,
+                        "ref tip moved while pushing — retry against the new tip",
+                    )
+                })?;
             return Ok(());
         }
         Err(GitError::InvalidArg(format!(
@@ -3401,6 +3526,7 @@ impl GitBackend for CliGitBackend {
         repo: &Path,
         refname: &str,
         target_sha: &str,
+        actor_capability: &str,
     ) -> Result<(), GitError> {
         let refname = validate_treeish(refname)?;
         let target_sha = validate_treeish(target_sha)?;
@@ -3430,12 +3556,16 @@ impl GitBackend for CliGitBackend {
         // Detached checkout of target, then push to branch (FF only — no +).
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
         let refspec = format!("HEAD:refs/heads/{branch}");
-        let hook_env = protection_hook_push_env("admin");
+        let hook_env = protection_hook_push_env(actor_capability);
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs).await?;
+        run_git_with_env(&["-C", work_s, "push", "origin", &refspec], &hook_env_refs)
+            .await
+            .map_err(|e| {
+                classify_push_error(e, "ref tip moved while pushing — retry against the new tip")
+            })?;
         Ok(())
     }
 
@@ -3462,6 +3592,477 @@ impl GitBackend for CliGitBackend {
         let repo_s = repo_str(repo)?;
         run_git(&["-C", repo_s, "update-ref", refname, sha]).await
     }
+
+    // ------------------------------------------------------------------
+    // VCS git-interop plumbing (u6 / TD6.2)
+    // ------------------------------------------------------------------
+
+    async fn verify_commit_oid(&self, repo: &Path, rev: &str) -> Result<Option<String>, GitError> {
+        let rev = validate_treeish(rev)?;
+        let repo_s = repo_str(repo)?;
+        match run_git_stdout(&[
+            "-C",
+            repo_s,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{rev}^{{commit}}"),
+        ])
+        .await
+        {
+            Ok(out) => {
+                let oid = String::from_utf8_lossy(&out).trim().to_string();
+                Ok((!oid.is_empty()).then_some(oid))
+            }
+            // Missing revs and non-commit objects both refuse the peel —
+            // `None` is data, not an error (BR6.28 drops non-commit tips).
+            Err(GitError::Process(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn check_refname(&self, repo: &Path, refname: &str) -> Result<bool, GitError> {
+        if refname.is_empty() || refname.contains('\0') || refname.starts_with('-') {
+            return Ok(false);
+        }
+        let repo_s = repo_str(repo)?;
+        let output = Command::new("git")
+            .args(["-C", repo_s, "check-ref-format", refname])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(GitError::Process(format!(
+                "git check-ref-format failed (status {:?})",
+                output.status.code()
+            ))),
+        }
+    }
+
+    async fn cat_commit(&self, repo: &Path, sha: &str) -> Result<RawCommit, GitError> {
+        let sha = validate_treeish(sha)?;
+        let repo_s = repo_str(repo)?;
+        let out = run_git_stdout_env_bounded(
+            &["-C", repo_s, "cat-file", "commit", sha],
+            &[],
+            None,
+            CAT_COMMIT_MAX,
+        )
+        .await?;
+        parse_raw_commit(&out)
+    }
+
+    async fn commit_name_status(
+        &self,
+        repo: &Path,
+        base: Option<&str>,
+        sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<NameStatusRow>, GitError> {
+        let sha = validate_treeish(sha)?;
+        let repo_s = repo_str(repo)?;
+        let mut args: Vec<String> = vec![
+            "-C".into(),
+            repo_s.into(),
+            "diff-tree".into(),
+            "-r".into(),
+            "--name-status".into(),
+            "-z".into(),
+            "-M".into(),
+            "--no-commit-id".into(),
+        ];
+        match base {
+            Some(b) => args.push(validate_treeish(b)?.into()),
+            None => args.push("--root".into()),
+        }
+        args.push(sha.into());
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = run_git_stdout_env_bounded(&arg_refs, &[], None, max_bytes).await?;
+        parse_name_status_z(&out)
+    }
+
+    async fn tree_flat(
+        &self,
+        repo: &Path,
+        sha: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<FlatTreeEntry>, GitError> {
+        let sha = validate_treeish(sha)?;
+        let repo_s = repo_str(repo)?;
+        let out = run_git_stdout_env_bounded(
+            &[
+                "-C",
+                repo_s,
+                "ls-tree",
+                "-r",
+                "-l",
+                "-z",
+                "--full-tree",
+                sha,
+            ],
+            &[],
+            None,
+            max_bytes,
+        )
+        .await?;
+        parse_flat_tree_z(&out)
+    }
+
+    async fn rev_list(
+        &self,
+        repo: &Path,
+        tips: &[String],
+        max: usize,
+    ) -> Result<RevList, GitError> {
+        if tips.is_empty() || max == 0 {
+            return Ok(RevList {
+                oids: Vec::new(),
+                truncated: false,
+            });
+        }
+        let repo_s = repo_str(repo)?;
+        let mut args: Vec<String> = vec![
+            "-C".into(),
+            repo_s.into(),
+            "rev-list".into(),
+            "--topo-order".into(),
+            format!("--max-count={}", max.saturating_add(1)),
+        ];
+        for t in tips {
+            args.push(validate_treeish(t)?.into());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        // The reader bound follows the requested page: (max+1) oids × 41
+        // bytes each + slack — never an unbounded walk (SR6.1).
+        let out = run_git_stdout_env_bounded(
+            &arg_refs,
+            &[],
+            None,
+            max.saturating_add(1).saturating_mul(41).saturating_add(64),
+        )
+        .await?;
+        let mut oids: Vec<String> = String::from_utf8_lossy(&out)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        let truncated = oids.len() > max;
+        oids.truncate(max);
+        // --topo-order emits children before parents; reversing yields a
+        // valid parents-first ordering for the import loop (review-BLOCKER).
+        oids.reverse();
+        Ok(RevList { oids, truncated })
+    }
+
+    async fn write_object(&self, repo: &Path, bytes: &[u8]) -> Result<String, GitError> {
+        let repo_s = repo_str(repo)?;
+        let out = run_git_stdout_env_stdin(
+            &["-C", repo_s, "hash-object", "-t", "blob", "-w", "--stdin"],
+            &[],
+            bytes,
+        )
+        .await?;
+        Ok(String::from_utf8_lossy(&out).trim().to_string())
+    }
+
+    async fn write_commit(
+        &self,
+        repo: &Path,
+        entries: &[TreeWriteEntry],
+        parents: &[String],
+        author: &GitIdent,
+        committer: &GitIdent,
+        message: &[u8],
+    ) -> Result<String, GitError> {
+        use tokio::io::AsyncWriteExt;
+        let repo_s = repo_str(repo)?;
+        let root_tree = mktree_fold(repo_s, entries).await?;
+        let mut args: Vec<String> = vec![
+            "-C".into(),
+            repo_s.into(),
+            "-c".into(),
+            "commit.gpgsign=false".into(),
+            "commit-tree".into(),
+            root_tree,
+        ];
+        for p in parents {
+            args.push("-p".into());
+            args.push(validate_treeish(p)?.into());
+        }
+        // Raw ident env — name/email may hold non-UTF8 bytes git tolerates;
+        // GIT_*_DATE carries the `<unix> <tz>` raw form so exported commits
+        // re-mint byte-identical oids (dev 5 / WF5.3).
+        let mut cmd = Command::new("git");
+        cmd.args(&args)
+            .env("GIT_AUTHOR_NAME", os_bytes(&author.name))
+            .env("GIT_AUTHOR_EMAIL", os_bytes(&author.email))
+            .env("GIT_AUTHOR_DATE", format!("{} {}", author.unix, author.tz))
+            .env("GIT_COMMITTER_NAME", os_bytes(&committer.name))
+            .env("GIT_COMMITTER_EMAIL", os_bytes(&committer.email))
+            .env(
+                "GIT_COMMITTER_DATE",
+                format!("{} {}", committer.unix, committer.tz),
+            )
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| GitError::Process("failed to open git stdin".into()))?;
+        stdin.write_all(message).await.map_err(GitError::Io)?;
+        drop(stdin);
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to wait on git: {e}")))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::Process(format!(
+                "git commit-tree failed (status {:?}): {}",
+                output.status.code(),
+                stderr.trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VCS git-interop parsing helpers (u6) — byte-tolerant; git object contents
+// are not guaranteed UTF-8 (idents, messages, paths).
+// ---------------------------------------------------------------------------
+
+/// Internal `cat-file commit` reader bound — `import_blob_max`-class; a
+/// commit object is headers + message, never near this size (SR6.1).
+const CAT_COMMIT_MAX: usize = 4 * 1024 * 1024;
+
+/// `raw` env value — `OsString::from_vec` on unix preserves non-UTF8 ident
+/// bytes byte-exactly; other platforms fall back to lossy UTF-8.
+fn os_bytes(raw: &[u8]) -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(raw.to_vec())
+    }
+    #[cfg(not(unix))]
+    {
+        std::ffi::OsString::from(String::from_utf8_lossy(raw).into_owned())
+    }
+}
+
+fn utf8_field(val: &[u8], what: &str) -> Result<String, GitError> {
+    std::str::from_utf8(val)
+        .map(str::to_string)
+        .map_err(|_| GitError::Process(format!("non-UTF8 {what} in commit object")))
+}
+
+/// `Name <email> <unix> <tz>` — splits at the LAST `<`/`>` pair (a name may
+/// itself carry `<`); `tz` defaults to `+0000` for ancient objects.
+fn parse_ident(val: &[u8]) -> Result<GitIdent, GitError> {
+    let malformed = || GitError::Process("malformed ident line".into());
+    let lt = val.iter().rposition(|b| *b == b'<').ok_or_else(malformed)?;
+    let gt = val[lt..]
+        .iter()
+        .position(|b| *b == b'>')
+        .map(|p| lt + p)
+        .ok_or_else(malformed)?;
+    let name = val[..lt].strip_suffix(b" ").unwrap_or(&val[..lt]).to_vec();
+    let email = val[lt + 1..gt].to_vec();
+    let rest = std::str::from_utf8(&val[gt + 1..]).map_err(|_| malformed())?;
+    let mut it = rest.split_whitespace();
+    let unix: i64 = it
+        .next()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(malformed)?;
+    let tz = it.next().unwrap_or("+0000").to_string();
+    Ok(GitIdent {
+        name,
+        email,
+        unix,
+        tz,
+    })
+}
+
+/// `cat-file commit` body → [`RawCommit`]. Header lines are `key value\n`;
+/// continuation lines (gpgsig folds) are skipped; the message is everything
+/// after the first blank line, verbatim.
+fn parse_raw_commit(raw: &[u8]) -> Result<RawCommit, GitError> {
+    let malformed = || GitError::Process("malformed commit object".into());
+    let mut tree: Option<String> = None;
+    let mut parents: Vec<String> = Vec::new();
+    let mut author: Option<GitIdent> = None;
+    let mut committer: Option<GitIdent> = None;
+    let mut saw_blank = false;
+    let mut i = 0;
+    while i < raw.len() {
+        let nl = raw[i..].iter().position(|b| *b == b'\n').map(|p| i + p);
+        let (line_end, next) = match nl {
+            Some(p) => (p, p + 1),
+            None => (raw.len(), raw.len()),
+        };
+        let line = &raw[i..line_end];
+        i = next;
+        if line.is_empty() {
+            saw_blank = true;
+            break;
+        }
+        if line[0] == b' ' {
+            continue; // folded continuation (gpgsig & co.)
+        }
+        let Some(sp) = line.iter().position(|b| *b == b' ') else {
+            return Err(malformed());
+        };
+        let (key, val) = (&line[..sp], &line[sp + 1..]);
+        match key {
+            b"tree" => tree = Some(utf8_field(val, "tree")?),
+            b"parent" => parents.push(utf8_field(val, "parent")?),
+            b"author" => author = Some(parse_ident(val)?),
+            b"committer" => committer = Some(parse_ident(val)?),
+            _ => {}
+        }
+    }
+    if !saw_blank && i >= raw.len() && tree.is_none() {
+        return Err(malformed());
+    }
+    Ok(RawCommit {
+        tree: tree.ok_or_else(malformed)?,
+        parents,
+        author: author.ok_or_else(malformed)?,
+        committer: committer.ok_or_else(malformed)?,
+        message: raw[i.min(raw.len())..].to_vec(),
+    })
+}
+
+fn utf8_path(raw: &[u8]) -> Result<String, GitError> {
+    if raw.is_empty() {
+        return Err(GitError::Process("missing path record".into()));
+    }
+    std::str::from_utf8(raw)
+        .map(str::to_string)
+        .map_err(|_| GitError::Process("non-UTF8 path record".into()))
+}
+
+/// `diff-tree --name-status -z` records → rows. Rename records carry THREE
+/// fields: `R<score>\0<src>\0<dst>\0` — first path is the source
+/// (`old_path`), second the destination (empirically verified order).
+fn parse_name_status_z(raw: &[u8]) -> Result<Vec<NameStatusRow>, GitError> {
+    let mut rows = Vec::new();
+    let mut it = raw.split(|b| *b == 0);
+    while let Some(rec) = it.next() {
+        if rec.is_empty() {
+            continue;
+        }
+        let status = match rec[0] {
+            b'A' => NameStatusKind::Add,
+            b'M' => NameStatusKind::Modify,
+            b'D' => NameStatusKind::Delete,
+            b'R' => NameStatusKind::Rename,
+            b'T' => NameStatusKind::TypeChange,
+            _ => return Err(GitError::Process("unexpected name-status record".into())),
+        };
+        let (path, old_path) = if status == NameStatusKind::Rename {
+            let src = it.next().unwrap_or_default();
+            let dst = it.next().unwrap_or_default();
+            (utf8_path(dst)?, Some(utf8_path(src)?))
+        } else {
+            (utf8_path(it.next().unwrap_or_default())?, None)
+        };
+        rows.push(NameStatusRow {
+            status,
+            path,
+            old_path,
+        });
+    }
+    Ok(rows)
+}
+
+/// `ls-tree -r -l -z --full-tree` records — `<mode> <type> <oid> <size>\t
+/// <path>\0`; non-blob sizes arrive as `-` → `0`.
+fn parse_flat_tree_z(raw: &[u8]) -> Result<Vec<FlatTreeEntry>, GitError> {
+    let malformed = || GitError::Process("malformed ls-tree record".into());
+    let mut out = Vec::new();
+    for rec in raw.split(|b| *b == 0) {
+        if rec.is_empty() {
+            continue;
+        }
+        let Some(tab) = rec.iter().position(|b| *b == b'\t') else {
+            return Err(malformed());
+        };
+        let meta = std::str::from_utf8(&rec[..tab]).map_err(|_| malformed())?;
+        let mut parts = meta.split_whitespace();
+        let (Some(mode), Some(kind_s), Some(oid), Some(size_s)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(malformed());
+        };
+        let kind = TreeEntryKind::parse(kind_s).ok_or_else(malformed)?;
+        let size = if size_s == "-" {
+            0
+        } else {
+            size_s.parse().map_err(|_| malformed())?
+        };
+        out.push(FlatTreeEntry {
+            mode: mode.to_string(),
+            kind,
+            oid: oid.to_string(),
+            path: utf8_path(&rec[tab + 1..])?,
+            size,
+        });
+    }
+    Ok(out)
+}
+
+/// Fold flat `path → {mode,oid}` leaves into nested `mktree -z` trees,
+/// bottom-up (directories are synthesized — git tracks leaves only).
+/// Returns the root tree oid; an empty input mints the well-known empty
+/// tree.
+fn mktree_fold<'a>(
+    repo_s: &'a str,
+    entries: &'a [TreeWriteEntry],
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, GitError>> + Send + 'a>> {
+    Box::pin(async move {
+        use std::collections::BTreeMap;
+        let mut rows: Vec<u8> = Vec::new();
+        let mut dirs: BTreeMap<String, Vec<TreeWriteEntry>> = BTreeMap::new();
+        for e in entries {
+            match e.path.split_once('/') {
+                Some((dir, rest)) => {
+                    dirs.entry(dir.to_string())
+                        .or_default()
+                        .push(TreeWriteEntry {
+                            mode: e.mode.clone(),
+                            oid: e.oid.clone(),
+                            path: rest.to_string(),
+                        })
+                }
+                None => {
+                    rows.extend_from_slice(format!("{} blob {}\t", e.mode, e.oid).as_bytes());
+                    rows.extend_from_slice(e.path.as_bytes());
+                    rows.push(0);
+                }
+            }
+        }
+        for (dir, children) in dirs {
+            let oid = mktree_fold(repo_s, &children).await?;
+            rows.extend_from_slice(format!("040000 tree {oid}\t").as_bytes());
+            rows.extend_from_slice(dir.as_bytes());
+            rows.push(0);
+        }
+        let out = run_git_stdout_env_stdin(&["-C", repo_s, "mktree", "-z"], &[], &rows).await?;
+        Ok(String::from_utf8_lossy(&out).trim().to_string())
+    })
 }
 
 /// Parse `git ls-tree -r -l` lines: `mode type oid size\tpath` (blobs only).
@@ -4554,7 +5155,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fetched, local_tip);
-        git.fast_forward_ref(&remote, "refs/heads/main", &local_tip)
+        git.fast_forward_ref(&remote, "refs/heads/main", &local_tip, "admin")
             .await
             .unwrap();
         assert_eq!(
@@ -4588,7 +5189,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fetched_m, merged);
-        git.fast_forward_ref(&remote, "refs/heads/main", &merged)
+        git.fast_forward_ref(&remote, "refs/heads/main", &merged, "admin")
             .await
             .unwrap();
         assert_eq!(
@@ -4667,12 +5268,12 @@ mod tests {
         assert_ne!(first, second);
         // Force main back to the older tip (non-FF).
         assert!(
-            git.fast_forward_ref(&bare, "refs/heads/main", &first)
+            git.fast_forward_ref(&bare, "refs/heads/main", &first, "admin")
                 .await
                 .is_err(),
             "non-FF must fail without force"
         );
-        git.force_update_ref(&bare, "refs/heads/main", &first)
+        git.force_update_ref(&bare, "refs/heads/main", &first, "admin")
             .await
             .unwrap();
         assert_eq!(

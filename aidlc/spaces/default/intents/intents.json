@@ -5,5 +5,12 @@
     "dirName": "261014-semver-rollout",
     "scope": "semver-release-automation",
     "status": "complete"
+  },
+  {
+    "uuid": "01a14ce1-0942-76e6-af65-5201c68085da",
+    "slug": "agentic-vcs-protocol",
+    "dirName": "261018-agentic-vcs-protocol",
+    "scope": "classic",
+    "status": "complete"
   }
 ]

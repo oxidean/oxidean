@@ -970,12 +970,13 @@ export type RepoActivityActor = {
 export type RepoActivityItem = {
   id: string;
   push_type: string;
-  ref_name: string;
-  ref_short: string;
-  before: string;
-  after: string;
+  /** Nullable (contract C4): ref-free activity rows emit explicit null. */
+  ref_name: string | null;
+  ref_short: string | null;
+  before: string | null;
+  after: string | null;
   pushed_at: string;
-  commits_count: number;
+  commits_count: number | null;
   commit_message?: string | null;
   pr_number?: number | null;
   pusher: RepoActivityActor;
@@ -3713,6 +3714,386 @@ export type CommentHistoryResponse = {
   revisions: CommentRevisionPublic[];
 };
 
+// --- Agentic VCS protocol (contract C1 — the `vcs.*` family) ---
+
+/** Opaque server-minted changeset id (`cs_<ulid>`) — never a git oid. */
+export type ChangesetId = string;
+/** Content-addressed object id (`sha256:` + 64 lowercase hex). */
+export type ObjectId = string;
+
+/** Closed error-code set emitted by the vcs domain layer and `/api/vcs/*` routes. */
+export type VcsErrorCode =
+  | "vcs.disabled"
+  | "vcs.not_found"
+  | "vcs.invalid_input"
+  | "vcs.ref_conflict"
+  | "vcs.conflict"
+  | "vcs.no_common_ancestor"
+  | "vcs.quota_exceeded"
+  | "vcs.too_large"
+  | "vcs.import_state"
+  | "vcs.unauthenticated"
+  | "vcs.forbidden";
+
+export const VCS_ACTIVITY_REPO_ENABLE = "vcs.repo_enable" as const;
+export const VCS_ACTIVITY_CHANGESET_CREATE = "vcs.changeset_create" as const;
+export const VCS_ACTIVITY_MERGE = "vcs.merge" as const;
+export const VCS_ACTIVITY_REBASE = "vcs.rebase" as const;
+export const VCS_ACTIVITY_REF_UPDATE = "vcs.ref_update" as const;
+export const VCS_ACTIVITY_GIT_IMPORT = "vcs.git_import" as const;
+export const VCS_ACTIVITY_GIT_EXPORT = "vcs.git_export" as const;
+
+export const VCS_ACTIVITY_KINDS = [
+  VCS_ACTIVITY_REPO_ENABLE,
+  VCS_ACTIVITY_CHANGESET_CREATE,
+  VCS_ACTIVITY_MERGE,
+  VCS_ACTIVITY_REBASE,
+  VCS_ACTIVITY_REF_UPDATE,
+  VCS_ACTIVITY_GIT_IMPORT,
+  VCS_ACTIVITY_GIT_EXPORT,
+] as const;
+
+/** Protection verdicts carried by `vcs.forbidden` — mirrors `oxidean_core::ProtectionBlockReasons`. */
+export type ProtectionBlockReasons = {
+  reasons?: string[];
+  required_approving_review_count?: number;
+  approving_review_count?: number;
+  missing_status_contexts?: string[];
+  unsigned_commits?: string[];
+};
+
+export type VcsForbiddenData = {
+  verdicts: ProtectionBlockReasons;
+};
+
+export type VcsRefConflictData = {
+  /** Stored ref value the CAS expected — null when the ref is absent. */
+  actual: ChangesetId | null;
+};
+
+export type VcsConflictEntry = {
+  path: string;
+  kind: string;
+  detail?: string | null;
+};
+
+export type VcsConflictData = {
+  conflicts: VcsConflictEntry[];
+  truncated: boolean;
+};
+
+export type VcsAuthor = {
+  name: string;
+  email: string;
+};
+
+export type ManifestEntryKind = "add" | "modify" | "delete" | "rename";
+export type VcsFileMode = "100644" | "100755" | "120000";
+
+/** One changed-file row — changeset_create inputs and get/log manifests. */
+export type ManifestEntry = {
+  path: string;
+  kind: ManifestEntryKind;
+  mode: VcsFileMode;
+  old_path?: string | null;
+  blob?: ObjectId | null;
+  content_b64?: string | null;
+};
+
+export type VcsChangesetPublic = {
+  changeset_id: ChangesetId;
+  parents: ChangesetId[];
+  author: VcsAuthor;
+  message: string;
+  committed_at: string;
+  manifest: ManifestEntry[];
+};
+
+export type VcsHeadPublic = {
+  name: string;
+  changeset_id: ChangesetId;
+};
+
+export type VcsRefPublic = {
+  name: string;
+  changeset_id: ChangesetId;
+  updated_at: string;
+};
+
+export type VcsRepoEnableRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type VcsRepoEnableResponse = {
+  enabled: boolean;
+};
+
+export type VcsStatusRequest = {
+  owner: string;
+  name: string;
+};
+
+export type VcsStatusResponse = {
+  enabled: boolean;
+  heads: VcsHeadPublic[];
+  changeset_count: number;
+  object_count: number;
+  storage_bytes: number;
+};
+
+export type VcsChangesetCreateRequest = {
+  owner: string;
+  name: string;
+  parents: ChangesetId[];
+  message: string;
+  author?: VcsAuthor | null;
+  changes: ManifestEntry[];
+};
+
+export type VcsChangesetCreateResponse = {
+  changeset_id: ChangesetId;
+  manifest_hash: string;
+};
+
+export type VcsChangesetGetRequest = {
+  owner: string;
+  name: string;
+  /** changeset_id or git_oid. */
+  id: string;
+};
+
+export type VcsChangesetGetResponse = VcsChangesetPublic;
+
+export type VcsLogRequest = {
+  owner: string;
+  name: string;
+  /** ref_name | changeset_id | git_oid. */
+  from: string;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsLogResponse = {
+  entries: VcsChangesetPublic[];
+  cursor?: string | null;
+};
+
+/** Inline patch text, or a `{truncated:true}` marker over the 256 KiB cap. */
+export type VcsDiffPatch = string | { truncated: boolean };
+
+export type VcsDiffEntry = {
+  path: string;
+  kind: ManifestEntryKind;
+  old_mode?: VcsFileMode | null;
+  new_mode?: VcsFileMode | null;
+  old_blob?: ObjectId | null;
+  new_blob?: ObjectId | null;
+  patch?: VcsDiffPatch | null;
+};
+
+export type VcsDiffTotals = {
+  files: number;
+  additions: number;
+  deletions: number;
+};
+
+export type VcsDiffRequest = {
+  owner: string;
+  name: string;
+  from: ChangesetId;
+  to: ChangesetId;
+  paths?: string[] | null;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsDiffResponse = {
+  entries: VcsDiffEntry[];
+  cursor?: string | null;
+  totals: VcsDiffTotals;
+};
+
+export type VcsTreeEntry = {
+  path: string;
+  mode: VcsFileMode;
+  blob: ObjectId;
+};
+
+export type VcsTreeRequest = {
+  owner: string;
+  name: string;
+  changeset_id: ChangesetId;
+  path_prefix?: string | null;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsTreeResponse = {
+  entries: VcsTreeEntry[];
+  cursor?: string | null;
+};
+
+export type VcsFileGetRequest = {
+  owner: string;
+  name: string;
+  changeset_id: ChangesetId;
+  path: string;
+};
+
+export type VcsFileGetResponse = {
+  blob: ObjectId;
+  mode: VcsFileMode;
+  size: number;
+  /** Always emitted — null when too_large (fetch bytes via the object route). */
+  content_b64: string | null;
+  too_large: boolean;
+};
+
+export type VcsBlameEntry = {
+  changeset_id: ChangesetId;
+  author: VcsAuthor;
+  content: string;
+};
+
+export type VcsBlameRequest = {
+  owner: string;
+  name: string;
+  path: string;
+  at?: ChangesetId | null;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsBlameResponse = {
+  entries: VcsBlameEntry[];
+  cursor?: string | null;
+};
+
+export type VcsPathHistoryEntry = {
+  changeset_id: ChangesetId;
+  kind: ManifestEntryKind;
+  path: string;
+  old_path?: string | null;
+  committed_at: string;
+};
+
+export type VcsPathHistoryRequest = {
+  owner: string;
+  name: string;
+  path: string;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsPathHistoryResponse = {
+  entries: VcsPathHistoryEntry[];
+  cursor?: string | null;
+};
+
+export type VcsMergeBaseRequest = {
+  owner: string;
+  name: string;
+  a: ChangesetId;
+  b: ChangesetId;
+};
+
+export type VcsMergeBaseResponse = {
+  merge_base: ChangesetId;
+};
+
+export type VcsMergeRequest = {
+  owner: string;
+  name: string;
+  a: ChangesetId;
+  b: ChangesetId;
+  message?: string | null;
+};
+
+export type VcsMergeResponse = {
+  changeset_id: ChangesetId;
+  fast_forward?: boolean | null;
+};
+
+export type VcsRebaseRequest = {
+  owner: string;
+  name: string;
+  changeset_id: ChangesetId;
+  new_parent_id: ChangesetId;
+  message?: string | null;
+};
+
+export type VcsRebaseResponse = {
+  head: ChangesetId;
+};
+
+export type VcsRefListRequest = {
+  owner: string;
+  name: string;
+  limit?: number | null;
+  cursor?: string | null;
+};
+
+export type VcsRefListResponse = {
+  entries: VcsRefPublic[];
+  cursor?: string | null;
+};
+
+export type VcsRefUpdateRequest = {
+  owner: string;
+  name: string;
+  /** Wire field name is `ref`. expected_old: null = create-only, new: null = delete. */
+  ref: string;
+  expected_old: ChangesetId | null;
+  new: ChangesetId | null;
+};
+
+export type VcsRefUpdateResponse = {
+  ref: string;
+  /** null after a delete. */
+  changeset_id: ChangesetId | null;
+};
+
+export type VcsGitImportHead = {
+  name: string;
+  git_oid: string;
+  changeset_id: ChangesetId;
+};
+
+export type VcsGitImportRequest = {
+  owner: string;
+  name: string;
+  /** ref | git_oid. */
+  from?: string | null;
+  cursor?: string | null;
+  limit?: number | null;
+};
+
+export type VcsGitImportResponse = {
+  imported: number;
+  cursor?: string | null;
+  done: boolean;
+  heads: VcsGitImportHead[];
+};
+
+export type VcsGitExportRequest = {
+  owner: string;
+  name: string;
+  head: ChangesetId;
+  branch: string;
+  force?: boolean | null;
+};
+
+export type VcsGitExportResponse = {
+  branch: string;
+  git_oid: string;
+};
+
+export type VcsObjectPutResponse = {
+  hash: ObjectId;
+};
+
 export type RpcOk<T> = { ok: true; data: T };
 export type RpcErr = { ok: false; error: AppError };
 export type RpcResult<T> = RpcOk<T> | RpcErr;
@@ -4550,6 +4931,39 @@ export function createClient(opts: CreateClientOptions) {
         revoke: (input: AdminInvitesRevokeRequest) =>
           rpcCall<{ ok: boolean }>(opts, "admin.invites.revoke", input),
       },
+    },
+    vcs: {
+      repoEnable: (input: VcsRepoEnableRequest) =>
+        rpcCall<VcsRepoEnableResponse>(opts, "vcs.repo_enable", input),
+      status: (input: VcsStatusRequest) =>
+        rpcCall<VcsStatusResponse>(opts, "vcs.status", input),
+      changesetCreate: (input: VcsChangesetCreateRequest) =>
+        rpcCall<VcsChangesetCreateResponse>(opts, "vcs.changeset_create", input),
+      changesetGet: (input: VcsChangesetGetRequest) =>
+        rpcCall<VcsChangesetGetResponse>(opts, "vcs.changeset_get", input),
+      log: (input: VcsLogRequest) => rpcCall<VcsLogResponse>(opts, "vcs.log", input),
+      diff: (input: VcsDiffRequest) => rpcCall<VcsDiffResponse>(opts, "vcs.diff", input),
+      tree: (input: VcsTreeRequest) => rpcCall<VcsTreeResponse>(opts, "vcs.tree", input),
+      fileGet: (input: VcsFileGetRequest) =>
+        rpcCall<VcsFileGetResponse>(opts, "vcs.file_get", input),
+      blame: (input: VcsBlameRequest) =>
+        rpcCall<VcsBlameResponse>(opts, "vcs.blame", input),
+      pathHistory: (input: VcsPathHistoryRequest) =>
+        rpcCall<VcsPathHistoryResponse>(opts, "vcs.path_history", input),
+      mergeBase: (input: VcsMergeBaseRequest) =>
+        rpcCall<VcsMergeBaseResponse>(opts, "vcs.merge_base", input),
+      merge: (input: VcsMergeRequest) =>
+        rpcCall<VcsMergeResponse>(opts, "vcs.merge", input),
+      rebase: (input: VcsRebaseRequest) =>
+        rpcCall<VcsRebaseResponse>(opts, "vcs.rebase", input),
+      refList: (input: VcsRefListRequest) =>
+        rpcCall<VcsRefListResponse>(opts, "vcs.ref_list", input),
+      refUpdate: (input: VcsRefUpdateRequest) =>
+        rpcCall<VcsRefUpdateResponse>(opts, "vcs.ref_update", input),
+      gitImport: (input: VcsGitImportRequest) =>
+        rpcCall<VcsGitImportResponse>(opts, "vcs.git_import", input),
+      gitExport: (input: VcsGitExportRequest) =>
+        rpcCall<VcsGitExportResponse>(opts, "vcs.git_export", input),
     },
   };
 }
@@ -6158,4 +6572,42 @@ fn scope_catalog_ts() -> String {
     }
     s.push_str("];\n");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    /// The template hardcodes `export const WIRE_VERSION` — `bump.ts` rewrites
+    /// only the oxidean-core `constant_path`, and `rpc-sync-check` can't catch
+    /// a stale template. Pin the emitted literal to the const (BR1.6).
+    #[test]
+    fn template_wire_version_matches_core() {
+        let src = include_str!("rpc_gen.rs");
+        let needle = "export const WIRE_VERSION = \"";
+        let start = src.find(needle).expect("template emits WIRE_VERSION");
+        let rest = &src[start + needle.len()..];
+        let end = rest.find('"').expect("WIRE_VERSION literal is terminated");
+        assert_eq!(
+            &rest[..end],
+            oxidean_core::WIRE_VERSION,
+            "rpc_gen WIRE_VERSION literal drifted from oxidean_core::WIRE_VERSION"
+        );
+    }
+
+    /// Generated-client coverage (BR1.8): all 17 `vcs.*` procedure names
+    /// appear as rpcCall sites in the committed generated client — regen-diff
+    /// parity alone proves nothing about coverage.
+    #[test]
+    fn generated_client_covers_vcs_procedures() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/api-client/src/index.ts");
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        for name in oxidean_core::VCS_PROCEDURES {
+            let needle = format!("\"{name}\"");
+            assert!(
+                src.contains(&needle),
+                "generated client missing `{name}` — run `make rpc-gen`"
+            );
+        }
+    }
 }

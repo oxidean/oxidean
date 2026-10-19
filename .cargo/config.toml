@@ -1,0 +1,6 @@
+[env]
+# Debug-build coroutine frames across the RPC dispatch chain (router →
+# rpc_http → dispatch → handler → engine → db → sqlx) overflow libtest's
+# 2 MiB test threads and tokio's 2 MiB `cargo run` workers. Prod sets an
+# explicit 8 MiB `thread_stack_size` in crates/oxidean-api/src/main.rs.
+RUST_MIN_STACK = "16777216"

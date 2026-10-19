@@ -1,0 +1,95 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u4-vcs-changeset-core",
+  "upstream_ids": [
+    "TD4.1",
+    "TD4.3",
+    "TD4.8",
+    "SR4.6",
+    "SR4.11",
+    "LC4.7",
+    "NFR6",
+    "BR4.11",
+    "U4-AR-01",
+    "U4-AR-02",
+    "U4-AR-03",
+    "U4-AR-06",
+    "U4-INF-01",
+    "U4-INF-02"
+  ],
+  "coverage": [
+    {
+      "id": "TD4.1",
+      "status": "OK",
+      "target": "Cargo.toml server-feature deps ride existing dead-code arms (clippy --all-features, doc --features server, cargo-machete) \u2014 all five lockfile-resident (serde/serde_json workspace deps; base64 0.23/hex 0.4 already in Cargo.lock; oxidean-core path dep), zero new crates; commit-lint's registry check covers member\u2194component only, not dep-graph-vs-manifest fidelity"
+    },
+    {
+      "id": "TD4.3",
+      "status": "OK",
+      "target": "0054 migrations (four MySQL ALTERs incl. old_path utf8mb4_bin \u2014 rename path-pair symmetry, avoids ERROR 1267 on mixed predicates) verified by real db.migrate() on the widened db-dialects leg; pg/sqlite apply comment-only parity files"
+    },
+    {
+      "id": "TD4.8",
+      "status": "OK",
+      "target": "crate suite rides the existing vcs-server leg unchanged (-E 'package(oxidean-vcs)' on nextest-archive); all tests stay #[cfg(all(test, feature = \"server\"))]-gated preserving the NO_TESTS_RUN sharpness pin"
+    },
+    {
+      "id": "SR4.6",
+      "status": "OK",
+      "target": "derived-index key grammar validated on sqlite via crate suite + on all three engines via widened dialect leg; MySQL utf8mb4_bin collation exercised by case-variant ref/path round-trips"
+    },
+    {
+      "id": "SR4.11",
+      "status": "OK",
+      "target": "19-row residual register \u2014 CI-relevant rows (R18 MySQL CAS divergence) covered by the widened dialect leg; walk-cost rows are unit-test-scale by construction"
+    },
+    {
+      "id": "LC4.7",
+      "status": "OK",
+      "target": "dialect_vcs.rs beside dialect_probe.rs + db-dialects -E filter widened to 'binary_id(oxidean-db::dialect_probe) or binary_id(oxidean-db::dialect_vcs)' \u2014 same archive, same services, DATABASE_URL skip-pass preserved",
+      "note": "same archive/services; DATABASE_URL skip-pass preserved; dialect_vcs extends case-variant coverage to old_path under 0054 collation"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "migration_parity filename-set test (the FR15.5 mechanism) rides the default archive in api-rust shards; the three 0054 files satisfy it"
+    },
+    {
+      "id": "BR4.11",
+      "status": "OK",
+      "target": "CAS arm coverage (applied, absent-row conflict, actual-value conflicts on both MySQL atomic and pg/sqlite post-CAS paths) runs per-dialect on the widened leg"
+    },
+    {
+      "id": "U4-AR-01",
+      "status": "OK",
+      "target": "PathTouchRow ownership fix compiles under the existing vcs-server clippy/doc arms \u2014 no lane delta"
+    },
+    {
+      "id": "U4-AR-02",
+      "status": "OK",
+      "target": "per-walk existence checks exercised by crate suite on the vcs-server leg"
+    },
+    {
+      "id": "U4-AR-03",
+      "status": "OK",
+      "target": "pub(crate) resolve + resolve_git_oid edge \u2014 compile-level only, no lane delta"
+    },
+    {
+      "id": "U4-AR-06",
+      "status": "OK",
+      "target": "byte-slice diff_lines seam: binary-safe golden vectors (\\0-bearing, \\r\\n) ride the vcs-server leg"
+    },
+    {
+      "id": "U4-INF-01",
+      "status": "OK",
+      "target": "versioning.toml depends_on deferral",
+      "note": "stale depends_on=[] (db edge since U3, core added U4) drives no bump cascade; deferred \u2014 path bound to u1's source manifest and change is out-of-scope housekeeping vs the feature write-set; land as chore/build commit post-unit-close; check step validates member\u2194component + DAG sanity, not dep-graph-vs-manifest fidelity"
+    },
+    {
+      "id": "U4-INF-02",
+      "status": "OK",
+      "target": "migration safety note",
+      "note": "fourth ALTER: old_path \u2192 utf8mb4_bin keeps rename path-pair symmetric"
+    }
+  ]
+}

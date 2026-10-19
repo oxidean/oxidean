@@ -1,0 +1,16 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u3-vcs-object-store",
+  "upstream_ids": ["TD3.7","SR3.6","SR3.9","BR3.7","BR3.11","LC3.6","NFR6","NFR10","SD3.9-R7"],
+  "coverage": [
+    {"id": "TD3.7", "status": "OK", "target": "--features server archive flag + vcs-server leg + Makefile lanes", "note": "one flag on ci.yml:207 (resolver-2 RFC-2957 scopes it to oxidean-vcs) + dedicated -E filter leg for the loud zero-test signal"},
+    {"id": "SR3.6", "status": "OK", "target": "skipped-DB fail-close tests ride the server suite"},
+    {"id": "SR3.9", "status": "OK", "target": "from_env range-check tests ride the server suite; env contract needs no CI resource"},
+    {"id": "BR3.7", "status": "OK", "target": "env contract is host config — no provisioning; marker + sibling-dir refusal covered by unit tests"},
+    {"id": "BR3.11", "status": "OK", "target": "sanctioned facade delta (vcs_get_object_link + vcs_delete_object_if_unlinked) rides the existing api-rust shards' archive — no new lane"},
+    {"id": "LC3.6", "status": "OK", "target": "Makefile lanes verbatim (test both arms, dead-code-check, docs-check) + cargo-machete ignored escape + no-doc-examples pin"},
+    {"id": "NFR6", "status": "OK", "target": "zero migrations — facade additions ride existing api-rust shards on sqlite; db-dialects probe lane unchanged (filter probes migrate/schema only — honest note)"},
+    {"id": "NFR10", "status": "OK", "target": "test surface: server suite in shared archive + facade tests; zero-test regression caught by vcs-server -E leg (NO_TESTS_RUN)"},
+    {"id": "SD3.9-R7", "status": "OK", "target": "sibling-dir equality refusal — config-time guard, unit-tested, no infra"}
+  ]
+}

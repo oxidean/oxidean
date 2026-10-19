@@ -1,0 +1,12 @@
+{
+  "stage": "nfr-design",
+  "unit": "u1-vcs-wire-foundation",
+  "upstream_ids": ["SR1","SR2","SR3","SR4","SR5"],
+  "coverage": [
+    {"id":"SR1","status":"OK","target":"SD1, LC2, LC6","note":"fail-closed match block + coverage test asserting the full 19-name mapping"},
+    {"id":"SR2","status":"OK","target":"SD2","note":"layering is structural — VcsErrorCode is only reachable from domain handlers/routes, transport codes never enter the enum"},
+    {"id":"SR3","status":"OK","target":"SD3","note":"typed with_data constructors + serializer-level 500 cap + truncated flag"},
+    {"id":"SR4","status":"OK","target":"SD4, LC1","note":"required {owner,name}, Nullable<ChangesetId> trichotomy, no deny_unknown_fields, type-vs-handler bound split"},
+    {"id":"SR5","status":"OK","target":"SD5","note":"no credential-typed fields in any input; 256KiB inline cap contract-pinned"}
+  ]
+}

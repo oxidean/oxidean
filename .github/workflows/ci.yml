@@ -204,7 +204,7 @@ jobs:
           df -h /
           cargo build --workspace --bins
           mkdir -p target
-          cargo nextest archive --workspace \
+          cargo nextest archive --workspace --features server \
             --archive-file target/nextest-archive.tar.zst
           ls -lh target/nextest-archive.tar.zst
       - name: upload rust-bins (same-run)
@@ -330,8 +330,12 @@ jobs:
         run: |
           cargo machete
           cargo clippy --workspace --all-targets -- -D warnings
+          # oxidean-vcs `server` feature is off by default — lint it too.
+          cargo clippy -p oxidean-vcs --all-targets --all-features -- -D warnings
       - name: rustdoc warnings
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+        run: |
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+          RUSTDOCFLAGS="-D warnings" cargo doc -p oxidean-vcs --no-deps --features server
 
   # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
   web-browser:
@@ -803,13 +807,45 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) or binary_id(oxidean-db::dialect_vcs)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          # sqlite serializes: the three probe tests share one database file
+          # sqlite serializes: both probe binaries share one database file
           # and parallel migrations race (duplicate column on migration 6).
           probe sqlite sqlite:./var/oxidean.db --test-threads=1
+
+  # Dedicated leg for the `server`-gated oxidean-vcs suite: the tests live
+  # behind a non-default feature, so without `--features server` on the
+  # rust-build archive this filter matches nothing and nextest --no-tests
+  # fails loud — that's the signal the leg exists for.
+  vcs-server:
+    name: vcs-server
+    needs: [rust-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # archive test binaries embed the build container's workspace root (env!("CARGO_MANIFEST_DIR")); the alias makes those paths resolve on the host.
+      - name: alias checkout at the archive's baked workspace root
+        run: |
+          sudo mkdir -p /__w/oxidean
+          sudo ln -sfn "${{ github.workspace }}" /__w/oxidean/oxidean
+      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the version baked in the ci-base images — archive format is
+      # produced by the same nextest that ran `cargo nextest archive`.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.146
+      - name: download nextest archive
+        uses: actions/download-artifact@v8
+        with:
+          name: nextest-archive
+          path: target/
+      - name: cargo nextest (oxidean-vcs server suite)
+        run: |
+          cargo nextest run --archive-file target/nextest-archive.tar.zst \
+            --workspace-remap "${{ github.workspace }}" \
+            --profile ci -E 'package(oxidean-vcs)'
 
   # Release-build evidence: `cargo build --timings` HTML + binary size, so build
   # performance changes are measurable on the PR that makes them. Runs on pushes
@@ -890,7 +926,7 @@ jobs:
   # so re-runs of failed jobs can still download the archive/bins.
   rust-artifacts-cleanup:
     name: rust-artifacts-cleanup
-    needs: [api-rust, db-dialects, e2e-stack, actions-e2e, rpc-sync]
+    needs: [api-rust, db-dialects, vcs-server, e2e-stack, actions-e2e, rpc-sync]
     # success() → all consumers done AND green; skipped needs → skip cleanup.
     # Fork PRs get a read-only token → let the 1-day retention lapse instead.
     if: success() && github.event.pull_request.head.repo.fork != true

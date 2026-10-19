@@ -1,0 +1,23 @@
+{
+ "stage": "nfr-design",
+ "unit": "u5-vcs-merge-engine",
+ "artifacts": ["security-design.md", "logical-components.md"],
+ "coverage": [
+  {"id": "SD5.1", "kind": "sec-design", "source": "SR5.1/SR5.5", "note": "trust boundaries; untrusted id/author/message/caps inputs; MergeCaps::validate blob-vs-object-cap pin"},
+  {"id": "SD5.2", "kind": "sec-design", "source": "SR5.5", "note": "entry pipeline: is_skipped→parse(discard text)→row probes→mirrored compose_author/message bounds (WF1.1 order); &str params so parse stays engine-side; pre-put InvalidInput impossible"},
+  {"id": "SD5.3", "kind": "sec-design", "source": "BR5.3/SR5.3", "note": "two-pass pipeline; pass-1 record (mode,sha256); pass-2 re-reads via read_blob_capped; deterministic-abort completeness; infra-only post-checkpoint residual"},
+  {"id": "SD5.4", "kind": "sec-design", "source": "SR5.1/SR5.2/NFR1", "note": "bound table; rename rows counted across whole side walk; saturating_add(1); per-pair LINE_CAP; uncapped paths + raced-empty-parents residual named"},
+  {"id": "SD5.5", "kind": "sec-design", "source": "SR5.8/BR5.17/BR5.23", "note": "shared mark; compose rules; detection ordering (rename/rename→rename/delete→classify); emission invariants; source-manifest rebase"},
+  {"id": "SD5.6", "kind": "sec-design", "source": "SR5.7/BR5.22", "note": "byte-faithful merge3: caller-derived ends_nl, byte-count pre-check, terminator emission, last-line pair sameness, Merge3Fail"},
+  {"id": "SD5.7", "kind": "sec-design", "source": "SR5.9/SR5.10/Q8/SR5.6", "note": "complete bridge table: 23 variants + io::Error + facade String + JoinError; Conflict Display count-only; detail ≤200-char char-boundary cut, paths-only, no per-detail wire flag; no PartialEq"},
+  {"id": "SD5.8", "kind": "sec-design", "source": "SR5.12", "note": "tracing on typed paths; ids+counts only"},
+  {"id": "LC5.1", "kind": "component", "source": "TD5.1/TD5.2", "note": "one file merge_engine.rs server-gated; zero dep/file edits"},
+  {"id": "LC5.2", "kind": "component", "source": "FR6/FR7", "note": "merge/rebase entry points, &str id params (engine owns parse); caps validation ×3 bounds; no ref/store writes outside create+put"},
+  {"id": "LC5.3", "kind": "component", "source": "entities.md", "note": "MergeCaps defaults+validate(objects)→InvalidInput; MergeError 8-variant; MergeOutcome"},
+  {"id": "LC5.4", "kind": "component", "source": "WF0/FD", "note": "eleven private primitives incl. row_probe + is_text; full_tree Option<&str> for root-rebase ∅; collect-rename cap; classify_path carries prov for rename-vs-modify detail; manifest_diff delete-skip ordering pinned"},
+  {"id": "LC5.5", "kind": "component", "source": "TD5.4", "note": "consumed surface enumeration incl. canonical_changeset/VcsFileChangeRow/PutKind/Infallible; zero new facade/index/deps"},
+  {"id": "LC5.6", "kind": "component", "source": "BR5.4", "note": "deterministic emission order; canonical_changeset owns sort"},
+  {"id": "LC5.7", "kind": "component", "source": "WF6", "note": "variant→wire table u7 consumes"},
+  {"id": "LC5.8", "kind": "component", "source": "support-pass", "note": "stale-FD supersedure relay: +1 conflict collect, dual validation, Merge3Fail, no memchr"}
+ ]
+}

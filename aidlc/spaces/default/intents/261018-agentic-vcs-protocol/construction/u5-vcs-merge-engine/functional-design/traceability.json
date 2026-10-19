@@ -1,0 +1,134 @@
+{
+ "stage": "functional-design",
+ "unit": "u5-vcs-merge-engine",
+ "upstream_ids": [
+  "AC2.4.1",
+  "AC2.4.2",
+  "AC2.4.3",
+  "AC2.5.1",
+  "AC2.5.2",
+  "AC5.2.3",
+  "FR2.4",
+  "FR7.2",
+  "FR7.3",
+  "FR7.4",
+  "G5",
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR9",
+  "NFR10",
+  "C6",
+  "BR5.1-BR5.26"
+ ],
+ "coverage": [
+  {
+   "id": "AC2.4.1",
+   "status": "OK",
+   "target": "WF1 + WF2 + BR5.1/BR5.5/BR5.6/BR5.22",
+   "note": "merge-base + 3-way + merge changeset, file list vs first parent; line-level diff3 for text, file-level kinds elsewhere"
+  },
+  {
+   "id": "AC2.4.2",
+   "status": "OK",
+   "target": "WF1.5-7 + WF6 + BR5.3/BR5.7/BR5.8",
+   "note": "machine-readable {path,kind} list, sorted+truncated; zero rows written on conflict; claimed-target suppression keeps one entry per path"
+  },
+  {
+   "id": "AC2.4.3",
+   "status": "OK",
+   "target": "WF1.2-3 + WF5.2-3 + BR5.2/BR5.14",
+   "note": "no_common_ancestor typed; true-ancestry fast-path via own BFS (dominated pick not trusted); descendant/cycle rebase target typed InvalidInput"
+  },
+  {
+   "id": "AC2.5.1",
+   "status": "OK",
+   "target": "WF4 + BR5.13",
+   "note": "single-changeset replay; provenance from source manifest (vcs_list_file_changes(cs)) not a target walk"
+  },
+  {
+   "id": "AC2.5.2",
+   "status": "OK",
+   "target": "WF4.4 + WF5",
+   "note": "identical conflict envelope and kind taxonomy as merge"
+  },
+  {
+   "id": "AC5.2.3",
+   "status": "OK",
+   "target": "BR5.12",
+   "note": "engine never touches refs; reconciliation is an explicit merge + caller CAS"
+  },
+  {
+   "id": "FR2.4",
+   "status": "OK",
+   "target": "BR5.1 + WF1.8 + WF4.5",
+   "note": "parents[0] = ours/a; changes always diff vs first parent"
+  },
+  {
+   "id": "FR7.2",
+   "status": "OK",
+   "target": "WF1/WF2/WF3",
+   "note": "merge-base compute, 3-way, merge changeset, conflict envelope, no partial writes"
+  },
+  {
+   "id": "FR7.3",
+   "status": "OK",
+   "target": "WF4",
+   "note": "rebase replays changed files onto target via same 3-way engine"
+  },
+  {
+   "id": "FR7.4",
+   "status": "OK",
+   "target": "BR5.3 + entities (no merge-state table)",
+   "note": "single create-tx is the only write; compute+puts complete first"
+  },
+  {
+   "id": "G5",
+   "status": "OK",
+   "target": "BR5.12",
+   "note": "no implicit ref moves \u2014 refs stay caller-CAS"
+  },
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "WF0/WF1.4 + BR5.9/BR5.17/BR5.26",
+   "note": "per-tree + manifest both \u226410k (wire bound engine-enforced); mark phase at ancestor_probe_max (250k), side walks 25k, rename rows 10k, LINE_CAP via byte-count pre-check; paged accumulation aborts mid-walk; TWO-PASS classify \u2014 zero puts pre-checkpoint"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "WF1.8 + BR5.11",
+   "note": "no locks; concurrent identical merges converge on one content-derived id"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "entities",
+   "note": "no mutable persisted state added; outputs are content-addressed rows+blobs"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "BR5.8/BR5.9 + caps defaults",
+   "note": "no credentials; caps typed; messages carry no internals"
+  },
+  {
+   "id": "NFR10",
+   "status": "OK",
+   "target": "WF6",
+   "note": "acceptance probe list seeds the unit-test plan in code-generation"
+  },
+  {
+   "id": "C6",
+   "status": "OK",
+   "target": "Q9 + entities consumed-table",
+   "note": "edges: u3 objects, u4 index+store+text_diff/split_lines (crate-internal), u2 facade parents+file_changes; no new facade methods, no u4 file edits"
+  },
+  {
+   "id": "BR5.1-BR5.26",
+   "status": "OK",
+   "target": "rules.md",
+   "note": "26 rules incl. integrated devsecops+reviewer findings: ancestry self-test, rename cross-path pass w/ claimed suppression, chain composition, error bridge, LINE_CAP, conservative mode rule, terminator-aware merge3"
+  }
+ ]
+}

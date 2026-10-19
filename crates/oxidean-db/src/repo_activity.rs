@@ -10,10 +10,11 @@ pub struct RepoActivityRow {
     pub repository_id: String,
     pub actor_id: String,
     pub push_type: String,
-    pub ref_name: String,
-    pub before_oid: String,
-    pub after_oid: String,
-    pub commits_count: i64,
+    /// NULL on ref-free `vcs.*` activity rows (contract C4 — migration 0053).
+    pub ref_name: Option<String>,
+    pub before_oid: Option<String>,
+    pub after_oid: Option<String>,
+    pub commits_count: Option<i64>,
     pub commit_message: Option<String>,
     pub pr_number: Option<i64>,
     pub created_at: String,
@@ -30,9 +31,12 @@ pub struct RepoActivityRow {
 macro_rules! map_activity {
     ($row:expr) => {{
         let row = $row;
-        let commits_count: i64 = row
-            .try_get::<i64, _>("commits_count")
-            .or_else(|_| row.try_get::<i32, _>("commits_count").map(|v| i64::from(v)))
+        let commits_count: Option<i64> = row
+            .try_get::<Option<i64>, _>("commits_count")
+            .or_else(|_| {
+                row.try_get::<Option<i32>, _>("commits_count")
+                    .map(|o| o.map(i64::from))
+            })
             .map_err(|e| format!("activity row: {e}"))?;
         let pr_number: Option<i64> = row
             .try_get::<Option<i64>, _>("pr_number")
@@ -54,15 +58,13 @@ macro_rules! map_activity {
             push_type: row
                 .try_get("push_type")
                 .map_err(|e| format!("activity row: {e}"))?,
-            ref_name: row
-                .try_get("ref_name")
-                .map_err(|e| format!("activity row: {e}"))?,
+            ref_name: row.try_get::<Option<String>, _>("ref_name").unwrap_or(None),
             before_oid: row
-                .try_get("before_oid")
-                .map_err(|e| format!("activity row: {e}"))?,
+                .try_get::<Option<String>, _>("before_oid")
+                .unwrap_or(None),
             after_oid: row
-                .try_get("after_oid")
-                .map_err(|e| format!("activity row: {e}"))?,
+                .try_get::<Option<String>, _>("after_oid")
+                .unwrap_or(None),
             commits_count,
             commit_message: row
                 .try_get::<Option<String>, _>("commit_message")
@@ -239,10 +241,11 @@ pub struct InsertRepoActivity<'a> {
     pub repository_id: &'a str,
     pub actor_id: &'a str,
     pub push_type: &'a str,
-    pub ref_name: &'a str,
-    pub before_oid: &'a str,
-    pub after_oid: &'a str,
-    pub commits_count: i64,
+    /// NULL for ref-free `vcs.*` activity kinds (contract C4 — migration 0053).
+    pub ref_name: Option<&'a str>,
+    pub before_oid: Option<&'a str>,
+    pub after_oid: Option<&'a str>,
+    pub commits_count: Option<i64>,
     pub commit_message: Option<&'a str>,
     pub pr_number: Option<i64>,
 }

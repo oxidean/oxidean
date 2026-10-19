@@ -4,8 +4,18 @@ use oxidean_db::Database;
 use oxidean_git::assert_git_version;
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Deep RPC dispatch chains (~25 nested coroutine polls) overflow tokio's
+    // 2 MiB worker default in debug builds — seen on vcs.changeset_create.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 << 20)
+        .build()
+        .expect("tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();
@@ -122,6 +132,7 @@ async fn main() {
         state.lfs_dir.clone(),
         state.packages_dir.clone(),
         job_cfg,
+        state.vcs.clone(),
     );
     let app = oxidean_api::router_with_state(state, cors);
     axum::serve(listener, app).await.expect("server error");

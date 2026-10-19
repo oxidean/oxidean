@@ -201,6 +201,27 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
         ],
     ),
     (
+        "vcs",
+        &[
+            ("enable", &[]),
+            ("status", &[]),
+            ("commit", &[]),
+            ("log", &[]),
+            ("diff", &[]),
+            ("show", &[]),
+            ("cat", &[]),
+            ("blame", &[]),
+            ("history", &[]),
+            ("merge-base", &[]),
+            ("merge", &[]),
+            ("rebase", &[]),
+            ("checkout", &[]),
+            ("ref", &["list", "set"]),
+            ("import", &[]),
+            ("export", &[]),
+        ],
+    ),
+    (
         "webhook",
         &[
             ("list", &[]),

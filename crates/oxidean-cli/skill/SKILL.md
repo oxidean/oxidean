@@ -63,6 +63,7 @@ instance PAT policy — `auth refresh` renews them.
 | actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run\|create`, `workflow template list\|view`, `secret list\|set\|delete`, `status create` |
 | releases | `release list\|view\|create\|edit\|delete`, `release upload\|download\|delete-asset` |
 | mcp | `mcp print\|install\|status\|remove` — wire the instance's `/api/mcp` endpoint into agent-harness MCP configs |
+| vcs | `vcs enable\|status\|commit\|log\|diff\|show\|cat\|blame\|history\|merge-base\|merge\|rebase\|checkout`, `vcs ref list\|set`, `vcs import\|export` — side-by-side agentic source control: immutable content-addressed changesets, sparse checkouts, compare-and-swap refs, git bridge |
 | everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email` |
 
 `<o/n>` is the `owner/name` repo spec; `-R/--repo` supplies it as a flag.
@@ -139,6 +140,16 @@ ox workflow create o/n --file ci.yml --new-branch ci/add-ci --message "ci: add C
 # Publish a release with artifacts
 ox release create o/n v1.2.0 --title "v1.2.0" --body-file CHANGELOG.md
 ox release upload o/n v1.2.0 dist/*.tar.gz
+
+# Agentic VCS: stage work without git commits, merge server-side
+ox vcs enable o/n
+ox vcs commit o/n -m "agent: implement retry" --add src/retry.rs=src/retry.rs --modify src/lib.rs=src/lib.rs
+ox vcs log o/n --json | jq -r '.data.entries[0].changeset_id'
+ox vcs checkout o/n cs_01XYZ --paths src/            # sparse working copy for follow-up edits
+ox vcs merge o/n cs_01AAA cs_01BBB -m "merge branches"
+ox vcs ref set o/n main --expect cs_01AAA --to cs_01MERGED   # compare-and-swap head move
+ox vcs export o/n cs_01MERGED --branch main          # materialize to git via protected ref path
+ox vcs import o/n --publish                          # git → changesets, named vcs ref per head
 ```
 
 ## Install this skill

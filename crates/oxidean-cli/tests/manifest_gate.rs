@@ -106,7 +106,7 @@ async fn manifest_listed_procedure_runs() {
             RpcResponse::Ok { data, .. } => assert_eq!(data["repos"], json!([])),
             other => panic!("expected ok envelope, got {other:?}"),
         },
-        Out::Report { .. } => panic!("expected rpc out"),
+        Out::Report { .. } | Out::Bytes { .. } => panic!("expected rpc out"),
     }
     server.verify().await;
 }

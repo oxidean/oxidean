@@ -1,0 +1,19 @@
+{
+  "stage": "code-generation",
+  "unit": "u2-vcs-persistence",
+  "version": 1,
+  "writes": [
+    {"path": "crates/oxidean-db/migrations/postgres/0053_vcs_schema.sql"},
+    {"path": "crates/oxidean-db/migrations/mysql/0053_vcs_schema.sql"},
+    {"path": "crates/oxidean-db/migrations/sqlite/0053_vcs_schema.sql"},
+    {"path": "crates/oxidean-db/src/vcs.rs"},
+    {"path": "crates/oxidean-db/src/repo_activity.rs"},
+    {"path": "crates/oxidean-db/src/lib.rs"},
+    {"path": "crates/oxidean-api/src/repo/activity.rs"},
+    {"path": "crates/oxidean-api/src/routes/feeds.rs"},
+    {"path": "crates/oxidean-api/src/admin/users.rs"},
+    {"path": "crates/oxidean-api/src/rpc.rs"},
+    {"path": "crates/oxidean-api/tests/repo_activity_list.rs"},
+    {"path": "crates/oxidean-api/tests/atom_feeds.rs"}
+  ]
+}

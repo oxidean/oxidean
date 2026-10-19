@@ -146,10 +146,10 @@ pub async fn record_ref_updates(
                 repository_id,
                 actor_id,
                 push_type,
-                ref_name,
-                before,
-                after,
-                commits_count,
+                Some(ref_name),
+                Some(before),
+                Some(after),
+                Some(commits_count),
                 commit_message.as_deref(),
                 None,
             )
@@ -185,14 +185,14 @@ pub async fn record_branch_creation(
             repository_id,
             actor_id,
             "branch_creation",
-            &ref_name,
-            ZERO_OID,
-            if after_oid.is_empty() {
+            Some(&ref_name),
+            Some(ZERO_OID),
+            Some(if after_oid.is_empty() {
                 ZERO_OID
             } else {
                 after_oid
-            },
-            0,
+            }),
+            Some(0),
             None,
             None,
         )
@@ -222,14 +222,14 @@ pub async fn record_branch_deletion(
             repository_id,
             actor_id,
             "branch_deletion",
-            &ref_name,
-            if before_oid.is_empty() {
+            Some(&ref_name),
+            Some(if before_oid.is_empty() {
                 ZERO_OID
             } else {
                 before_oid
-            },
-            ZERO_OID,
-            0,
+            }),
+            Some(ZERO_OID),
+            Some(0),
             None,
             None,
         )
@@ -266,10 +266,10 @@ pub async fn record_branch_rename(
             repository_id,
             actor_id,
             "branch_rename",
-            &ref_name,
-            after,
-            after,
-            0,
+            Some(&ref_name),
+            Some(after),
+            Some(after),
+            Some(0),
             Some(from_short.as_str()),
             None,
         )
@@ -301,10 +301,10 @@ pub async fn record_pr_merge(
             repository_id,
             actor_id,
             "pr_merge",
-            &ref_name,
-            ZERO_OID,
-            merge_sha,
-            1,
+            Some(&ref_name),
+            Some(ZERO_OID),
+            Some(merge_sha),
+            Some(1),
             commit_message,
             Some(pr_number),
         )
@@ -364,7 +364,7 @@ fn row_to_item(row: oxidean_db::RepoActivityRow) -> RepoActivityItem {
     RepoActivityItem {
         id: row.id,
         push_type: row.push_type,
-        ref_short: short_ref(&row.ref_name),
+        ref_short: row.ref_name.as_deref().map(short_ref),
         ref_name: row.ref_name,
         before: row.before_oid,
         after: row.after_oid,
@@ -401,7 +401,12 @@ pub async fn list(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
     if let Some(ref pt) = push_type {
-        if !VALID_PUSH_TYPES.contains(&pt.as_str()) {
+        // `vcs.*` rows land here via the shared activity recorder; their
+        // kinds are valid filter values too (`VCS_ACTIVITY_KINDS` — the
+        // extension point u1 seeded for u7).
+        if !VALID_PUSH_TYPES.contains(&pt.as_str())
+            && !oxidean_core::VCS_ACTIVITY_KINDS.contains(&pt.as_str())
+        {
             return Err(AppError::new(
                 "rpc.bad_input",
                 format!("invalid push_type filter: {pt}"),

@@ -1,0 +1,79 @@
+{
+  "stage": "code-generation",
+  "unit": "u10-vcs-web-surfaces",
+  "version": 1,
+  "upstream": [
+    {
+      "id": "contract-C4",
+      "source": "inception/contract-design/contract-summary.md#C4",
+      "covered_by": ["apps/web/src/components/repo/repo-activity-row.tsrx", "apps/web/src/routes/$owner.$repo.activity.tsrx"],
+      "notes": "vcs.* activity-row copy per kind; cs_<ULID> ids never link to /commit/{sha}; git_export real OIDs still link; filter chips ride exact push_type values"
+    },
+    {
+      "id": "contract-auth-scope",
+      "source": "inception/contract-design/contract-summary.md#auth-scope-note",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx"],
+      "notes": "session cookies authorize vcs.* RPC; apiClient credentials:include already configured; panel never calls /api/vcs/* object routes"
+    },
+    {
+      "id": "uow-U10",
+      "source": "inception/units-generation/unit-of-work.md#U10",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx", "apps/web/src/components/repo/repo-activity-row.tsrx", "apps/web/src/routes/$owner.$repo.activity.tsrx"],
+      "notes": "VcsToggle settings component, activity-row vcs.* handling, filter chips"
+    },
+    {
+      "id": "FR1.1",
+      "source": "inception/requirements-analysis/requirements.md#FR1.1",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx", "apps/web/src/routes/$owner.$repo.settings.tsrx", "apps/web/src/components/repo/repo-settings-nav.tsrx"],
+      "notes": "per-repo VCS protocol flag toggle in settings"
+    },
+    {
+      "id": "FR1.4",
+      "source": "inception/requirements-analysis/requirements.md#FR1.4",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx"],
+      "notes": "disabled repos keep reads; unchecked-default state reflects never-enabled/disabled wire signal"
+    },
+    {
+      "id": "FR16.1",
+      "source": "inception/requirements-analysis/requirements.md#FR16.1",
+      "covered_by": ["apps/web/src/components/repo/repo-activity-row.tsrx", "apps/web/src/routes/$owner.$repo.activity.tsrx"],
+      "notes": "one activity row per mutating op rendered for all seven vcs.* kinds"
+    },
+    {
+      "id": "AC1.1.1",
+      "source": "inception/user-stories/stories.md#US1.1",
+      "covered_by": ["apps/web/src/routes/$owner.$repo.settings.tsrx", "apps/web/src/components/repo/vcs-settings-panel.tsrx"],
+      "notes": "settings page gates admins before mounting; panel renders a non-admin disabled state as the dead-state prong"
+    },
+    {
+      "id": "AC1.2.1",
+      "source": "inception/user-stories/stories.md#US1.2",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx"],
+      "notes": "enable/disable via explicit Save protocol setting submit"
+    },
+    {
+      "id": "AC1.2.3",
+      "source": "inception/user-stories/stories.md#US1.2",
+      "covered_by": ["apps/web/src/components/repo/vcs-settings-panel.tsrx"],
+      "notes": "vcs.disabled maps to unchecked default, never error UI; other status errors render alert state"
+    },
+    {
+      "id": "AC2.7.1",
+      "source": "inception/user-stories/stories.md#US2.7",
+      "covered_by": ["apps/web/src/components/repo/repo-activity-row.tsrx"],
+      "notes": "vcs.* rows render human copy per kind"
+    },
+    {
+      "id": "AC2.7.2",
+      "source": "inception/user-stories/stories.md#US2.7",
+      "covered_by": ["apps/web/src/components/repo/repo-activity-row.tsrx"],
+      "notes": "cs_ changeset ids do not produce /commit/{sha} links; git_export OIDs do"
+    },
+    {
+      "id": "AC2.7.3",
+      "source": "inception/user-stories/stories.md#US2.7",
+      "covered_by": ["apps/web/src/routes/$owner.$repo.activity.tsrx"],
+      "notes": "activity feed filterable by each vcs.* kind via existing type query param"
+    }
+  ]
+}

@@ -74,6 +74,8 @@ services:
       OXIDEAN_PACKAGES_OWNER_QUOTA_BYTES: ${OXIDEAN_PACKAGES_OWNER_QUOTA_BYTES:-10737418240}
       # Instance template pack zips (issue #18) — content-addressed; distinct from packages.
       OXIDEAN_TEMPLATE_PACKS_DIR: /var/template-packs
+      # Agentic VCS object store — content-addressed blobs; distinct from repos / LFS / packages.
+      OXIDEAN_VCS_OBJECTS_DIR: /var/vcs-objects
       # Actions job logs (D-ACT-13) — distinct from repos / LFS / packages / release-assets.
       OXIDEAN_ACTIONS_LOG_DIR: /var/actions-logs
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
@@ -109,6 +111,8 @@ services:
       - ./var/packages:/var/packages
       # Instance template packs (issue #18) — content-addressed zip store
       - ./var/template-packs:/var/template-packs
+      # Agentic VCS objects — content-addressed; not LFS or release-assets
+      - ./var/vcs-objects:/var/vcs-objects
       # Actions job logs (D-ACT-13) — {run_id}/{job_id}.log
       - ./var/actions-logs:/var/actions-logs
       # Persist SSH host keys across restarts (TOFU; D-SSH-07 / RESEARCH pitfall 5)

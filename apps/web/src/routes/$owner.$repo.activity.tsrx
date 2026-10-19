@@ -71,6 +71,13 @@ const TYPES = [
   { id: "branch_creation", label: "Branch creates", value: "branch_creation" },
   { id: "branch_deletion", label: "Branch deletes", value: "branch_deletion" },
   { id: "branch_rename", label: "Branch renames", value: "branch_rename" },
+  { id: "vcs.changeset_create", label: "VCS changesets", value: "vcs.changeset_create" },
+  { id: "vcs.merge", label: "VCS merges", value: "vcs.merge" },
+  { id: "vcs.rebase", label: "VCS rebases", value: "vcs.rebase" },
+  { id: "vcs.ref_update", label: "VCS ref moves", value: "vcs.ref_update" },
+  { id: "vcs.git_import", label: "VCS imports", value: "vcs.git_import" },
+  { id: "vcs.git_export", label: "VCS exports", value: "vcs.git_export" },
+  { id: "vcs.repo_enable", label: "VCS flag", value: "vcs.repo_enable" },
 ] as const;
 
 function activityHrefWithFilters(

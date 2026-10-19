@@ -1,0 +1,165 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u6-vcs-git-interop",
+  "upstream_ids": [
+    "TD6.1",
+    "TD6.2",
+    "TD6.4",
+    "TD6.5",
+    "TD6.6",
+    "TD6.8",
+    "SR6.1",
+    "SR6.2",
+    "SR6.3",
+    "SR6.4",
+    "SR6.5",
+    "SR6.7",
+    "SR6.9",
+    "SR6.10",
+    "LC6.1",
+    "LC6.2",
+    "LC6.4",
+    "SD6.4",
+    "SD6.6",
+    "SD6.7",
+    "NFR1",
+    "NFR10",
+    "BR6.4",
+    "BR6.19",
+    "BR6.20",
+    "BR6.24"
+  ],
+  "coverage": [
+    {
+      "id": "TD6.1",
+      "status": "OK",
+      "target": "InteropCaps constructor-injected — every cap exercised with small values (window/tips/tree/chain/probe/payload/blob bounds → TooLarge; validate trio → InvalidInput); no production-scale fixtures"
+    },
+    {
+      "id": "TD6.2",
+      "status": "OK",
+      "target": "backend +8 methods + bounded reader + classify_push_error share + actor_capability params — cli.rs in-file tests on real tempdir repos (cli.rs:3686 precedent) cover sentinel-kill, -z rename order, max_bytes, write round-trip, refname oracle, tag-peel"
+    },
+    {
+      "id": "TD6.4",
+      "status": "OK",
+      "target": "facade calls all covered: insert-if-absent idempotence re-import test, linked:/ident/ident-cs sidecar rows asserted post-import, Option covering_changeset NULL write → None decode on dialect_vcs leg"
+    },
+    {
+      "id": "TD6.5",
+      "status": "OK",
+      "target": "amended DTOs — VcsGitImportHead.changeset_id Option absent-key + skipped_tips serde round-trip on api-rust shards; wire-superset never breaks u1 decoders"
+    },
+    {
+      "id": "TD6.6",
+      "status": "OK",
+      "target": "vcs_derived_index Option sides + migration 0055 — NULL write/read + non-NULL round-trip across postgres/mysql/sqlite on the db-dialects leg; 0055 replay per dialect"
+    },
+    {
+      "id": "TD6.8",
+      "status": "OK",
+      "target": "test-harness reuse: testutil::test_db() file-backed sqlite (TempDir alive), tempfile git repos via CliGitBackend, mock ProtectionChecker — zero new services, git binary on PATH the only external"
+    },
+    {
+      "id": "SR6.1",
+      "status": "OK",
+      "target": "cap-arm coverage: each InteropCaps bound → TooLarge via injected small caps; subprocess max_bytes honored asserted on tree_flat/name_status fixtures"
+    },
+    {
+      "id": "SR6.3",
+      "status": "OK",
+      "target": "forged-cursor arm set: bad b64/JSON, v!=1, tips>max, bad oid shape, >256-char name, skip>len pre-index bound, continuity mismatch → ImportState; emitted-string cap → TooLarge"
+    },
+    {
+      "id": "SR6.4",
+      "status": "OK",
+      "target": "subprocess hygiene: sentinel sentinel Process→TooLarge mapping test, fixed-argv/dash-led rejection coverage via refname+tip-shape tests, stderr never surfaced asserted in error-bridge arm"
+    },
+    {
+      "id": "SR6.2",
+      "status": "OK",
+      "target": "nonce claim/release (best-effort mutex): foreign-active ImportState, TTL reclaim, mismatch-skip release, ok→idle/failed terminal states — convergence backstop tested via divergent-link arm"
+    },
+    {
+      "id": "SR6.5",
+      "status": "OK",
+      "target": "message hygiene (no stderr/value echo): error-bridge arm asserts fixed messages carry no stderr/paths/rejected values (Forbidden{push_hook} fixed reason, RefConflict re-read link)"
+    },
+    {
+      "id": "SR6.7",
+      "status": "OK",
+      "target": "deterministic refusal inventory — one arm each: >64 parents, >65535-byte message, unrepresentable timestamps, >512-char/dotdot/control paths, author </>/empty/>255-composed ⇒ InvalidInput with zero minted state"
+    },
+    {
+      "id": "SR6.9",
+      "status": "OK",
+      "target": "fail-closed is_skipped entry gate — import_chain/lazy_import/export each type DbNotConfigured before any argv/claim/facade call on a skipped database"
+    },
+    {
+      "id": "SR6.10",
+      "status": "OK",
+      "target": "residual register is unit-test-scale by construction: list_refs post-materialize cap, per-move clone cost, no run_git timeout — named, not gated"
+    },
+    {
+      "id": "LC6.1",
+      "status": "OK",
+      "target": "crate-layout delta = rollback unit: git_interop.rs + lib.rs line + Cargo.toml + backend/cli additions + 0055 triplet + 2 DTO fields; additive-nullable migration rollback caveat named"
+    },
+    {
+      "id": "LC6.2",
+      "status": "OK",
+      "target": "entry-point coverage: import_chain/lazy_import/export pipelines exercised end-to-end on real repos incl. lazy 40-hex-shadow bypass and multi-page cursor carry"
+    },
+    {
+      "id": "LC6.4",
+      "status": "OK",
+      "target": "primitive-level coverage: decode_cursor forged-input set, encode emitted-string cap, ident_sidecar_read hit/miss/malformed arms, export_one base-flat borrow + sidecar fallback"
+    },
+    {
+      "id": "SD6.4",
+      "status": "OK",
+      "target": "bounded-reader kill → sentinel Process string → interop TooLarge arm; -z rename order src→dst empirical assert; stdin message/mktree round-trip"
+    },
+    {
+      "id": "SD6.6",
+      "status": "OK",
+      "target": "bound table rows each have a cap-arm test; uncapped-but-named paths (list_refs materialize, clone IO, run_git timeout, cold index) documented as residual"
+    },
+    {
+      "id": "SD6.7",
+      "status": "OK",
+      "target": "error-channel table total coverage — GitError 6-variant arm, IndexError u5-parity arms (CursorMalformed→Internal, FrontierTooLarge→TooLarge), ObjectStoreError/ChangesetError/facade/io arms"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "bounded-cost coverage: every traversal/stdout/blob/payload cap exercised with injected small InteropCaps → TooLarge"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "verification posture: nextest on vcs-server + api-rust + db-dialects legs; real file-backed sqlite + tempdir git repos; no services",
+      "note": "same gate as TD4.8/TD6.8 — the upstream of the lane-riding claim"
+    },
+    {
+      "id": "BR6.4",
+      "status": "OK",
+      "target": "convergence backstop: insert-if-absent re-import idempotence + idempotent changeset create + divergent-link arm (insert false with stored≠ours ⇒ Internal) — raced-claim is cost not corruption"
+    },
+    {
+      "id": "BR6.19",
+      "status": "OK",
+      "target": "bounded traversal architecture: cap-arm tests cover every SD6.6 table row (rev_list/tips/tree/chain/probe/payload/blob bounds)"
+    },
+    {
+      "id": "BR6.20",
+      "status": "OK",
+      "target": "actor_capability threaded through checker + both move methods; oxidean-api callers (sync_fork.rs:227, mirror/engine.rs:536/863/991) pass 'admin' — call-site updates compile-checked"
+    },
+    {
+      "id": "BR6.24",
+      "status": "OK",
+      "target": "backend-extension pins covered by cli.rs subprocess tests: check-ref-format oracle, rev-parse tag-peel verify_commit_oid, mktree -z / {:06o} modes / stdin messages, bounded reader sentinel"
+    }
+  ]
+}

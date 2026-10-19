@@ -13,8 +13,9 @@ pub mod version;
 pub use backend::{
     ssh_host_from_remote_url, validate_remote_url, ArchiveFormat, BlameFile, BlameLine,
     CommitDetail, CommitSummary, ContributorSummary, DiffFile, DiffResult, FileChange, FilesCommit,
-    GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials,
-    SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES,
+    FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit, GrepResult, NameStatusKind,
+    NameStatusRow, RawCommit, RemoteAuthKind, RemoteCredentials, RevList, SizedBlobEntry,
+    TreeEntry, TreeEntryKind, TreeWriteEntry, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES,
     DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 pub use cli::{
