@@ -15,6 +15,10 @@ use axum::response::{IntoResponse, Response};
 /// labels and the retired vite proxy table).
 const API_PREFIXES: &[&str] = &[
     "/api/",
+    // actions/cache@v4 Twirp service — the toolkit client resolves
+    // `new URL("/twirp/…", ACTIONS_RESULTS_URL)`, so it always lands at the
+    // origin root regardless of the env var's path.
+    "/twirp",
     "/uploads",
     // Pages site trees (`pages.*` materialized sites) — user HTML/JS
     // forwards verbatim; the API's CSP sandbox carries the hardening.

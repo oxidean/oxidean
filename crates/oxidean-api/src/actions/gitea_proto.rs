@@ -756,6 +756,9 @@ fn task_context(
         "token": ctx.job_token.clone().unwrap_or_default(),
         "gitea_runtime_token": ctx.cache_token.clone().unwrap_or_default(),
         "cache_url": ctx.cache_url.clone().unwrap_or_default(),
+        // act_runner ≥0.2.11 forwards this verbatim — actions/cache@v4's
+        // Twirp client joins `/twirp/…` against it (origin root wins).
+        "ACTIONS_RESULTS_URL": ctx.server_url,
         "gitea_default_actions_url": ctx.server_url,
     }))
     .unwrap_or_else(|| prost_types::Struct {

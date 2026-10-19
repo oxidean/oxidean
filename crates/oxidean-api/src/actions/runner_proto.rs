@@ -66,8 +66,10 @@ pub fn router() -> Router<AppState> {
             get(crate::actions::templates::template_icon),
         )
         // actions/cache service — `_apis/artifactcache` REST surface authed
-        // by per-job runtime tokens (not the runner token).
+        // by per-job runtime tokens (not the runner token) + the v2 blob
+        // plane (`signed_{upload,download}_url` targets, `?t=` authed).
         .merge(crate::actions::cache::router())
+        .merge(crate::actions::cache_v2::blob_router())
 }
 
 pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {

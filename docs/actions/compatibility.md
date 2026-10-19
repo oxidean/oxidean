@@ -57,7 +57,7 @@ download, annotations, `workflow_job` webhook.
 | 11. Action metadata — action.yml | 17 | 0 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
 | 13. Artifacts | 13 | 0 | 0 | 0 |
-| 14. Dependency caching | 5 | 0 | 0 | 0 |
+| 14. Dependency caching | 6 | 0 | 0 | 0 |
 | 15. Concurrency | 5 | 0 | 0 | 0 |
 | 16. Environments & deployments | 11 | 0 | 0 | 0 |
 | 17. `GITHUB_TOKEN` permissions | 9 | 0 | 0 | 0 |
@@ -488,13 +488,26 @@ default) with LRU eviction on commit; abandoned `reserved` rows and
 expired tokens are reaped by the actions sweep. `repo.actions.listCaches`
 /`deleteCache` expose the management surface `gh cache` mirrors.
 
+`actions/cache@v4` speaks the Twirp v2 protocol instead: JSON-RPC at
+`/twirp/github.actions.results.api.v1.CacheService/*`
+(`CreateCacheEntry` → `signed_upload_url` → `FinalizeCacheEntryUpload`;
+`GetCacheEntryDownloadURL` → `signed_download_url`). Blob bytes move over the
+`/_apis/artifactcache2/blobs/{id}` data plane, which accepts the Azure
+block-blob shape the toolkit's SDK path emits (PutBlob, `comp=block` +
+`comp=blocklist` staging for >128 MiB archives) and answers downloads with a
+plain GET. Both signed URLs carry `?t=<runtime token>` — the real client
+sends no `Authorization` header on the data plane (the same applies to the
+v1 `archiveLocation`). Both protocol generations share the same entry store
+and scope rules, so a v3 save restores through a v4 lookup and vice versa.
+
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
 | `cache.action` | `actions/cache` restore+save | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Reserve/upload/commit/lookup/download round-trip covered. |
-| `cache.keys` | `key`/`restore-keys` prefix fallback | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_restore_key_prefix_fallback | Committed rows only; newest wins. |
-| `cache.save-only` | `actions/cache/save` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_immutable_save_409 | Unique key/version/scope conflict surfaces `409`. |
+| `cache.action-v4` | `actions/cache@v4` Twirp service | supported | test:crates/oxidean-api/tests/actions_cache_v2.rs::v2_roundtrip_putblob_then_restore | `CacheService` JSON-RPC at `/twirp/…`; signed-URL blob plane handles PutBlob and `comp=block`/`comp=blocklist` staging. |
+| `cache.keys` | `key`/`restore-keys` prefix fallback | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_restore_key_prefix_fallback, test:crates/oxidean-api/tests/actions_cache_v2.rs::v2_restore_key_prefix_match | Committed rows only; newest wins. v2 matches `key` exactly, then `restore_keys` prefixes in order. |
+| `cache.save-only` | `actions/cache/save` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_immutable_save_409, test:crates/oxidean-api/tests/actions_cache_v2.rs::v2_conflict_is_already_exists | Unique key/version/scope conflict surfaces `409`/`already_exists`. |
 | `cache.restore-only` | `actions/cache/restore` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_reserved_not_restorable | Reserved rows never restore; lookup 404s unknown keys. |
-| `cache.lookup-only` | `lookup-only` dry-run | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Same `GET /caches` lookup — hit/miss identical sans download. |
+| `cache.lookup-only` | `lookup-only` dry-run | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore, test:crates/oxidean-api/tests/actions_cache_v2.rs::v2_miss_is_ok_false_not_error | v1: same lookup sans download; v2: `{ok:false}` miss at 200. |
 
 ## 15. Concurrency (`conc.`)
 

@@ -76,7 +76,7 @@ fn reserve_ttl_minutes() -> i64 {
 /// sha256(key \n version \n scope) — the `lookup_hash` stored on each row.
 /// Hashing keeps the uniqueness index narrow (InnoDB 3072-byte prefix limit)
 /// while the plaintext columns stay queryable.
-fn lookup_hash(key: &str, version: &str, scope: &str) -> String {
+pub(crate) fn lookup_hash(key: &str, version: &str, scope: &str) -> String {
     hex::encode(Sha256::digest(
         format!("{key}\n{version}\n{scope}").as_bytes(),
     ))
@@ -91,18 +91,21 @@ fn normalize_scope(head_ref: &str) -> String {
 }
 
 /// Resolved job scope for one authenticated cache call.
-struct CacheScope {
-    repository_id: String,
+pub(crate) struct CacheScope {
+    pub repository_id: String,
     /// The job's branch — where its saves land and the first lookup scope.
-    scope: String,
+    pub scope: String,
     /// Repo default branch — the second lookup scope (never saved into from
     /// a non-default branch).
-    default_scope: String,
+    pub default_scope: String,
+    /// The presented runtime token — v2 signs blob URLs with it (the data
+    /// plane carries `?t=` instead of an Authorization header).
+    pub token: String,
 }
 
 /// Bearer `ACTIONS_RUNTIME_TOKEN` → job/repo/branch scope. 401 on unknown or
 /// expired tokens; 404 on a dangling job row.
-async fn cache_scope_from_headers(
+pub(crate) async fn cache_scope_from_headers(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<CacheScope, StatusCode> {
@@ -115,6 +118,24 @@ async fn cache_scope_from_headers(
         .or_else(|| auth.strip_prefix("bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?
         .trim();
+    cache_scope_from_token(state, raw).await
+}
+
+/// `?t=<ACTIONS_RUNTIME_TOKEN>` data-plane auth — the real `actions/cache`
+/// clients attach no `Authorization` header when following `archiveLocation`
+/// or the v2 signed URLs; the URL itself is the credential (SAS semantics).
+pub(crate) async fn cache_scope_from_query(
+    state: &AppState,
+    token: Option<&str>,
+) -> Result<CacheScope, StatusCode> {
+    cache_scope_from_token(state, token.ok_or(StatusCode::UNAUTHORIZED)?.trim()).await
+}
+
+/// Shared token → scope resolution for both auth carriers.
+pub(crate) async fn cache_scope_from_token(
+    state: &AppState,
+    raw: &str,
+) -> Result<CacheScope, StatusCode> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let tok = state
         .db
@@ -149,6 +170,7 @@ async fn cache_scope_from_headers(
         repository_id: tok.repository_id,
         scope: normalize_scope(&run.head_ref),
         default_scope: normalize_scope(&default_scope),
+        token: raw.to_string(),
     })
 }
 
@@ -174,13 +196,15 @@ pub async fn mint_cache_token(state: &AppState, job_id: &str, repo_id: &str) -> 
 }
 
 /// Absolute URL the `cache` response hands back as `archiveLocation` —
-/// same-origin under the runner-proto mount so the runtime token carries it.
-fn archive_location(cache_id: &str) -> String {
+/// same-origin under the runner-proto mount. Carries `?t=<runtime token>`
+/// because the real `actions/cache` client sends no `Authorization` header
+/// when downloading (GitHub's archiveLocation is a self-authenticating SAS).
+fn archive_location(cache_id: &str, token: &str) -> String {
     let origin = crate::public_origin::resolve_public_origin();
-    format!("{origin}/api/actions/_apis/artifactcache/caches/{cache_id}/download")
+    format!("{origin}/api/actions/_apis/artifactcache/caches/{cache_id}/download?t={token}")
 }
 
-fn storage_rel(repo_id: &str, cache_id: &str) -> String {
+pub(crate) fn storage_rel(repo_id: &str, cache_id: &str) -> String {
     format!("{repo_id}/{cache_id}.tgz")
 }
 
@@ -196,13 +220,13 @@ struct CacheEntry {
     result: Option<String>,
 }
 
-fn entry_public(c: &oxidean_db::actions_cache::ActionCacheRow) -> CacheEntry {
+fn entry_public(c: &oxidean_db::actions_cache::ActionCacheRow, token: &str) -> CacheEntry {
     CacheEntry {
         cache_key: c.cache_key.clone(),
         scope: c.scope.clone(),
         creation_time: c.created_at.clone(),
         last_accessed: c.last_accessed_at.clone(),
-        archive_location: archive_location(&c.id),
+        archive_location: archive_location(&c.id, token),
         result: None,
     }
 }
@@ -248,7 +272,7 @@ async fn get_cache(
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             {
                 let _ = state.db.touch_action_cache(&hit.id).await;
-                return Ok(Json(entry_public(&hit)).into_response());
+                return Ok(Json(entry_public(&hit, &scope.token)).into_response());
             }
         }
     }
@@ -263,7 +287,7 @@ async fn get_cache(
             hits.retain(|c| c.version == version);
             if let Some(hit) = hits.into_iter().next() {
                 let _ = state.db.touch_action_cache(&hit.id).await;
-                return Ok(Json(entry_public(&hit)).into_response());
+                return Ok(Json(entry_public(&hit, &scope.token)).into_response());
             }
         }
     }
@@ -436,16 +460,23 @@ async fn get_cache_meta(
 ) -> Result<Response, StatusCode> {
     let scope = cache_scope_from_headers(&state, &headers).await?;
     let row = find_by_id_scoped(&state, &cache_id, &scope).await?;
-    Ok(Json(entry_public(&row)).into_response())
+    Ok(Json(entry_public(&row, &scope.token)).into_response())
 }
 
 /// GET `/_apis/artifactcache/caches/{id}/download` — `archiveLocation` target.
+/// The upstream client sends no `Authorization` here, so `?t=` carries the
+/// token; a Bearer header is still honoured for older/simple clients.
 async fn download_cache(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(cache_id): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
 ) -> Result<Response, StatusCode> {
-    let scope = cache_scope_from_headers(&state, &headers).await?;
+    let scope = if headers.contains_key(axum::http::header::AUTHORIZATION) {
+        cache_scope_from_headers(&state, &headers).await?
+    } else {
+        cache_scope_from_query(&state, q.get("t").map(String::as_str)).await?
+    };
     let row = find_by_id_scoped(&state, &cache_id, &scope).await?;
     let path = state.actions_cache_dir.join(&row.storage_path);
     let file = tokio::fs::File::open(&path)
@@ -482,7 +513,7 @@ async fn delete_cache(
 }
 
 /// A `reserved` row owned by the caller's repo — PATCH/commit target.
-async fn find_reserved(
+pub(crate) async fn find_reserved(
     state: &AppState,
     cache_id: &str,
     repo_id: &str,
@@ -495,7 +526,7 @@ async fn find_reserved(
 }
 
 /// Any row by id — scoped to the caller's repo and visible scopes.
-async fn find_by_id_scoped(
+pub(crate) async fn find_by_id_scoped(
     state: &AppState,
     cache_id: &str,
     scope: &CacheScope,
@@ -511,7 +542,7 @@ async fn find_by_id_scoped(
 }
 
 /// By-id probe without scope/state filtering (internal).
-async fn find_cache_row_by_id(
+pub(crate) async fn find_cache_row_by_id(
     state: &AppState,
     cache_id: &str,
 ) -> Result<oxidean_db::actions_cache::ActionCacheRow, StatusCode> {
@@ -525,7 +556,7 @@ async fn find_cache_row_by_id(
 
 /// LRU eviction — drop oldest committed entries until the repo's total sits
 /// under `cache_max_bytes`. Payload files are unlinked with their rows.
-async fn evict_over_cap(state: &AppState, repo_id: &str) {
+pub(crate) async fn evict_over_cap(state: &AppState, repo_id: &str) {
     let entries = match state.db.list_action_caches_for_repo(repo_id).await {
         Ok(v) => v,
         Err(e) => {
@@ -564,6 +595,8 @@ pub async fn sweep_action_caches(
     for rel in &stale {
         let _ = std::fs::remove_file(cache_dir.join(rel));
         let _ = std::fs::remove_file(cache_dir.join(rel).with_extension("part"));
+        // v2 staged-block dir (`{id}.blocks/<hex>`) — removed whole.
+        let _ = std::fs::remove_dir_all(cache_dir.join(rel).with_extension("blocks"));
     }
     Ok(tokens + stale.len() as u64)
 }

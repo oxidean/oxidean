@@ -99,6 +99,46 @@ pub async fn find_action_cache(
     }
 }
 
+/// Reserved-row lookup by (repo, key, version, scope) — the v2
+/// `FinalizeCacheEntryUpload` RPC carries key+version (no id), so it binds
+/// the *pending* row this way. `find_action_cache` can't serve it — that one
+/// only sees committed entries.
+pub async fn find_action_cache_reservation(
+    pool: &DbPool,
+    repo_id: &str,
+    lookup_hash: &str,
+) -> Result<Option<ActionCacheRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {CACHE_COLS_SQLITE} FROM action_caches WHERE repository_id = ? AND lookup_hash = ? AND state = 'reserved'"
+        )))
+        .bind(repo_id)
+        .bind(lookup_hash)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_cache_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {CACHE_COLS} FROM action_caches WHERE repository_id = $1 AND lookup_hash = $2 AND state = 'reserved'"
+        )))
+        .bind(repo_id)
+        .bind(lookup_hash)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_cache_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {CACHE_COLS_MYSQL} FROM action_caches WHERE repository_id = ? AND lookup_hash = ? AND state = 'reserved'"
+        )))
+        .bind(repo_id)
+        .bind(lookup_hash)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_cache_row!(r)))
+        .map_err(|e| e.to_string()),
+    }
+}
+
 /// By-id probe — any state (reserved or committed); the caller filters.
 pub async fn find_action_cache_by_id(
     pool: &DbPool,

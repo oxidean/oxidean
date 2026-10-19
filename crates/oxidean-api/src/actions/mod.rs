@@ -2,6 +2,7 @@
 
 pub mod artifacts;
 pub mod cache;
+pub mod cache_v2;
 pub mod cron;
 pub mod dispatch;
 pub mod eval_ctx;

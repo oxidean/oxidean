@@ -5318,6 +5318,17 @@ impl Database {
         actions_cache::find_action_cache(self.require_pool()?, repo_id, lookup_hash).await
     }
 
+    /// Reserved-row lookup by (repo, key, version, scope) — the v2
+    /// FinalizeCacheEntryUpload RPC binds the pending row this way.
+    pub async fn find_action_cache_reservation(
+        &self,
+        repo_id: &str,
+        lookup_hash: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache_reservation(self.require_pool()?, repo_id, lookup_hash)
+            .await
+    }
+
     /// By-id probe — any state; caller filters reserved/committed.
     pub async fn find_action_cache_by_id(
         &self,
