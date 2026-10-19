@@ -2038,3 +2038,239 @@ async fn rest_actions_deployments_permissions_dispatch_surface() {
         "no pending envs after approval"
     );
 }
+
+/// `/api/v1` caches list/delete + run-attempt routes — `gh cache` and
+/// `gh run view --attempt` surface.
+#[tokio::test]
+async fn rest_actions_caches_attempts_surface() {
+    let (app, db, _dir) = app_db().await;
+    let (token, run_id, job_id, job_token) = claim_full_yaml(
+        &app,
+        &db,
+        "cax",
+        b"name: CI\non: [push]\npermissions:\n  contents: read\n  actions: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    )
+    .await;
+    let base = "/api/v1/repos/cax/cax";
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    // Deletes gate on repo Write capability + a verified email — the job
+    // token's `actions: write` scope covers reads but repo capability stays
+    // read; owner PAT it is.
+    db.set_email_verified_at("u-cax", &now).await.unwrap();
+    let pat = "oxidean_pat_cax_roundtrip";
+    db.create_pat(
+        "pat-cax",
+        "u-cax",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Two committed cache rows — one on main, one scoped to a branch.
+    for (id, key, scope, size) in [
+        ("cache-1", "linux-cargo-main", "refs/heads/main", 100i64),
+        ("cache-2", "linux-cargo-dev", "refs/heads/dev", 200i64),
+        ("cache-3", "win-cargo-main", "refs/heads/main", 50i64),
+    ] {
+        db.insert_action_cache(&oxidean_db::actions_cache::ActionCacheRow {
+            id: id.into(),
+            repository_id: "r-cax".into(),
+            lookup_hash: hex::encode(Sha256::digest(format!("{key}\nv\n{scope}").as_bytes())),
+            cache_key: key.into(),
+            version: "v".into(),
+            scope: scope.into(),
+            storage_path: format!("/tmp/{id}.tgz"),
+            size_bytes: size,
+            state: "committed".into(),
+            created_at: now.clone(),
+            last_accessed_at: now.clone(),
+        })
+        .await
+        .unwrap();
+        // insert lands `reserved`; commit marks it listable.
+        db.commit_action_cache(id, size).await.unwrap();
+    }
+
+    // gh cache list → {total_count, actions_caches}
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches"),
+        Some(&job_token),
+    )
+    .await;
+    let status = res.status();
+    let body = body_json(res).await;
+    assert_eq!(body["total_count"], 3, "caches list ({status}): {body}");
+    let caches = body["actions_caches"].as_array().unwrap();
+    assert_eq!(caches.len(), 3);
+    // GitHub shape: ref (from scope), key, size_in_bytes
+    assert!(caches.iter().all(|c| c["ref"].as_str().is_some()
+        && c["key"].as_str().is_some()
+        && c["size_in_bytes"].as_i64().is_some()));
+
+    // key prefix filter (GitHub semantics — prefix, not substring)
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches?key=linux-cargo"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 2);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches?key=cargo"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(
+        body_json(res).await["total_count"],
+        0,
+        "substring must not match — prefix only"
+    );
+
+    // ref filter
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches?ref=refs/heads/dev"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+
+    // sort=size_in_bytes&direction=asc
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches?sort=size_in_bytes&direction=asc"),
+        Some(&job_token),
+    )
+    .await;
+    let body = body_json(res).await;
+    let sizes: Vec<i64> = body["actions_caches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["size_in_bytes"].as_i64().unwrap())
+        .collect();
+    assert_eq!(sizes, vec![50, 100, 200]);
+
+    // DELETE by key+ref → only the matching row goes
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/caches?key=linux-cargo&ref=refs/heads/dev"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 2);
+
+    // DELETE by id
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/caches/cache-3"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/caches"),
+        Some(&job_token),
+    )
+    .await;
+    let body = body_json(res).await;
+    assert_eq!(body["total_count"], 1);
+    assert_eq!(body["actions_caches"][0]["id"], "cache-1");
+
+    // missing key+ref on bulk delete → 400
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/caches"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // ---- run attempts ----
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/attempts/1"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "attempt 1: {}", res.status());
+    let att = body_json(res).await;
+    assert_eq!(att["run_attempt"], 1);
+    assert_eq!(att["id"], run_id);
+
+    // stale attempt → 404 (reruns replace job rows — no attempt history)
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/attempts/2"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/attempts/1/jobs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let jobs = body_json(res).await;
+    assert_eq!(jobs["total_count"], 1);
+    assert_eq!(jobs["jobs"][0]["id"], job_id);
+
+    // attempt logs — the same zip archive the unqualified route serves
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/attempts/1/logs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "attempt logs: {}",
+        res.status()
+    );
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/attempts/7/logs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let _ = token;
+}

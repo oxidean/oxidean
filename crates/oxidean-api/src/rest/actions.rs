@@ -193,6 +193,43 @@ struct DeploymentPath {
     deployment_id: String,
 }
 
+/// `/{owner}/{repo}/actions/caches/{cache_id}`.
+#[derive(Deserialize)]
+struct CachePath {
+    owner: String,
+    repo: String,
+    cache_id: String,
+}
+
+/// `/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}`.
+#[derive(Deserialize)]
+struct AttemptPath {
+    owner: String,
+    repo: String,
+    run_id: String,
+    attempt_number: i64,
+}
+
+/// `GET /actions/caches` query — GitHub's key/ref filters + sort/direction.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct CachesQuery {
+    key: Option<String>,
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+    sort: Option<String>,
+    direction: Option<String>,
+    per_page: Option<u32>,
+    page: Option<u32>,
+}
+
+/// `DELETE /actions/caches` query — key+ref bulk delete.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct CachesDeleteQuery {
+    key: Option<String>,
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+}
+
 /// `PUT …/secrets/{name}` body — GitHub sends `{encrypted_value, key_id}`
 /// sealed against the `public-key` endpoint; `value` stays accepted for
 /// first-party/plaintext clients.
@@ -1405,6 +1442,96 @@ pub const ROUTES: &[RouteDef] = &[
         body: Some(BodySpec::Json(pending_deployments_body_schema)),
         response: Some(RespSpec::Json(pending_deployments_schema)),
         mount: || post(review_pending_deployments),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/caches",
+        tags: &["actions"],
+        operation_id: "actions/getActionsCacheList",
+        summary: "List repo cache entries, GitHub shape (repo.actions.listCaches)",
+        procedure: "repo.actions.listCaches",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<CachesQuery>),
+        body: None,
+        response: Some(RespSpec::Json(caches_list_schema)),
+        mount: || get(list_gh_caches),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/caches",
+        tags: &["actions"],
+        operation_id: "actions/deleteActionsCacheByKey",
+        summary: "Delete caches matching key/ref (repo.actions.listCaches + deleteCache)",
+        procedure: "repo.actions.deleteCache",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<CachesDeleteQuery>),
+        body: None,
+        response: None,
+        mount: || delete(delete_gh_caches_by_key),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/actions/caches/{cache_id}",
+        tags: &["actions"],
+        operation_id: "actions/deleteActionsCacheById",
+        summary: "Delete one cache entry (repo.actions.deleteCache)",
+        procedure: "repo.actions.deleteCache",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "cache_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_gh_cache),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}",
+        tags: &["actions"],
+        operation_id: "actions/getWorkflowRunAttempt",
+        summary: "Get a run attempt — reruns replace jobs in place, so only the current attempt answers (repo.actions.getRun)",
+        procedure: "repo.actions.getRun",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(run_schema)),
+        mount: || get(get_run_attempt),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs",
+        tags: &["actions"],
+        operation_id: "actions/listJobsForWorkflowRunAttempt",
+        summary: "Jobs for a run attempt (repo.actions.getRun)",
+        procedure: "repo.actions.getRun",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(jobs_list_schema)),
+        mount: || get(list_attempt_jobs),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/logs",
+        tags: &["actions"],
+        operation_id: "actions/downloadWorkflowRunAttemptLogs",
+        summary: "Log archive for a run attempt (repo.actions.getJobLog)",
+        procedure: "repo.actions.getJobLog",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || get(download_attempt_logs),
     },
 ];
 
@@ -4666,4 +4793,281 @@ async fn review_pending_deployments(
         .map(|e| gh_environment(&origin, &p.owner, &p.repo, e))
         .collect();
     (StatusCode::OK, Json(json!(reviewed))).into_response()
+}
+
+// ---- caches + run attempts ----
+
+fn caches_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "total_count": {"type": "integer"},
+            "actions_caches": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {},
+                        "ref": {"type": "string"},
+                        "key": {"type": "string"},
+                        "version": {"type": "string"},
+                        "last_accessed_at": {"type": "string"},
+                        "created_at": {"type": "string"},
+                        "size_in_bytes": {"type": "integer"},
+                    },
+                },
+            },
+        },
+        "required": ["total_count", "actions_caches"],
+    })
+}
+
+/// RPC cache row → GitHub `{id, ref, key, version, last_accessed_at,
+/// created_at, size_in_bytes}`. `scope` is the branch ref the cache was
+/// written under.
+fn gh_cache(c: &Value) -> Value {
+    json!({
+        "id": c["id"],
+        "ref": c["scope"],
+        "key": c["key"],
+        "version": c["version"],
+        "last_accessed_at": c["last_accessed_at"],
+        "created_at": c["created_at"],
+        "size_in_bytes": c["size_bytes"],
+    })
+}
+
+fn cache_matches(c: &Value, key: Option<&str>, git_ref: Option<&str>) -> bool {
+    if let Some(k) = key {
+        // GitHub matches on key prefix, not substring.
+        if !c["key"].as_str().unwrap_or_default().starts_with(k) {
+            return false;
+        }
+    }
+    if let Some(r) = git_ref {
+        if c["scope"].as_str().unwrap_or_default() != r {
+            return false;
+        }
+    }
+    true
+}
+
+/// GET /actions/caches — `gh cache list`.
+async fn list_gh_caches(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<CachesQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(
+        &mut ctx,
+        "repo.actions.listCaches",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => {
+            let mut items: Vec<Value> = data["caches"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter(|c| cache_matches(c, q.key.as_deref(), q.git_ref.as_deref()))
+                .map(gh_cache)
+                .collect();
+            let sort_key = q.sort.as_deref().unwrap_or("last_accessed_at");
+            let desc = q.direction.as_deref() != Some("asc");
+            items.sort_by(|a, b| {
+                let ord = match sort_key {
+                    "size_in_bytes" => a["size_in_bytes"]
+                        .as_i64()
+                        .cmp(&b["size_in_bytes"].as_i64()),
+                    // created_at | last_accessed_at | default
+                    _ => a[sort_key]
+                        .as_str()
+                        .unwrap_or_default()
+                        .cmp(b[sort_key].as_str().unwrap_or_default()),
+                };
+                if desc {
+                    ord.reverse()
+                } else {
+                    ord
+                }
+            });
+            let total_count = items.len();
+            let per_page = q.per_page.unwrap_or(30).clamp(1, 100) as usize;
+            let start = (q.page.unwrap_or(1).max(1) - 1) as usize * per_page;
+            let page: Vec<Value> = items
+                .into_iter()
+                .skip(start.min(total_count))
+                .take(per_page)
+                .collect();
+            (
+                StatusCode::OK,
+                Json(json!({"total_count": total_count, "actions_caches": page})),
+            )
+                .into_response()
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// DELETE /actions/caches/{cache_id}.
+async fn delete_gh_cache(
+    State(state): State<AppState>,
+    Path(p): Path<CachePath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["cache_id"] = json!(p.cache_id);
+    call(
+        &state,
+        &headers,
+        "repo.actions.deleteCache",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// DELETE /actions/caches?key=&ref= — GitHub deletes every entry matching
+/// the (prefix) key and optional ref.
+async fn delete_gh_caches_by_key(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<CachesDeleteQuery>,
+    headers: HeaderMap,
+) -> Response {
+    if q.key.is_none() && q.git_ref.is_none() {
+        return err_json(StatusCode::BAD_REQUEST, "key or ref is required");
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let caches = match dispatch(
+        &mut ctx,
+        "repo.actions.listCaches",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => data["caches"].as_array().cloned().unwrap_or_default(),
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    for c in caches
+        .iter()
+        .filter(|c| cache_matches(c, q.key.as_deref(), q.git_ref.as_deref()))
+    {
+        let mut input = repo_ref(&p.owner, &p.repo);
+        input["cache_id"] = c["id"].clone();
+        match dispatch(&mut ctx, "repo.actions.deleteCache", input).await {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (status_for_error(&error), Json(error)).into_response()
+            }
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Fetch the run once and gate on `attempt_number` — reruns reuse job rows
+/// (replacement semantics), so only the current attempt exists to serve.
+async fn run_at_attempt(
+    ctx: &mut RpcCtx,
+    owner: &str,
+    repo: &str,
+    run_id: &str,
+    attempt: i64,
+) -> Result<Value, AppError> {
+    let mut input = repo_ref(owner, repo);
+    input["run_id"] = json!(run_id);
+    let data = match dispatch(ctx, "repo.actions.getRun", input).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => return Err(error),
+    };
+    if data["run"]["attempt"].as_i64().unwrap_or(1) != attempt {
+        return Err(AppError::new(
+            "api.not_found",
+            "attempt not found — earlier attempts are replaced on rerun",
+        ));
+    }
+    Ok(data)
+}
+
+async fn get_run_attempt(
+    State(state): State<AppState>,
+    Path(p): Path<AttemptPath>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match run_at_attempt(&mut ctx, &p.owner, &p.repo, &p.run_id, p.attempt_number).await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(gh_run(&origin, &p.owner, &p.repo, &data["run"])),
+        )
+            .into_response(),
+        Err(e) => (status_for_error(&e), Json(e)).into_response(),
+    }
+}
+
+async fn list_attempt_jobs(
+    State(state): State<AppState>,
+    Path(p): Path<AttemptPath>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match run_at_attempt(&mut ctx, &p.owner, &p.repo, &p.run_id, p.attempt_number).await {
+        Ok(data) => {
+            let run_name = data["run"]["workflow_name"].as_str().map(str::to_string);
+            let jobs: Vec<Value> = data["jobs"]
+                .as_array()
+                .map(|js| {
+                    js.iter()
+                        .map(|j| gh_job(&origin, &p.owner, &p.repo, j, run_name.as_deref()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                StatusCode::OK,
+                Json(json!({"total_count": jobs.len(), "jobs": jobs})),
+            )
+                .into_response()
+        }
+        Err(e) => (status_for_error(&e), Json(e)).into_response(),
+    }
+}
+
+async fn download_attempt_logs(
+    State(state): State<AppState>,
+    Path(p): Path<AttemptPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(e) = run_at_attempt(&mut ctx, &p.owner, &p.repo, &p.run_id, p.attempt_number).await {
+        return (status_for_error(&e), Json(e)).into_response();
+    }
+    crate::routes::action_downloads::download_run_logs(
+        State(state),
+        axum::extract::Path((p.owner, p.repo, p.run_id)),
+        headers,
+    )
+    .await
 }
