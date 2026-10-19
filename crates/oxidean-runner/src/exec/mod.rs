@@ -744,6 +744,19 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             let mut outputs = HashMap::new();
             if let Some(uses) = &step.uses {
                 result = if uses.starts_with("actions/checkout") {
+                    // GitHub registers `Post actions/checkout` when the step
+                    // is invoked (it runs even if the step fails). Our
+                    // builtin never persists credentials — auth rides
+                    // per-command `http.extraHeader` — so the post has no
+                    // cleanup to do; the marker-only entry still keeps the
+                    // log rail's step list GitHub-shaped.
+                    step_env.posts.push(PendingPost {
+                        name: format!("Post {plan_title}"),
+                        if_expr: None,
+                        argv: vec![],
+                        env: vec![],
+                        cwd: workspace.clone(),
+                    });
                     let with = step
                         .with
                         .as_ref()
@@ -879,6 +892,12 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             continue;
         }
         logger.line(&format!("##[post]{}", post.name)).await;
+        // Empty argv = marker-only post (e.g. builtin checkout — nothing
+        // persisted, nothing to run); the rail entry is still emitted.
+        if post.argv.is_empty() {
+            logger.line(&format!("##[step-done]{}", post.name)).await;
+            continue;
+        }
         let post_env = post.env.clone();
         let mut cmd = tokio::process::Command::new(&post.argv[0]);
         cmd.args(&post.argv[1..]).current_dir(&post.cwd);
@@ -890,7 +909,11 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         )
         .await
         {
-            Ok(0) => {}
+            Ok(0) => {
+                // Close the rail section — otherwise it falls to the job's
+                // terminal status and a clean post renders as failed.
+                logger.line(&format!("##[step-done]{}", post.name)).await;
+            }
             Ok(code) => {
                 logger
                     .line(&format!("::warning::post '{}' exited {code}", post.name))

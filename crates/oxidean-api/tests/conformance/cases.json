@@ -117,7 +117,8 @@
     "build": "success"
    },
    "log_contains": [
-    "post-checkout"
+    "post-checkout",
+    "##[post]Post actions/checkout@v4"
    ]
   },
   {

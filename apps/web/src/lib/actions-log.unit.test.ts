@@ -190,6 +190,22 @@ describe("parseJobLog", () => {
     ]);
     expect(parsed.steps[1].lines.map((l) => l.plain)).toEqual(["cleaning up"]);
   });
+
+  it("keeps a ##[step-done]-closed post successful on a failed job", () => {
+    const log = [
+      "##[step-plan]Build",
+      "##[step]Build",
+      "boom",
+      "##[step-done]Build",
+      "##[post]Post actions/checkout@v4",
+      "##[step-done]Post actions/checkout@v4",
+    ].join("\n");
+    const parsed = parseJobLog(log, "failure");
+    expect(parsed.steps.map((s) => [s.name, s.status])).toEqual([
+      ["Build", "success"],
+      ["Post actions/checkout@v4", "success"],
+    ]);
+  });
 });
 
 describe("splitHits", () => {
