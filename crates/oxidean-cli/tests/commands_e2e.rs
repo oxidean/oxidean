@@ -825,11 +825,11 @@ async fn vcs_ref_set_sends_cas_payload() {
         .and(path("/api/rpc"))
         .and(body_json(json!({
             "procedure": "vcs.ref_update",
-            "input": {"owner": "o", "name": "n", "ref_name": "main",
+            "input": {"owner": "o", "name": "n", "ref": "main",
                       "expected_old": null, "new": "cs_2"}
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ok": true, "data": {"ref_name": "main", "changeset_id": "cs_2"}
+            "ok": true, "data": {"ref": "main", "changeset_id": "cs_2"}
         })))
         .expect(1)
         .mount(&server)

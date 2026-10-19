@@ -295,18 +295,31 @@ pub async fn run(
                     "vcs commit needs at least one --add/--modify, --delete, or --rename".into(),
                 ));
             }
+            // The wire grammar requires `mode` on every entry and `blob` on
+            // every non-delete — delete/rename resolve both from the source
+            // path's record at the first parent via vcs.file_get.
+            if (!deletes.is_empty() || !renames.is_empty()) && parents.is_empty() {
+                return Err(CliFault::Usage(
+                    "--delete/--rename need --parent to resolve the source entry".into(),
+                ));
+            }
             let mut changes = Vec::new();
             for spec in files {
                 changes.push(stage_file(transport, repo, spec).await?);
             }
             for path in deletes {
-                changes.push(json!({ "path": path, "kind": "delete" }));
+                let (mode, _) = file_meta(transport, repo, parents.first().unwrap(), path).await?;
+                changes.push(json!({ "path": path, "kind": "delete", "mode": mode }));
             }
             for rename in renames {
+                let (mode, blob) =
+                    file_meta(transport, repo, parents.first().unwrap(), &rename.old_path).await?;
                 changes.push(json!({
                     "path": rename.path,
                     "kind": "rename",
                     "old_path": rename.old_path,
+                    "mode": mode,
+                    "blob": blob,
                 }));
             }
             let mut input = repo.input();
@@ -638,7 +651,7 @@ pub async fn run(
         VcsCommand::RefSet { repo, name, args } => {
             validate_ref_set(args)?;
             let mut input = repo.input();
-            input.insert("ref_name".into(), json!(name));
+            input.insert("ref".into(), json!(name));
             input.insert(
                 "expected_old".into(),
                 if args.create {
@@ -657,8 +670,8 @@ pub async fn run(
             );
             let envelope = call(transport, "vcs.ref_update", input).await?;
             let pretty = ok_pretty(&envelope, |data| match data["changeset_id"].as_str() {
-                Some(cs) => format!("ref {} -> {cs}", data["ref_name"].as_str().unwrap_or(name)),
-                None => format!("ref {} deleted", data["ref_name"].as_str().unwrap_or(name)),
+                Some(cs) => format!("ref {} -> {cs}", data["ref"].as_str().unwrap_or(name)),
+                None => format!("ref {} deleted", data["ref"].as_str().unwrap_or(name)),
             });
             Ok(CliOutcome {
                 envelope,
@@ -843,7 +856,7 @@ fn changeset_detail(data: &Value) -> String {
         cs.message.trim_end(),
     );
     for e in &cs.manifest {
-        let mut line = format!("  {:?}\t{}", e.kind, e.path).to_lowercase();
+        let mut line = format!("  {}\t{}", format!("{:?}", e.kind).to_lowercase(), e.path);
         if let Some(old) = &e.old_path {
             line.push_str(&format!(" (from {old})"));
         }
@@ -917,6 +930,30 @@ async fn stage_file(
         entry.insert("blob".into(), json!(hash));
     }
     Ok(Value::Object(entry))
+}
+
+/// Resolve `path` at `parent` via `vcs.file_get` — delete/rename manifest
+/// entries must carry the source file's `mode` (and rename its `blob`) per
+/// the wire grammar, so commit pulls them from the server instead of
+/// guessing. A server `Err` (path absent at that parent) propagates as-is.
+async fn file_meta(
+    transport: &dyn VcsTransport,
+    repo: &RepoRef,
+    parent: &str,
+    path: &str,
+) -> Result<(VcsFileMode, String), CliFault> {
+    let mut input = repo.input();
+    input.insert("changeset_id".into(), json!(parent));
+    input.insert("path".into(), json!(path));
+    let envelope = call(transport, "vcs.file_get", input).await?;
+    match &envelope {
+        RpcResponse::Ok { data, .. } => {
+            let resp: VcsFileGetResponse = serde_json::from_value(data.clone())
+                .map_err(|e| CliFault::Transport(format!("decoding vcs.file_get: {e}")))?;
+            Ok((resp.mode, resp.blob.as_str().to_string()))
+        }
+        RpcResponse::Err { .. } => Err(CliFault::Server(Box::new(envelope))),
+    }
 }
 
 /// Read a local path for staging — symlinks yield their target string as the
@@ -1255,10 +1292,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("new.txt"), b"hello").unwrap();
         fs::write(dir.path().join("upd.txt"), b"v2").unwrap();
-        let t = Rec::new(vec![Rec::ok(json!({
-            "changeset_id": "cs_01",
-            "manifest_hash": "sha256:xx"
-        }))]);
+        let t = Rec::new(vec![
+            // delete old.txt → file_get at parent; rename a.txt → file_get.
+            Rec::ok(json!({
+                "mode": "100644",
+                "blob": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                "size": 3,
+                "too_large": false,
+                "content_b64": null
+            })),
+            Rec::ok(json!({
+                "mode": "100755",
+                "blob": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                "size": 3,
+                "too_large": false,
+                "content_b64": null
+            })),
+            Rec::ok(json!({
+                "changeset_id": "cs_01",
+                "manifest_hash": "sha256:xx"
+            })),
+        ]);
         let cmd = VcsCommand::Commit {
             repo: repo(),
             message: "test commit".into(),
@@ -1297,10 +1351,19 @@ mod tests {
         );
         assert_eq!(changes[1]["kind"], json!("modify"));
         assert_eq!(changes[1]["mode"], json!("100755"), "--mode override wins");
-        assert_eq!(changes[2], json!({ "path": "old.txt", "kind": "delete" }));
+        assert_eq!(
+            changes[2],
+            json!({ "path": "old.txt", "kind": "delete", "mode": "100644" })
+        );
         assert_eq!(
             changes[3],
-            json!({ "path": "b.txt", "kind": "rename", "old_path": "a.txt" })
+            json!({
+                "path": "b.txt",
+                "kind": "rename",
+                "old_path": "a.txt",
+                "mode": "100755",
+                "blob": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+            })
         );
         assert!(out.pretty.contains("cs_01"));
     }
@@ -1362,7 +1425,7 @@ mod tests {
     async fn ref_set_cas_payloads() {
         // --create --to cs_2 → expected_old:null, new:"cs_2"
         let t = Rec::new(vec![Rec::ok(
-            json!({ "ref_name": "main", "changeset_id": "cs_2" }),
+            json!({ "ref": "main", "changeset_id": "cs_2" }),
         )]);
         let dir = tempfile::tempdir().unwrap();
         run(
@@ -1382,11 +1445,14 @@ mod tests {
         .await
         .unwrap();
         let input = t.last_input();
+        // The wire field is `ref` — VcsRefUpdateRequest.ref_name carries
+        // #[serde(rename = "ref")]; sending `ref_name` is rpc.bad_input.
+        assert_eq!(input["ref"], json!("main"));
         assert_eq!(input["expected_old"], Value::Null);
         assert_eq!(input["new"], json!("cs_2"));
 
         // --expect cs_1 --delete → expected_old:"cs_1", new:null
-        let t = Rec::new(vec![Rec::ok(json!({ "ref_name": "main" }))]);
+        let t = Rec::new(vec![Rec::ok(json!({ "ref": "main" }))]);
         let out = run(
             &t,
             &VcsCommand::RefSet {
@@ -1407,6 +1473,91 @@ mod tests {
         assert_eq!(input["expected_old"], json!("cs_1"));
         assert_eq!(input["new"], Value::Null);
         assert!(out.pretty.contains("deleted"));
+    }
+
+    #[tokio::test]
+    async fn commit_resolves_delete_rename_from_parent() {
+        // The wire grammar requires `mode` on every entry and `blob` on
+        // rename — both resolve via vcs.file_get against the first parent.
+        let t = Rec::new(vec![
+            Rec::ok(json!({
+                "mode": "100755",
+                "blob": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "size": 4,
+                "too_large": false,
+                "content_b64": null
+            })),
+            Rec::ok(json!({
+                "mode": "100644",
+                "blob": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "size": 4,
+                "too_large": false,
+                "content_b64": null
+            })),
+            Rec::ok(json!({ "changeset_id": "cs_new", "manifest_hash": "h" })),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        run(
+            &t,
+            &VcsCommand::Commit {
+                repo: repo(),
+                message: "m".into(),
+                parents: vec!["cs_p".into()],
+                files: vec![],
+                deletes: vec!["old.txt".into()],
+                renames: vec![RenameSpec {
+                    old_path: "a.txt".into(),
+                    path: "b.txt".into(),
+                }],
+            },
+            &mut cache(dir.path()),
+        )
+        .await
+        .unwrap();
+        let calls = t.calls.lock().unwrap();
+        assert_eq!(calls[0].0, "vcs.file_get");
+        assert_eq!(calls[0].1["changeset_id"], json!("cs_p"));
+        assert_eq!(calls[0].1["path"], json!("old.txt"));
+        assert_eq!(calls[1].0, "vcs.file_get");
+        assert_eq!(calls[1].1["path"], json!("a.txt"));
+        assert_eq!(calls[2].0, "vcs.changeset_create");
+        let changes = calls[2].1["changes"].as_array().unwrap();
+        assert_eq!(
+            changes[0],
+            json!({ "path": "old.txt", "kind": "delete", "mode": "100755" })
+        );
+        assert_eq!(
+            changes[1],
+            json!({
+                "path": "b.txt",
+                "kind": "rename",
+                "old_path": "a.txt",
+                "mode": "100644",
+                "blob": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_delete_without_parent_is_usage() {
+        let t = Rec::new(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        let err = run(
+            &t,
+            &VcsCommand::Commit {
+                repo: repo(),
+                message: "m".into(),
+                parents: vec![],
+                files: vec![],
+                deletes: vec!["x.txt".into()],
+                renames: vec![],
+            },
+            &mut cache(dir.path()),
+        )
+        .await
+        .expect_err("delete without a parent must refuse");
+        assert_eq!(err.code(), "ox.usage");
+        assert!(t.calls.lock().unwrap().is_empty(), "no RPC must fire");
     }
 
     #[test]

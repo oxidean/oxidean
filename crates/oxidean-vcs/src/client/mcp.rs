@@ -190,7 +190,7 @@ pub fn tool_descriptors() -> Vec<McpToolDef> {
         },
         McpToolDef {
             name: "vcs_changeset_create",
-            description: "Create a changeset: parent ids, message, and manifest changes ({path, kind, blob, mode, size, content_b64?} entries).",
+            description: "Create a changeset: parent ids, message, and manifest changes ({path, kind, mode, blob|content_b64, old_path?} entries — mode required on every kind; rename adds old_path; delete carries no blob/content).",
             procedure: "vcs.changeset_create",
             access: w,
             input_schema: repo_schema(
@@ -198,7 +198,7 @@ pub fn tool_descriptors() -> Vec<McpToolDef> {
                     "parents": {"type": "array", "items": {"type": "string"}, "description": "Parent changeset ids ([] = root)"},
                     "message": {"type": "string", "description": "Changeset message"},
                     "author": {"type": "object", "properties": {"name": {"type": "string"}, "email": {"type": "string"}}, "description": "Author override; authenticated user when absent"},
-                    "changes": {"type": "array", "items": {"type": "object"}, "description": "Manifest entries: {path, kind, blob, mode, size, content_b64?}"},
+                    "changes": {"type": "array", "items": {"type": "object"}, "description": "Manifest entries: {path, kind, mode, blob|content_b64, old_path?}"},
                 }),
                 &["parents", "message", "changes"],
             ),

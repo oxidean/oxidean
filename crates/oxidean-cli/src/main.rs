@@ -66,7 +66,7 @@ async fn main() -> ExitCode {
                 }
                 ExitCode::SUCCESS
             }
-            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope),
+            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope, &pretty),
         },
         // Raw-bytes RPC results (`vcs cat`) — the blob goes to stdout
         // verbatim; error envelopes behave exactly like `Out::Rpc`.
@@ -87,7 +87,7 @@ async fn main() -> ExitCode {
                 }
                 ExitCode::SUCCESS
             }
-            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope),
+            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope, ""),
         },
         Err(e) => {
             eprintln!("ox: {e}");
@@ -97,8 +97,14 @@ async fn main() -> ExitCode {
 }
 
 /// `RpcResponse::Err` handling shared by `Out::Rpc`/`Out::Bytes` — print the
-/// error + auth hints on stderr, exit via `error_exit_code`.
-fn rpc_err(inv: &args::Invocation, rt: &commands::Runtime, envelope: &RpcResponse) -> ExitCode {
+/// error + auth hints on stderr, exit via `error_exit_code`. A non-empty
+/// `pretty` (e.g. the `vcs.conflict` typed path list) follows the code line.
+fn rpc_err(
+    inv: &args::Invocation,
+    rt: &commands::Runtime,
+    envelope: &RpcResponse,
+    pretty: &str,
+) -> ExitCode {
     let RpcResponse::Err { error, .. } = envelope else {
         return ExitCode::SUCCESS;
     };
@@ -109,6 +115,9 @@ fn rpc_err(inv: &args::Invocation, rt: &commands::Runtime, envelope: &RpcRespons
         );
     } else {
         eprintln!("ox: {}: {}", error.code, error.message);
+        if !pretty.is_empty() {
+            eprintln!("{pretty}");
+        }
     }
     let instance = oxidean_cli::config::resolve_instance(
         inv.global.instance.as_deref(),
