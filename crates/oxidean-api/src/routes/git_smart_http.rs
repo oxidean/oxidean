@@ -832,6 +832,28 @@ async fn authorize_and_cgi(
                                 actions_enabled,
                             )
                             .await;
+                            // Merge queue: a base-branch move invalidates
+                            // the checking group on that train.
+                            let mq_deps = crate::merge_queue::MqDeps {
+                                db: db.clone(),
+                                git: git_pages.clone(),
+                                repos_dir: repos_dir.clone(),
+                                pages_dir: pages_dir.clone(),
+                                env_name: env_name.clone(),
+                                job_token_actor: suppress_actions,
+                                actions_enabled,
+                            };
+                            for (_before, after, refname) in &updates_pages {
+                                if after.chars().all(|c| c == '0') {
+                                    continue;
+                                }
+                                if let Some(branch) = refname.strip_prefix("refs/heads/") {
+                                    crate::merge_queue::after_base_pushed(
+                                        &mq_deps, &repo_id, branch,
+                                    )
+                                    .await;
+                                }
+                            }
                         });
                         // GITHUB_TOKEN parity: pushes authenticated with an
                         // Actions job token must not trigger new workflow runs

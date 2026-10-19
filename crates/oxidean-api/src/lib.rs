@@ -25,6 +25,7 @@ pub mod jobs;
 pub mod label;
 pub mod lfs;
 pub mod mcp;
+pub mod merge_queue;
 pub mod milestone;
 pub mod mirror;
 pub mod notification;

@@ -1913,6 +1913,8 @@ export type BranchProtectionRulePublic = {
   lock_branch: boolean;
   /** GIT-22: pushes introducing unsigned commits are denied by the update hook. */
   require_signed_commits: boolean;
+  /** PRs merge only via the merge queue — direct `pull.merge` is rejected. */
+  required_merge_queue: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1939,6 +1941,8 @@ export type BranchProtectionRuleInput = {
   lock_branch?: boolean;
   /** GIT-22: deny pushes introducing commits without a verified signature. */
   require_signed_commits?: boolean;
+  /** Require the merge queue for PRs targeting matching branches. */
+  required_merge_queue?: boolean;
 };
 
 export type BranchProtectionUpdateRequest = BranchProtectionRuleInput & {
@@ -3462,6 +3466,112 @@ export type PagesDeployCreateRequest = {
   name: string;
   /** Artifact name to publish (default `github-pages`). */
   artifact?: string;
+};
+
+export type MergeQueuePullEmbed = {
+  number: number;
+  title: string;
+  state: string;
+  head_ref: string;
+  head_sha: string;
+  base_ref: string;
+};
+
+export type MergeQueueEntryPublic = {
+  id: string;
+  repo_id: string;
+  /** PR repo-visible number (queue entries always resolve by number). */
+  pull_number: number;
+  /** Bare branch name the train targets (`main`, not `refs/heads/main`). */
+  base_ref: string;
+  /** 1-based enqueue order within the train. */
+  position: number;
+  /** `queued` | `merged` | `dequeued`. */
+  state: string;
+  /** The `checking` group the entry currently rides. */
+  group_id?: string;
+  enqueued_by?: string;
+  enqueued_by_username?: string;
+  /** `manual` | `failed_checks` | `merge_conflict` | `head_changed` |
+      `base_changed` | `closed` (`""` while queued/merged). */
+  dequeue_reason: string;
+  pull?: MergeQueuePullEmbed;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MergeGroupPublic = {
+  id: string;
+  repo_id: string;
+  base_ref: string;
+  base_sha: string;
+  head_ref: string;
+  head_sha: string;
+  /** `checking` | `merged` | `destroyed`. */
+  state: string;
+  /** Pull numbers the group carries, in merge order. */
+  pull_numbers: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type MergeQueueListRequest = {
+  owner: string;
+  name: string;
+  /** Filter to one train (bare branch name); empty lists every train. */
+  base_ref?: string;
+  /** `queued` (default) | `merged` | `dequeued` | `all`. */
+  state?: string;
+};
+
+export type MergeQueueListResponse = {
+  entries: MergeQueueEntryPublic[];
+};
+
+export type MergeQueueGetRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueGetResponse = {
+  entry?: MergeQueueEntryPublic;
+  /** The `checking` group the entry rides (absent when not queued). */
+  group?: MergeGroupPublic;
+  /** Whether the base branch's protection requires the queue. */
+  required: boolean;
+};
+
+export type MergeQueueEnqueueRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueEnqueueResponse = {
+  entry: MergeQueueEntryPublic;
+  group?: MergeGroupPublic;
+};
+
+export type MergeQueueDequeueRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueDequeueResponse = {
+  entry: MergeQueueEntryPublic;
+};
+
+export type MergeQueueGroupsRequest = {
+  owner: string;
+  name: string;
+  base_ref?: string;
+  limit?: number;
+};
+
+export type MergeQueueGroupsResponse = {
+  groups: MergeGroupPublic[];
 };
 
 export type OrgSecretMetaPublic = {
@@ -5949,6 +6059,18 @@ export function createClient(opts: CreateClientOptions) {
         create: (input: PagesDeployCreateRequest) =>
           rpcCall<PagesBuildPublic>(opts, "pages.deploys.create", input),
       },
+    },
+    mergeQueue: {
+      list: (input: MergeQueueListRequest) =>
+        rpcCall<MergeQueueListResponse>(opts, "merge_queue.list", input),
+      get: (input: MergeQueueGetRequest) =>
+        rpcCall<MergeQueueGetResponse>(opts, "merge_queue.get", input),
+      groups: (input: MergeQueueGroupsRequest) =>
+        rpcCall<MergeQueueGroupsResponse>(opts, "merge_queue.groups", input),
+      enqueue: (input: MergeQueueEnqueueRequest) =>
+        rpcCall<MergeQueueEnqueueResponse>(opts, "merge_queue.enqueue", input),
+      dequeue: (input: MergeQueueDequeueRequest) =>
+        rpcCall<MergeQueueDequeueResponse>(opts, "merge_queue.dequeue", input),
     },
     pull: {
       create: (input: CreatePullRequest) =>

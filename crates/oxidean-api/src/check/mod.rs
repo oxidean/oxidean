@@ -998,6 +998,16 @@ async fn emit_suite_completed_if_due(
     }
     dispatch::emit_check_suite_webhook(&ctx.db, &suite, "completed", env_name).await;
     notify_actions_check_suite(ctx, accessible, &suite, "completed", user).await;
+    // Merge queue: a suite landing on a `checking` group's head_sha decides
+    // the train — `success` fast-forwards the base ref; anything else
+    // destroys the group (GitHub merge-group verification semantics).
+    crate::merge_queue::after_suite_completed(
+        &crate::merge_queue::MqDeps::from_ctx(ctx),
+        &suite.repository_id,
+        &suite.head_sha,
+        suite.conclusion.as_deref().unwrap_or("failure"),
+    )
+    .await;
 }
 
 /// Persist inline annotations under a check run.

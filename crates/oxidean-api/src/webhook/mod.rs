@@ -37,6 +37,7 @@ const ALLOWED_EVENTS: &[&str] = &[
     "discussion",
     "discussion_comment",
     "page_build",
+    "merge_group",
     "pull_request_review_comment",
     "release",
     "star",

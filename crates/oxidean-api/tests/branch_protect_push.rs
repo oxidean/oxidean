@@ -246,6 +246,7 @@ async fn branch_protect_push_denies_force_push() {
         required_linear_history: false,
         lock_branch: false,
         require_signed_commits: false,
+        required_merge_queue: false,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -279,6 +280,7 @@ async fn branch_protect_push_lock_branch() {
         required_linear_history: false,
         lock_branch: true,
         require_signed_commits: false,
+        required_merge_queue: false,
         created_at: String::new(),
         updated_at: String::new(),
     };

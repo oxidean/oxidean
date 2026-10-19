@@ -35,6 +35,12 @@ pub enum PullRequestAction {
     Opened,
     Synchronize,
     Reopened,
+    /// Merge or close-without-merge — `merged` on the event splits them.
+    Closed,
+    /// Merge-queue entry added (`merge_queue.enqueue`).
+    Enqueued,
+    /// Entry left the queue (manual remove, failed checks, head moved, close).
+    Dequeued,
 }
 
 impl PullRequestAction {
@@ -44,6 +50,9 @@ impl PullRequestAction {
             Self::Opened => "opened",
             Self::Synchronize => "synchronize",
             Self::Reopened => "reopened",
+            Self::Closed => "closed",
+            Self::Enqueued => "enqueued",
+            Self::Dequeued => "dequeued",
         }
     }
 }
@@ -82,6 +91,9 @@ pub struct PullRequestEvent {
     /// differs for fork heads. Recorded on `pull_request` runs; claim uses it
     /// to gate secrets and the job token's write grant.
     pub head_repo_id: Option<String>,
+    /// `pull_request.merged` on `closed` payloads — queue landings and
+    /// `pull.merge` set it; plain closes leave it false.
+    pub merged: bool,
     /// Set when the mutating actor authenticated with an Actions job token —
     /// GITHUB_TOKEN-caused events never start new runs (GitHub's recursion
     /// rule; `workflow_dispatch`/`repository_dispatch` are exempt and don't
@@ -233,6 +245,7 @@ async fn dispatch_pull_request_inner(
         },
         &actor_embed,
         &base_repo,
+        event.merged,
     );
 
     let mut n = 0;
@@ -509,6 +522,7 @@ pub async fn dispatch_pull_request_for_sha(
         base_default_branch: "main".into(),
         actor_id: actor_id.map(str::to_string),
         head_repo_id: head_repo_id.map(str::to_string),
+        merged: action == PullRequestAction::Closed,
         job_token_actor: false,
         actions_enabled_instance,
     };

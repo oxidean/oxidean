@@ -390,6 +390,7 @@ jobs:
         actor_id: Some(uid2.clone()),
         head_repo_id: Some(repo2_id.clone()),
         job_token_actor: false,
+        merged: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(
@@ -1232,6 +1233,7 @@ jobs:
         actor_id: Some(uid.clone()),
         head_repo_id: Some(repo_id.clone()),
         job_token_actor: false,
+        merged: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)
@@ -1357,6 +1359,7 @@ jobs:
         actor_id: Some(uid.clone()),
         head_repo_id: Some(repo_id.clone()),
         job_token_actor: false,
+        merged: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)

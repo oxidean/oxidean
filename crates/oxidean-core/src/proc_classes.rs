@@ -274,7 +274,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.comments.history"
         | "pull.reviews.list"
         | "pull.reviewRequests.list"
-        | "pull.branchStatus" => PullsRead,
+        | "pull.branchStatus"
+        | "merge_queue.list"
+        | "merge_queue.get"
+        | "merge_queue.groups" => PullsRead,
 
         "pull.create"
         | "pull.update"
@@ -289,7 +292,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.reviewRequests.add"
         | "pull.reviewRequests.remove"
         | "pull.merge"
-        | "pull.updateBranch" => PullsWrite,
+        | "pull.updateBranch"
+        | "merge_queue.enqueue"
+        | "merge_queue.dequeue" => PullsWrite,
 
         "repo.actions.listRuns"
         | "repo.actions.getRun"

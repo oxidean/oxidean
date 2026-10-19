@@ -708,6 +708,7 @@ fn apply_event(
         | "project_card"
         | "discussion"
         | "discussion_comment"
+        | "merge_group"
         | "public"
         | "status"
         | "repository_dispatch"
@@ -716,7 +717,7 @@ fn apply_event(
                 .insert(name.to_string(), parse_event_filters(value).types);
         }
         other => {
-            // Other unimplemented events (merge_group, …) never
+            // Other unimplemented events (security_advisory, …) never
             // fire — the caller warns loudly so the gap isn't silent.
             return Some(other.to_string());
         }
@@ -1817,7 +1818,7 @@ jobs:
 name: CI
 on:
   push:
-  merge_group:
+  security_advisory:
   unfamiliar_event:
     types: [checks_requested]
 jobs:
@@ -1834,7 +1835,7 @@ jobs:
         assert!(
             doc.warnings
                 .iter()
-                .any(|w| w.contains("on.merge_group") && w.contains("unsupported event")),
+                .any(|w| w.contains("on.security_advisory") && w.contains("unsupported event")),
             "missing unsupported-event warning: {:?}",
             doc.warnings
         );
@@ -1849,7 +1850,7 @@ jobs:
         let doc2 = parse_workflow_yaml(
             br#"
 name: CI
-on: [push, merge_group]
+on: [push, security_advisory]
 jobs:
   a:
     runs-on: ubuntu-latest
@@ -1858,7 +1859,10 @@ jobs:
 "#,
         )
         .expect("parse");
-        assert!(doc2.warnings.iter().any(|w| w.contains("on.merge_group")));
+        assert!(doc2
+            .warnings
+            .iter()
+            .any(|w| w.contains("on.security_advisory")));
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
 pub mod mcp_settings;
+pub mod merge_queue;
 pub mod migrate;
 pub mod milestones;
 pub mod mirrors;
@@ -85,6 +86,7 @@ pub use issues::{
 };
 pub use lfs::LfsObjectRow;
 pub use mcp_settings::McpSettingsRow;
+pub use merge_queue::{MergeGroupRow, MergeQueueEntryRow};
 pub use milestones::MilestoneRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
@@ -1587,6 +1589,7 @@ impl Database {
         required_linear_history: bool,
         lock_branch: bool,
         require_signed_commits: bool,
+        required_merge_queue: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::insert_rule(
             self.require_pool()?,
@@ -1606,6 +1609,7 @@ impl Database {
             required_linear_history,
             lock_branch,
             require_signed_commits,
+            required_merge_queue,
         )
         .await
     }
@@ -1629,6 +1633,7 @@ impl Database {
         required_linear_history: bool,
         lock_branch: bool,
         require_signed_commits: bool,
+        required_merge_queue: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::update_rule(
             self.require_pool()?,
@@ -1648,6 +1653,7 @@ impl Database {
             required_linear_history,
             lock_branch,
             require_signed_commits,
+            required_merge_queue,
         )
         .await
     }
@@ -2418,6 +2424,167 @@ impl Database {
 
     pub async fn delete_pages_builds_for_repo(&self, repo_id: &str) -> Result<(), String> {
         pages::delete_pages_builds_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    // --- merge queue ---------------------------------------------------
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_merge_queue_entry(
+        &self,
+        id: &str,
+        repo_id: &str,
+        pull_id: &str,
+        pull_number: i64,
+        base_ref: &str,
+        enqueued_by: &str,
+    ) -> Result<MergeQueueEntryRow, String> {
+        merge_queue::insert_merge_queue_entry(
+            self.require_pool()?,
+            id,
+            repo_id,
+            pull_id,
+            pull_number,
+            base_ref,
+            enqueued_by,
+        )
+        .await
+    }
+
+    pub async fn find_merge_queue_entry(
+        &self,
+        id: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_merge_queue_entry(self.require_pool()?, id).await
+    }
+
+    pub async fn find_queued_entry_for_pull(
+        &self,
+        pull_id: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_queued_entry_for_pull(self.require_pool()?, pull_id).await
+    }
+
+    pub async fn find_merge_queue_entry_for_pull_number(
+        &self,
+        repo_id: &str,
+        pull_number: i64,
+        state: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_merge_queue_entry_for_pull_number(
+            self.require_pool()?,
+            repo_id,
+            pull_number,
+            state,
+        )
+        .await
+    }
+
+    pub async fn find_latest_merge_queue_entry_for_pull_number(
+        &self,
+        repo_id: &str,
+        pull_number: i64,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_latest_merge_queue_entry_for_pull_number(
+            self.require_pool()?,
+            repo_id,
+            pull_number,
+        )
+        .await
+    }
+
+    pub async fn list_merge_queue_entries(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+        state: &str,
+    ) -> Result<Vec<MergeQueueEntryRow>, String> {
+        merge_queue::list_merge_queue_entries(self.require_pool()?, repo_id, base_ref, state).await
+    }
+
+    pub async fn list_merge_queue_entries_for_group(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<MergeQueueEntryRow>, String> {
+        merge_queue::list_merge_queue_entries_for_group(self.require_pool()?, group_id).await
+    }
+
+    pub async fn set_merge_queue_entry_state(
+        &self,
+        id: &str,
+        state: &str,
+        dequeue_reason: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::set_merge_queue_entry_state(self.require_pool()?, id, state, dequeue_reason)
+            .await
+    }
+
+    pub async fn set_entry_group_and_chain(
+        &self,
+        entry_id: &str,
+        group_id: Option<&str>,
+        chain_sha: &str,
+    ) -> Result<(), String> {
+        merge_queue::set_entry_group_and_chain(self.require_pool()?, entry_id, group_id, chain_sha)
+            .await
+    }
+
+    pub async fn insert_merge_group(
+        &self,
+        id: &str,
+        repo_id: &str,
+        base_ref: &str,
+        base_sha: &str,
+        head_ref: &str,
+        head_sha: &str,
+    ) -> Result<MergeGroupRow, String> {
+        merge_queue::insert_merge_group(
+            self.require_pool()?,
+            id,
+            repo_id,
+            base_ref,
+            base_sha,
+            head_ref,
+            head_sha,
+        )
+        .await
+    }
+
+    pub async fn set_merge_group_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::set_merge_group_state(self.require_pool()?, id, state).await
+    }
+
+    pub async fn find_merge_group(&self, id: &str) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_merge_group(self.require_pool()?, id).await
+    }
+
+    pub async fn find_checking_merge_group(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_checking_merge_group(self.require_pool()?, repo_id, base_ref).await
+    }
+
+    pub async fn find_checking_merge_group_for_head(
+        &self,
+        repo_id: &str,
+        head_sha: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_checking_merge_group_for_head(self.require_pool()?, repo_id, head_sha)
+            .await
+    }
+
+    pub async fn list_merge_groups(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+        limit: i64,
+    ) -> Result<Vec<MergeGroupRow>, String> {
+        merge_queue::list_merge_groups(self.require_pool()?, repo_id, base_ref, limit).await
     }
 
     pub async fn insert_issue_revision(

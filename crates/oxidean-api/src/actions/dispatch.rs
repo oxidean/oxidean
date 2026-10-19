@@ -1399,6 +1399,131 @@ pub(crate) async fn emit_jobs(
     Ok(job_ids)
 }
 
+#[allow(clippy::too_many_arguments)]
+/// `on: merge_group` — soft-fail fan-out for a `checking` merge group.
+/// Workflows are discovered at the group's chain head (`head_sha`) and runs
+/// record `head_ref` (`refs/heads/gh-readonly-queue/…`) — the checked-out
+/// tree IS the combined queue train (GitHub parity).
+pub async fn notify_merge_group_actions(
+    db: &Database,
+    git: &dyn GitBackend,
+    bare_repo: &Path,
+    repository_id: &str,
+    head_sha: &str,
+    head_ref: &str,
+    payload: &serde_json::Value,
+    actor_id: Option<&str>,
+    job_token_actor: bool,
+    actions_enabled_instance: bool,
+) {
+    if let Err(e) = dispatch_merge_group_inner(
+        db,
+        git,
+        bare_repo,
+        repository_id,
+        head_sha,
+        head_ref,
+        payload,
+        actor_id,
+        job_token_actor,
+        actions_enabled_instance,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            repository_id,
+            head_sha,
+            "actions merge_group dispatch failed (group already formed)"
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_merge_group_inner(
+    db: &Database,
+    git: &dyn GitBackend,
+    bare_repo: &Path,
+    repository_id: &str,
+    head_sha: &str,
+    head_ref: &str,
+    payload: &serde_json::Value,
+    actor_id: Option<&str>,
+    job_token_actor: bool,
+    actions_enabled_instance: bool,
+) -> Result<usize, String> {
+    if job_token_actor || !actions_enabled_instance {
+        return Ok(0);
+    }
+    if !db
+        .get_repo_actions_enabled(repository_id)
+        .await
+        .unwrap_or(true)
+    {
+        return Ok(0);
+    }
+    if !bare_repo.exists() {
+        return Err(format!("bare repo missing: {}", bare_repo.display()));
+    }
+    let discovered = discover_workflows(git, bare_repo, head_sha)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut n = 0;
+    if !discovered.errors.is_empty() {
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+        }
+        n += fail_discovery_runs(
+            db,
+            repository_id,
+            &discovered.errors,
+            "merge_group",
+            head_sha,
+            head_ref,
+            actor_id,
+            None,
+            Some(payload),
+        )
+        .await?;
+    }
+    let disabled = db.list_disabled_action_workflows(repository_id).await?;
+    for wf in &discovered.workflows {
+        let Some(types) = wf
+            .document
+            .triggers
+            .lifecycle
+            .get("merge_group")
+            .map(|v| v.as_slice())
+        else {
+            continue;
+        };
+        if disabled.contains(&wf.path) {
+            continue;
+        }
+        // `checks_requested` is merge_group's only activity type upstream;
+        // an explicit `types:` list may narrow to it but never widens.
+        if !types.is_empty() && !types.iter().any(|t| t == "checks_requested") {
+            continue;
+        }
+        enqueue_run(
+            db,
+            repository_id,
+            &wf.path,
+            &wf.document,
+            "merge_group",
+            head_sha,
+            head_ref,
+            actor_id,
+            None,
+            Some(payload),
+            false,
+        )
+        .await?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::message_has_skip_marker;
@@ -1420,3 +1545,4 @@ mod tests {
         assert!(!message_has_skip_marker("[skip c")); // partial token no
     }
 }
+

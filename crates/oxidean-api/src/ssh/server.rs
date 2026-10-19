@@ -449,6 +449,29 @@ impl Handler for SshHandler {
                                     actions_enabled,
                                 )
                                 .await;
+                                // Merge queue: a base-branch move
+                                // invalidates the checking group on that
+                                // train (SSH auth is never a job token).
+                                let mq_deps = crate::merge_queue::MqDeps {
+                                    db: db.clone(),
+                                    git: git.clone(),
+                                    repos_dir: repos_dir.clone(),
+                                    pages_dir: crate::pages::resolve_pages_dir(),
+                                    env_name: env_name.clone(),
+                                    job_token_actor: false,
+                                    actions_enabled,
+                                };
+                                for (_before, after, refname) in &updates {
+                                    if after.chars().all(|c| c == '0') {
+                                        continue;
+                                    }
+                                    if let Some(branch) = refname.strip_prefix("refs/heads/") {
+                                        crate::merge_queue::after_base_pushed(
+                                            &mq_deps, &repo_id, branch,
+                                        )
+                                        .await;
+                                    }
+                                }
                                 let git_mirror = git.clone();
                                 crate::actions::notify_push_actions(
                                     &db,

@@ -62,6 +62,10 @@ pub struct BranchProtectionRulePublic {
     pub lock_branch: bool,
     /// GIT-22: pushes introducing unsigned commits are denied by the update hook.
     pub require_signed_commits: bool,
+    /// GitHub ruleset "Require merge queue" — direct merges are rejected and
+    /// PRs route through `merge_queue.*` (groups run required checks on the
+    /// combined tree before the base ref fast-forwards).
+    pub required_merge_queue: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -105,6 +109,9 @@ pub struct BranchProtectionRuleInput {
     /// GIT-22: deny pushes introducing commits without a forge-verified signature.
     #[serde(default)]
     pub require_signed_commits: bool,
+    /// GitHub ruleset "Require merge queue" for matching branches.
+    #[serde(default)]
+    pub required_merge_queue: bool,
 }
 
 fn default_review_count() -> i32 {
@@ -145,6 +152,9 @@ pub struct BranchProtectionUpdateRequest {
     /// GIT-22: deny pushes introducing commits without a forge-verified signature.
     #[serde(default)]
     pub require_signed_commits: bool,
+    /// GitHub ruleset "Require merge queue" for matching branches.
+    #[serde(default)]
+    pub required_merge_queue: bool,
 }
 
 /// `repo.branchProtection.delete`.

@@ -498,6 +498,11 @@ pub const PROCEDURES: &[&str] = &[
     "pages.builds.get",
     "pages.builds.request",
     "pages.deploys.create",
+    "merge_queue.list",
+    "merge_queue.get",
+    "merge_queue.groups",
+    "merge_queue.enqueue",
+    "merge_queue.dequeue",
     "repo.discussions.getEnabled",
     "repo.discussions.setEnabled",
     "issue.assigneeCandidates",
@@ -2175,6 +2180,26 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "pages.deploys.create" => match crate::pages::deploys_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "merge_queue.list" => match crate::merge_queue::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "merge_queue.get" => match crate::merge_queue::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "merge_queue.groups" => match crate::merge_queue::groups(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "merge_queue.enqueue" => match crate::merge_queue::enqueue(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "merge_queue.dequeue" => match crate::merge_queue::dequeue(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

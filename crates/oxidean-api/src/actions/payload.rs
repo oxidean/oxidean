@@ -81,6 +81,7 @@ pub fn pull_request_payload(
     head_owner: Option<&str>,
     actor: &JsonValue,
     repository: &JsonValue,
+    merged: bool,
 ) -> JsonValue {
     let base_repo_name = base_repo
         .get("full_name")
@@ -90,14 +91,15 @@ pub fn pull_request_payload(
         .get("full_name")
         .and_then(|v| v.as_str())
         .unwrap_or(base_repo_name);
+    let state = if action == "closed" { "closed" } else { "open" };
     json!({
         "action": action,
         "number": number,
         "pull_request": {
             "number": number,
             "title": title,
-            "state": "open",
-            "merged": false,
+            "state": state,
+            "merged": merged,
             "user": actor,
             "head": {
                 "ref": head_ref,
@@ -688,6 +690,35 @@ pub fn page_build_payload(
             "updated_at": build.updated_at,
             "pusher": pusher,
         },
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
+/// `merge_group` payload — `action` is `checks_requested` (a group started
+/// verification), `dequeued` (a PR left the queue), or `destroyed` (the
+/// group was invalidated/merged). The `merge_group` object mirrors GitHub:
+/// `head_ref` is the `gh-readonly-queue/…` branch, `head_sha` the chain tip
+/// Actions checks out; `pulls` lists the PR numbers in merge order.
+pub fn merge_group_payload(
+    action: &str,
+    group: &oxidean_db::MergeGroupRow,
+    head_commit: &JsonValue,
+    pull_numbers: &[i64],
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let pulls: Vec<JsonValue> = pull_numbers.iter().map(|n| json!(n)).collect();
+    json!({
+        "action": action,
+        "merge_group": {
+            "head_sha": group.head_sha,
+            "head_ref": group.head_ref,
+            "base_sha": group.base_sha,
+            "base_ref": format!("refs/heads/{}", group.base_ref),
+            "head_commit": head_commit,
+        },
+        "pulls": pulls,
         "repository": repository,
         "sender": sender,
     })

@@ -2,7 +2,7 @@
 
 pub(crate) mod acl;
 mod comments;
-mod merge_ops;
+pub(crate) mod merge_ops;
 pub(crate) mod refs;
 mod reviews;
 mod update_branch;
@@ -53,7 +53,7 @@ fn db_err(e: String) -> AppError {
 
 #[allow(clippy::too_many_arguments)]
 /// Soft-fail PR → Actions enqueue (CR-02 / D-ACT-05). Never fails the PR mutation.
-async fn notify_actions_for_pull(
+pub(crate) async fn notify_actions_for_pull(
     db: &Database,
     git: &dyn GitBackend,
     repos_dir: &Path,
@@ -65,6 +65,8 @@ async fn notify_actions_for_pull(
     actor_id: Option<&str>,
     job_token_actor: bool,
     action: crate::actions::PullRequestAction,
+    // `pull_request.merged` on `closed` events.
+    merged: bool,
 ) {
     let Ok(bare) = bare_repo_path(repos_dir, head_owner, head_name) else {
         return;
@@ -98,6 +100,7 @@ async fn notify_actions_for_pull(
         base_default_branch,
         actor_id: actor_id.map(str::to_string),
         head_repo_id: Some(pull.head_repo_id.clone()),
+        merged,
         job_token_actor,
         actions_enabled_instance: crate::actions::env_actions_enabled(),
     };
@@ -124,6 +127,7 @@ pub(crate) async fn emit_pull_event(
         sender_id,
         merged,
         &ctx.env_name,
+        None,
     )
     .await;
 }
@@ -141,6 +145,7 @@ pub(crate) async fn emit_pull_event_db(
     sender_id: &str,
     merged: bool,
     env_name: &str,
+    dequeue_reason: Option<&str>,
 ) {
     let (head_owner, head_name) = if row.head_repo_id == row.repo_id {
         (base_owner.to_string(), base_name.to_string())
@@ -166,7 +171,7 @@ pub(crate) async fn emit_pull_event_db(
         (base_owner.to_string(), base_name.to_string())
     };
     let state = if merged { "closed" } else { row.state.as_str() };
-    let payload = payloads::pull_request_payload(
+    let mut payload = payloads::pull_request_payload(
         action,
         row.number,
         &row.title,
@@ -185,7 +190,49 @@ pub(crate) async fn emit_pull_event_db(
         sender_login,
         sender_id,
     );
+    if let Some(reason) = dequeue_reason {
+        payload["reason"] = serde_json::Value::String(reason.to_string());
+    }
     dispatch::emit(db, base_repo_id, "pull_request", action, payload, env_name).await;
+}
+
+/// Pull the PR head commit into the base bare when the head lives in a
+/// fork — `merge_commit`/`test_merge_commit` on the base object store need
+/// the objects present. Same-repo heads are already local (no-op).
+pub(crate) async fn ensure_head_objects_in_base(
+    db: &Database,
+    git: &dyn GitBackend,
+    repos_dir: &Path,
+    base_bare: &Path,
+    pull: &PullRow,
+) -> Result<(), AppError> {
+    if pull.head_repo_id == pull.repo_id {
+        return Ok(());
+    }
+    let head_repo = db
+        .find_repository_by_id(&pull.head_repo_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("pull.internal", "head repo missing"))?;
+    let head_owner = match head_repo.owner_type.as_str() {
+        "org" => db
+            .find_organization_by_id(&head_repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|o| o.slug)
+            .unwrap_or_default(),
+        _ => db
+            .find_user_by_id(&head_repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|u| u.username)
+            .unwrap_or_default(),
+    };
+    let head_path = bare_repo_path(repos_dir, &head_owner, &head_repo.name)?;
+    git.fetch_ref_from(base_bare, &head_path, &pull.head_sha)
+        .await
+        .map_err(|e| AppError::new("pull.merge_failed", format!("fetch head failed: {e}")))?;
+    Ok(())
 }
 
 async fn resolve_ref_sha_at(
@@ -424,6 +471,7 @@ pub(crate) async fn synchronize_pull_after_head_move(
         actor_id,
         false,
         env_name,
+        None,
     )
     .await;
     notify_actions_for_pull(
@@ -438,6 +486,25 @@ pub(crate) async fn synchronize_pull_after_head_move(
         Some(actor_id),
         job_token_actor,
         crate::actions::PullRequestAction::Synchronize,
+        false,
+    )
+    .await;
+    // Merge queue: a queued PR whose head moved leaves the train — GitHub
+    // removes it (the queued commit is stale).
+    crate::merge_queue::after_pull_head_moved(
+        &crate::merge_queue::MqDeps {
+            db: db.clone(),
+            git: std::sync::Arc::new(oxidean_git::CliGitBackend::new()),
+            repos_dir: repos_dir.to_path_buf(),
+            pages_dir: crate::pages::resolve_pages_dir(),
+            env_name: env_name.to_string(),
+            job_token_actor,
+            actions_enabled: crate::actions::env_actions_enabled(),
+        },
+        &pull.repo_id,
+        &updated,
+        actor_login,
+        actor_id,
     )
     .await;
     Ok(updated)
@@ -853,6 +920,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         Some(&user.id),
         crate::actions::events::rpc_caller_is_job_token(ctx),
         crate::actions::PullRequestAction::Opened,
+        false,
     )
     .await;
     to_public(ctx, &row).await
@@ -1113,6 +1181,15 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
         false,
     )
     .await;
+    // Merge queue: closing a queued PR removes it from the train.
+    crate::merge_queue::after_pull_closed(
+        &crate::merge_queue::MqDeps::from_ctx(ctx),
+        &accessible.row.id,
+        &updated,
+        &user.username,
+        &user.id,
+    )
+    .await;
     to_public(ctx, &updated).await
 }
 
@@ -1204,6 +1281,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         Some(&user.id),
         crate::actions::events::rpc_caller_is_job_token(ctx),
         crate::actions::PullRequestAction::Reopened,
+        false,
     )
     .await;
     to_public(ctx, &updated).await
@@ -1294,6 +1372,36 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             .map_err(db_err)?;
     }
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    // Merge queue: a head move or base retarget removes the PR from its
+    // train — the queued commit/branch is stale.
+    if head_changed || base_ref != row.base_ref {
+        let reason = if head_changed {
+            "head_changed"
+        } else {
+            "base_changed"
+        };
+        let deps = crate::merge_queue::MqDeps::from_ctx(ctx);
+        if head_changed {
+            crate::merge_queue::after_pull_head_moved(
+                &deps,
+                &accessible.row.id,
+                &updated,
+                &user.username,
+                &user.id,
+            )
+            .await;
+        } else {
+            crate::merge_queue::dequeue_entry_for_pull(
+                &deps,
+                &accessible.row.id,
+                &updated,
+                reason,
+                &user.username,
+                &user.id,
+            )
+            .await;
+        }
+    }
     let action = if head_changed {
         "synchronize"
     } else {
