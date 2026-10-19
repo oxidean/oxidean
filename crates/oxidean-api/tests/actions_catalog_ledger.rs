@@ -12,7 +12,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use oxidean_api::actions::templates::classify_template_content;
+use oxidean_api::actions::templates::{
+    classify_template_content, render_template_content, RenderCtx,
+};
 
 const STATUSES: &[&str] = &[
     "runnable",
@@ -50,11 +52,19 @@ fn vendored_templates() -> BTreeMap<String, PathBuf> {
 }
 
 fn expected_compat() -> BTreeMap<String, serde_json::Value> {
+    // The ledger describes the *rendered* template — the content users
+    // actually preview/commit — so render-time fixes (dropped GitHub-API
+    // steps, aligned runtime pins) are reflected in the classification.
+    let ctx = RenderCtx {
+        default_branch: "main".to_string(),
+        vars: Default::default(),
+    };
     vendored_templates()
         .iter()
         .map(|(key, path)| {
             let content = std::fs::read_to_string(path).unwrap();
-            let c = classify_template_content(&content);
+            let rendered = render_template_content(&format!("builtin:{key}"), &content, &ctx);
+            let c = classify_template_content(&rendered);
             (
                 key.clone(),
                 serde_json::json!({

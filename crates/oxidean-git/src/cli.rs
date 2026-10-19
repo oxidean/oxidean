@@ -11,8 +11,7 @@ use crate::backend::{
     FileChange, FilesCommit, FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit,
     GrepResult, NameStatusKind, NameStatusRow, PushEventCommit, RawCommit, RemoteAuthKind,
     RemoteCredentials, RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry,
-    ARCHIVE_TIMEOUT,
-    BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.

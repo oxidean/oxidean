@@ -103,6 +103,46 @@ for (const key of Object.keys(catalog.templates ?? {})) {
   }
 }
 
+// render rules: byte-exact transforms applied to vendored templates at
+// preview/commit time (templates.rs). Every `find` needle must still appear
+// in the vendored bytes — a re-vendor that drifts the anchor fails here and
+// in crates/oxidean-api's render_rule_needles_match_vendored_bytes test.
+const render = catalog.render ?? {};
+for (const [key, rules] of Object.entries(render)) {
+  const [d, stem] = key.split("/", 2);
+  const file = ["yml", "yaml"].map((e) => join(TEMPLATES, d, `${stem}.${e}`)).find(isFile);
+  if (!dirs.includes(d) || !file) {
+    err(`catalog render entry '${key}' has no vendored template`);
+    fail = 1;
+    continue;
+  }
+  if (!Array.isArray(rules) || rules.length === 0) {
+    err(`catalog render '${key}' must be a nonempty rule array`);
+    fail = 1;
+    continue;
+  }
+  const bytes = readFileSync(file, "utf8");
+  for (const [i, rule] of rules.entries()) {
+    if (typeof rule.find !== "string" || rule.find.length === 0) {
+      err(`catalog render '${key}' rule ${i} has an empty find`);
+      fail = 1;
+      continue;
+    }
+    if (typeof rule.replace !== "string") {
+      err(`catalog render '${key}' rule ${i} missing replace`);
+      fail = 1;
+    }
+    if (!bytes.includes(rule.find)) {
+      err(`catalog render '${key}' rule ${i} needle not in vendored bytes: ${JSON.stringify(rule.find.slice(0, 80))}`);
+      fail = 1;
+    }
+    if ("note" in rule && typeof rule.note !== "string") {
+      err(`catalog render '${key}' rule ${i} note must be a string`);
+      fail = 1;
+    }
+  }
+}
+
 // compat ledger: every vendored workflow has a classified entry; values are
 // recomputed and verified by tests/actions_catalog_ledger.rs.
 const COMPAT_STATUSES = new Set([

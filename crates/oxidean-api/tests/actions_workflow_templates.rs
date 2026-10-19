@@ -502,6 +502,65 @@ async fn workflows_create_direct_commit() {
     assert_eq!(blob["data"]["content"], "name: Authored\non: [push]\njobs:\n  j:\n    runs-on: linux\n    steps:\n      - run: echo ok\n");
 }
 
+/// Render-time runtime alignment: `builtin:ci/go` preview == committed bytes,
+/// and both carry `go-version-file` (repo go.mod) instead of the stale
+/// upstream pin — the Go preset's `go 1.22` code compiles under it.
+#[tokio::test]
+async fn workflows_create_renders_aligned_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wt_render.db").display());
+    let db = support::connect_test_db(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "g@ex.com", "gou").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    // A `go` preset repo — seeds go.mod with `go 1.22`.
+    let c = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"gorepo","visibility":"public","stack_id":"go"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(c["ok"], true, "{c}");
+
+    // Preview shows the aligned bytes.
+    let get = rpc_json(
+        &app,
+        r#"{"procedure":"repo.actions.workflowTemplates.get","input":{"owner":"gou","name":"gorepo","id":"builtin:ci/go"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(get["ok"], true, "get — {get}");
+    let preview = get["data"]["content"].as_str().expect("content");
+    assert!(preview.contains("actions/setup-go@v5"), "{preview}");
+    assert!(preview.contains("go-version-file: 'go.mod'"), "{preview}");
+    assert!(!preview.contains("go-version: '1.20'"), "{preview}");
+    assert!(preview.contains("branches: [ main ]"), "{preview}");
+
+    // Commit — identical bytes land on disk.
+    let create = rpc_json(
+        &app,
+        r#"{"procedure":"repo.actions.workflows.create","input":{"owner":"gou","name":"gorepo","template_id":"builtin:ci/go"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "create — {create}");
+    let blob = blob_content(
+        &app,
+        &cookie,
+        "gou",
+        "gorepo",
+        "main",
+        ".github/workflows/go.yml",
+    )
+    .await;
+    assert_eq!(blob["ok"], true, "{blob}");
+    assert_eq!(blob["data"]["content"].as_str().unwrap(), preview);
+}
+
 /// `workflows.create` onto an open same-repo PR head + fork PR rejection.
 #[tokio::test]
 async fn workflows_create_onto_pull_head() {
