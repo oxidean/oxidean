@@ -133,6 +133,7 @@ async fn serve() {
         state.lfs_dir.clone(),
         state.packages_dir.clone(),
         job_cfg,
+        state.vcs.clone(),
     );
     let app = oxidean_api::router_with_state(state, cors);
     axum::serve(listener, app).await.expect("server error");

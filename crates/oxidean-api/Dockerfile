@@ -52,6 +52,29 @@ ARG OXIDEAN_SOURCE_COMMIT=
 ARG RAILWAY_GIT_COMMIT_SHA=
 RUN commit="${OXIDEAN_SOURCE_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}" \
   && if [ -n "$commit" ]; then echo "$commit" > /usr/local/share/oxidean-cli/SOURCE_COMMIT; fi
+# Host-only builds (PR/preview, self-host, Compose) synthesize a truthful
+# latest.json from the staged binary — /cli/latest then advertises this
+# deployment's own ox and `ox self-update` can align to it. Feed builds leave
+# the file absent: the feed's release-owned manifest is fetched below (or at
+# runtime by the entrypoint) and wins.
+RUN if [ -z "$OXIDEAN_CLI_DIST_URL" ]; then \
+      target=$(rustc -vV | awk '/^host:/ {print $2}') \
+      && bin="/usr/local/share/oxidean-cli/ox-$target" \
+      && version=$(awk -F'"' '/^version = "/ {print $2; exit}' /app/crates/oxidean-cli/Cargo.toml) \
+      && if [ -f "$bin" ] && [ -n "$version" ]; then \
+        sha=$(sha256sum "$bin" | awk '{print $1}') \
+        && bytes=$(wc -c < "$bin" | tr -d ' ') \
+        && { printf '{"schema_version":1,"version":"%s",' "$version"; \
+             if [ -f /usr/local/share/oxidean-cli/SOURCE_COMMIT ]; then \
+               printf '"dist_commit":"%s",' \
+                 "$(tr -d '[:space:]' < /usr/local/share/oxidean-cli/SOURCE_COMMIT)"; \
+             fi; \
+             printf '"targets":[{"target":"%s","sha256":"%s","bytes":%s}]}\n' \
+               "$target" "$sha" "$bytes"; \
+           } > /usr/local/share/oxidean-cli/latest.json \
+        && cat /usr/local/share/oxidean-cli/latest.json; \
+      fi; \
+    fi
 RUN if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
        echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
        ok=0; \

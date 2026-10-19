@@ -1,0 +1,1 @@
+-- no-op: bytewise equality/BINARY collation already correct

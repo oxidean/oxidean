@@ -493,6 +493,29 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         // SessionOnly — a token must never mint tokens.
         "pat.list" | "pat.revoke" => PatSelfManage,
 
+        // Agentic VCS protocol (contract C1): read tier — the `vcs.*` name set
+        // is closed (BR1.2); anything unlisted stays SessionOnly below.
+        "vcs.status" | "vcs.changeset_get" | "vcs.log" | "vcs.diff" | "vcs.tree"
+        | "vcs.file_get" | "vcs.blame" | "vcs.path_history" | "vcs.merge_base" | "vcs.ref_list" => {
+            RepoRead
+        }
+
+        // Write tier.
+        "vcs.changeset_create"
+        | "vcs.merge"
+        | "vcs.rebase"
+        | "vcs.ref_update"
+        | "vcs.git_import"
+        | "vcs.git_export" => RepoWrite,
+
+        // Repo flag toggle — the contract's "admin" class is RepoAdminWrite.
+        "vcs.repo_enable" => RepoAdminWrite,
+
+        // Object-route aliases (contract C2): classified so the `/api/vcs/*`
+        // routes can authorize token callers — never listed in PROCEDURES.
+        "vcs.object_get" => RepoRead,
+        "vcs.object_put" => RepoWrite,
+
         // Everything else is session-only: auth lifecycle (`auth.login`,
         // `auth.logout`, verify/reset/bootstrap…), PAT minting
         // (`pat.createClassic`/`createFineGrained`), `admin.*` and
@@ -758,6 +781,53 @@ mod tests {
             classify_pat_proc("packages.deleteVersion"),
             PatProc::PackageDelete
         );
+    }
+
+    /// The pinned 19-name `vcs.*` mapping (BR1.2/BR1.3): 10 read, 6 write, 1
+    /// admin, 2 object-route aliases — a new `vcs.*` name without a tier entry
+    /// fails here rather than silently inheriting access.
+    #[test]
+    fn vcs_classification() {
+        for p in [
+            "vcs.status",
+            "vcs.changeset_get",
+            "vcs.log",
+            "vcs.diff",
+            "vcs.tree",
+            "vcs.file_get",
+            "vcs.blame",
+            "vcs.path_history",
+            "vcs.merge_base",
+            "vcs.ref_list",
+        ] {
+            assert_eq!(classify_pat_proc(p), PatProc::RepoRead, "{p}");
+        }
+        for p in [
+            "vcs.changeset_create",
+            "vcs.merge",
+            "vcs.rebase",
+            "vcs.ref_update",
+            "vcs.git_import",
+            "vcs.git_export",
+        ] {
+            assert_eq!(classify_pat_proc(p), PatProc::RepoWrite, "{p}");
+        }
+        assert_eq!(
+            classify_pat_proc("vcs.repo_enable"),
+            PatProc::RepoAdminWrite
+        );
+        // Object-route aliases classify for route authorization only.
+        assert_eq!(classify_pat_proc("vcs.object_get"), PatProc::RepoRead);
+        assert_eq!(classify_pat_proc("vcs.object_put"), PatProc::RepoWrite);
+        // Unlisted vcs.* names fail closed.
+        for p in [
+            "vcs.object_delete",
+            "vcs.checkout",
+            "vcs.",
+            "vcs.status.extra",
+        ] {
+            assert_eq!(classify_pat_proc(p), PatProc::SessionOnly, "{p}");
+        }
     }
 
     #[test]

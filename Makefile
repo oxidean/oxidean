@@ -238,9 +238,11 @@ logs:
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
 		cargo nextest run --workspace; \
+		cargo nextest run -p oxidean-vcs --features server; \
 	else \
 		echo "cargo-nextest not found; falling back to cargo test (install: cargo install cargo-nextest --locked)"; \
 		cargo test --workspace; \
+		cargo test -p oxidean-vcs --features server; \
 	fi
 	bun run test
 
@@ -327,7 +329,7 @@ db-switch-dialect:
 	./scripts/db-switch-dialect.sh $(ARGS)
 
 db-matrix:
-	cargo test -p oxidean-db --test dialect_probe --test dialect_actions -- --nocapture
+	cargo test -p oxidean-db --test dialect_probe --test dialect_vcs --test dialect_actions -- --nocapture
 
 # Every actions_* test binary plus the conformance corpus.
 ACTIONS_DB_TESTS := $(addprefix --test ,$(notdir $(basename $(wildcard crates/oxidean-api/tests/actions_*.rs))) workflow_conformance)
@@ -424,11 +426,13 @@ dead-code-check:
 	bunx knip
 	cargo machete
 	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy -p oxidean-vcs --all-targets --all-features -- -D warnings
 
 # Rustdoc gate: intra-doc-link / HTML-tag lints are warnings-only by default —
 # keep them denied so dead links don't accumulate between docs builds.
 docs-check:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc -p oxidean-vcs --no-deps --features server
 
 test-web-browser:
 	bun run --filter @oxidean/web test:browser

@@ -1,0 +1,17 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u1-vcs-wire-foundation",
+  "upstream_ids": ["NFR1","NFR2","NFR3","NFR4","NFR5","NFR6","NFR7","NFR8","NFR9","NFR10"],
+  "coverage": [
+    {"id":"NFR1","status":"N/A","note":"commit-path boundedness is runtime behavior — u2/u4 derived-index work, not a wire-type concern"},
+    {"id":"NFR2","status":"N/A","note":"lock-free writes — u2/u4 commit path, not a wire-type concern"},
+    {"id":"NFR3","status":"OK","target":"tech-stack-decisions identifiers","note":"wire treats cs_<ulid> + sha256: object ids as opaque validated strings — u1's share of the immutability contract is the identifier shape clients must not interpret"},
+    {"id":"NFR4","status":"N/A","note":"stateless serving — u7 route/mount layer"},
+    {"id":"NFR5","status":"OK","target":"SR4, tech-stack-decisions envelope/serialization/client-generation","note":"u1 owns the wire stability contract: additive-only fields, untagged envelope, pinned WIRE_VERSION + rpc_gen.rs literal sync, generated-coverage test"},
+    {"id":"NFR6","status":"N/A","note":"dialect migrations — u2 persistence"},
+    {"id":"NFR7","status":"N/A","note":"resumable fetch — u3 object store + u9/u8 clients"},
+    {"id":"NFR8","status":"OK","target":"SR2/SR3, security-requirements","note":"u1's share: the closed VcsErrorCode enum + typed data payloads are compile-time-checkable, but AppError.message is a free String — message hygiene (no internals in the text) remains a u4/u7 code-review discipline; tracing instrumentation is also u4/u7 runtime work"},
+    {"id":"NFR9","status":"OK","target":"SR1–SR5","note":"u1's share: no new credential types, cookie-scoped route denial codes, fail-closed classification, 256KiB inline cap, bounded error payloads"},
+    {"id":"NFR10","status":"OK","target":"SR1","note":"u1's share: the extended coverage test (classification+dispatch parity, alias presence/absence) is the build-time check for the wire layer"}
+  ]
+}

@@ -3707,6 +3707,7 @@ dependencies = [
  "oxidean-db",
  "oxidean-git",
  "oxidean-runner",
+ "oxidean-vcs",
  "password-hash",
  "prost",
  "prost-build",
@@ -3746,13 +3747,16 @@ name = "oxidean-cli"
 version = "0.2.0"
 dependencies = [
  "anstyle",
+ "async-trait",
  "dialoguer",
+ "hex",
  "indicatif",
  "jaq-core",
  "jaq-json",
  "jaq-std",
  "keyring",
  "oxidean-core",
+ "oxidean-vcs",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -3811,6 +3815,27 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "oxidean-vcs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "hex",
+ "oxidean-core",
+ "oxidean-db",
+ "oxidean-git",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

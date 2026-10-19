@@ -58,6 +58,7 @@ const ACTIONS_DISPATCH_INPUTS_BROWSER =
 const ACTIONS_ENVIRONMENTS_BROWSER =
   "apps/web/src/components/repo/actions-environments-panel.browser.test.tsx";
 const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
+const VCS_BROWSER = "apps/web/src/components/repo/vcs-settings-panel.browser.test.tsx";
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
 const MCP_HARNESS_BROWSER = "apps/web/src/components/settings/mcp-harness-blocks.browser.test.tsx";
 
@@ -246,6 +247,10 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
           "Switch/settings panel; promote to *.browser.test.tsx on next LFS settings edit.",
       },
     ],
+  },
+  {
+    surface: "components/repo/vcs-settings-panel.tsrx",
+    coverage: [{ kind: "browser", test: VCS_BROWSER, subject: "vcs-settings-panel" }],
   },
   {
     surface: "components/repo/actions-settings-panel.tsrx",

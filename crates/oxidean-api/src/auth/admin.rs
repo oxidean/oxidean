@@ -241,6 +241,16 @@ pub async fn factory_reset(
             "release asset storage",
         )
         .await?;
+        // VCS objects live outside `repos_dir` — wiping DB+repos without
+        // them would leave orphaned content blobs behind (C9).
+        if let Some(slot) = ctx.vcs.as_ref() {
+            wipe_dir_contents(
+                &slot.objects_dir,
+                "admin.factory_reset_vcs_objects",
+                "VCS object storage",
+            )
+            .await?;
+        }
     }
 
     ctx.set_cookie = Some(CookieChange::Clear);

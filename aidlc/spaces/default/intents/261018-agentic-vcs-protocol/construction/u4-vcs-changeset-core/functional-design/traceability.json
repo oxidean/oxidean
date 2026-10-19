@@ -1,0 +1,382 @@
+{
+  "stage": "functional-design",
+  "unit": "u4-vcs-changeset-core",
+  "upstream_ids": [
+    "AC2.1.1",
+    "AC2.1.2",
+    "AC2.1.3",
+    "AC2.1.4",
+    "AC2.1.5",
+    "AC2.2.1",
+    "AC2.2.2",
+    "AC2.2.3",
+    "AC2.3.1",
+    "AC2.3.2",
+    "AC2.4.1",
+    "AC2.6.1",
+    "AC2.6.2",
+    "AC3.5.2",
+    "AC4.1.1",
+    "AC4.1.2",
+    "AC4.1.3",
+    "AC4.2.1",
+    "AC4.2.2",
+    "AC4.3.1",
+    "AC4.3.2",
+    "AC4.4.1",
+    "AC4.5.1",
+    "AC4.5.2",
+    "AC5.1.1",
+    "AC5.1.2",
+    "AC5.1.3",
+    "AC5.1.4",
+    "AC5.2.1",
+    "AC5.2.2",
+    "AC5.2.3",
+    "AC7.1.2",
+    "AC7.4.2",
+    "FR2.1",
+    "FR2.2",
+    "FR2.4",
+    "FR2.3",
+    "FR2.5",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR6.1",
+    "FR6.2",
+    "FR6.3",
+    "FR7.4",
+    "FR9.4",
+    "FR10.1",
+    "C1",
+    "C5",
+    "C6",
+    "BR3.11",
+    "ADR-005",
+    "ADR-011",
+    "NFR1"
+  ],
+  "coverage": [
+    {
+      "id": "AC2.1.1",
+      "status": "OK",
+      "target": "WF1 + BR4.3",
+      "note": "create takes parents/message/changes, returns id; no ref read or moved"
+    },
+    {
+      "id": "AC2.1.2",
+      "status": "OK",
+      "target": "BR4.17 + WF1.1",
+      "note": "u4 share: store accepts blob_hash only; blob|content_b64 transport split is u7"
+    },
+    {
+      "id": "AC2.1.3",
+      "status": "OK",
+      "target": "BR4.4 + WF1.1",
+      "note": "path/kind/mode/blob per entry; manifest replaces any full-tree pointer"
+    },
+    {
+      "id": "AC2.1.4",
+      "status": "OK",
+      "target": "BR4.3 + WF1.2",
+      "note": "parents:[] = legal empty-parent root"
+    },
+    {
+      "id": "AC2.1.5",
+      "status": "OK",
+      "target": "WF1.6 + BR4.3",
+      "note": "in-tx parent check \u2192 sentinel \u2192 ParentNotFound \u2192 vcs.not_found"
+    },
+    {
+      "id": "AC2.2.1",
+      "status": "OK",
+      "target": "BR4.1 + BR4.2",
+      "note": "deterministic id + in-tx idem/PK insert \u2192 same id, no second row; recipe byte-pinned (Q1)"
+    },
+    {
+      "id": "AC2.2.2",
+      "status": "OK",
+      "target": "BR4.2",
+      "note": "PK insert-if-absent + reselect \u2192 same id, one row"
+    },
+    {
+      "id": "AC2.2.3",
+      "status": "OK",
+      "target": "BR4.1 + Q2",
+      "note": "committed_at/created_at excluded from canonical input"
+    },
+    {
+      "id": "AC2.3.1",
+      "status": "OK",
+      "target": "BR4.2 + BR4.12",
+      "note": "content ids never collide; path_touch keys unique per (path,cs)"
+    },
+    {
+      "id": "AC2.3.2",
+      "status": "OK",
+      "target": "BR4.7 + WF1.5",
+      "note": "single create_tx = atomic boundary; PUT objects GC-owned"
+    },
+    {
+      "id": "AC2.4.1",
+      "status": "OK",
+      "target": "BR4.13 + WF8.2",
+      "note": "consumed pin: merge manifests are relative to first parent \u2192 single-chain fold is sound; the merge changeset itself is u5"
+    },
+    {
+      "id": "AC2.6.1",
+      "status": "OK",
+      "target": "BR4.4 + WF2.1",
+      "note": "mode set incl. 0o120000 symlink; binary via blob hashes"
+    },
+    {
+      "id": "AC2.6.2",
+      "status": "OK",
+      "target": "BR4.4",
+      "note": "old_path\u2194path explicit; read-back verbatim; rename also emits old-path path_touch"
+    },
+    {
+      "id": "AC3.5.2",
+      "status": "OK",
+      "target": "BR4.6",
+      "note": "u4 share: every manifest blob_hash \u2192 object_links row in create tx (BR3.11 invariant)"
+    },
+    {
+      "id": "AC4.1.1",
+      "status": "OK",
+      "target": "WF4",
+      "note": "heap frontier walk; LogEntry = full VcsChangesetPublic-shaped record incl. manifest"
+    },
+    {
+      "id": "AC4.1.2",
+      "status": "OK",
+      "target": "BR4.15 + WF4\u2013WF7",
+      "note": "clamp 1..=500 + opaque cursors; log cursor = skip-replay {n}, never too_large"
+    },
+    {
+      "id": "AC4.1.3",
+      "status": "OK",
+      "target": "BR4.15 + WF4\u2013WF8",
+      "note": "malformed \u2192 invalid_input; absent \u2192 not_found; every read entry existence-checks inputs (D4-06 integrated)"
+    },
+    {
+      "id": "AC4.2.1",
+      "status": "OK",
+      "target": "WF6",
+      "note": "file-level entries via materialize-and-compare; patches/totals via text_diff+ObjectStore::get"
+    },
+    {
+      "id": "AC4.2.2",
+      "status": "OK",
+      "target": "WF8.1 + BR4.14",
+      "note": "paint-down + BFS levels + cached result; absent input \u2192 not_found; none \u2192 no_common_ancestor"
+    },
+    {
+      "id": "AC4.3.1",
+      "status": "OK",
+      "target": "WF7.1 + Q3",
+      "note": "path_touch key embeds committed_at \u2192 keyset order chronological; rename rows on old-path hash too"
+    },
+    {
+      "id": "AC4.3.2",
+      "status": "OK",
+      "target": "WF7.2 + Q5",
+      "note": "lazy attribution over ancestry-ordered touches + blob diffs (ObjectStore::get \u2014 C6 u3\u2192u4 edge); sharded blame-kind cache \u226432KB/row"
+    },
+    {
+      "id": "AC4.4.1",
+      "status": "OK",
+      "target": "WF5 + BR4.13",
+      "note": "first-parent fold + lazy snapshot; chunked entries + final snap call; keyset-paginated"
+    },
+    {
+      "id": "AC4.5.1",
+      "status": "OK",
+      "target": "WF2.1",
+      "note": "row + path-ordered manifest entries"
+    },
+    {
+      "id": "AC4.5.2",
+      "status": "OK",
+      "target": "WF8.2 + BR4.13",
+      "note": "per-path first-parent fold; absent \u2192 not_found; inline bytes u7's join"
+    },
+    {
+      "id": "AC5.1.1",
+      "status": "OK",
+      "target": "WF3.1c\u2013d",
+      "note": "facade CAS succeeds iff stored == expected_old"
+    },
+    {
+      "id": "AC5.1.2",
+      "status": "OK",
+      "target": "WF3.1c\u2013d",
+      "note": "atomic CAS \u2014 one Applied, loser Conflict{actual}"
+    },
+    {
+      "id": "AC5.1.3",
+      "status": "OK",
+      "target": "WF3.1f + BR4.10",
+      "note": "retried landed call \u2192 ref_conflict{data:{actual}}; client pattern ref_list\u2192re-CAS"
+    },
+    {
+      "id": "AC5.1.4",
+      "status": "OK",
+      "target": "BR4.3 + BR4.8",
+      "note": "create ref-free; CAS checks expected_old only"
+    },
+    {
+      "id": "AC5.2.1",
+      "status": "OK",
+      "target": "WF3.2 + BR4.11",
+      "note": "fresh repo \u2192 []; no implicit main"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "WF3.1a\u2013e",
+      "note": "create-only expected_absent; absent+delete/move \u2192 not_found via Conflict{actual:None} \u2014 atomic, no pre-read TOCTOU (D4-05)"
+    },
+    {
+      "id": "AC5.2.3",
+      "status": "OK",
+      "target": "BR4.11",
+      "note": "no ref op merges; divergence reconciles via u5 merge changeset"
+    },
+    {
+      "id": "AC7.1.2",
+      "status": "OK",
+      "target": "WF2.3",
+      "note": "u4 share: resolve_git_oid answers import-link lookups; lazy-import trigger is u7"
+    },
+    {
+      "id": "AC7.4.2",
+      "status": "OK",
+      "target": "BR4.1 + Q1",
+      "note": "byte-exact canonical recipe in one fn \u2014 U5/U6/U7 call it; id convergence across import paths"
+    },
+    {
+      "id": "FR2.1",
+      "status": "OK",
+      "target": "WF1"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "BR4.1 + BR4.5",
+      "note": "canonical-hash mechanism + resolved author verbatim; repo_id deviation recorded in Q1 (global id PK requires it)"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "BR4.13 + WF5.1",
+      "note": "consumed pin: first-parent-relative merge manifests justify the first-parent fold"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "BR4.3"
+    },
+    {
+      "id": "FR2.5",
+      "status": "OK",
+      "target": "BR4.4"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": "WF6"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": "WF4/WF7/WF8"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "WF7.2"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "WF5"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "WF3.2"
+    },
+    {
+      "id": "FR6.2",
+      "status": "OK",
+      "target": "WF3.1"
+    },
+    {
+      "id": "FR6.3",
+      "status": "OK",
+      "target": "WF3.1e + BR4.11"
+    },
+    {
+      "id": "FR7.4",
+      "status": "OK",
+      "target": "BR4.7"
+    },
+    {
+      "id": "FR9.4",
+      "status": "OK",
+      "target": "BR4.1 + WF2.3",
+      "note": "u4 share: deterministic-id machinery + resolve_git_oid; conversion is u6"
+    },
+    {
+      "id": "FR10.1",
+      "status": "OK",
+      "target": "BR4.15",
+      "note": "u4 share is the identifier discipline (malformed\u2192invalid_input, absent\u2192not_found); the procedure family itself is u7"
+    },
+    {
+      "id": "C1",
+      "status": "OK",
+      "target": "Q7 + BR4.15 error mapping",
+      "note": "typed-internal \u2192 wire code mapping is u7's; u4 variants name target codes"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": "WF1/WF3/WF8 facade calls",
+      "note": "only the pinned C5 surface; zero new facade methods \u2014 ref point-reads via vcs_list_refs scans (D4-05)"
+    },
+    {
+      "id": "C6",
+      "status": "OK",
+      "target": "Q8 module surfaces",
+      "note": "signatures match C6 block; ObjectStore u3\u2192u4 edge used read-only"
+    },
+    {
+      "id": "BR3.11",
+      "status": "OK",
+      "target": "BR4.6",
+      "note": "u3-pinned invariant lands here"
+    },
+    {
+      "id": "ADR-005",
+      "status": "OK",
+      "target": "BR4.12 + BR4.13",
+      "note": "incremental in-tx path_touch; reads never walk unbounded chains (folds stop at snapshots)"
+    },
+    {
+      "id": "ADR-011",
+      "status": "OK",
+      "target": "BR4.16",
+      "note": "server feature gating; client stays dep-free"
+    },
+    {
+      "id": "NFR1",
+      "status": "AT-RISK",
+      "target": "BR4.14/BR4.15 + Q4",
+      "note": "pages bounded; honest residuals: merge_base mark set capped 250k\u2192too_large, log seen-cap 65536\u2192too_large, blame touch-collection O(path history), materialize O(tree) per miss \u2014 all documented bounds, none unbounded-by-accident"
+    }
+  ]
+}

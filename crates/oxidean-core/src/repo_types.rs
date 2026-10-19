@@ -529,18 +529,22 @@ pub struct RepoActivityActor {
 }
 
 /// One push / branch / merge event for `repo.activity.list`.
+/// `ref_name`/`ref_short`/`before`/`after`/`commits_count` are nullable on the
+/// wire (contract C4: `vcs.*` ops write ref-free activity rows) — plain
+/// `Option`s, always emitted (explicit `null`, never absent).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActivityItem {
     pub id: String,
     /// `push` | `force_push` | `pr_merge` | `branch_creation` | `branch_deletion`
+    /// | `vcs.*` activity kinds
     pub push_type: String,
-    pub ref_name: String,
+    pub ref_name: Option<String>,
     /// Short branch/tag name when `ref_name` is under `refs/heads/` or `refs/tags/`.
-    pub ref_short: String,
-    pub before: String,
-    pub after: String,
+    pub ref_short: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
     pub pushed_at: String,
-    pub commits_count: i64,
+    pub commits_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2004,5 +2008,56 @@ mod tests {
         assert!(validate_repo_name(".hidden").is_err());
         assert!(validate_repo_name(".config").is_err());
         assert!(validate_repo_name(".git").is_err());
+    }
+
+    /// Widened activity fields (contract C4): the five push columns serialize
+    /// as explicit `null` — never omitted — so ref-free `vcs.*` rows render
+    /// predictably; populated rows keep plain values.
+    #[test]
+    fn repo_activity_item_nullable_fields_emit_explicit_null() {
+        let item = RepoActivityItem {
+            id: "a1".into(),
+            push_type: "vcs.repo_enable".into(),
+            ref_name: None,
+            ref_short: None,
+            before: None,
+            after: None,
+            pushed_at: "2026-10-18T00:00:00Z".into(),
+            commits_count: None,
+            commit_message: None,
+            pr_number: None,
+            pusher: RepoActivityActor {
+                login: "octo".into(),
+                name: "Octo".into(),
+                avatar_url: None,
+                path: "/octo".into(),
+            },
+        };
+        let v = serde_json::to_value(&item).unwrap();
+        for key in ["ref_name", "ref_short", "before", "after", "commits_count"] {
+            assert_eq!(
+                v.get(key),
+                Some(&serde_json::Value::Null),
+                "{key} must emit explicit null, not absent"
+            );
+        }
+        // The optional (skip_serializing_if) fields stay absent-not-null.
+        assert!(v.get("commit_message").is_none());
+        assert!(v.get("pr_number").is_none());
+
+        let pushed = RepoActivityItem {
+            ref_name: Some("refs/heads/main".into()),
+            ref_short: Some("main".into()),
+            before: Some("0".repeat(40)),
+            after: Some("a".repeat(40)),
+            commits_count: Some(2),
+            ..item
+        };
+        let v = serde_json::to_value(&pushed).unwrap();
+        assert_eq!(v["ref_name"], "refs/heads/main");
+        assert_eq!(v["ref_short"], "main");
+        assert_eq!(v["commits_count"], 2);
+        let back: RepoActivityItem = serde_json::from_value(v).unwrap();
+        assert_eq!(back.ref_short.as_deref(), Some("main"));
     }
 }

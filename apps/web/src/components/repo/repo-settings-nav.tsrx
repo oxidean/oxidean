@@ -16,6 +16,7 @@ const REPO_SETTINGS_SECTIONS: RepoSettingsSection[] = [
   { id: "repo-settings-deploy-keys", label: "Deploy keys" },
   { id: "repo-settings-storage", label: "Storage" },
   { id: "repo-settings-lfs", label: "Git LFS" },
+  { id: "repo-settings-vcs", label: "Source control" },
   { id: "repo-settings-template", label: "Template repository" },
   { id: "repo-settings-features", label: "Features" },
   { id: "repo-settings-actions", label: "Actions" },

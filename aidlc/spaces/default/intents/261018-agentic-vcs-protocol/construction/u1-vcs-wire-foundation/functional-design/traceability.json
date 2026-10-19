@@ -1,0 +1,106 @@
+{
+ "stage": "functional-design",
+ "unit": "u1-vcs-wire-foundation",
+ "upstream_ids": [
+  "AC8.1.1",
+  "AC8.1.2",
+  "AC1.1.3",
+  "AC8.1.3",
+  "AC8.1.4",
+  "AC8.2.1",
+  "AC8.2.2",
+  "AC8.6.1",
+  "AC8.5.1",
+  "AC1.1.2",
+  "AC2.6.1",
+  "AC5.1.1",
+  "AC2.7.1",
+  "AC8.4.3"
+ ],
+ "coverage": [
+  {
+   "id": "AC8.1.1",
+   "status": "OK",
+   "target": "BR1.1, BR1.2, BR1.4"
+  },
+  {
+   "id": "AC8.1.2",
+   "status": "OK",
+   "target": "BR1.8"
+  },
+  {
+   "id": "AC1.1.3",
+   "status": "OK",
+   "target": "BR1.4",
+   "note": "u1 share: the {owner, name} two-field wire convention carried by all 17 procedures \u2014 owner/name\u2192repo-id resolution is u7\u2019s \u2014 partial share, owning unit u7"
+  },
+  {
+   "id": "AC8.1.3",
+   "status": "OK",
+   "target": "BR1.1",
+   "note": "u1 share: the wire envelope these routes answer in. The /api/vcs/* route nest itself is u7's \u2014 partial share, owning unit u7"
+  },
+  {
+   "id": "AC8.1.4",
+   "status": "OK",
+   "target": "entities.md VcsErrorCode, BR1.1"
+  },
+  {
+   "id": "AC8.2.1",
+   "status": "OK",
+   "target": "BR1.8, BR1.2"
+  },
+  {
+   "id": "AC8.2.2",
+   "status": "OK",
+   "target": "BR1.8",
+   "note": "u1 share: client regen + versioning.toml + proc_classes. required_procedures/CLI_PROCS/MCP_PROCS/env-doc clauses are owned by u8/u9/u7 \u2014 partial share"
+  },
+  {
+   "id": "AC8.6.1",
+   "status": "OK",
+   "target": "BR1.3"
+  },
+  {
+   "id": "AC8.5.1",
+   "status": "OK",
+   "target": "BR1.3",
+   "note": "u1 share: the proc_classes tier table (RepoRead/RepoWrite/SessionOnly) the authz layer consults \u2014 the /api/vcs/* route auth behavior itself is u7\u2019s \u2014 partial share, owning unit u7"
+  },
+  {
+   "id": "AC1.1.2",
+   "status": "OK",
+   "target": "entities.md VcsStatusResponse, BR1.6"
+  },
+  {
+   "id": "AC2.6.1",
+   "status": "OK",
+   "target": "entities.md ManifestEntry (mode/old_path), BR1.6"
+  },
+  {
+   "id": "AC5.1.1",
+   "status": "OK",
+   "target": "BR1.5",
+   "note": "u1 share: the required-nullable CAS wire encoding (Nullable<ChangesetId> absent/null/value trichotomy) \u2014 compare-and-set behavior and vcs.ref_conflict semantics land in the engine unit \u2014 partial share, owning unit u4"
+  },
+  {
+   "id": "AC2.7.1",
+   "status": "OK",
+   "target": "BR1.7",
+   "note": "u1 share: the seven ActivityKind constants; insert_repo_activity attribution and row emission belong to u2/u6/u7 \u2014 partial share"
+  },
+  {
+   "id": "AC8.4.3",
+   "status": "OK",
+   "target": "BR1.8",
+   "note": "u1 share: generated-client coverage of the 17 names; the `ox api` escape hatch is u8/u9\u2019s \u2014 partial share"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "BR1.6",
+   "status": "N/A",
+   "target": "wire-evolution policy from C9 provenance contract \u2014 no single AC"
+  }
+ ]
+}

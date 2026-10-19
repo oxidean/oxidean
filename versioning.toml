@@ -96,6 +96,16 @@ globs = ["crates/oxidean-cli/**", "packaging/**"]
 scopes = ["cli", "ox"]
 depends_on = ["oxidean-core", "wire"]
 
+[[component]]
+id = "oxidean-vcs"
+kind = "crate"
+manifest_path = "crates/oxidean-vcs/Cargo.toml"
+tag_prefix = "oxidean-vcs-v"
+changelog_path = "crates/oxidean-vcs/CHANGELOG.md"
+globs = ["crates/oxidean-vcs/**"]
+scopes = ["vcs"]
+depends_on = ["oxidean-core", "oxidean-db"]
+
 # --- Bun workspaces --------------------------------------------------------
 
 [[component]]

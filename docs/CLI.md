@@ -397,6 +397,25 @@ ox release upload|download o/n <tag> [<file>...|--pattern g --dir d --clobber]
 ox release delete-asset o/n <tag> <filename>
 ox pkg list [--owner octo]
 
+# Agentic VCS — side-by-side source control alongside git
+ox vcs enable o/n [--disable]           # repo-admin toggle; reads stay on when disabled
+ox vcs status o/n                       # enablement, heads, object/changeset counts
+ox vcs commit o/n -m msg [--add vpath=local]... [--modify v=l]... [--delete v]...
+                        [--rename old=new]... [--parent cs]... [--mode 100644|100755|120000]
+ox vcs log o/n [--from ref|cs|git-oid] [--limit n --cursor c]
+ox vcs show o/n <id>                    # changeset record; git oids lazy-import on a miss
+ox vcs diff o/n <from> <to> [--paths p]... [--limit n --cursor c]
+ox vcs cat o/n <cs> <path>              # one file's bytes at a changeset
+ox vcs blame o/n <path> [--at cs]       # history: every change touching <path>
+ox vcs merge-base o/n <a> <b>
+ox vcs merge o/n <a> <b> [-m msg]       # server-side merge; conflicts print typed paths
+ox vcs rebase o/n <cs> --onto <cs> [-m msg]
+ox vcs checkout o/n <cs> [--paths f]... [--dir t]   # sparse working copy, shared object cache
+ox vcs ref list o/n                     # set: (--expect cs|--create) (--to cs|--delete) — CAS
+ox vcs import o/n [--from ref|oid --limit n --cursor c]   # resumable git → changesets
+                 [--publish]                              # + create-only vcs refs per imported head
+ox vcs export o/n <cs> --branch b [--force]  # git commits via the protected ref-update path
+
 # People & orgs
 ox org list|view|create|members|invites
 ox user view|lookup|follow|unfollow <u> | ox user starred|watched

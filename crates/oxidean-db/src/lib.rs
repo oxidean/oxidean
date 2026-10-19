@@ -54,6 +54,7 @@ pub mod topics;
 pub mod two_factor;
 pub mod user_emails;
 pub mod users;
+pub mod vcs;
 pub mod watches;
 pub mod webhooks;
 pub mod workflow_templates;
@@ -121,6 +122,11 @@ pub use tag_protection::TagProtectionRuleRow;
 pub use templates::{InstanceTemplatePackRow, TemplateRepoListRow};
 pub use user_emails::UserEmailRow;
 pub use users::UserRow;
+pub use vcs::{
+    CasOutcome, VcsChangesetInsert, VcsChangesetRow, VcsDerivedIndexRow, VcsDerivedIndexUpsert,
+    VcsFileChangeInsert, VcsFileChangeRow, VcsImportLinkRow, VcsObjectLinkRow, VcsObjectRow,
+    VcsRefRow, VcsRepoObjectCounts, VcsRepoSurfaceFlagRow,
+};
 pub use watches::RepoWatcherListRow;
 pub use webhooks::{WebhookDeliveryAttemptRow, WebhookDeliveryRow, WebhookRow};
 pub use workflow_templates::InstanceWorkflowTemplateRow;
@@ -6459,6 +6465,8 @@ impl Database {
         webhooks::delete_webhook(self.require_pool()?, id).await
     }
 
+    /// `ref_name`/`before_oid`/`after_oid`/`commits_count` are `Option` per C4 —
+    /// ref-free `vcs.*` activity kinds write NULLs (migration 0053).
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_repo_activity(
         &self,
@@ -6466,10 +6474,10 @@ impl Database {
         repository_id: &str,
         actor_id: &str,
         push_type: &str,
-        ref_name: &str,
-        before_oid: &str,
-        after_oid: &str,
-        commits_count: i64,
+        ref_name: Option<&str>,
+        before_oid: Option<&str>,
+        after_oid: Option<&str>,
+        commits_count: Option<i64>,
         commit_message: Option<&str>,
         pr_number: Option<i64>,
     ) -> Result<(), String> {

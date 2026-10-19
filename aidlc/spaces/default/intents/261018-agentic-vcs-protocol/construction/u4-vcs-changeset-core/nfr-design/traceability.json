@@ -1,0 +1,532 @@
+{
+  "stage": "nfr-design",
+  "unit": "u4-vcs-changeset-core",
+  "upstream_ids": [
+    "SR4.1",
+    "SR4.2",
+    "SR4.3",
+    "SR4.4",
+    "SR4.5",
+    "SR4.6",
+    "SR4.7",
+    "SR4.8",
+    "SR4.9",
+    "SR4.10",
+    "SR4.11",
+    "SR4.12",
+    "TD4.1",
+    "TD4.2",
+    "TD4.3",
+    "TD4.4",
+    "TD4.5",
+    "TD4.6",
+    "TD4.7",
+    "TD4.8",
+    "TD4.9",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR4.6",
+    "BR4.7",
+    "BR4.8",
+    "BR4.9",
+    "BR4.10",
+    "BR4.11",
+    "BR4.12",
+    "BR4.13",
+    "BR4.14",
+    "BR4.15",
+    "BR4.16",
+    "BR4.17",
+    "BR4.18",
+    "BR4.19",
+    "NFR1",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "FR15.5",
+    "AR-01",
+    "AR-02",
+    "AR-07",
+    "AR-08",
+    "AR-09",
+    "DS-02",
+    "DS-04",
+    "DS-09",
+    "DS-10",
+    "N-06",
+    "N-07",
+    "N-08",
+    "N-11",
+    "N-13",
+    "U4-ND-01",
+    "U4-ND-02",
+    "U4-ND-03",
+    "U4-ND-04",
+    "U4-ND-05",
+    "U4-ND-06",
+    "U4-ND-07",
+    "U4-ND-08",
+    "U4-ND-09",
+    "U4-ND-10",
+    "U4-ND-11",
+    "U4-AR-01",
+    "U4-AR-02",
+    "U4-AR-03",
+    "U4-AR-04",
+    "U4-AR-05",
+    "U4-AR-06"
+  ],
+  "coverage": [
+    {
+      "id": "SR4.1",
+      "status": "OK",
+      "target": "SD4.2",
+      "note": "three-phase validator: field shape \u2192 manifest (incl. old_path uniqueness) \u2192 scalars; mode set corrected"
+    },
+    {
+      "id": "SR4.2",
+      "status": "OK",
+      "target": "SD4.5",
+      "note": "match-literal decode + probe path + single From impl"
+    },
+    {
+      "id": "SR4.3",
+      "status": "OK",
+      "target": "SD4.6",
+      "note": "validator order incl. ChangesetId::parse id-shape oracle"
+    },
+    {
+      "id": "SR4.4",
+      "status": "OK",
+      "target": "SD4.6",
+      "note": "complete CAS arm table; post-CAS observation; absent/NULL conflation documented; MySQL create-race Err\u2192Internal divergence in R18"
+    },
+    {
+      "id": "SR4.5",
+      "status": "OK",
+      "target": "SD4.3",
+      "note": "serde-struct recipe + hand-rolled ULID + repo deviation + 256-bit idem"
+    },
+    {
+      "id": "SR4.6",
+      "status": "OK",
+      "target": "SD4.9",
+      "note": "key grammar incl. \\x01r rename discriminator; payload bounds"
+    },
+    {
+      "id": "SR4.7",
+      "status": "OK",
+      "target": "SD4.7",
+      "note": "URL_SAFE_NO_PAD codec + per-read shapes + \u22641KB parse bound"
+    },
+    {
+      "id": "SR4.8",
+      "status": "OK",
+      "target": "SD4.8",
+      "note": "ReadIndexCaps injectable + per-walk mechanism pins"
+    },
+    {
+      "id": "SR4.9",
+      "status": "OK",
+      "target": "SD4.1, SD4.5",
+      "note": "boundary drawn; eager is_skipped; opaque Internal"
+    },
+    {
+      "id": "SR4.10",
+      "status": "OK",
+      "target": "SD4.9",
+      "note": "hashed-read payload guard; tree filters key suffix; blame shard carries path"
+    },
+    {
+      "id": "SR4.11",
+      "status": "OK",
+      "target": "SD4.11",
+      "note": "19-row register, authoritative (R18 MySQL CAS divergence, R19 dir-marker superset)"
+    },
+    {
+      "id": "SR4.12",
+      "status": "OK",
+      "target": "SD4.10",
+      "note": "warn/info sites + ids/hashes/counts-only pin"
+    },
+    {
+      "id": "TD4.1",
+      "status": "OK",
+      "target": "LC4.1, LC4.7",
+      "note": "five dep additions + oxidean-core optional under server"
+    },
+    {
+      "id": "TD4.2",
+      "status": "OK",
+      "target": "LC4.1, LC4.5",
+      "note": "module layout + IO-free text_diff seam"
+    },
+    {
+      "id": "TD4.3",
+      "status": "OK",
+      "target": "LC4.7",
+      "note": "exact ALTER statements + three-dir parity"
+    },
+    {
+      "id": "TD4.4",
+      "status": "OK",
+      "target": "LC4.2",
+      "note": "ULID packing in canonical_changeset + parse round-trip test"
+    },
+    {
+      "id": "TD4.5",
+      "status": "OK",
+      "target": "SD4.3",
+      "note": "fixed serde structs; manifest_json hash-material only"
+    },
+    {
+      "id": "TD4.6",
+      "status": "OK",
+      "target": "LC4.2",
+      "note": "committed_at Option<String> seam; SecondsFormat::Secs"
+    },
+    {
+      "id": "TD4.7",
+      "status": "OK",
+      "target": "LC4.8",
+      "note": "12-method surface + scan idioms"
+    },
+    {
+      "id": "TD4.8",
+      "status": "OK",
+      "target": "LC4.9",
+      "note": "full test matrix incl. injectable caps + golden vectors + dialect_vcs"
+    },
+    {
+      "id": "TD4.9",
+      "status": "OK",
+      "target": "LC4.6",
+      "note": "closed enum sets; BaseNotFound alias; From<String> carve-out"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "SD4.3, LC4.2"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "SD4.4"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "SD4.4"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "SD4.2"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "SD4.2, LC4.2"
+    },
+    {
+      "id": "BR4.6",
+      "status": "OK",
+      "target": "SD4.4"
+    },
+    {
+      "id": "BR4.7",
+      "status": "OK",
+      "target": "SD4.4"
+    },
+    {
+      "id": "BR4.8",
+      "status": "OK",
+      "target": "SD4.6"
+    },
+    {
+      "id": "BR4.9",
+      "status": "OK",
+      "target": "SD4.6"
+    },
+    {
+      "id": "BR4.10",
+      "status": "OK",
+      "target": "SD4.6"
+    },
+    {
+      "id": "BR4.11",
+      "status": "OK",
+      "target": "SD4.4 + SD4.6",
+      "note": "create is ref-free + strict CAS (no implicit refs, no head-merging); cost residual at SD4.11-R5"
+    },
+    {
+      "id": "BR4.12",
+      "status": "OK",
+      "target": "SD4.9"
+    },
+    {
+      "id": "BR4.13",
+      "status": "OK",
+      "target": "SD4.8"
+    },
+    {
+      "id": "BR4.14",
+      "status": "OK",
+      "target": "SD4.8"
+    },
+    {
+      "id": "BR4.15",
+      "status": "OK",
+      "target": "SD4.7 + SD4.8",
+      "note": "cursor codec + per-walk existence-check clause"
+    },
+    {
+      "id": "BR4.16",
+      "status": "OK",
+      "target": "SD4.1, SD4.5"
+    },
+    {
+      "id": "BR4.17",
+      "status": "OK",
+      "target": "SD4.1, LC4.5"
+    },
+    {
+      "id": "BR4.18",
+      "status": "OK",
+      "target": "SD4.5"
+    },
+    {
+      "id": "BR4.19",
+      "status": "OK",
+      "target": "SD4.9, LC4.7"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "SD4.8, SD4.11"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "LC4.7"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "SD4.7, SD4.8",
+      "note": "cursor resume + tree_snap-last crash-resume"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "SD4.5, SD4.10"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "SD4.1-SD4.10"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "LC4.9"
+    },
+    {
+      "id": "FR15.5",
+      "status": "OK",
+      "target": "LC4.7"
+    },
+    {
+      "id": "AR-01",
+      "status": "OK",
+      "target": "SD4.2 + SD4.9",
+      "note": "old_path uniqueness + \\x01r discriminator \u2014 collision class closed"
+    },
+    {
+      "id": "AR-02",
+      "status": "OK",
+      "target": "SD4.8 + SD4.11",
+      "note": "blame cap injectable; exclusivity fixed; depth ceiling registered"
+    },
+    {
+      "id": "AR-07",
+      "status": "OK",
+      "target": "SD4.11-R9",
+      "note": "path-hash collision named in register"
+    },
+    {
+      "id": "AR-08",
+      "status": "OK",
+      "target": "SD4.11-R5",
+      "note": "'only residual with neither cap nor amortization' wording lands in R5"
+    },
+    {
+      "id": "AR-09",
+      "status": "OK",
+      "target": "LC4.9",
+      "note": "manifest-uniqueness arm names all three rules"
+    },
+    {
+      "id": "DS-02",
+      "status": "OK",
+      "target": "LC4.7",
+      "note": "dialect_vcs placement + gating idiom pinned"
+    },
+    {
+      "id": "DS-04",
+      "status": "OK",
+      "target": "SD4.8 + SD4.12",
+      "note": "tree filters key suffix; WF5.2 superseded"
+    },
+    {
+      "id": "DS-09",
+      "status": "OK",
+      "target": "SD4.9",
+      "note": "payload caps in grammar section"
+    },
+    {
+      "id": "DS-10",
+      "status": "OK",
+      "target": "LC4.7",
+      "note": "full MODIFY COLUMN shape"
+    },
+    {
+      "id": "N-06",
+      "status": "OK",
+      "target": "SD4.12",
+      "note": "NULL-head wording superseded"
+    },
+    {
+      "id": "N-07",
+      "status": "OK",
+      "target": "SD4.12",
+      "note": "sqlite TEXT note"
+    },
+    {
+      "id": "N-08",
+      "status": "OK",
+      "target": "LC4.6 + SD4.12",
+      "note": "actual:String + BaseNotFound alias"
+    },
+    {
+      "id": "N-11",
+      "status": "OK",
+      "target": "SD4.12",
+      "note": "second-precision wording supersedes"
+    },
+    {
+      "id": "N-13",
+      "status": "OK",
+      "target": "SD4.9 + SD4.12",
+      "note": "blame shard payload carries path"
+    },
+    {
+      "id": "U4-ND-01",
+      "status": "OK",
+      "target": "LC4.4 + SD4.8",
+      "note": "ObjectStore by-value + File-read-to-lines + ObjectStoreError\u2192IndexError mapping pinned"
+    },
+    {
+      "id": "U4-ND-02",
+      "status": "OK",
+      "target": "SD4.6 + SD4.11-R18",
+      "note": "MySQL create-race Err\u2192Internal divergence registered; prefix deliberately not decoded"
+    },
+    {
+      "id": "U4-ND-03",
+      "status": "OK",
+      "target": "LC4.4 + edges",
+      "note": "update_for pinned static pub(crate); FileChangeInput owner + types-only edge named"
+    },
+    {
+      "id": "U4-ND-04",
+      "status": "OK",
+      "target": "LC4.1",
+      "note": "FileEntry/PathTouch added to exports"
+    },
+    {
+      "id": "U4-ND-05",
+      "status": "OK",
+      "target": "LC4.5",
+      "note": "LineHunk single name; totals caller-derived supersedes Q8 sketch"
+    },
+    {
+      "id": "U4-ND-06",
+      "status": "OK",
+      "target": "SD4.9",
+      "note": "payload field normalized to changeset_id"
+    },
+    {
+      "id": "U4-ND-07",
+      "status": "OK",
+      "target": "LC4.6",
+      "note": "enum payload shapes pinned: InvalidInput(String), ObjectNotFound{hash:Option}, Internal(String)"
+    },
+    {
+      "id": "U4-ND-08",
+      "status": "OK",
+      "target": "SD4.8",
+      "note": "heap keys (String,String) \u2014 ChangesetId has no Ord"
+    },
+    {
+      "id": "U4-ND-09",
+      "status": "OK",
+      "target": "LC4.7",
+      "note": "CI -E filter named as the non-execution mechanism; widening unclaimed"
+    },
+    {
+      "id": "U4-ND-10",
+      "status": "OK",
+      "target": "LC4.7",
+      "note": "comment-only no-op files noted as first in-tree precedent; SELECT 1 fallback if sqlx balks"
+    },
+    {
+      "id": "U4-ND-11",
+      "status": "OK",
+      "target": "SD4.11-R19",
+      "note": "16384 dir-marker unreachable-superset registered"
+    },
+    {
+      "id": "U4-AR-01",
+      "status": "OK",
+      "target": "LC4.4",
+      "note": "owned PathTouchRow intermediate; borrows formed at tx call site (E0515 fix)"
+    },
+    {
+      "id": "U4-AR-02",
+      "status": "OK",
+      "target": "SD4.8",
+      "note": "per-walk vcs_get_changeset existence-check clause pinned"
+    },
+    {
+      "id": "U4-AR-03",
+      "status": "OK",
+      "target": "LC4.3/4.4 + edges",
+      "note": "resolve pinned pub(crate); resolve_git_oid edge added"
+    },
+    {
+      "id": "U4-AR-04",
+      "status": "OK",
+      "target": "traceability.json",
+      "note": "SR4.11 count corrected to 19"
+    },
+    {
+      "id": "U4-AR-05",
+      "status": "OK",
+      "target": "traceability.json",
+      "note": "BR4.11 retargeted to SD4.4+SD4.6"
+    },
+    {
+      "id": "U4-AR-06",
+      "status": "OK",
+      "target": "LC4.1/LC4.5/SD4.8",
+      "note": "byte-slice &[&[u8]] line inputs pinned; lossless non-UTF-8"
+    }
+  ],
+  "corrections_register": "SD4.12 \u2014 supersedes stale FD/entities lines (mode 40960, \\x01r 85-char rename key, second-precision ordering, NULL-head, sqlite TEXT, actual:String, blame path field, tree key-suffix filter, Ref domain-vs-wire); upstream artifacts fingerprint-bound"
+}

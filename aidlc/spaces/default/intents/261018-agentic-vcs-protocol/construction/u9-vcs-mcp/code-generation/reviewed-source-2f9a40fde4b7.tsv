@@ -1,0 +1,4 @@
+manifest	44de9690246f7da4db8872d26c1a40e5e495c2cff947f0bea7703a07cc399d50	-
+	crates/oxidean-api/src/mcp.rs	100644	57e5859bff63b6c389a2916e0e3cf769d96163c5a74a39ac1e8b6f2c514e9e7f
+	crates/oxidean-vcs/src/client/mcp.rs	100644	09e1609ea75ca86afd51e0edd7ef52ba6878bba8bf32a55d63e72624eacaa7b8
+	crates/oxidean-vcs/src/client/mod.rs	100644	aa524706a89fa8de7a03f5440600c6ca72b023cbc1e08b872f07f6b0a603cf2b

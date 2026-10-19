@@ -11,10 +11,14 @@ use serde_json::{json, Value};
 use crate::args::{parse_repo, BodyArg, Command, Global, Invocation, ListFilters, ReviewAction};
 use crate::config::{self, Config};
 use crate::device;
+use crate::http::{HttpClient, VcsObjectError};
 use crate::keystore;
 use crate::manifest;
 use crate::output;
 use crate::rpc::{self, CallError, Client};
+use oxidean_vcs::client::cli::{self as vcs_cli, VcsCommand};
+use oxidean_vcs::client::object_cache::ObjectCache;
+use oxidean_vcs::client::transport::{CliFault, TransportError, VcsTransport};
 
 pub const EXIT_OK: u8 = 0;
 pub const EXIT_API: u8 = 1;
@@ -99,6 +103,12 @@ pub enum Out {
     Rpc {
         envelope: RpcResponse,
         pretty: String,
+    },
+    /// RPC result with a raw-bytes stdout payload (`ox vcs cat` — binary
+    /// safe). Error envelopes behave exactly like `Out::Rpc`.
+    Bytes {
+        envelope: RpcResponse,
+        bytes: Vec<u8>,
     },
 }
 
@@ -501,6 +511,10 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         }
         .into()],
         Command::RepoView { .. } => one("repo.get"),
+        // Each `ox vcs` sub maps to its `vcs.*` procedure via the crate's
+        // own table (`oxidean_vcs::client::cli::procedure`); object routes
+        // are path-aliased, not RPC procedures.
+        Command::Vcs(cmd) => vec![vcs_cli::procedure(cmd).to_string()],
         // createDefaults is needed to resolve --template or run the wizard.
         Command::RepoCreate { name, template, .. } => {
             if name.is_none() || template.is_some() {
@@ -883,6 +897,9 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::RepoView { repo } => {
             invoke(g, rt, "repo.get", repo_input(repo)?, output::repo_view).await
         }
+        // All `ox vcs` ops dispatch through the shared crate; the CLI only
+        // supplies HTTP plumbing + output handling (ADR-011).
+        Command::Vcs(cmd) => vcs_dispatch(g, rt, cmd).await,
         Command::RepoCreate {
             name,
             owner,
@@ -2723,6 +2740,88 @@ fn http_client(global: &Global, rt: &Runtime) -> Result<crate::http::HttpClient,
     Ok(crate::http::HttpClient::new(&instance, token))
 }
 
+/// `VcsTransport` over the real HTTP plumbing — RPC calls ride `Client`
+/// (`/api/rpc`), object routes ride `HttpClient` (`/api/vcs/.../objects`).
+struct CliVcsTransport {
+    rpc: Client,
+    http: HttpClient,
+}
+
+#[async_trait::async_trait]
+impl VcsTransport for CliVcsTransport {
+    async fn call(&self, procedure: &str, input: Value) -> Result<RpcResponse, TransportError> {
+        self.rpc.call(procedure, input).await.map_err(|e| match e {
+            CallError::Transport(m) => TransportError::Transport(m),
+            CallError::Http { status, body } => TransportError::Http { status, body },
+        })
+    }
+
+    async fn object_get(
+        &self,
+        owner: &str,
+        name: &str,
+        hash: &str,
+    ) -> Result<Vec<u8>, TransportError> {
+        self.http
+            .vcs_object_get(owner, name, hash)
+            .await
+            .map_err(vcs_object_err)
+    }
+
+    async fn object_put(
+        &self,
+        owner: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<String, TransportError> {
+        self.http
+            .vcs_object_put(owner, name, bytes)
+            .await
+            .map_err(vcs_object_err)
+    }
+}
+
+fn vcs_object_err(e: VcsObjectError) -> TransportError {
+    match e {
+        VcsObjectError::Transport(m) => TransportError::Transport(m),
+        VcsObjectError::Api(a) => TransportError::Envelope(a),
+        VcsObjectError::Http { status, body } => TransportError::Http { status, body },
+    }
+}
+
+/// `ox vcs` — typed ops + working copy live in `oxidean-vcs::client`; this
+/// resolves instance/auth, builds the transport, and maps `CliOutcome` onto
+/// the CLI's output/exit channels.
+async fn vcs_dispatch(g: &Global, rt: &Runtime, cmd: &VcsCommand) -> Result<Out, CliError> {
+    let instance = resolve_instance(g, &rt.config)?;
+    let token = config::resolve_token(config::env_token().as_deref(), &rt.config, &instance);
+    let transport = CliVcsTransport {
+        rpc: Client::new(&instance, token.clone()),
+        http: HttpClient::new(&instance, token),
+    };
+    let mut cache = ObjectCache::from_env();
+    match vcs_cli::run(&transport, cmd, &mut cache).await {
+        Ok(outcome) => Ok(match outcome.bytes {
+            Some(bytes) => Out::Bytes {
+                envelope: outcome.envelope,
+                bytes,
+            },
+            None => Out::Rpc {
+                envelope: outcome.envelope,
+                pretty: outcome.pretty,
+            },
+        }),
+        Err(CliFault::Usage(m)) => Err(CliError::Usage(m)),
+        // Object-route errors arrive as envelopes — emit them through the
+        // same Rpc channel so `error_exit_code` classifies `vcs.*` codes.
+        Err(CliFault::Server(envelope)) => Ok(Out::Rpc {
+            envelope: *envelope,
+            pretty: String::new(),
+        }),
+        Err(f) => Err(CliError::Transport(f.to_string())),
+    }
+}
+
 /// `release.get` by tag — shared by the asset verbs to resolve release id
 /// and enumerate assets.
 async fn release_by_tag(
@@ -2916,6 +3015,23 @@ const CLI_PROCS: &[&str] = &[
     "repo.lfs.getStatus",
     "repo.quota.set",
     "repo.quota.get",
+    "vcs.repo_enable",
+    "vcs.status",
+    "vcs.changeset_create",
+    "vcs.changeset_get",
+    "vcs.log",
+    "vcs.diff",
+    "vcs.tree",
+    "vcs.file_get",
+    "vcs.blame",
+    "vcs.path_history",
+    "vcs.merge_base",
+    "vcs.merge",
+    "vcs.rebase",
+    "vcs.ref_list",
+    "vcs.ref_update",
+    "vcs.git_import",
+    "vcs.git_export",
     "issue.list",
     "issue.get",
     "issue.create",
@@ -3037,6 +3153,19 @@ const MCP_PROCS: &[&str] = &[
     "repo.listMine",
     "repo.search",
     "repo.tree",
+    "vcs.status",
+    "vcs.log",
+    "vcs.diff",
+    "vcs.tree",
+    "vcs.file_get",
+    "vcs.blame",
+    "vcs.path_history",
+    "vcs.merge_base",
+    "vcs.ref_list",
+    "vcs.changeset_get",
+    "vcs.changeset_create",
+    "vcs.merge",
+    "vcs.rebase",
 ];
 
 /// Classic-scope names that would unlock uncovered procedures — the

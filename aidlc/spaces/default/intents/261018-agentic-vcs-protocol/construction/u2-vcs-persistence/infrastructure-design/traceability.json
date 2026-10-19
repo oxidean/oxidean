@@ -1,0 +1,15 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u2-vcs-persistence",
+  "upstream_ids": ["SR2.6","TD2.1","TD2.4","TD2.6","TD2.7","LC2.2","NFR6","AC1.3.1"],
+  "coverage": [
+    {"id": "SR2.6", "status": "OK", "target": "migration parity + dialect lanes"},
+    {"id": "TD2.1", "status": "OK", "target": "nextest + migration_parity gate"},
+    {"id": "TD2.4", "status": "OK", "target": "per-dialect idiom compile+apply"},
+    {"id": "TD2.6", "status": "OK", "target": "no-dep-change claim — Cargo.lock hygiene only"},
+    {"id": "TD2.7", "status": "OK", "target": "sqlite test lane + CI dialect coverage"},
+    {"id": "LC2.2", "status": "OK", "target": "migration_parity + apply gates"},
+    {"id": "NFR6", "status": "OK", "target": "filename-parity test + 3-dialect migrations"},
+    {"id": "AC1.3.1", "status": "OK", "target": "cascade exercised by unit tests; rollback = revert (additive migration)"}
+  ]
+}

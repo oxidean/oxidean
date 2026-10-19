@@ -128,6 +128,7 @@ surface and fails when an `implemented`/`partial` row drifts.
 | — | `self-update` | ox-only | instance-served upgrades |
 | — | `skill print|install`, `mcp …` | ox-only | agent/harness integration |
 | — | `status create` | ox-only | commit status API |
+| — | `vcs …` (16 subs) | ox-only | side-by-side agentic source control — immutable changesets, CAS refs, git import/export |
 
 ## Terminal / UX behavior
 

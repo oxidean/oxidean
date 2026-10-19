@@ -1,0 +1,100 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u5-vcs-merge-engine",
+  "upstream_ids": [
+    "TD5.1",
+    "TD5.2",
+    "TD5.5",
+    "SR5.2",
+    "SR5.3",
+    "SR5.11",
+    "LC5.1",
+    "LC5.4",
+    "NFR1",
+    "NFR10",
+    "BR5.2",
+    "BR5.8",
+    "BR5.10",
+    "BR5.14",
+    "BR5.15"
+  ],
+  "coverage": [
+    {
+      "id": "TD5.1",
+      "status": "OK",
+      "target": "zero Cargo.toml delta — all consumed crates already server deps (hex/sha2/tokio/futures-util/bytes); dead-code arms (clippy --all-features, doc --features server, cargo machete) cover the file unchanged"
+    },
+    {
+      "id": "TD5.2",
+      "status": "OK",
+      "target": "single new file merge_engine.rs + lib.rs server-block line; crate suite rides the existing vcs-server leg (-E 'package(oxidean-vcs)' on nextest-archive); tests stay #[cfg(all(test, feature = \"server\"))]-gated preserving the NO_TESTS_RUN sharpness pin"
+    },
+    {
+      "id": "TD5.5",
+      "status": "OK",
+      "target": "MergeCaps constructor-injected — cap tests exercise ancestor_probe/side_walk/rename_probe/blob/paths/conflict bounds with small values; no production-scale fixtures needed"
+    },
+    {
+      "id": "SR5.2",
+      "status": "OK",
+      "target": "cap-arm coverage in the U5 suite (each bound → TooLarge); merge_paths_max exercised on full_tree mid-walk abort AND emitted-manifest check"
+    },
+    {
+      "id": "SR5.3",
+      "status": "OK",
+      "target": "two-pass zero-write: conflict path probes {vcs_get_changeset, vcs_list_file_changes, vcs_get_object_link on pass-1 mint}; deterministic-abort fires at entry pre-check (no mint exists) → {changeset, file_changes} pair only"
+    },
+    {
+      "id": "SR5.11",
+      "status": "OK",
+      "target": "residual-register rows are unit-test-scale by construction (cold materialize, stored manifests); raced-sentinel arms covered by mapping tests not fault injection"
+    },
+    {
+      "id": "LC5.1",
+      "status": "OK",
+      "target": "crate layout delta confined to merge_engine.rs; no edits to u1-u4 sources — the single-file delta is also the rollback unit"
+    },
+    {
+      "id": "LC5.4",
+      "status": "OK",
+      "target": "primitive-level coverage: full_tree(None) root-rebase, side_manifest_pair caps, classify_path arms incl. prov-carried rename-vs-modify detail, read_blob_capped saturating take, merge3 per-pair LINE_CAP +2 bound"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "bounded-cost coverage: every traversal/blob/path/manifest/rename cap exercised with injected small MergeCaps → TooLarge; cold-materialize/stored-manifest residuals unit-test-scale by construction"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "verification posture: Rust nextest on the vcs-server leg, real file-backed sqlite via testutil::test_db() (TempDir held alive), no services needed — dialect variation lives below the facade (u4's dialect_vcs leg scope)",
+      "note": "same gate as TD4.8; the upstream of the vcs-server-leg/sqlite-suite claim"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "fast-forward both directions + equal-heads + zero-new-rows probes (vcs_get_changeset/tree state)"
+    },
+    {
+      "id": "BR5.8",
+      "status": "OK",
+      "target": "conflict detail ≤200-char char-boundary cut tested on a path-bearing entry + merge_conflict_max+1 collection + truncated flag"
+    },
+    {
+      "id": "BR5.10",
+      "status": "OK",
+      "target": "spawn_blocking interleave probe bound to the private merge3 helper's JoinHandle await (probe spawned immediately before, try_recv after) — binding at merge() level cannot detect the violation since merge() yields at every facade await; payload must outlast first-poll completion",
+      "note": "reviewer iteration-1 Major: merge()-level binding is a smoke, not a detector; helper-level binding + payload pin is the detector shape"
+    },
+    {
+      "id": "BR5.14",
+      "status": "OK",
+      "target": "rebase legality matrix: disjoint target legal, ancestor rollback legal, descendant/cycle InvalidInput, root ∅ base, no-op FastForward"
+    },
+    {
+      "id": "BR5.15",
+      "status": "OK",
+      "target": "message defaults tested (merge None ⇒ 'merge {b} into {a}'; rebase None ⇒ source verbatim) — determinism backing the idempotence assertion"
+    }
+  ]
+}

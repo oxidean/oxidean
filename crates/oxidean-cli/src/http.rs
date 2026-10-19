@@ -2,6 +2,7 @@
 //! not ride `/api/rpc`: multipart `POST` for uploads and an ACL'd byte-stream
 //! `GET` for downloads. Same Bearer auth as the RPC edge.
 
+use oxidean_core::AppError;
 use serde_json::Value;
 
 use crate::rpc::CallError;
@@ -123,5 +124,125 @@ impl HttpClient {
             return Err(CallError::Http { status, body: msg });
         }
         Ok((filename, bytes.to_vec()))
+    }
+
+    /// `GET /api/vcs/{owner}/{name}/objects/{hash}` — raw blob bytes on
+    /// success; error responses carry the standard `{ok:false,error}`
+    /// envelope surfaced verbatim (`VcsObjectError::Api`).
+    pub async fn vcs_object_get(
+        &self,
+        owner: &str,
+        name: &str,
+        hash: &str,
+    ) -> Result<Vec<u8>, VcsObjectError> {
+        let url = format!("{}/api/vcs/{}/{}/objects/{}", self.base, owner, name, hash);
+        let mut req = self
+            .http
+            .get(&url)
+            .header("user-agent", concat!("ox/", env!("CARGO_PKG_VERSION")));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let res = req
+            .send()
+            .await
+            .map_err(|e| VcsObjectError::Transport(format!("request to {url} failed: {e}")))?;
+        let status = res.status().as_u16();
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| VcsObjectError::Transport(format!("reading response failed: {e}")))?;
+        if status >= 400 {
+            return Err(vcs_object_error(&bytes, status));
+        }
+        Ok(bytes.to_vec())
+    }
+
+    /// `POST /api/vcs/{owner}/{name}/objects` — raw blob body, returns the
+    /// server-computed `sha256:` object id from `{ok:true,data:{hash}}`.
+    pub async fn vcs_object_put(
+        &self,
+        owner: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<String, VcsObjectError> {
+        let url = format!("{}/api/vcs/{}/{}/objects", self.base, owner, name);
+        let mut req = self
+            .http
+            .post(&url)
+            .header("user-agent", concat!("ox/", env!("CARGO_PKG_VERSION")))
+            .header("content-type", "application/octet-stream")
+            .body(bytes.to_vec());
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let res = req
+            .send()
+            .await
+            .map_err(|e| VcsObjectError::Transport(format!("request to {url} failed: {e}")))?;
+        let status = res.status().as_u16();
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| VcsObjectError::Transport(format!("reading response failed: {e}")))?;
+        let body: Value = serde_json::from_slice(&bytes).map_err(|_| VcsObjectError::Http {
+            status,
+            body: crate::output::truncate(&String::from_utf8_lossy(&bytes), 200).to_string(),
+        })?;
+        if status >= 400 || body.get("ok") == Some(&Value::Bool(false)) {
+            return Err(vcs_object_error(&bytes, status));
+        }
+        body.pointer("/data/hash")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                VcsObjectError::Transport("object put: response missing data.hash".to_string())
+            })
+    }
+}
+
+/// Object-route failure: envelope-shaped errors keep their `AppError` (the
+/// `vcs.*` code classifies exit status); everything else is a bare HTTP error.
+#[derive(Debug)]
+pub enum VcsObjectError {
+    /// Network/connection failure.
+    Transport(String),
+    /// An `{ok:false,error}` server envelope — verbatim `code`/`message`.
+    Api(AppError),
+    /// Non-envelope HTTP failure.
+    Http { status: u16, body: String },
+}
+
+impl std::fmt::Display for VcsObjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(m) => f.write_str(m),
+            Self::Api(e) => write!(f, "{}: {}", e.code, e.message),
+            Self::Http { status, body } => write!(f, "HTTP {status}: {body}"),
+        }
+    }
+}
+
+impl std::error::Error for VcsObjectError {}
+
+/// `Api(AppError)` when the body carries `{error:{code,message}}` — else a
+/// truncated `Http` view of the raw body.
+fn vcs_object_error(bytes: &[u8], status: u16) -> VcsObjectError {
+    let body: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
+    let code = body.pointer("/error/code").and_then(Value::as_str);
+    let msg = body.pointer("/error/message").and_then(Value::as_str);
+    match (code, msg) {
+        (Some(c), Some(m)) => VcsObjectError::Api(AppError::new(c, m)),
+        _ => {
+            let raw = String::from_utf8_lossy(bytes);
+            VcsObjectError::Http {
+                status,
+                body: if raw.trim().is_empty() {
+                    String::new()
+                } else {
+                    crate::output::truncate(&raw, 200).to_string()
+                },
+            }
+        }
     }
 }

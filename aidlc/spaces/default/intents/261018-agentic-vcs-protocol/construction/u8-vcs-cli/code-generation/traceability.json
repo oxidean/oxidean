@@ -1,0 +1,73 @@
+{
+  "stage": "code-generation",
+  "unit": "u8-vcs-cli",
+  "version": 1,
+  "upstream": [
+    {
+      "id": "contract-C1",
+      "source": "inception/contract-design/contract-summary.md#C1",
+      "covered_by": ["crates/oxidean-vcs/src/client/cli.rs", "crates/oxidean-vcs/src/client/transport.rs"],
+      "notes": "{owner,name}-first inputs, verbatim {ok:false} envelopes, vcs.* codes never rewritten"
+    },
+    {
+      "id": "contract-C2",
+      "source": "inception/contract-design/contract-summary.md#C2",
+      "covered_by": ["crates/oxidean-cli/src/http.rs", "crates/oxidean-vcs/src/client/cli.rs", "crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "object GET/PUT raw routes; >256 KiB staging via object_put; envelope-shaped errors keep their AppError"
+    },
+    {
+      "id": "contract-C8",
+      "source": "inception/contract-design/contract-summary.md#C8",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs", "crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "sparse-by-default checkout, want-fetch, atomic materialize, marker refusal, bounded verified cache"
+    },
+    {
+      "id": "FR12.1",
+      "source": "inception/requirements-analysis/requirements.md#FR12.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/cli.rs", "crates/oxidean-cli/src/args.rs"],
+      "notes": "16-command ox vcs surface, hand-rolled parser conventions preserved"
+    },
+    {
+      "id": "FR8.1",
+      "source": "inception/requirements-analysis/requirements.md#FR8.1",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "sparse working copy over vcs.tree paging"
+    },
+    {
+      "id": "FR8.2",
+      "source": "inception/requirements-analysis/requirements.md#FR8.2",
+      "covered_by": ["crates/oxidean-vcs/src/client/object_cache.rs"],
+      "notes": "shared content-addressed cache with verify-on-read and byte bound"
+    },
+    {
+      "id": "FR8.3",
+      "source": "inception/requirements-analysis/requirements.md#FR8.3",
+      "covered_by": ["crates/oxidean-vcs/src/client/cli.rs"],
+      "notes": "commit staging: inline <=256 KiB, object route above; fs-derived modes + --mode override"
+    },
+    {
+      "id": "AC6.1.1-AC6.3.1",
+      "source": "inception/requirements-analysis/requirements.md#AC6",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "client-side selection, want-fetch verify, marker-owned dirs, symlink typed degradation"
+    },
+    {
+      "id": "AC8.4.1-AC8.4.3",
+      "source": "inception/requirements-analysis/requirements.md#AC8",
+      "covered_by": ["crates/oxidean-cli/src/commands.rs", "crates/oxidean-cli/src/rpc.rs", "crates/oxidean-cli/src/main.rs", "crates/oxidean-cli/src/http.rs"],
+      "notes": "dispatch + transport wiring; exit-3 vcs auth classification incl. object routes; auth hints"
+    },
+    {
+      "id": "AC3.4.1-AC3.4.2",
+      "source": "inception/requirements-analysis/requirements.md#AC3",
+      "covered_by": ["crates/oxidean-vcs/src/client/working_copy.rs"],
+      "notes": "declared path filters; empty set = full checkout (bug fixed in matches())"
+    },
+    {
+      "id": "ADR-011",
+      "source": "inception/contract-design/contract-summary.md#ADR-011",
+      "covered_by": ["crates/oxidean-vcs/Cargo.toml", "crates/oxidean-cli/Cargo.toml"],
+      "notes": "client feature dependency-light (cargo-tree-verified: no oxidean-db/git/sqlx); host crates opt into server"
+    }
+  ]
+}

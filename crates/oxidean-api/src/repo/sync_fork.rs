@@ -228,6 +228,7 @@ pub async fn sync_fork(
                 &fork_bare,
                 &format!("refs/heads/{branch}"),
                 &state.upstream_sha,
+                "admin",
             )
             .await
             .map_err(|e| AppError::new("repo.sync_failed", format!("sync failed: {e}")))?;

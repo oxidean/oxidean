@@ -1,0 +1,16 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u1-vcs-wire-foundation",
+  "upstream_ids": ["SR1","SR4","SR5","LC1","LC2","LC3","LC4","LC5","LC6"],
+  "coverage": [
+    {"id":"SR1","status":"OK","target":"Lane coverage table","note":"fail-closed classification is gated by the test lane's coverage test"},
+    {"id":"SR4","status":"OK","target":"Lane coverage (test lane)","note":"the absent/null/value trichotomy + decode safety is exercised by the serde round-trip tests in the test lane"},
+    {"id":"SR5","status":"OK","target":"Lane coverage table","note":"no-secrets property is structural (no credential-typed fields) — compile-checked, no lane needed"},
+    {"id":"LC1","status":"OK","target":"Lane coverage (test, rust-fmt, docs-check)","note":"vcs_types.rs DTOs/serde tests + rustdoc-clean pub items"},
+    {"id":"LC2","status":"OK","target":"Lane coverage (test)","note":"the classification coverage test gates the proc_classes block"},
+    {"id":"LC3","status":"OK","target":"Lane coverage (web-lint, web-format-check, web Vitest lane, wire-scoped commit)","note":"the widening drives the CI-novel rows: nullable client fields + activity-row guards + the wire bump"},
+    {"id":"LC4","status":"OK","target":"Lane coverage + sequencing constraint","note":"version-check + dead-code-check gate the skeleton; atomic member+component+version+lockfile tree pinned"},
+    {"id":"LC5","status":"OK","target":"Lane coverage","note":"parity tests, rpc-sync-check, generated-coverage test, WIRE_VERSION sync assertion, openapi.yaml third pin site"},
+    {"id":"LC6","status":"OK","target":"Lane coverage","note":"all coverage tests live in the existing test lane — no new lane"}
+  ]
+}
