@@ -1,0 +1,128 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-vcs-merge-engine",
+  "upstream_ids": [
+    "AC2.4.1",
+    "AC2.4.2",
+    "AC2.4.3",
+    "AC2.5.1",
+    "AC2.5.2",
+    "AC5.2.3",
+    "FR2.4",
+    "FR7.2",
+    "FR7.3",
+    "FR7.4",
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR9",
+    "NFR10",
+    "BR5.1-BR5.26",
+    "SR5.1-SR5.12",
+    "TD5.1-TD5.5",
+    "SD5.1-SD5.8",
+    "LC5.1-LC5.8"
+  ],
+  "coverage": [
+    {
+      "id": "AC2.4.1",
+      "status": "planned",
+      "target": "merge() fast-forward both directions + equal-heads + zero-row fast path (FastForward{head})"
+    },
+    {
+      "id": "AC2.4.2",
+      "status": "planned",
+      "target": "three-way merge → Merged{changeset_id} with parents:[a,b], manifest relative to first parent"
+    },
+    {
+      "id": "AC2.4.3",
+      "status": "planned",
+      "target": "typed file-level conflicts: content/binary/mode/type/delete/rename kinds via MergeError::Conflict(Vec<VcsConflictEntry>)"
+    },
+    {
+      "id": "AC2.5.1",
+      "status": "planned",
+      "target": "rebase replay: root ∅ base, no-op FastForward, first-parent replay, parents:[new_parent] output"
+    },
+    {
+      "id": "AC2.5.2",
+      "status": "planned",
+      "target": "rebase legality matrix: descendant/cycle InvalidInput, rollback+disjoint legal"
+    },
+    {
+      "id": "AC5.2.3",
+      "status": "planned",
+      "target": "rename detection across paths: rename/rename + rename/delete + rename/modify via ancestry-manifest provenance (no path_touch enumeration)"
+    },
+    {
+      "id": "FR2.4",
+      "status": "planned",
+      "target": "multiple concurrent changesets from a common parent — merge/rebase produce new parents without ref movement"
+    },
+    {
+      "id": "FR7.2",
+      "status": "planned",
+      "target": "deterministic merge output: same inputs → same content-derived changeset id (idempotent)"
+    },
+    {
+      "id": "FR7.3",
+      "status": "planned",
+      "target": "conflict abort writes zero changeset/file-change/index rows AND zero object links (two-pass discipline)"
+    },
+    {
+      "id": "FR7.4",
+      "status": "planned",
+      "target": "writes through ChangesetStore::create only — author/message validation semantics preserved via mirrored pre-check"
+    },
+    {
+      "id": "NFR1",
+      "status": "planned",
+      "target": "bounded traversal: ancestor_probe_max/side_walk_max/rename_probe_max/paths/blob/line/conflict caps → TooLarge, never silent truncation"
+    },
+    {
+      "id": "NFR2",
+      "status": "planned",
+      "target": "merge3 off-runtime via run_merge3 JoinHandle seam (spawn_blocking); async executor never stalls"
+    },
+    {
+      "id": "NFR3",
+      "status": "planned",
+      "target": "typed errors opaque internal messages; Conflict Display count-only; no raw-id echo"
+    },
+    {
+      "id": "NFR9",
+      "status": "planned",
+      "target": "BTreeMap-ordered paths/conflicts; deterministic emission independent of DB row order"
+    },
+    {
+      "id": "NFR10",
+      "status": "planned",
+      "target": "nextest suite on file-backed sqlite via testutil::test_db; no services"
+    },
+    {
+      "id": "BR5.1-BR5.26",
+      "status": "planned",
+      "target": "full BR5.x rule register implemented verbatim per rules.md + post-review corrections (LC5.8 supersede list)"
+    },
+    {
+      "id": "SR5.1-SR5.12",
+      "status": "planned",
+      "target": "security register: entry pipeline, two-pass, caps validation, provenance integrity, byte-faithful merge3, error bridge, observability"
+    },
+    {
+      "id": "TD5.1-TD5.5",
+      "status": "planned",
+      "target": "zero new deps/files; single merge_engine.rs; injected MergeCaps; consumed-surface-only"
+    },
+    {
+      "id": "SD5.1-SD5.8",
+      "status": "planned",
+      "target": "nfr-design security sections → implementation pins (see plan Pinned corrections)"
+    },
+    {
+      "id": "LC5.1-LC5.8",
+      "status": "planned",
+      "target": "logical components → implementation map incl. run_merge3 seam + stale-FD supersedure"
+    }
+  ]
+}

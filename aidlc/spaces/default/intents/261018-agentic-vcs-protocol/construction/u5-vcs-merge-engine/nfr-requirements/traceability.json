@@ -1,0 +1,136 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "u5-vcs-merge-engine",
+ "artifacts": [
+  "security-requirements.md",
+  "tech-stack-decisions.md"
+ ],
+ "coverage": [
+  {
+   "id": "SR5.1",
+   "kind": "sec-req",
+   "source": "BR5.9/BR5.17/NFR1",
+   "note": "named injectable caps; ancestor_probe_max for is_ancestor+mark, side_walk_max=25k for side-exclusive, rename_probe_max=10k; all TooLarge"
+  },
+  {
+   "id": "SR5.2",
+   "kind": "sec-req",
+   "source": "BR5.9/BR5.21/FR7.3",
+   "note": "blob take(cap+1), post-merge re-check, per-tree + pre-create manifest bound (engine is sole guard), LINE_CAP pre-check"
+  },
+  {
+   "id": "SR5.3",
+   "kind": "sec-req",
+   "source": "BR5.3/FR7.4/AC2.4.2",
+   "note": "TWO-PASS classify: pass-1 zero puts (local sha256 ids), manifest_diff+input bounds pre-checkpoint, pass-2 re-merge3+put; aborts write zero rows/links; post-checkpoint infra leak = named residual"
+  },
+  {
+   "id": "SR5.4",
+   "kind": "sec-req",
+   "source": "BR5.4/BR5.11/AC2.2.2/AC2.2.3",
+   "note": "pure function + byte-order + byte-first old pick + deterministic default message \u21d2 idempotent resubmit"
+  },
+  {
+   "id": "SR5.5",
+   "kind": "sec-req",
+   "source": "BR5.2/BR5.14/AC2.4.1/AC2.5.2",
+   "note": "id parse, row probes, guard ordering (no-op before descendant probe), no value echo"
+  },
+  {
+   "id": "SR5.6",
+   "kind": "sec-req",
+   "source": "NFR1/BR5.8",
+   "note": "\u226430k-entry union memory; conflict cap 501; detail \u2264200 chars path-names only"
+  },
+  {
+   "id": "SR5.7",
+   "kind": "sec-req",
+   "source": "BR5.10/BR5.22/BR5.5/BR5.21",
+   "note": "spawn_blocking boundary; mode\u2192size\u2192NUL ordering; ends_nl byte-faithful merge3"
+  },
+  {
+   "id": "SR5.8",
+   "kind": "sec-req",
+   "source": "BR5.17/BR5.23/AC2.4.3",
+   "note": "compose+filter provenance; ambiguity dropped; first-tree existence + entry equality for emission; source-manifest-only for rebase"
+  },
+  {
+   "id": "SR5.9",
+   "kind": "sec-req",
+   "source": "BR4.16/G4",
+   "note": "no auth; eager db.is_skipped() at entry emits DbNotConfigured (typed variant reachable); exhaustive 23-variant + io::Error + facade String + JoinError bridge defaults Internal"
+  },
+  {
+   "id": "SR5.10",
+   "kind": "sec-req",
+   "source": "BR5.18/BR5.25/Q8",
+   "note": "QuotaScope preserved; CursorMalformed\u2192Internal (engine cursors); ObjectNotFound\u2192Internal; ObjectStoreError::DbNotConfigured\u2192DbNotConfigured; facade String\u2192Internal"
+  },
+  {
+   "id": "SR5.11",
+   "kind": "sec-req",
+   "source": "residuals",
+   "note": "12 named residuals: dominated base, cold-materialize unbounded, stored-manifest unbounded read, >250k ancestry, pass-2 rerun cost, post-checkpoint infra link leak, walk cost, union memory, rename/delete blocking, no merge state, detail truncation unflagged, no-PartialEq"
+  },
+  {
+   "id": "SR5.12",
+   "kind": "sec-req",
+   "source": "BR5.18/NFR-obs",
+   "note": "tracing on typed paths; ids+counts only, no payload"
+  },
+  {
+   "id": "TD5.1",
+   "kind": "tech",
+   "source": "server feature",
+   "note": "zero new deps; merge_engine server-gated; client stays dep-free"
+  },
+  {
+   "id": "TD5.2",
+   "kind": "tech",
+   "source": "TD4.2 precedent",
+   "note": "one new file merge_engine.rs; crate-internal imports only; MERGE_PAGE=500 private const"
+  },
+  {
+   "id": "TD5.3",
+   "kind": "tech",
+   "source": "TD4.6",
+   "note": "committed_at None\u2192now inside create; not id material; authors threaded"
+  },
+  {
+   "id": "TD5.4",
+   "kind": "tech",
+   "source": "C5/BR5.19",
+   "note": "pinned consumed surface only; zero new facade/index/u4 edits"
+  },
+  {
+   "id": "TD5.5",
+   "kind": "tech",
+   "source": "NFR10",
+   "note": "nextest+clippy gates; ~30-case sqlite matrix incl. cap injection via MergeCaps, real >LINE_CAP fixture, zero-link abort probe (vcs_get_object_link), DbNotConfigured variant probe"
+  },
+  {
+   "id": "TD5.6",
+   "kind": "tech",
+   "source": "TD4.9 precedent",
+   "note": "MergeError single enum; per-Q8 From maps; no PartialEq (recorded deviation)"
+  },
+  {
+   "id": "FR6",
+   "kind": "story",
+   "source": "user-stories AC2.4.x",
+   "note": "merge covered by SR5.1-5.11 + WF1-4"
+  },
+  {
+   "id": "FR7",
+   "kind": "story",
+   "source": "user-stories AC2.5.x",
+   "note": "rebase covered by SR5.1/5.5/5.8 + WF5"
+  },
+  {
+   "id": "DS-u5",
+   "kind": "support",
+   "source": "devsecops contribution",
+   "note": "16 findings integrated (blocker\u2192two-pass classify zero-link aborts); reviewer-2 pass added: manifest_diff+input bounds before pass-2, eager is_skipped, bridge reconciliation, stale-text strikes"
+  }
+ ]
+}
