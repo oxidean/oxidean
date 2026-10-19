@@ -3968,7 +3968,10 @@ pub async fn list_stale_pending_artifacts(
 ) -> Result<Vec<ActionArtifactRow>, String> {
     match pool {
         DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE state = 'pending' AND updated_at < ?"
+            // `updated_at` stores '%Y-%m-%d %H:%M:%S' (space-separated);
+            // project to RFC3339 so the 'T'-separated cutoff compares
+            // correctly — raw text would rank every same-date row stale.
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) < ?"
         )))
         .bind(cutoff)
         .fetch_all(p)

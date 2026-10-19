@@ -418,7 +418,10 @@ pub async fn reap_stale_action_cache_reservations(
 ) -> Result<Vec<String>, String> {
     let paths: Vec<String> = match pool {
         DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM action_caches WHERE state = 'reserved' AND created_at < ? RETURNING storage_path",
+            // `created_at` stores '%Y-%m-%d %H:%M:%S' (space-separated);
+            // project to RFC3339 so the 'T'-separated cutoff compares
+            // correctly — raw text would rank every same-date row stale.
+            "DELETE FROM action_caches WHERE state = 'reserved' AND strftime('%Y-%m-%dT%H:%M:%SZ', created_at) < ? RETURNING storage_path",
         )
         .bind(cutoff)
         .fetch_all(p)

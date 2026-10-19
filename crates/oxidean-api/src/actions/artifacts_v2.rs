@@ -629,7 +629,18 @@ pub async fn sweep_pending_artifacts(
 ) -> Result<u64, String> {
     let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(reserve_ttl_minutes()))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let stale = db.list_stale_pending_artifacts(&cutoff).await?;
+    sweep_pending_artifacts_before(db, artifacts_dir, &cutoff).await
+}
+
+/// `sweep_pending_artifacts` with an explicit cutoff — mirrors the
+/// `reap_stale_action_cache_reservations(cutoff)` seam one layer down and
+/// lets tests reap deterministically without backdating SQL rows.
+pub async fn sweep_pending_artifacts_before(
+    db: &oxidean_db::Database,
+    artifacts_dir: &std::path::Path,
+    cutoff: &str,
+) -> Result<u64, String> {
+    let stale = db.list_stale_pending_artifacts(cutoff).await?;
     let mut n = 0u64;
     for row in stale {
         let dest = artifacts_dir.join(&row.storage_path);

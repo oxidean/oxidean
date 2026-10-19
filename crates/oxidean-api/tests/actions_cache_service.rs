@@ -725,10 +725,35 @@ async fn cache_sweep_reaps_stale_rows() {
         "expired + the (now-past) live token both reaped"
     );
 
-    // And the composed sweeper still runs clean on a now-cutoff.
+    // A fresh reservation must survive the composed sweep — SQLite stores
+    // `created_at` space-separated while the cutoff is RFC3339; raw text
+    // comparison would rank every same-date row stale. The 2100 reap above
+    // cleared every token row, so mint a fresh one for the reserve call.
+    db.insert_action_cache_token(
+        &oxidean_api::actions::tokens::hash_token("oxrt_fresh"),
+        &job,
+        &repo.id,
+        "2999-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    json_req(
+        &app,
+        "POST",
+        &format!("{base}/caches"),
+        Some("oxrt_fresh"),
+        serde_json::json!({"key": "fresh", "version": "v1"}),
+    )
+    .await;
     let n =
         oxidean_api::actions::cache::sweep_action_caches(&db, &dir.path().join("actions-cache"))
             .await
             .unwrap();
     assert_eq!(n, 0);
+    // The fresh reservation is still there to reap under a future cutoff.
+    let paths = db
+        .reap_stale_action_cache_reservations("2999-01-01T00:00:00Z")
+        .await
+        .unwrap();
+    assert_eq!(paths.len(), 1, "fresh reservation survived the sweep");
 }

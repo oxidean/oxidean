@@ -506,3 +506,76 @@ async fn v4_runtime_token_is_decodable_jwt() {
     .unwrap();
     assert_eq!(header["alg"], "RS256");
 }
+
+#[tokio::test]
+async fn v4_sweep_reaps_stale_pending_artifacts() {
+    let (app, db, dir) = app_db().await;
+    let (token, run_id, job_id) = claim(&app, &db, "sweep").await;
+    let artifacts_dir = dir.path().join("actions-artifacts");
+
+    // Abandoned reservation — job died between CreateArtifact and
+    // FinalizeArtifact: a `.part` payload plus staged `.blocks` residue.
+    let mut req = ids(&run_id, &job_id);
+    req["name"] = "stale".into();
+    req["version"] = 7.into();
+    let created = body_json(twirp(&app, "CreateArtifact", Some(&token), req).await).await;
+    assert_eq!(created["ok"], true, "{created}");
+    let upload_url = rel(created["signed_upload_url"].as_str().unwrap()).to_string();
+    let put = blob_req(&app, "PUT", &upload_url, b"partial bytes").await;
+    assert_eq!(put.status(), StatusCode::CREATED);
+
+    let stale = db
+        .find_action_artifact(&run_id, "stale")
+        .await
+        .unwrap()
+        .expect("pending row exists");
+    assert_eq!(stale.state, "pending");
+    let dest = artifacts_dir.join(&stale.storage_path);
+    assert!(dest.with_extension("part").exists());
+    let blocks = dest.with_extension("blocks");
+    std::fs::create_dir_all(&blocks).unwrap();
+    std::fs::write(blocks.join("0"), b"blk").unwrap();
+
+    // A committed artifact must survive the reap.
+    let kept_id = upload_one(&app, &token, &run_id, &job_id, "kept", b"ok").await;
+
+    // A far-future cutoff reaps every pending row — the same seam the
+    // cache sweep test uses, no SQL backdating.
+    let n = oxidean_api::actions::artifacts_v2::sweep_pending_artifacts_before(
+        &db,
+        &artifacts_dir,
+        "2999-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "only the pending row reaps");
+    assert!(db
+        .find_action_artifact(&run_id, "stale")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(!dest.with_extension("part").exists());
+    assert!(!blocks.exists());
+    let kept = db
+        .find_action_artifact_by_id(&kept_id)
+        .await
+        .unwrap()
+        .expect("committed row survives");
+    assert!(artifacts_dir.join(&kept.storage_path).exists());
+
+    // The composed sweep on the real TTL cutoff leaves fresh pending rows.
+    let mut req = ids(&run_id, &job_id);
+    req["name"] = "fresh".into();
+    req["version"] = 7.into();
+    let res = twirp(&app, "CreateArtifact", Some(&token), req).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let n = oxidean_api::actions::artifacts_v2::sweep_pending_artifacts(&db, &artifacts_dir)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+    assert!(db
+        .find_action_artifact(&run_id, "fresh")
+        .await
+        .unwrap()
+        .is_some());
+}
