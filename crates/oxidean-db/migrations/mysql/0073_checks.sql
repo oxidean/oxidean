@@ -8,14 +8,17 @@
 -- `seq` auto_increment columns carry insertion order — the monotonic ORDER
 -- BY tiebreak on created_at used by every newest-first query (see 0072).
 
+-- FK columns referencing CHAR(36) parents must be CHAR(36) too: MySQL's InnoDB
+-- FK probe compares stored widths, so a VARCHAR child only matches parent rows
+-- whose value is exactly 36 chars (e.g. any non-UUID repo id FK-fails).
 CREATE TABLE check_suites (
   id              VARCHAR(64) PRIMARY KEY,
   seq             BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
-  repository_id   VARCHAR(64) NOT NULL,
+  repository_id   CHAR(36) NOT NULL,
   head_sha        VARCHAR(64) NOT NULL,
   head_branch     VARCHAR(255) NULL,
   app             VARCHAR(64) NOT NULL DEFAULT 'api',
-  run_id          VARCHAR(64) NULL,
+  run_id          CHAR(36) NULL,
   status          VARCHAR(32) NOT NULL DEFAULT 'queued',
   conclusion      VARCHAR(32) NULL,
   url             TEXT NULL,
@@ -32,7 +35,7 @@ CREATE INDEX idx_check_suites_run ON check_suites(run_id);
 CREATE TABLE check_runs (
   id              VARCHAR(64) PRIMARY KEY,
   seq             BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
-  repository_id   VARCHAR(64) NOT NULL,
+  repository_id   CHAR(36) NOT NULL,
   check_suite_id  VARCHAR(64) NOT NULL,
   name            VARCHAR(255) NOT NULL,
   head_sha        VARCHAR(64) NOT NULL,
@@ -43,8 +46,8 @@ CREATE TABLE check_runs (
   output_title    TEXT NULL,
   output_summary  TEXT NULL,
   output_text     MEDIUMTEXT NULL,
-  job_id          VARCHAR(64) NULL,
-  run_id          VARCHAR(64) NULL,
+  job_id          CHAR(36) NULL,
+  run_id          CHAR(36) NULL,
   creator_id      CHAR(36) NULL,
   started_at      VARCHAR(64) NULL,
   completed_at    VARCHAR(64) NULL,
@@ -65,7 +68,7 @@ CREATE TABLE check_run_annotations (
   id               VARCHAR(64) PRIMARY KEY,
   seq              BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
   check_run_id     VARCHAR(64) NOT NULL,
-  repository_id    VARCHAR(64) NOT NULL,
+  repository_id    CHAR(36) NOT NULL,
   path             TEXT NOT NULL,
   start_line       BIGINT NOT NULL,
   end_line         BIGINT NOT NULL,
