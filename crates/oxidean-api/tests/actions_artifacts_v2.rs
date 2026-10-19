@@ -508,7 +508,7 @@ async fn v4_runtime_token_is_decodable_jwt() {
 }
 
 #[tokio::test]
-async fn v4_sweep_reaps_stale_pending_artifacts() {
+async fn v4_sweep_reaps_stale_pending_and_expired_artifacts() {
     let (app, db, dir) = app_db().await;
     let (token, run_id, job_id) = claim(&app, &db, "sweep").await;
     let artifacts_dir = dir.path().join("actions-artifacts");
@@ -536,26 +536,59 @@ async fn v4_sweep_reaps_stale_pending_artifacts() {
     std::fs::create_dir_all(&blocks).unwrap();
     std::fs::write(blocks.join("0"), b"blk").unwrap();
 
-    // A committed artifact must survive the reap.
+    // A committed artifact already past retention — GitHub deletes it.
+    let mut req = ids(&run_id, &job_id);
+    req["name"] = "expired".into();
+    req["version"] = 7.into();
+    req["expires_at"] = "2000-01-01T00:00:00Z".into();
+    let created = body_json(twirp(&app, "CreateArtifact", Some(&token), req).await).await;
+    assert_eq!(created["ok"], true, "{created}");
+    let payload = b"old zip";
+    let upload_url = rel(created["signed_upload_url"].as_str().unwrap()).to_string();
+    let put = blob_req(&app, "PUT", &upload_url, payload).await;
+    assert_eq!(put.status(), StatusCode::CREATED);
+    let mut fin = ids(&run_id, &job_id);
+    fin["name"] = "expired".into();
+    fin["size"] = payload.len().to_string().into();
+    fin["hash"] = format!("sha256:{}", hex::encode(Sha256::digest(payload))).into();
+    let res = twirp(&app, "FinalizeArtifact", Some(&token), fin).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let expired = db
+        .find_action_artifact(&run_id, "expired")
+        .await
+        .unwrap()
+        .expect("committed row exists");
+    assert!(artifacts_dir.join(&expired.storage_path).exists());
+
+    // A committed artifact inside its retention window must survive.
     let kept_id = upload_one(&app, &token, &run_id, &job_id, "kept", b"ok").await;
 
-    // A far-future cutoff reaps every pending row — the same seam the
-    // cache sweep test uses, no SQL backdating.
-    let n = oxidean_api::actions::artifacts_v2::sweep_pending_artifacts_before(
+    // A far-future pending cutoff reaps the abandoned reservation; a real
+    // `now` reaps the expired row while `kept`'s default 90-day retention
+    // still protects it — no SQL backdating.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let n = oxidean_api::actions::artifacts_v2::sweep_artifacts_before(
         &db,
         &artifacts_dir,
         "2999-01-01T00:00:00Z",
+        &now,
     )
     .await
     .unwrap();
-    assert_eq!(n, 1, "only the pending row reaps");
+    assert_eq!(n, 2, "pending reservation + expired artifact reap");
     assert!(db
         .find_action_artifact(&run_id, "stale")
         .await
         .unwrap()
         .is_none());
+    assert!(db
+        .find_action_artifact(&run_id, "expired")
+        .await
+        .unwrap()
+        .is_none());
     assert!(!dest.with_extension("part").exists());
     assert!(!blocks.exists());
+    assert!(!artifacts_dir.join(&expired.storage_path).exists());
     let kept = db
         .find_action_artifact_by_id(&kept_id)
         .await
@@ -563,13 +596,13 @@ async fn v4_sweep_reaps_stale_pending_artifacts() {
         .expect("committed row survives");
     assert!(artifacts_dir.join(&kept.storage_path).exists());
 
-    // The composed sweep on the real TTL cutoff leaves fresh pending rows.
+    // The composed sweep on real cutoffs leaves fresh pending rows alone.
     let mut req = ids(&run_id, &job_id);
     req["name"] = "fresh".into();
     req["version"] = 7.into();
     let res = twirp(&app, "CreateArtifact", Some(&token), req).await;
     assert_eq!(res.status(), StatusCode::OK);
-    let n = oxidean_api::actions::artifacts_v2::sweep_pending_artifacts(&db, &artifacts_dir)
+    let n = oxidean_api::actions::artifacts_v2::sweep_artifacts(&db, &artifacts_dir)
         .await
         .unwrap();
     assert_eq!(n, 0);

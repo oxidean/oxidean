@@ -5325,6 +5325,11 @@ impl Database {
         actions::list_stale_pending_artifacts(self.require_pool()?, cutoff).await
     }
 
+    /// Committed artifacts past `expires_at` — returns payload paths.
+    pub async fn reap_expired_action_artifacts(&self, now: &str) -> Result<Vec<String>, String> {
+        actions::reap_expired_action_artifacts(self.require_pool()?, now).await
+    }
+
     // --- actions/cache service (0062) ----------------------------------------
 
     /// Exact committed-entry lookup by (repo, key, version, scope) hash.

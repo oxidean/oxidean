@@ -187,18 +187,19 @@ pub fn spawn_background_jobs(
                     Err(e) => tracing::error!(error = %e, "actions cache sweep failed"),
                     _ => {}
                 }
-                // Twirp artifact reservations abandoned between
-                // CreateArtifact and FinalizeArtifact (job died mid-upload).
-                match crate::actions::artifacts_v2::sweep_pending_artifacts(
+                // Artifact lifecycle reaps — Twirp reservations abandoned
+                // between CreateArtifact and FinalizeArtifact (job died
+                // mid-upload) plus committed artifacts past expires_at.
+                match crate::actions::artifacts_v2::sweep_artifacts(
                     &db_c,
                     &crate::actions::artifacts::resolve_artifact_dir(),
                 )
                 .await
                 {
                     Ok(n) if n > 0 => {
-                        tracing::info!(reaped = n, "pending artifact sweep reaped rows");
+                        tracing::info!(reaped = n, "artifact sweep reaped rows");
                     }
-                    Err(e) => tracing::error!(error = %e, "pending artifact sweep failed"),
+                    Err(e) => tracing::error!(error = %e, "artifact sweep failed"),
                     _ => {}
                 }
             }

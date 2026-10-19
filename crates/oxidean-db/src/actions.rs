@@ -3997,6 +3997,69 @@ pub async fn list_stale_pending_artifacts(
     }
 }
 
+/// Reap committed artifacts past `expires_at` — GitHub deletes artifacts
+/// hard at retention expiry. `expires_at` is bound as RFC3339 text on
+/// insert, so `now` compares cleanly on every dialect. Returns the
+/// payload `storage_path`s for the caller to unlink.
+pub async fn reap_expired_action_artifacts(
+    pool: &DbPool,
+    now: &str,
+) -> Result<Vec<String>, String> {
+    let paths: Vec<String> = match pool {
+        DbPool::Sqlite(p) => sqlx::query(
+            "DELETE FROM action_artifacts WHERE state = 'committed' AND expires_at IS NOT NULL AND expires_at < ? RETURNING storage_path",
+        )
+        .bind(now)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .filter_map(|r| {
+            use sqlx::Row;
+            r.try_get::<String, _>("storage_path").ok()
+        })
+        .collect(),
+        DbPool::Postgres(p) => sqlx::query(
+            "DELETE FROM action_artifacts WHERE state = 'committed' AND expires_at IS NOT NULL AND expires_at < $1::timestamptz RETURNING storage_path",
+        )
+        .bind(now)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .filter_map(|r| {
+            use sqlx::Row;
+            r.try_get::<String, _>("storage_path").ok()
+        })
+        .collect(),
+        DbPool::MySql(p) => {
+            // MySQL has no RETURNING — select paths, then delete.
+            let paths: Vec<String> = sqlx::query(
+                "SELECT storage_path FROM action_artifacts WHERE state = 'committed' AND expires_at IS NOT NULL AND expires_at < STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s')",
+            )
+            .bind(now)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .iter()
+            .filter_map(|r| {
+                use sqlx::Row;
+                r.try_get::<String, _>("storage_path").ok()
+            })
+            .collect();
+            sqlx::query(
+                "DELETE FROM action_artifacts WHERE state = 'committed' AND expires_at IS NOT NULL AND expires_at < STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s')",
+            )
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            paths
+        }
+    };
+    Ok(paths)
+}
+
 /// Delete an artifact record by id (row only — the caller owns the payload
 /// file under the artifacts dir). Returns whether a row existed.
 pub async fn delete_action_artifact(pool: &DbPool, id: &str) -> Result<bool, String> {

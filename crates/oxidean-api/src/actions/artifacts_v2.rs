@@ -620,27 +620,31 @@ pub fn blob_router() -> Router<AppState> {
 }
 
 /// Periodic maintenance — drop 'pending' reservations past the reservation
-/// TTL (abandoned between CreateArtifact and FinalizeArtifact) together with
-/// their staged `.part`/`.blocks` payload files. Runs on the actions sweep
-/// tick next to the cache reservation sweep.
-pub async fn sweep_pending_artifacts(
+/// TTL (abandoned between CreateArtifact and FinalizeArtifact) and
+/// 'committed' artifacts past `expires_at` (GitHub hard-deletes at retention
+/// expiry), together with their `.part`/`.blocks` payload files. Runs on the
+/// actions sweep tick next to the cache reservation sweep.
+pub async fn sweep_artifacts(
     db: &oxidean_db::Database,
     artifacts_dir: &std::path::Path,
 ) -> Result<u64, String> {
-    let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(reserve_ttl_minutes()))
+    let now = chrono::Utc::now();
+    let pending_cutoff = (now - chrono::Duration::minutes(reserve_ttl_minutes()))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    sweep_pending_artifacts_before(db, artifacts_dir, &cutoff).await
+    let now_s = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    sweep_artifacts_before(db, artifacts_dir, &pending_cutoff, &now_s).await
 }
 
-/// `sweep_pending_artifacts` with an explicit cutoff — mirrors the
+/// `sweep_artifacts` with explicit cutoffs — mirrors the
 /// `reap_stale_action_cache_reservations(cutoff)` seam one layer down and
 /// lets tests reap deterministically without backdating SQL rows.
-pub async fn sweep_pending_artifacts_before(
+pub async fn sweep_artifacts_before(
     db: &oxidean_db::Database,
     artifacts_dir: &std::path::Path,
-    cutoff: &str,
+    pending_cutoff: &str,
+    now: &str,
 ) -> Result<u64, String> {
-    let stale = db.list_stale_pending_artifacts(cutoff).await?;
+    let stale = db.list_stale_pending_artifacts(pending_cutoff).await?;
     let mut n = 0u64;
     for row in stale {
         let dest = artifacts_dir.join(&row.storage_path);
@@ -650,6 +654,13 @@ pub async fn sweep_pending_artifacts_before(
         if matches!(db.delete_action_artifact(&row.id).await, Ok(true)) {
             n += 1;
         }
+    }
+    for rel in db.reap_expired_action_artifacts(now).await? {
+        let dest = artifacts_dir.join(&rel);
+        let _ = std::fs::remove_file(&dest);
+        let _ = std::fs::remove_file(dest.with_extension("part"));
+        let _ = std::fs::remove_dir_all(dest.with_extension("blocks"));
+        n += 1;
     }
     Ok(n)
 }
