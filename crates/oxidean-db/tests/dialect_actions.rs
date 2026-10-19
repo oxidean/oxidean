@@ -86,9 +86,9 @@ async fn dialect_actions_schema_presence() {
         "commit_statuses must exist for Actions→Phase 13 integration (D-ACT-15)"
     );
 
-    // 0053: durable payloads + normalized labels + attempt metadata in every dialect.
+    // 0056: durable payloads + normalized labels + attempt metadata in every dialect.
     for dialect in ["sqlite", "postgres", "mysql"] {
-        let p = migrations_dir(dialect).join("0053_action_job_payloads.sql");
+        let p = migrations_dir(dialect).join("0056_action_job_payloads.sql");
         let sql = std::fs::read_to_string(&p)
             .unwrap_or_else(|_| panic!("{dialect}: missing {}", p.display()));
         for needle in [
