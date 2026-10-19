@@ -508,9 +508,11 @@
       "warnings": []
     },
     "ci/generator-generic-ossf-slsa3-publish": {
-      "status": "runnable",
+      "status": "unsupported-runtime",
       "missing_features": [],
-      "unsupported_actions": [],
+      "unsupported_actions": [
+        "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0 (artifact attestations are not available on Oxidean)"
+      ],
       "warnings": []
     },
     "ci/go": {
@@ -520,9 +522,11 @@
       "warnings": []
     },
     "ci/go-ossf-slsa3-publish": {
-      "status": "runnable",
+      "status": "unsupported-runtime",
       "missing_features": [],
-      "unsupported_actions": [],
+      "unsupported_actions": [
+        "slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0 (artifact attestations are not available on Oxidean)"
+      ],
       "warnings": []
     },
     "ci/gradle": {

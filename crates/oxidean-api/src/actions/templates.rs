@@ -485,6 +485,20 @@ fn classify_uses(doc: &WorkflowDocument) -> (Vec<String>, Vec<String>) {
     let mut unsupported = BTreeSet::new();
     let mut warnings = BTreeSet::new();
     for job in &doc.jobs {
+        // `jobs.<id>.uses` — reusable-workflow calls carry the same
+        // capability caveats as step actions (e.g. the SLSA generators
+        // need OIDC/transparency infrastructure we cannot serve).
+        if let Some(call) = &job.uses {
+            if !call.starts_with("./") {
+                if let Some(c) = caveat_for(call) {
+                    if caveat_is_hard(c) {
+                        unsupported.insert(format!("{call} ({})", c.reason()));
+                    } else {
+                        warnings.insert(format!("{call} ({})", c.reason()));
+                    }
+                }
+            }
+        }
         for step in &job.steps {
             let Some(uses) = &step.uses else { continue };
             if uses.starts_with("docker://") {
