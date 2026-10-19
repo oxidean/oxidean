@@ -1545,4 +1545,3 @@ mod tests {
         assert!(!message_has_skip_marker("[skip c")); // partial token no
     }
 }
-
