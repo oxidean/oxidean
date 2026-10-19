@@ -1,6 +1,6 @@
 //! Host `ProtectionChecker` impl for `oxidean-vcs`'s git export — funnels
 //! `vcs.git_export`'s proposed ref move through the same
-//! [`protection::check_ref_update`] evaluation a git receive-pack runs, so a
+//! [`crate::protection::check_ref_update`] evaluation a git receive-pack runs, so a
 //! VCS write can never bypass branch/tag protection, signed-commit, or
 //! capability rules. Denials surface as `vcs.forbidden` with the SAME
 //! `ProtectionBlockReasons` verdict block a git push produces (AC7.2.2).
