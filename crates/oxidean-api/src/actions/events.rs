@@ -297,7 +297,8 @@ async fn dispatch_pull_request_inner(
                 continue;
             }
             // Trusted context — the run belongs to the base repo: base branch
-            // ref+sha, no fork clamp (`head_repo_id` unset).
+            // ref+sha, no fork clamp (`head_repo_id` unset). GitHub titles
+            // `pull_request*` runs with the PR title, not the commit subject.
             let (run_id, _) = enqueue_run(
                 db,
                 &event.repository_id,
@@ -310,6 +311,7 @@ async fn dispatch_pull_request_inner(
                 None,
                 Some(&payload),
                 hold,
+                Some(event.pull_title.as_str()),
             )
             .await?;
             tracing::info!(run_id, hold, "pull_request_target run enqueued");
@@ -446,6 +448,7 @@ async fn dispatch_pull_request_inner(
             event.head_repo_id.as_deref(),
             Some(&payload),
             hold,
+            Some(event.pull_title.as_str()),
         )
         .await?;
         // Pin the run's head sha under a per-run ref. `refs/pull/N/merge` is
@@ -673,6 +676,8 @@ async fn dispatch_lifecycle_inner(
     let disabled = db
         .list_disabled_action_workflows(&event.repository_id)
         .await?;
+    let default_title =
+        crate::actions::dispatch::head_commit_subject(git, &event.bare_repo, &head_sha).await;
     for wf in &discovered.workflows {
         if disabled.contains(&wf.path) {
             continue;
@@ -702,6 +707,7 @@ async fn dispatch_lifecycle_inner(
             None,
             Some(&event.payload),
             false,
+            default_title.as_deref(),
         )
         .await?;
         n += 1;
@@ -859,6 +865,7 @@ async fn dispatch_workflow_run_inner(
     let disabled = db
         .list_disabled_action_workflows(&run.repository_id)
         .await?;
+    let default_title = crate::actions::dispatch::head_commit_subject(git, &bare, &head_sha).await;
     // `workflows:` matches the completed workflow's name — unnamed
     // workflows match their file stem (GitHub's display fallback).
     let file_stem = Path::new(&run.workflow_path)
@@ -904,6 +911,7 @@ async fn dispatch_workflow_run_inner(
             None,
             Some(&payload),
             false,
+            default_title.as_deref(),
         )
         .await?;
         crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", env_name).await;

@@ -154,6 +154,7 @@ async fn enqueue(db: &Database, actor_id: &str, yaml: &[u8]) -> (String, Vec<Str
         None,
         None,
         false,
+        None,
     )
     .await
     .expect("enqueue")

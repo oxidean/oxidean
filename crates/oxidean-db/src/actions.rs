@@ -590,18 +590,18 @@ pub async fn insert_run(
 pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {RUN_COLS}, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {RUN_COLS}, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| map_run_row!(r)))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {RUN_COLS}, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {RUN_COLS}, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| map_run_row!(r)))
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT {RUN_COLS}, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"
+                "SELECT {RUN_COLS}, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"
             )))
             .bind(id)
             .fetch_optional(p)

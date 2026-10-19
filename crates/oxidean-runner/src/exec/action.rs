@@ -279,35 +279,54 @@ async fn fetch_remote_action(
     // `ls-remote` is a single cheap round-trip; when every endpoint is
     // unreachable (airgapped, mirror down) fall back to the legacy
     // ref-keyed cache so a warm cache still serves.
+    //
+    // The same probe doubles as the endpoint selector: every `(endpoint,
+    // cred)` pair ls-remote rejects is dead weight for the clone too —
+    // smart HTTP gates refs and objects on the same auth check — so a
+    // repo the instance doesn't host would otherwise spam N×`git clone`
+    // auth failures into the job log before the github.com fallback even
+    // runs. Clone only the pairs that probed alive, in endpoint order.
+    // (endpoint idx, cred idx, resolved sha — pinned refs probe existence
+    // via HEAD only)
+    let mut hits: Vec<(usize, usize, Option<String>)> = Vec::new();
+    for (ei, (url, creds)) in endpoints.iter().enumerate() {
+        for (ci, auth) in creds.iter().enumerate() {
+            let hit = if sha_pinned {
+                ls_remote_commit(git_env, url, auth, "HEAD")
+                    .await
+                    .map(|_| git_ref.to_string())
+            } else {
+                ls_remote_commit(git_env, url, auth, git_ref).await
+            };
+            if let Some(sha) = hit {
+                hits.push((ei, ci, Some(sha)));
+            }
+        }
+    }
     let resolved_sha = if sha_pinned {
         Some(git_ref.to_string())
     } else {
-        let mut sha = None;
-        'resolve: for (url, creds) in &endpoints {
-            for auth in creds {
-                if let Some(s) = ls_remote_commit(git_env, url, auth, git_ref).await {
-                    sha = Some(s);
-                    break 'resolve;
-                }
-            }
-        }
-        sha
+        hits.iter().find_map(|(_, _, sha)| sha.clone())
     };
     let ref_key = git_ref.replace('/', "_");
-    let dest = match &resolved_sha {
+    let dest_guess = match &resolved_sha {
         Some(sha) => cache_root.join(format!("{ref_key}@{sha}")),
         None => cache_root.join(&ref_key),
     };
-    if dest.is_dir() {
+    if dest_guess.is_dir() {
         return Ok(if subdir.is_empty() {
-            dest
+            dest_guess
         } else {
-            dest.join(subdir)
+            dest_guess.join(subdir)
         });
     }
     std::fs::create_dir_all(&cache_root).map_err(|e| e.to_string())?;
 
-    let mut last_err = String::new();
+    let mut last_err = if hits.is_empty() {
+        format!("no endpoint could ls-remote {owner}/{repo}")
+    } else {
+        String::new()
+    };
     let logger = senv.logger;
     // Unique temp dir per attempt — concurrent jobs on one runner may fetch
     // the same action; a shared `.clone-<pid>` path would let one job remove
@@ -318,8 +337,10 @@ async fn fetch_remote_action(
         std::process::id(),
         CLONE_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    for (url, creds) in &endpoints {
-        for auth in creds {
+    for &(ep_idx, cred_idx, ref hit_sha) in &hits {
+        let (url, creds) = &endpoints[ep_idx];
+        let auth = &creds[cred_idx];
+        {
             let _ = std::fs::remove_dir_all(&tmp);
             let attempts = [
                 vec![
@@ -337,10 +358,13 @@ async fn fetch_remote_action(
                     tmp.to_string_lossy().to_string(),
                 ],
             ];
+            // `clone --branch <tag>` detaches HEAD at the tag — suppress
+            // git's advisory block (parity with actions/checkout's quiet).
+            let detach_quiet = ["-c".to_string(), "advice.detachedHead=false".to_string()];
             let mut cloned = false;
             for args in attempts {
                 let mut cmd = Command::new("git");
-                cmd.args(auth.iter().chain(args.iter()));
+                cmd.args(auth.iter().chain(detach_quiet.iter()).chain(args.iter()));
                 match run_streamed(&mut cmd, git_env, logger, Duration::from_secs(180)).await {
                     Ok(0) => {
                         cloned = true;
@@ -372,7 +396,8 @@ async fn fetch_remote_action(
                 let mut ok = true;
                 for args in seq {
                     let mut cmd = Command::new("git");
-                    cmd.args(auth.iter().chain(args.iter())).current_dir(&tmp);
+                    cmd.args(auth.iter().chain(detach_quiet.iter()).chain(args.iter()))
+                        .current_dir(&tmp);
                     match run_streamed(&mut cmd, git_env, logger, Duration::from_secs(180)).await {
                         Ok(0) => {}
                         Ok(code) => {
@@ -398,7 +423,7 @@ async fn fetch_remote_action(
             // Full-clone fallback path may leave HEAD on the default branch.
             let mut cmd = Command::new("git");
             cmd.args(auth.iter().cloned()).current_dir(&tmp);
-            cmd.args(["checkout", git_ref]);
+            cmd.args(["-c", "advice.detachedHead=false", "checkout", git_ref]);
             let _ = run_streamed(&mut cmd, git_env, logger, Duration::from_secs(60)).await;
             // Download integrity: record the resolved commit; for a
             // SHA-pinned ref, hard-verify HEAD matches the pin (a substituted
@@ -424,6 +449,13 @@ async fn fetch_remote_action(
                 }
                 _ => {}
             }
+            // Cache key = the commit actually checked out, not the probe's —
+            // a movable ref can slide between ls-remote and clone, and
+            // endpoints may serve different tips under one ref name.
+            let dest = match head.as_deref().or(hit_sha.as_deref()) {
+                Some(sha) => cache_root.join(format!("{ref_key}@{sha}")),
+                None => cache_root.join(&ref_key),
+            };
             // Atomic install: rename wins; a loser removes its clone and uses
             // the racing job's identical result (same resolved sha).
             if std::fs::rename(&tmp, &dest).is_err() {
@@ -625,6 +657,7 @@ fn run_action_spec<'x>(
                 run_node_action(
                     senv,
                     ctx,
+                    step,
                     step_id,
                     &spec,
                     action_dir,
@@ -919,6 +952,7 @@ fn select_node_major(using: &str, action_env: &[(String, String)]) -> (u32, Opti
 async fn run_node_action(
     senv: &mut StepEnv<'_>,
     ctx: &mut Context,
+    step: &Step,
     step_id: &str,
     spec: &ActionSpec,
     action_dir: &Path,
@@ -981,8 +1015,15 @@ async fn run_node_action(
             .unwrap_or_else(|| "always()".into());
         let mut post_env = env;
         state_env_for_post(senv.runner_temp, &mut post_env);
+        // GitHub titles the post phase "Post <step display name>" — the
+        // step's `name:`/`uses:` label, not its internal id.
+        let post_base = step
+            .name
+            .as_deref()
+            .or(step.uses.as_deref())
+            .unwrap_or(step_id);
         senv.posts.push(PendingPost {
-            name: format!("Post {step_id}"),
+            name: format!("Post {post_base}"),
             if_expr: Some(if_expr),
             argv: vec![node, script.to_string_lossy().to_string()],
             env: post_env,
@@ -1261,8 +1302,14 @@ async fn run_docker_action(
         pargv.extend(argv_base);
         pargv.extend(entrypoint_argv(&Some(pep.clone())));
         pargv.push(tag);
+        let post_base = step
+            .name
+            .as_deref()
+            .or(step.uses.as_deref())
+            .or(step.id.as_deref())
+            .unwrap_or("docker-action");
         senv.posts.push(PendingPost {
-            name: format!("Post {}", step.id.as_deref().unwrap_or("docker-action")),
+            name: format!("Post {post_base}"),
             if_expr: Some(if_expr),
             argv: pargv,
             env: post_env,

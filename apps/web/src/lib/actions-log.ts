@@ -6,6 +6,8 @@
  *
  *   ##[step]<title>      — step starts; following lines belong to it
  *   ##[step-done]<title> — step finished successfully
+ *   ##[step-plan]<title> — declared step announced pre-gate; steps planned
+ *                          but never opened render as skipped in the rail
  *   ::error::<msg>       — failure annotation (runner emits before aborting)
  *   ::warning::/::notice:: — annotation severities
  *   ##[group]<title>     — group header line (runner rewrites `::group::`)
@@ -17,7 +19,7 @@
  * status — the runner protocol does not persist per-step status rows.
  */
 
-export type StepStatus = "running" | "success" | "failure" | "cancelled";
+export type StepStatus = "running" | "success" | "failure" | "cancelled" | "skipped";
 
 export type AnsiSegment = {
   text: string;
@@ -55,6 +57,10 @@ export type ParsedJobLog = {
 
 const STEP_OPEN = /^##\[step\](.*)$/;
 const STEP_DONE = /^##\[step-done\](.*)$/;
+const STEP_PLAN = /^##\[step-plan\](.*)$/;
+// Post-action phases (`runs.post`) — GitHub lists them in the rail as
+// "Post <action>" steps.
+const STEP_POST = /^##\[post\](.*)$/;
 const GROUP_OPEN = /^##\[group\](.*)$/;
 // `::error::` is the raw workflow-command form; `##[error]` is the runner's
 // translated form (and what GitHub's own downloaded logs carry).
@@ -210,6 +216,10 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
   const preamble: LogLine[] = [];
   const steps: LogStep[] = [];
   const epilogue: LogLine[] = [];
+  // `##[step-plan]` markers — the runner announces every iterated step before
+  // its `if`/cancel gates, so plans without a matching `##[step]` open are
+  // steps GitHub renders as skipped (dimmed) in the rail.
+  const planned: { name: string; n: number; step?: LogStep }[] = [];
   let current: LogStep | null = null;
   let sawDone = false;
 
@@ -231,6 +241,25 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
         lines: [],
       };
       steps.push(current);
+      // Pair with the LAST unpaired plan — a skipped step's plan marker
+      // interleaves between the previous open and this one.
+      const last = planned.findLastIndex((p) => !p.step);
+      if (last >= 0) planned[last].step = current;
+      sawDone = false;
+      continue;
+    }
+    const post = STEP_POST.exec(raw);
+    if (post) {
+      if (current) {
+        current.status = jobStatus === "success" ? "success" : "failure";
+      }
+      current = {
+        name: post[1].trim() || `Post step ${steps.length + 1}`,
+        status: "running",
+        startLine: n,
+        lines: [],
+      };
+      steps.push(current);
       sawDone = false;
       continue;
     }
@@ -244,6 +273,11 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
       continue;
     }
     if (HIDDEN_COMMAND.test(raw) || OTHER_MARKER.test(raw)) {
+      const plan = STEP_PLAN.exec(raw);
+      if (plan) {
+        planned.push({ name: plan[1].trim(), n });
+        continue;
+      }
       // `##[group]`/`::debug::`/`##[error]` are visible line kinds — handle
       // them first; `##[ann]` and any other `##[x]` stay hidden.
       const group = GROUP_OPEN.exec(raw);
@@ -288,7 +322,32 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
             ? "running"
             : "failure";
   }
-  return { preamble, steps, epilogue };
+  if (planned.length === 0) {
+    return { preamble, steps, epilogue };
+  }
+  // Planned-but-unopened steps — `if`-gated off or never reached after an
+  // earlier failure — still list in GitHub's rail (dimmed). Merge in plan
+  // order; opened steps pair positionally, leftovers become placeholders.
+  const merged: LogStep[] = [];
+  const seen = new Set<LogStep>();
+  for (const p of planned) {
+    if (p.step) {
+      merged.push(p.step);
+      seen.add(p.step);
+    } else {
+      merged.push({
+        name: p.name || `Step ${merged.length + 1}`,
+        status: "skipped",
+        startLine: p.n,
+        lines: [],
+      });
+    }
+  }
+  // Steps opened without a plan marker (older-runner logs) keep their order.
+  for (const s of steps) {
+    if (!seen.has(s)) merged.push(s);
+  }
+  return { preamble, steps: merged, epilogue };
 }
 
 /** All visible lines in order (preamble → steps → epilogue) — raw text basis

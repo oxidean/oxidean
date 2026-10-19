@@ -154,7 +154,8 @@ async fn dispatch_push_inner(
             continue; // notes/replace/etc — no push workflows on non-branch/tag refs
         };
         // [skip ci]-family markers on the head commit suppress the event.
-        if let Ok(c) = git.show_commit(&bare, after, None, None).await {
+        let head_commit = git.show_commit(&bare, after, None, None).await.ok();
+        if let Some(c) = &head_commit {
             if message_has_skip_marker(&format!("{}\n{}", c.subject, c.body)) {
                 tracing::info!(
                     repository_id,
@@ -250,6 +251,10 @@ async fn dispatch_push_inner(
         }
 
         let disabled = db.list_disabled_action_workflows(repository_id).await?;
+        let default_title = head_commit
+            .as_ref()
+            .map(|c| c.subject.clone())
+            .filter(|s| !s.trim().is_empty());
         for wf in &discovered.workflows {
             if !wf.document.triggers.push || disabled.contains(&wf.path) {
                 continue;
@@ -275,11 +280,27 @@ async fn dispatch_push_inner(
                 None,
                 Some(&payload),
                 false,
+                default_title.as_deref(),
             )
             .await?;
         }
     }
     Ok(())
+}
+
+/// GitHub `display_title` fallback for commit-backed events — the head
+/// commit's subject line. Resolved once per dispatch so a multi-workflow
+/// fan-out pays a single `show_commit`.
+pub async fn head_commit_subject(
+    git: &dyn GitBackend,
+    bare: &Path,
+    head_sha: &str,
+) -> Option<String> {
+    git.show_commit(bare, head_sha, None, None)
+        .await
+        .ok()
+        .map(|c| c.subject)
+        .filter(|s| !s.trim().is_empty())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -299,6 +320,9 @@ pub async fn enqueue_run(
     // `approval_hold` set (unclaimable, publicly `waiting_approval`) until
     // `repo.actions.approveRun` clears the flag.
     hold_for_approval: bool,
+    // GitHub `display_title` fallback when `run-name:` is absent — callers
+    // pass the head commit subject (or the PR title for `pull_request*`).
+    default_title: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
     let run_id = Uuid::new_v4().to_string();
     // Enqueue-time expression context (Phase 2): github/env/vars/inputs.
@@ -327,8 +351,9 @@ pub async fn enqueue_run(
     eval_warnings.extend(name_notes);
     crate::actions::eval_ctx::set_workflow_name(&mut ctx, &workflow_name);
     // `run-name:` — per-run title evaluated against the same enqueue ctx
-    // (github/inputs/vars). Empty or absent falls back to the workflow name,
-    // matching GitHub's title column.
+    // (github/inputs/vars). Empty or absent falls back to GitHub's
+    // `display_title` — the head commit subject for commit-backed events,
+    // the PR title for `pull_request*` — then the workflow name.
     let run_title = doc
         .run_name
         .as_deref()
@@ -339,7 +364,12 @@ pub async fn enqueue_run(
             t
         })
         .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| workflow_name.clone());
+        .unwrap_or_else(|| {
+            default_title
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or(workflow_name.as_str())
+                .to_string()
+        });
     db.insert_action_run(
         &run_id,
         repository_id,
@@ -659,7 +689,8 @@ pub async fn dispatch_push_for_sha(
         return Ok(0);
     }
     // Same skip-marker contract as the post-receive path.
-    if let Ok(c) = git.show_commit(bare, head_sha, None, None).await {
+    let head_commit = git.show_commit(bare, head_sha, None, None).await.ok();
+    if let Some(c) = &head_commit {
         if message_has_skip_marker(&format!("{}\n{}", c.subject, c.body)) {
             return Ok(0);
         }
@@ -761,6 +792,10 @@ pub async fn dispatch_push_for_sha(
             None,
             Some(&payload),
             false,
+            head_commit
+                .as_ref()
+                .map(|c| c.subject.as_str())
+                .filter(|s| !s.trim().is_empty()),
         )
         .await?;
         n += 1;
@@ -1487,6 +1522,9 @@ async fn dispatch_merge_group_inner(
         .await?;
     }
     let disabled = db.list_disabled_action_workflows(repository_id).await?;
+    // Merge-group heads are synthetic merge commits — their subject ("Merge
+    // X into Y") is the run title GitHub shows.
+    let default_title = head_commit_subject(git, bare_repo, head_sha).await;
     for wf in &discovered.workflows {
         let Some(types) = wf
             .document
@@ -1517,6 +1555,7 @@ async fn dispatch_merge_group_inner(
             None,
             Some(payload),
             false,
+            default_title.as_deref(),
         )
         .await?;
         n += 1;

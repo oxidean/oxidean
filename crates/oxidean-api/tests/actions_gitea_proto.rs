@@ -144,6 +144,7 @@ async fn seed_repo_job(db: &Database, yaml: &[u8], key: &str) -> String {
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();

@@ -119,6 +119,77 @@ describe("parseJobLog", () => {
     expect(parsed.steps).toHaveLength(0);
     expect(flattenedLines(parsed).map((l) => l.plain)).toEqual(["plain", "log", ""]);
   });
+
+  it("lists planned-but-unopened steps as skipped in declaration order", () => {
+    // Build failed → the runner still announced `Test` via ##[step-plan],
+    // so GitHub-parity rendering keeps it in the rail as skipped.
+    const log = [
+      "Job build — Go / 4 step(s) [host]",
+      "##[step-plan]actions/checkout@v4",
+      "##[step]actions/checkout@v4",
+      "clone ok",
+      "##[step-done]actions/checkout@v4",
+      "##[step-plan]Set up Go",
+      "##[step]Set up Go",
+      "go 1.20",
+      "##[step-done]Set up Go",
+      "##[step-plan]Build",
+      "##[step]Build",
+      "::error::step exited 1",
+      "##[step-plan]Test",
+    ].join("\n");
+    const parsed = parseJobLog(log, "failure");
+    expect(parsed.steps.map((s) => [s.name, s.status])).toEqual([
+      ["actions/checkout@v4", "success"],
+      ["Set up Go", "success"],
+      ["Build", "failure"],
+      ["Test", "skipped"],
+    ]);
+    // The skipped step contributes no lines and the plan markers are hidden.
+    expect(flattenedLines(parsed).map((l) => l.plain)).toEqual([
+      "Job build — Go / 4 step(s) [host]",
+      "clone ok",
+      "go 1.20",
+      "step exited 1",
+    ]);
+  });
+
+  it("keeps mid-sequence skipped steps in rail order", () => {
+    const log = [
+      "##[step-plan]Lint",
+      "##[step]Lint",
+      "ok",
+      "##[step-done]Lint",
+      "##[step-plan]Docs",
+      "##[step-plan]Package",
+      "##[step]Package",
+      "ok",
+      "##[step-done]Package",
+    ].join("\n");
+    const parsed = parseJobLog(log, "success");
+    expect(parsed.steps.map((s) => [s.name, s.status])).toEqual([
+      ["Lint", "success"],
+      ["Docs", "skipped"],
+      ["Package", "success"],
+    ]);
+  });
+
+  it("renders ##[post] markers as trailing steps", () => {
+    const log = [
+      "##[step-plan]actions/checkout@v4",
+      "##[step]actions/checkout@v4",
+      "clone ok",
+      "##[step-done]actions/checkout@v4",
+      "##[post]Post actions/checkout@v4",
+      "cleaning up",
+    ].join("\n");
+    const parsed = parseJobLog(log, "success");
+    expect(parsed.steps.map((s) => [s.name, s.status])).toEqual([
+      ["actions/checkout@v4", "success"],
+      ["Post actions/checkout@v4", "success"],
+    ]);
+    expect(parsed.steps[1].lines.map((l) => l.plain)).toEqual(["cleaning up"]);
+  });
 });
 
 describe("splitHits", () => {

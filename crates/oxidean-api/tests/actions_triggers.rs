@@ -103,6 +103,9 @@ jobs:
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "push");
     assert_eq!(runs[0].status, "queued");
+    // GitHub `display_title` — no `run-name:` means the head commit subject,
+    // not the workflow name.
+    assert_eq!(runs[0].title, "wf");
     let jobs = db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, "queued");

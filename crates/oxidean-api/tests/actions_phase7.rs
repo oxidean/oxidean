@@ -70,6 +70,7 @@ async fn enqueue(
         None,
         None,
         hold,
+        None,
     )
     .await
     .expect("enqueue")

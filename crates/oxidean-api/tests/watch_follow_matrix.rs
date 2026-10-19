@@ -1003,6 +1003,7 @@ jobs:
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();
@@ -1152,6 +1153,7 @@ async fn workflow_run_failure_fanout() {
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();
@@ -1276,6 +1278,7 @@ async fn workflow_run_cancel_fanout_and_finished_guard() {
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();

@@ -2071,6 +2071,8 @@ pub async fn dispatch_workflow(
         &repository,
         &sender,
     );
+    let default_title =
+        crate::actions::dispatch::head_commit_subject(ctx.git.as_ref(), &bare, &treeish).await;
     let (run_id, _jobs) = enqueue_run(
         &ctx.db,
         &accessible.row.id,
@@ -2083,6 +2085,7 @@ pub async fn dispatch_workflow(
         None,
         Some(&payload),
         false,
+        default_title.as_deref(),
     )
     .await
     .map_err(db_err)?;

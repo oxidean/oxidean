@@ -605,6 +605,23 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 }
                 ctx.set_context("github", gh);
             }
+            // Step plan — announce every iterated step before its gates so
+            // the log viewer can render `if`-skipped and unreached steps in
+            // the rail (GitHub lists them dimmed). Emitted per-step so plan
+            // titles interpolate against this step's ctx (matrix/env/github).
+            let plan_title = ident_src
+                .name
+                .as_deref()
+                .map(|n| expr::interpolate(n, &ctx).unwrap_or_else(|_| n.to_string()))
+                .or_else(|| ident_src.uses.clone())
+                .or_else(|| {
+                    ident_src.run.as_deref().map(|r| {
+                        let r = expr::interpolate(r, &ctx).unwrap_or_else(|_| r.to_string());
+                        truncate(&r, 60)
+                    })
+                })
+                .unwrap_or_else(|| format!("step {i}"));
+            logger.line(&format!("##[step-plan]{plan_title}")).await;
             // Job deadline marks the job cancelled — but GitHub semantics
             // keep `always()`/`cancelled()` steps running (timeout cleanup),
             // so fall through to the `if` gate instead of hard-skipping.

@@ -109,7 +109,10 @@ pub(crate) async fn checkout(
         .unwrap_or_else(|| task.head_sha.clone().unwrap_or_default());
     if !target.is_empty() {
         let mut cmd = Command::new("git");
-        cmd.args(["checkout", &target]).current_dir(&dest);
+        // actions/checkout detaches silently — suppress git's detached-HEAD
+        // advisory block so the job log matches GitHub's.
+        cmd.args(["-c", "advice.detachedHead=false", "checkout", &target])
+            .current_dir(&dest);
         let code = run_streamed(&mut cmd, env, logger, timeout).await?;
         if code != 0 {
             // `git clone` only fetches heads + tags: `pull_request` runs pin a
@@ -179,7 +182,8 @@ pub(crate) async fn checkout(
                         continue;
                     }
                     let mut cmd = Command::new("git");
-                    cmd.args(["checkout", cand]).current_dir(&dest);
+                    cmd.args(["-c", "advice.detachedHead=false", "checkout", cand])
+                        .current_dir(&dest);
                     if run_streamed(&mut cmd, env, logger, timeout).await? == 0 {
                         checked_out = true;
                         break;

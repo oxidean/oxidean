@@ -162,6 +162,8 @@ pub async fn sweep_scheduled_workflows(
         let Ok(sha) = git.rev_parse(&bare, &default_ref).await else {
             continue;
         };
+        let default_title =
+            crate::actions::dispatch::head_commit_subject(git.as_ref(), &bare, &sha).await;
         let Ok(discovered) = crate::actions::discover_workflows(git.as_ref(), &bare, &sha).await
         else {
             continue;
@@ -224,6 +226,7 @@ pub async fn sweep_scheduled_workflows(
                     None,
                     Some(&payload),
                     false,
+                    default_title.as_deref(),
                 )
                 .await
                 {

@@ -171,6 +171,7 @@ async fn claim_with_cache(
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();
@@ -589,6 +590,7 @@ async fn cache_rpc_list_and_delete() {
         None,
         None,
         false,
+        None,
     )
     .await
     .unwrap();

@@ -339,6 +339,22 @@ async fn get_run_anonymous_includes_jobs_and_timestamps() {
     .await;
     assert_eq!(res["ok"], true, "anonymous getRun — {res}");
     assert_eq!(res["data"]["run"]["actor"], "actowner");
+    // The detail payload must carry the row timestamps — `find_run_by_id`
+    // once omitted created_at/updated_at from its SELECT and serialized "".
+    assert!(
+        !res["data"]["run"]["created_at"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
+        "getRun created_at empty — {res}"
+    );
+    assert!(
+        !res["data"]["run"]["updated_at"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
+        "getRun updated_at empty — {res}"
+    );
     let job = &res["data"]["jobs"][0];
     assert_eq!(job["id"], "job-1");
     assert_eq!(job["status"], "queued");
