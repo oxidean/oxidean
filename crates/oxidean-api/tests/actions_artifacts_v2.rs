@@ -1648,3 +1648,393 @@ async fn rest_actions_secrets_variables_environments_surface() {
     .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }
+
+/// `/api/v1` deployments + statuses + `repository_dispatch` + the
+/// actions/permissions + workflow-permissions settings, and the
+/// `pending_deployments` review roundtrip — the surface `gh api` / deployment
+/// tooling targets.
+#[tokio::test]
+async fn rest_actions_deployments_permissions_dispatch_surface() {
+    let (app, db, dir) = app_db().await;
+    let owner = db
+        .create_user(
+            "u-dep",
+            "dep@example.com",
+            "dep",
+            Some("h"),
+            "F",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo = db
+        .insert_repository("r-dep", &owner.id, "user", "dep", "private", "", "main")
+        .await
+        .unwrap();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at("u-dep", &now).await.unwrap();
+    let pat = "oxidean_pat_dep_roundtrip";
+    db.create_pat(
+        "pat-dep",
+        "u-dep",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    // dispatch + workflow discovery need the bare repo's tree.
+    let bare = dir.path().join("repos").join("dep").join("dep.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = oxidean_git::CliGitBackend::new();
+    oxidean_git::GitBackend::init_bare(&git, &bare, "main")
+        .await
+        .unwrap();
+    oxidean_git::GitBackend::seed_commit(
+        &git,
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/deploy.yml".into(),
+            b"name: D\non: [repository_dispatch]\njobs:\n  ship:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ship\n".to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+    let base = "/api/v1/repos/dep/dep";
+
+    // ---- deployments ----
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/deployments"),
+        Some(pat),
+        r#"{"ref":"main","environment":"production","description":"first","task":"deploy"}"#,
+    )
+    .await;
+    let status = res.status();
+    let dep = body_json(res).await;
+    assert_eq!(status, StatusCode::CREATED, "create: {dep}");
+    let dep_id = dep["id"].as_str().unwrap().to_string();
+    assert_eq!(dep["ref"], "refs/heads/main");
+    assert_eq!(dep["environment"], "production");
+    assert_eq!(dep["task"], "deploy");
+    assert!(dep["url"].as_str().unwrap().contains("/deployments/"));
+
+    let res = rest(&app, "GET", &format!("{base}/deployments"), Some(pat)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let list = body_json(res).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["id"], dep_id);
+
+    // query filters GitHub passes through
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/deployments?environment=staging"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await.as_array().unwrap().len(), 0);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/deployments?environment=production&ref=main&task=deploy"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await.as_array().unwrap().len(), 1);
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/deployments/{dep_id}"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_json(res).await["id"], dep_id);
+
+    // ---- deployment statuses ----
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/deployments/{dep_id}/statuses"),
+        Some(pat),
+        r#"{"state":"in_progress","description":"rolling out","target_url":"https://example.com/logs"}"#,
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "status create: {}",
+        res.status()
+    );
+    let st = body_json(res).await;
+    assert_eq!(st["state"], "in_progress");
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/deployments/{dep_id}/statuses"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let statuses = body_json(res).await;
+    assert_eq!(statuses.as_array().unwrap().len(), 1);
+    assert_eq!(statuses[0]["state"], "in_progress");
+    // latest status surfaces on the deployment projection
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/deployments/{dep_id}"),
+        Some(pat),
+    )
+    .await;
+    let dep = body_json(res).await;
+    assert!(
+        dep["statuses_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/repos/dep/dep/deployments/{dep_id}/statuses")),
+        "statuses_url: {}",
+        dep["statuses_url"]
+    );
+
+    // GitHub only deletes inactive deployments — the live one must 4xx.
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/deployments/{dep_id}"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/deployments/{dep_id}/statuses"),
+        Some(pat),
+        r#"{"state":"inactive","auto_inactive":false}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/deployments/{dep_id}"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(&app, "GET", &format!("{base}/deployments"), Some(pat)).await;
+    assert_eq!(body_json(res).await.as_array().unwrap().len(), 0);
+
+    // ---- actions/permissions (enabled toggle) ----
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let perms = body_json(res).await;
+    assert_eq!(perms["enabled"], true);
+    assert_eq!(perms["allowed_actions"], "all");
+
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions"),
+        Some(pat),
+        r#"{"enabled":false,"allowed_actions":"all"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["enabled"], false);
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions"),
+        Some(pat),
+        r#"{"enabled":true}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // ---- actions/permissions/workflow ----
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions/workflow"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let wp = body_json(res).await;
+    assert_eq!(wp["default_workflow_permissions"], "read");
+    assert_eq!(wp["can_approve_pull_request_reviews"], false);
+
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions/workflow"),
+        Some(pat),
+        r#"{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions/workflow"),
+        Some(pat),
+    )
+    .await;
+    let wp = body_json(res).await;
+    assert_eq!(wp["default_workflow_permissions"], "write");
+    assert_eq!(wp["can_approve_pull_request_reviews"], true);
+    // restore read so later mints stay restricted
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions/workflow"),
+        Some(pat),
+        r#"{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // ---- repository_dispatch ----
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/dispatches"),
+        Some(pat),
+        r#"{"event_type":"deploy-preview","client_payload":{"env":"staging","n":2}}"#,
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::NO_CONTENT,
+        "dispatch: {}",
+        res.status()
+    );
+    let res = rest(&app, "GET", &format!("{base}/actions/runs"), Some(pat)).await;
+    let runs = body_json(res).await;
+    let dispatched = runs["workflow_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["event"] == "repository_dispatch")
+        .expect("repository_dispatch run enqueued");
+    let run_id = dispatched["id"].as_str().unwrap().to_string();
+
+    // ---- pending_deployments: env-gated job roundtrip ----
+    db.upsert_action_environment(
+        "env-dep",
+        &repo.id,
+        "production",
+        &format!(r#"{{"required_reviewers":["{}"]}}"#, owner.id),
+    )
+    .await
+    .unwrap();
+    let doc = parse_workflow_yaml(
+        b"name: E\non: [push]\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    environment: production\n    steps:\n      - run: echo deploy\n",
+    )
+    .unwrap();
+    let (held_run, job_ids) = enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/deploy.yml",
+        &doc,
+        "push",
+        "deadbeef",
+        "refs/heads/main",
+        Some(&owner.id),
+        None,
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+    let held_job = db
+        .find_action_job_by_id(&job_ids[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(held_job.approval_hold);
+
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{held_run}/pending_deployments"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let pending = body_json(res).await;
+    let pending = pending.as_array().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["name"], "production");
+    assert_eq!(pending[0]["current_user_can_approve"], true);
+
+    // a run with no held jobs → empty list
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/pending_deployments"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await.as_array().unwrap().len(), 0);
+
+    let res = rest_json(
+        &app,
+        "POST",
+        &format!("{base}/actions/runs/{held_run}/pending_deployments"),
+        Some(pat),
+        r#"{"environment_ids":["production"],"state":"approved","comment":"ship"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "review: {}", res.status());
+    let reviewed = body_json(res).await;
+    assert_eq!(reviewed[0]["name"], "production");
+    let job = db
+        .find_action_job_by_id(&job_ids[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!job.approval_hold, "review releases the gate");
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{held_run}/pending_deployments"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(
+        body_json(res).await.as_array().unwrap().len(),
+        0,
+        "no pending envs after approval"
+    );
+}

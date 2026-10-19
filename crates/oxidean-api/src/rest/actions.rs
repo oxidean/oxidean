@@ -18,6 +18,10 @@ use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use std::collections::HashMap;
+
+use oxidean_core::AppError;
+
 use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{call, call_map, ctx_for, dispatch, repo_ref, status_for_error, RepoPath};
 use crate::app::AppState;
@@ -180,6 +184,13 @@ struct OrgVarRepoPath {
     org: String,
     variable_name: String,
     repository_id: String,
+}
+
+#[derive(Deserialize)]
+struct DeploymentPath {
+    owner: String,
+    repo: String,
+    deployment_id: String,
 }
 
 /// `PUT …/secrets/{name}` body — GitHub sends `{encrypted_value, key_id}`
@@ -1199,6 +1210,201 @@ pub const ROUTES: &[RouteDef] = &[
         body: None,
         response: None,
         mount: || delete(delete_environment),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/deployments",
+        tags: &["actions"],
+        operation_id: "repos/listDeployments",
+        summary: "List deployments, GitHub shape (deployment.list)",
+        procedure: "deployment.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<DeploymentsQuery>),
+        body: None,
+        response: Some(RespSpec::Json(deployments_list_schema)),
+        mount: || get(list_deployments),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/deployments",
+        tags: &["actions"],
+        operation_id: "repos/createDeployment",
+        summary: "Create a deployment, GitHub shape (deployment.create)",
+        procedure: "deployment.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(deployment_create_schema)),
+        response: Some(RespSpec::Json(deployment_schema)),
+        mount: || post(create_deployment),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/deployments/{deployment_id}",
+        tags: &["actions"],
+        operation_id: "repos/getDeployment",
+        summary: "One deployment, GitHub shape (deployment.get)",
+        procedure: "deployment.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(deployment_schema)),
+        mount: || get(get_deployment),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/deployments/{deployment_id}",
+        tags: &["actions"],
+        operation_id: "repos/deleteDeployment",
+        summary: "Delete a deployment (deployment.delete)",
+        procedure: "deployment.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_deployment),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/deployments/{deployment_id}/statuses",
+        tags: &["actions"],
+        operation_id: "repos/listDeploymentStatuses",
+        summary: "List a deployment's statuses, GitHub shape (deployment.status.list)",
+        procedure: "deployment.status.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "deployment_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(deployment_statuses_schema)),
+        mount: || get(list_deployment_statuses),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/deployments/{deployment_id}/statuses",
+        tags: &["actions"],
+        operation_id: "repos/createDeploymentStatus",
+        summary: "Create a deployment status, GitHub shape (deployment.status.create)",
+        procedure: "deployment.status.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "deployment_id"],
+        query: None,
+        body: Some(BodySpec::Json(deployment_status_body_schema)),
+        response: Some(RespSpec::Json(deployment_status_schema)),
+        mount: || post(create_deployment_status),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/dispatches",
+        tags: &["actions"],
+        operation_id: "repos/createDispatchEvent",
+        summary: "repository_dispatch event (repo.actions.dispatchRepository)",
+        procedure: "repo.actions.dispatchRepository",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(repo_dispatch_schema)),
+        response: None,
+        mount: || post(repository_dispatch),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/permissions",
+        tags: &["actions"],
+        operation_id: "actions/getActionsPermissionsRepository",
+        summary: "Repo Actions permissions {enabled, allowed_actions} (repo.actions.getEnabled)",
+        procedure: "repo.actions.getEnabled",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(actions_permissions_schema)),
+        mount: || get(get_actions_permissions),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/actions/permissions",
+        tags: &["actions"],
+        operation_id: "actions/setActionsPermissionsRepository",
+        summary: "Set repo Actions permissions (repo.actions.setEnabled)",
+        procedure: "repo.actions.setEnabled",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(actions_permissions_put_schema)),
+        response: None,
+        mount: || put(set_actions_permissions),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/permissions/workflow",
+        tags: &["actions"],
+        operation_id: "actions/getWorkflowPermissionsRepository",
+        summary: "Default token permissions + PR-approve flag (getDefaultPermissions + getPullRequestTarget)",
+        procedure: "repo.actions.getDefaultPermissions",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(workflow_permissions_schema)),
+        mount: || get(get_workflow_permissions),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/actions/permissions/workflow",
+        tags: &["actions"],
+        operation_id: "actions/setWorkflowPermissionsRepository",
+        summary: "Set default token permissions (setDefaultPermissions / setPullRequestTarget)",
+        procedure: "repo.actions.setDefaultPermissions",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(workflow_permissions_schema)),
+        response: None,
+        mount: || put(set_workflow_permissions),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments",
+        tags: &["actions"],
+        operation_id: "actions/getPendingDeployments",
+        summary: "Environments with approval-held jobs for a run (repo.actions.getRun)",
+        procedure: "repo.actions.getRun",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(pending_deployments_schema)),
+        mount: || get(list_pending_deployments),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments",
+        tags: &["actions"],
+        operation_id: "actions/reviewPendingDeployments",
+        summary: "Approve/reject environment-held jobs (repo.actions.reviewDeployment)",
+        procedure: "repo.actions.reviewDeployment",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: Some(BodySpec::Json(pending_deployments_body_schema)),
+        response: Some(RespSpec::Json(pending_deployments_schema)),
+        mount: || post(review_pending_deployments),
     },
 ];
 
@@ -3735,4 +3941,729 @@ async fn org_variable_remove_selected_repo(
         false,
     )
     .await
+}
+
+// ---- deployments ----
+
+/// `GET /deployments` filters — GitHub documents `sha`, `ref`, `task`,
+/// `environment`.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DeploymentsQuery {
+    sha: Option<String>,
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+    task: Option<String>,
+    environment: Option<String>,
+    per_page: Option<u32>,
+    page: Option<u32>,
+}
+
+/// `POST /deployments` body — GitHub shape (`ref` renames to `git_ref`).
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DeploymentCreateBody {
+    #[serde(rename = "ref")]
+    git_ref: String,
+    task: Option<String>,
+    auto_merge: Option<bool>,
+    required_contexts: Option<Vec<String>>,
+    payload: Option<Value>,
+    environment: Option<String>,
+    description: Option<String>,
+    transient_environment: Option<bool>,
+    production_environment: Option<bool>,
+}
+
+/// `POST /deployments/{id}/statuses` body — GitHub shape.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DeploymentStatusBody {
+    state: String,
+    description: Option<String>,
+    environment: Option<String>,
+    environment_url: Option<String>,
+    target_url: Option<String>,
+    log_url: Option<String>,
+    auto_inactive: Option<bool>,
+}
+
+/// `POST /dispatches` body — `repository_dispatch`.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RepoDispatchBody {
+    event_type: String,
+    client_payload: Option<Value>,
+}
+
+/// `PUT /actions/permissions` body.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ActionsPermissionsPutBody {
+    enabled: Option<bool>,
+}
+
+/// `PUT /actions/permissions/workflow` body.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct WorkflowPermissionsBody {
+    default_workflow_permissions: Option<String>,
+    can_approve_pull_request_reviews: Option<bool>,
+}
+
+/// `POST …/pending_deployments` body — `{environment_ids, state, comment}`.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct PendingDeploymentsBody {
+    environment_ids: Vec<Value>,
+    state: String,
+    comment: Option<String>,
+}
+
+fn deployments_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn deployment_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+fn deployment_statuses_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn deployment_status_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+fn deployment_create_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["ref"],
+        "properties": {
+            "ref": {"type": "string"},
+            "task": {"type": "string"},
+            "auto_merge": {"type": "boolean"},
+            "required_contexts": {"type": "array", "items": {"type": "string"}},
+            "payload": {},
+            "environment": {"type": "string"},
+            "description": {"type": "string"},
+            "transient_environment": {"type": "boolean"},
+            "production_environment": {"type": "boolean"},
+        },
+    })
+}
+
+fn deployment_status_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+            "state": {"type": "string"},
+            "description": {"type": "string"},
+            "environment": {"type": "string"},
+            "environment_url": {"type": "string"},
+            "target_url": {"type": "string"},
+            "log_url": {"type": "string"},
+            "auto_inactive": {"type": "boolean"},
+        },
+    })
+}
+
+fn repo_dispatch_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["event_type"],
+        "properties": {
+            "event_type": {"type": "string"},
+            "client_payload": {"type": "object"},
+        },
+    })
+}
+
+fn actions_permissions_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean"},
+            "allowed_actions": {"type": "string", "enum": ["all", "local_only", "selected"]},
+        },
+    })
+}
+
+fn actions_permissions_put_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean"},
+            "allowed_actions": {"type": "string"},
+        },
+    })
+}
+
+fn workflow_permissions_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "default_workflow_permissions": {"type": "string", "enum": ["read", "write"]},
+            "can_approve_pull_request_reviews": {"type": "boolean"},
+        },
+    })
+}
+
+fn pending_deployments_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": environment_schema_value()})
+}
+
+fn pending_deployments_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["environment_ids", "state"],
+        "properties": {
+            "environment_ids": {"type": "array", "items": {}},
+            "state": {"type": "string", "enum": ["approved", "rejected"]},
+            "comment": {"type": "string"},
+        },
+    })
+}
+
+/// `ActionDeploymentPublic` JSON → the GitHub deployment object.
+fn gh_deployment(origin: &str, owner: &str, repo: &str, d: &Value) -> Value {
+    let id = d["id"].as_str().unwrap_or_default();
+    let base = format!("{origin}/api/v1/repos/{owner}/{repo}");
+    json!({
+        "id": num_or_str(id),
+        "node_id": "",
+        "url": format!("{base}/deployments/{id}"),
+        "statuses_url": format!("{base}/deployments/{id}/statuses"),
+        "repository_url": base,
+        "sha": d["sha"],
+        "ref": d["ref"],
+        "task": d["task"],
+        "payload": d["payload"],
+        "original_environment": d["environment"],
+        "environment": d["environment"],
+        "description": d["description"],
+        "creator": d["creator_username"].as_str().map(|u| json!({
+            "login": u, "type": "User", "site_admin": false,
+        })),
+        "transient_environment": d["transient_environment"],
+        "production_environment": d["production_environment"],
+        "created_at": d["created_at"],
+        "updated_at": d["updated_at"],
+    })
+}
+
+fn gh_deployment_status(origin: &str, owner: &str, repo: &str, st: &Value) -> Value {
+    let id = st["id"].as_str().unwrap_or_default();
+    let dep = st["deployment_id"].as_str().unwrap_or_default();
+    let base = format!("{origin}/api/v1/repos/{owner}/{repo}");
+    json!({
+        "id": num_or_str(id),
+        "node_id": "",
+        "url": format!("{base}/deployments/{dep}/statuses/{id}"),
+        "state": st["state"],
+        "description": st["description"],
+        "environment": st["environment"],
+        "environment_url": st["environment_url"],
+        "target_url": st["target_url"],
+        "log_url": st["log_url"],
+        "creator": st["creator_username"].as_str().map(|u| json!({
+            "login": u, "type": "User", "site_admin": false,
+        })),
+        "created_at": st["created_at"],
+        "updated_at": st["created_at"],
+        "deployment_url": format!("{base}/deployments/{dep}"),
+        "repository_url": base,
+    })
+}
+
+async fn list_deployments(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<DeploymentsQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    if let Some(v) = &q.sha {
+        input["sha"] = json!(v);
+    }
+    if let Some(v) = &q.git_ref {
+        input["git_ref"] = json!(v);
+    }
+    if let Some(v) = &q.task {
+        input["task"] = json!(v);
+    }
+    if let Some(v) = &q.environment {
+        input["environment"] = json!(v);
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "deployment.list", input).await {
+        RpcResponse::Ok { data, .. } => {
+            let items = data["deployments"].as_array().cloned().unwrap_or_default();
+            let per_page = q.per_page.unwrap_or(30).clamp(1, 100) as usize;
+            let start = (q.page.unwrap_or(1).max(1) - 1) as usize * per_page;
+            let items = items
+                .iter()
+                .skip(start.min(items.len()))
+                .take(per_page)
+                .map(|d| gh_deployment(&origin, &p.owner, &p.repo, d))
+                .collect::<Vec<_>>();
+            (StatusCode::OK, Json(json!(items))).into_response()
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+async fn create_deployment(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<DeploymentCreateBody>,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["ref"] = json!(body.git_ref);
+    for (k, v) in [
+        ("task", body.task.map(Value::from)),
+        ("environment", body.environment.map(Value::from)),
+        ("description", body.description.map(Value::from)),
+        ("auto_merge", body.auto_merge.map(Value::from)),
+        ("required_contexts", body.required_contexts.map(Value::from)),
+        ("payload", body.payload),
+        (
+            "transient_environment",
+            body.transient_environment.map(Value::from),
+        ),
+        (
+            "production_environment",
+            body.production_environment.map(Value::from),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(k, v)| v.map(|v| (k, v)))
+    {
+        input[k] = v;
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "deployment.create",
+        input,
+        StatusCode::CREATED,
+        |d| gh_deployment(&origin, &p.owner, &p.repo, &d),
+    )
+    .await
+}
+
+async fn get_deployment(
+    State(state): State<AppState>,
+    Path(p): Path<DeploymentPath>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["id"] = json!(p.deployment_id);
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(&mut ctx, "deployment.get", input, StatusCode::OK, |d| {
+        gh_deployment(&origin, &p.owner, &p.repo, &d)
+    })
+    .await
+}
+
+async fn delete_deployment(
+    State(state): State<AppState>,
+    Path(p): Path<DeploymentPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["id"] = json!(p.deployment_id);
+    call(
+        &state,
+        &headers,
+        "deployment.delete",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn list_deployment_statuses(
+    State(state): State<AppState>,
+    Path(p): Path<DeploymentPath>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["deployment_id"] = json!(p.deployment_id);
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "deployment.status.list", input).await {
+        RpcResponse::Ok { data, .. } => {
+            let items = data["statuses"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|st| gh_deployment_status(&origin, &p.owner, &p.repo, st))
+                .collect::<Vec<_>>();
+            (StatusCode::OK, Json(json!(items))).into_response()
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+async fn create_deployment_status(
+    State(state): State<AppState>,
+    Path(p): Path<DeploymentPath>,
+    headers: HeaderMap,
+    Json(body): Json<DeploymentStatusBody>,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["deployment_id"] = json!(p.deployment_id);
+    input["state"] = json!(body.state);
+    for (k, v) in [
+        ("description", body.description.map(Value::from)),
+        ("environment", body.environment.map(Value::from)),
+        ("environment_url", body.environment_url.map(Value::from)),
+        ("target_url", body.target_url.map(Value::from)),
+        ("log_url", body.log_url.map(Value::from)),
+        ("auto_inactive", body.auto_inactive.map(Value::from)),
+    ]
+    .into_iter()
+    .filter_map(|(k, v)| v.map(|v| (k, v)))
+    {
+        input[k] = v;
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "deployment.status.create",
+        input,
+        StatusCode::CREATED,
+        |st| gh_deployment_status(&origin, &p.owner, &p.repo, &st),
+    )
+    .await
+}
+
+// ---- repository_dispatch ----
+
+async fn repository_dispatch(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<RepoDispatchBody>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["event_type"] = json!(body.event_type);
+    if let Some(cp) = body.client_payload {
+        input["client_payload"] = cp;
+    }
+    call(
+        &state,
+        &headers,
+        "repo.actions.dispatchRepository",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- actions permissions ----
+
+async fn get_actions_permissions(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    call_dispatch_map(
+        &mut ctx,
+        "repo.actions.getEnabled",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| {
+            json!({
+                "enabled": d["enabled"],
+                // No selected-actions allowlist backing — the store models
+                // enabled/disabled only, so the surface reads `all`.
+                "allowed_actions": "all",
+            })
+        },
+    )
+    .await
+}
+
+async fn set_actions_permissions(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<ActionsPermissionsPutBody>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["enabled"] = json!(body.enabled.unwrap_or(true));
+    call(
+        &state,
+        &headers,
+        "repo.actions.setEnabled",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn get_workflow_permissions(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let perms = match dispatch(
+        &mut ctx,
+        "repo.actions.getDefaultPermissions",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => data["default_permissions"]
+            .as_str()
+            .unwrap_or("read")
+            .to_string(),
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    let can_approve = match dispatch(
+        &mut ctx,
+        "repo.actions.getPullRequestTarget",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => data["enabled"].as_bool().unwrap_or(false),
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "default_workflow_permissions": perms,
+            // Nearest backing toggle: pull_request_target opts Actions into
+            // trusted-context work on PRs.
+            "can_approve_pull_request_reviews": can_approve,
+        })),
+    )
+        .into_response()
+}
+
+async fn set_workflow_permissions(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<WorkflowPermissionsBody>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Some(dwp) = &body.default_workflow_permissions {
+        let mut input = repo_ref(&p.owner, &p.repo);
+        input["default_permissions"] = json!(dwp);
+        match dispatch(&mut ctx, "repo.actions.setDefaultPermissions", input).await {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (status_for_error(&error), Json(error)).into_response()
+            }
+        }
+    }
+    if let Some(can) = body.can_approve_pull_request_reviews {
+        let mut input = repo_ref(&p.owner, &p.repo);
+        input["enabled"] = json!(can);
+        match dispatch(&mut ctx, "repo.actions.setPullRequestTarget", input).await {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (status_for_error(&error), Json(error)).into_response()
+            }
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+// ---- pending deployments (environment review gate) ----
+
+/// Run's approval-held environment jobs → GitHub environment objects, with
+/// `current_user_can_approve` from the job's reviewer gate.
+async fn pending_envs_for_run(
+    ctx: &mut RpcCtx,
+    origin: &str,
+    owner: &str,
+    repo: &str,
+    run_id: &str,
+) -> Result<Vec<Value>, AppError> {
+    let mut input = repo_ref(owner, repo);
+    input["run_id"] = json!(run_id);
+    let run = match dispatch(ctx, "repo.actions.getRun", input).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => return Err(error),
+    };
+    let mut held: HashMap<String, bool> = HashMap::new();
+    for j in run["jobs"].as_array().cloned().unwrap_or_default() {
+        if j["waiting_reason"].as_str() == Some("environment_review")
+            && j["status"].as_str() == Some("waiting_approval")
+        {
+            if let Some(env) = j["environment"].as_str() {
+                let can = held.entry(env.to_string()).or_insert(false);
+                *can = *can || j["can_review"].as_bool().unwrap_or(false);
+            }
+        }
+    }
+    if held.is_empty() {
+        return Ok(vec![]);
+    }
+    let envs = match dispatch(ctx, "repo.actions.environments.list", repo_ref(owner, repo)).await {
+        RpcResponse::Ok { data, .. } => {
+            data["environments"].as_array().cloned().unwrap_or_default()
+        }
+        RpcResponse::Err { error, .. } => return Err(error),
+    };
+    let mut out = Vec::new();
+    for e in envs {
+        let name = e["name"].as_str().unwrap_or_default();
+        if let Some(can) = held.get(name) {
+            let mut ge = gh_environment(origin, owner, repo, &e);
+            ge["current_user_can_approve"] = json!(can);
+            out.push(ge);
+        }
+    }
+    Ok(out)
+}
+
+async fn list_pending_deployments(
+    State(state): State<AppState>,
+    Path(p): Path<RunPath>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match pending_envs_for_run(&mut ctx, &origin, &p.owner, &p.repo, &p.run_id).await {
+        Ok(envs) => (StatusCode::OK, Json(json!(envs))).into_response(),
+        Err(e) => (status_for_error(&e), Json(e)).into_response(),
+    }
+}
+
+async fn review_pending_deployments(
+    State(state): State<AppState>,
+    Path(p): Path<RunPath>,
+    headers: HeaderMap,
+    Json(body): Json<PendingDeploymentsBody>,
+) -> Response {
+    let origin = crate::public_origin::resolve_public_origin();
+    if !matches!(body.state.as_str(), "approved" | "rejected") {
+        return err_json(
+            StatusCode::BAD_REQUEST,
+            "state must be 'approved' or 'rejected'",
+        );
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    // environment_ids are GitHub ints; ours are string ids — resolve both to
+    // environment names via the repo's environment list.
+    let wanted: Vec<String> = body
+        .environment_ids
+        .iter()
+        .filter_map(|v| {
+            v.as_str()
+                .map(String::from)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        })
+        .collect();
+    let envs = match dispatch(
+        &mut ctx,
+        "repo.actions.environments.list",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => {
+            data["environments"].as_array().cloned().unwrap_or_default()
+        }
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    let mut names = Vec::new();
+    for e in &envs {
+        let id = e["id"].as_str().unwrap_or_default();
+        if wanted
+            .iter()
+            .any(|w| w == id || w == e["name"].as_str().unwrap_or_default())
+        {
+            names.push(e["name"].as_str().unwrap_or_default().to_string());
+        }
+    }
+    // Held jobs in those environments → reviewDeployment per job.
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["run_id"] = json!(p.run_id);
+    let run = match dispatch(&mut ctx, "repo.actions.getRun", input).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response()
+        }
+    };
+    for j in run["jobs"].as_array().cloned().unwrap_or_default() {
+        let env = j["environment"].as_str().unwrap_or_default();
+        if j["waiting_reason"].as_str() == Some("environment_review")
+            && j["status"].as_str() == Some("waiting_approval")
+            && names.iter().any(|n| n == env)
+        {
+            let mut input = repo_ref(&p.owner, &p.repo);
+            input["job_id"] = json!(j["id"].as_str().unwrap_or_default());
+            input["state"] = json!(body.state);
+            if let Some(c) = &body.comment {
+                input["comment"] = json!(c);
+            }
+            match dispatch(&mut ctx, "repo.actions.reviewDeployment", input).await {
+                RpcResponse::Ok { .. } => {}
+                RpcResponse::Err { error, .. } => {
+                    return (status_for_error(&error), Json(error)).into_response()
+                }
+            }
+        }
+    }
+    // GitHub returns the environments the review covered.
+    match pending_envs_for_run(&mut ctx, &origin, &p.owner, &p.repo, &p.run_id).await {
+        Ok(_) => {}
+        Err(e) => return (status_for_error(&e), Json(e)).into_response(),
+    }
+    let reviewed: Vec<Value> = envs
+        .iter()
+        .filter(|e| {
+            names
+                .iter()
+                .any(|n| *n == e["name"].as_str().unwrap_or_default())
+        })
+        .map(|e| gh_environment(&origin, &p.owner, &p.repo, e))
+        .collect();
+    (StatusCode::OK, Json(json!(reviewed))).into_response()
 }

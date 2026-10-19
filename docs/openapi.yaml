@@ -4073,6 +4073,620 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/deployments:
+    get:
+      tags:
+      - actions
+      summary: List deployments, GitHub shape (deployment.list)
+      operationId: repos/listDeployments
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: sha
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      - name: ref
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      - name: task
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      - name: environment
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Create a deployment, GitHub shape (deployment.create)
+      operationId: repos/createDeployment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - ref
+              properties:
+                ref:
+                  type: string
+                task:
+                  type: string
+                auto_merge:
+                  type: boolean
+                required_contexts:
+                  type: array
+                  items:
+                    type: string
+                payload: {}
+                environment:
+                  type: string
+                description:
+                  type: string
+                transient_environment:
+                  type: boolean
+                production_environment:
+                  type: boolean
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/deployments/{deployment_id}:
+    get:
+      tags:
+      - actions
+      summary: One deployment, GitHub shape (deployment.get)
+      operationId: repos/getDeployment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - actions
+      summary: Delete a deployment (deployment.delete)
+      operationId: repos/deleteDeployment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/deployments/{deployment_id}/statuses:
+    get:
+      tags:
+      - actions
+      summary: List a deployment's statuses, GitHub shape (deployment.status.list)
+      operationId: repos/listDeploymentStatuses
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Create a deployment status, GitHub shape (deployment.status.create)
+      operationId: repos/createDeploymentStatus
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - state
+              properties:
+                state:
+                  type: string
+                description:
+                  type: string
+                environment:
+                  type: string
+                environment_url:
+                  type: string
+                target_url:
+                  type: string
+                log_url:
+                  type: string
+                auto_inactive:
+                  type: boolean
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/dispatches:
+    post:
+      tags:
+      - actions
+      summary: repository_dispatch event (repo.actions.dispatchRepository)
+      operationId: repos/createDispatchEvent
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - event_type
+              properties:
+                event_type:
+                  type: string
+                client_payload:
+                  type: object
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/permissions:
+    get:
+      tags:
+      - actions
+      summary: Repo Actions permissions {enabled, allowed_actions} (repo.actions.getEnabled)
+      operationId: actions/getActionsPermissionsRepository
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  allowed_actions:
+                    type: string
+                    enum:
+                    - all
+                    - local_only
+                    - selected
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Set repo Actions permissions (repo.actions.setEnabled)
+      operationId: actions/setActionsPermissionsRepository
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                allowed_actions:
+                  type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/permissions/workflow:
+    get:
+      tags:
+      - actions
+      summary: Default token permissions + PR-approve flag (getDefaultPermissions + getPullRequestTarget)
+      operationId: actions/getWorkflowPermissionsRepository
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  default_workflow_permissions:
+                    type: string
+                    enum:
+                    - read
+                    - write
+                  can_approve_pull_request_reviews:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - actions
+      summary: Set default token permissions (setDefaultPermissions / setPullRequestTarget)
+      operationId: actions/setWorkflowPermissionsRepository
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                default_workflow_permissions:
+                  type: string
+                  enum:
+                  - read
+                  - write
+                can_approve_pull_request_reviews:
+                  type: boolean
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments:
+    get:
+      tags:
+      - actions
+      summary: Environments with approval-held jobs for a run (repo.actions.getRun)
+      operationId: actions/getPendingDeployments
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {}
+                    name:
+                      type: string
+                    url:
+                      type: string
+                    html_url:
+                      type: string
+                    created_at:
+                      type: string
+                    updated_at:
+                      type: string
+                    protection_rules:
+                      type: array
+                      items:
+                        type: object
+                    deployment_branch_policy:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - actions
+      summary: Approve/reject environment-held jobs (repo.actions.reviewDeployment)
+      operationId: actions/reviewPendingDeployments
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - environment_ids
+              - state
+              properties:
+                environment_ids:
+                  type: array
+                  items: {}
+                state:
+                  type: string
+                  enum:
+                  - approved
+                  - rejected
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {}
+                    name:
+                      type: string
+                    url:
+                      type: string
+                    html_url:
+                      type: string
+                    created_at:
+                      type: string
+                    updated_at:
+                      type: string
+                    protection_rules:
+                      type: array
+                      items:
+                        type: object
+                    deployment_branch_policy:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/statuses/{sha}:
     get:
       tags:
