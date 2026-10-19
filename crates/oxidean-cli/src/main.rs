@@ -66,34 +66,62 @@ async fn main() -> ExitCode {
                 }
                 ExitCode::SUCCESS
             }
-            RpcResponse::Err { error, .. } => {
+            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope),
+        },
+        // Raw-bytes RPC results (`vcs cat`) — the blob goes to stdout
+        // verbatim; error envelopes behave exactly like `Out::Rpc`.
+        Ok(Out::Bytes { envelope, bytes }) => match &envelope {
+            RpcResponse::Ok { data, .. } => {
+                if let Some(filter) = &inv.global.jq {
+                    return jq_out(filter, data);
+                }
                 if inv.global.json {
-                    eprintln!(
+                    println!(
                         "{}",
                         serde_json::to_string_pretty(&envelope).unwrap_or_default()
                     );
                 } else {
-                    eprintln!("ox: {}: {}", error.code, error.message);
+                    use std::io::Write;
+                    let mut out = std::io::stdout().lock();
+                    let _ = out.write_all(&bytes);
                 }
-                let instance = oxidean_cli::config::resolve_instance(
-                    inv.global.instance.as_deref(),
-                    oxidean_cli::config::env_instance().as_deref(),
-                    &rt.config,
-                )
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "<instance>".to_string());
-                for hint in auth_hints(&error.code, &instance) {
-                    eprintln!("hint: {hint}");
-                }
-                ExitCode::from(rpc::error_exit_code(error))
+                ExitCode::SUCCESS
             }
+            RpcResponse::Err { .. } => rpc_err(&inv, &rt, &envelope),
         },
         Err(e) => {
             eprintln!("ox: {e}");
             ExitCode::from(e.exit_code())
         }
     }
+}
+
+/// `RpcResponse::Err` handling shared by `Out::Rpc`/`Out::Bytes` — print the
+/// error + auth hints on stderr, exit via `error_exit_code`.
+fn rpc_err(inv: &args::Invocation, rt: &commands::Runtime, envelope: &RpcResponse) -> ExitCode {
+    let RpcResponse::Err { error, .. } = envelope else {
+        return ExitCode::SUCCESS;
+    };
+    if inv.global.json {
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(envelope).unwrap_or_default()
+        );
+    } else {
+        eprintln!("ox: {}: {}", error.code, error.message);
+    }
+    let instance = oxidean_cli::config::resolve_instance(
+        inv.global.instance.as_deref(),
+        oxidean_cli::config::env_instance().as_deref(),
+        &rt.config,
+    )
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "<instance>".to_string());
+    for hint in auth_hints(&error.code, &instance) {
+        eprintln!("hint: {hint}");
+    }
+    ExitCode::from(rpc::error_exit_code(error))
 }
 
 /// `--jq` — filter `data` and print each result (strings bare like jq).
@@ -136,6 +164,12 @@ fn auth_hints(code: &str, instance: &str) -> Vec<String> {
             format!("mint a new PAT with the needed scope at {instance}/settings/tokens, or `ox auth login --web --scopes <list>`"),
         ],
         "auth.banned" => vec!["account is banned — contact the instance admin".to_string()],
+        "vcs.unauthenticated" => vec![format!(
+            "run `ox auth login` or set OXIDEAN_TOKEN{env_note}"
+        )],
+        "vcs.forbidden" => vec![
+            "token lacks access to this repository — check repo permissions".to_string()
+        ],
         _ => Vec::new(),
     }
 }

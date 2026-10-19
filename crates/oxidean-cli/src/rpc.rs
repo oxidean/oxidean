@@ -60,7 +60,10 @@ pub fn error_exit_code(error: &AppError) -> u8 {
         | "auth.email_unverified"
         | "auth.forbidden"
         | "admin.forbidden"
-        | "auth.setup_required" => 3,
+        | "auth.setup_required"
+        // VCS surface — same credential/authorization classification (C8).
+        | "vcs.unauthenticated"
+        | "vcs.forbidden" => 3,
         _ => 1,
     }
 }
@@ -191,6 +194,9 @@ mod tests {
             "auth.pat_scope",
             "auth.banned",
             "admin.forbidden",
+            // VCS auth failures classify the same way (AC8.4.3).
+            "vcs.unauthenticated",
+            "vcs.forbidden",
         ] {
             assert_eq!(error_exit_code(&AppError::new(code, "nope")), 3, "{code}");
         }

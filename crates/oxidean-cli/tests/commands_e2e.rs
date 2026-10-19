@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use oxidean_cli::args;
 use oxidean_cli::commands::{self, Out, Runtime};
 use oxidean_cli::config::Config;
+use oxidean_core::RpcResponse;
 use serde_json::{json, Value};
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -751,4 +752,155 @@ async fn repo_create_no_name_non_tty_is_usage_error() {
         format!("{err}").contains("usage: ox repo create <name>"),
         "{err}"
     );
+}
+
+#[tokio::test]
+async fn vcs_status_calls_rpc_and_renders() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["vcs.status"]).await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "vcs.status",
+            "input": {"owner": "o", "name": "n"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "data": {"enabled": true, "heads": [{"name": "main", "changeset_id": "cs_1"}],
+                     "changeset_count": 3, "object_count": 9, "storage_bytes": 512}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["vcs", "status", "o/n"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { envelope, pretty } => {
+            assert!(matches!(envelope, RpcResponse::Ok { .. }));
+            assert!(pretty.contains("enabled: true"), "{pretty}");
+            assert!(pretty.contains("cs_1"), "{pretty}");
+        }
+        _ => panic!("expected rpc out"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn vcs_error_envelope_passes_verbatim() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["vcs.status"]).await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": false,
+            "error": {"code": "vcs.disabled", "message": "vcs is not enabled"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["vcs", "status", "o/n"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { envelope, .. } => match envelope {
+            RpcResponse::Err { error, .. } => {
+                // Verbatim — `error_exit_code`/`vcs.*` classification is the
+                // caller's job, not the transport's.
+                assert_eq!(error.code, "vcs.disabled");
+            }
+            other => panic!("expected err envelope, got {other:?}"),
+        },
+        _ => panic!("expected rpc out"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn vcs_ref_set_sends_cas_payload() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["vcs.ref_update"]).await;
+    // `--create --to cs_2` — expected_old rides the wire as an explicit null.
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "vcs.ref_update",
+            "input": {"owner": "o", "name": "n", "ref_name": "main",
+                      "expected_old": null, "new": "cs_2"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true, "data": {"ref_name": "main", "changeset_id": "cs_2"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(
+        &server,
+        &[
+            "vcs", "ref", "set", "o/n", "main", "--create", "--to", "cs_2",
+        ],
+    );
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { envelope, pretty } => {
+            assert!(matches!(envelope, RpcResponse::Ok { .. }));
+            assert!(pretty.contains("main -> cs_2"), "{pretty}");
+        }
+        _ => panic!("expected rpc out"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn vcs_object_route_error_keeps_vcs_code() {
+    use sha2::{Digest, Sha256};
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["vcs.tree"]).await;
+    let hash = format!("sha256:{}", hex::encode(Sha256::digest(b"x")));
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "data": {"entries": [{"path": "f.txt", "mode": "100644", "blob": hash}]}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The object route answers with an auth envelope — its `vcs.*` code must
+    // survive to the Out::Rpc channel for exit-code classification.
+    Mock::given(method("GET"))
+        .and(path(format!("/api/vcs/o/n/objects/{hash}")))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "ok": false,
+            "error": {"code": "vcs.unauthenticated", "message": "bad credentials"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("wc");
+    let inv = invocation(
+        &server,
+        &[
+            "vcs",
+            "checkout",
+            "o/n",
+            "cs_1",
+            "--dir",
+            target.to_str().unwrap(),
+        ],
+    );
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { envelope, .. } => match envelope {
+            RpcResponse::Err { error, .. } => {
+                assert_eq!(error.code, "vcs.unauthenticated");
+            }
+            other => panic!("expected err envelope, got {other:?}"),
+        },
+        _ => panic!("expected rpc out"),
+    }
+    server.verify().await;
 }

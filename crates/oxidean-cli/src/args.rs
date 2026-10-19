@@ -2,6 +2,8 @@
 //! clap (see crates/oxidean-api/src/bin/protection_hook.rs and
 //! crates/oxidean-runner), so `ox` keeps the same minimal dependency shape.
 
+use oxidean_core::vcs_types::{ManifestEntryKind, VcsFileMode};
+use oxidean_vcs::client::cli::{FileSpec, RefSetArgs, RenameSpec, RepoRef, VcsCommand};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -21,6 +23,8 @@ GETTING AROUND
   ox search <query>                                global search — --type repos|issues|pulls|…
 
 REPOSITORIES
+  ox vcs enable|status|commit|log|diff|show|cat|blame|history
+  ox vcs merge-base|merge|rebase|checkout|ref|import|export   side-by-side agentic source control
   ox repo list|view|create|fork|sync|clone
   ox repo edit|rename|archive|unarchive|delete|transfer
   ox repo star|unstar|watch|unwatch
@@ -207,6 +211,23 @@ const HELP: &[(&str, &str)] = &[
     ("mcp status", "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401."),
     ("mcp remove", "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`."),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
+    ("vcs", "ox vcs — side-by-side agentic source control\n\n  enable|status|commit|log|diff|show|cat|blame|history\n  merge-base|merge|rebase|checkout|ref|import|export\n\nThe VCS protocol runs alongside git on the instance: changesets are\nimmutable, content-addressed, and carry file changes without a git\ncommit. `ox vcs import`/`export` bridge to git when interop is enabled."),
+    ("vcs enable", "ox vcs enable <o/n> [--disable]\n\nToggle the repository's VCS surface (repo admin)."),
+    ("vcs status", "ox vcs status <o/n>\n\nShow enablement, heads, and object/changeset counts."),
+    ("vcs commit", "ox vcs commit <o/n> -m <msg> [--parent <cs>]...\n              [--add <vpath>=<local>]... [--modify <vpath>=<local>]...\n              [--delete <vpath>]... [--rename <old>=<new>]...\n              [--mode 100644|100755|120000]\n\nStage local files into a changeset without a git commit. Files ≤256 KiB\nride inline; larger files upload via the object route first. --mode\napplies to every --add/--modify (default: fs-derived)."),
+    ("vcs log", "ox vcs log <o/n> [--from <ref|cs|git-oid>] [--limit <n>] [--cursor <c>]\n\nFirst-parent history from `main` (or --from). --cursor continues a page."),
+    ("vcs diff", "ox vcs diff <o/n> <from> <to> [--paths <p>]... [--limit <n>] [--cursor <c>]"),
+    ("vcs show", "ox vcs show <o/n> <id>\n\nA changeset's full record — `id` accepts a changeset id or a git oid\n(the server lazy-imports the commit on a miss)."),
+    ("vcs cat", "ox vcs cat <o/n> <cs> <path>\n\nPrint one file's contents to stdout at a changeset."),
+    ("vcs blame", "ox vcs blame <o/n> <path> [--at <cs>] [--limit <n>] [--cursor <c>]"),
+    ("vcs history", "ox vcs history <o/n> <path> [--limit <n>] [--cursor <c>]\n\nEvery change touching <path>."),
+    ("vcs merge-base", "ox vcs merge-base <o/n> <a> <b>"),
+    ("vcs merge", "ox vcs merge <o/n> <a> <b> [-m <msg>]\n\nServer-side merge of two heads; conflicts print typed path entries."),
+    ("vcs rebase", "ox vcs rebase <o/n> <cs> --onto <cs> [-m <msg>]\n\nReplay one changeset's files onto a new parent."),
+    ("vcs checkout", "ox vcs checkout <o/n> <cs> [--paths <f>...] [--dir <target>]\n\nSparse working copy: --paths selects subtrees (default all), blobs are\nfetched on demand into a shared local cache, files land atomically.\nA non-empty --dir that was not made by `ox vcs checkout` is refused."),
+    ("vcs ref", "ox vcs ref list <o/n> [--limit <n>] [--cursor <c>]\n  ox vcs ref set <o/n> <name> (--expect <cs> | --create) (--to <cs> | --delete)\n\nNamed heads with compare-and-swap updates — --expect must match the\ncurrent head (or --create requires absence); --delete removes the ref."),
+    ("vcs import", "ox vcs import <o/n> [--from <ref|oid>] [--limit <n>] [--cursor <c>]\n\nImport git history into VCS changesets (resumable via --cursor)."),
+    ("vcs export", "ox vcs export <o/n> <cs> --branch <b> [--force]\n\nMaterialize a changeset chain as git commits and move <branch> through\nthe protected ref-update path (--force overrides fast-forward only)."),
 ];
 
 /// argv parse failure — process exit code 2.
@@ -940,6 +961,9 @@ pub enum Command {
         procedure: String,
         input: Value,
     },
+    /// `ox vcs <sub>` — the agentic VCS surface; the typed command lives in
+    /// `oxidean_vcs::client::cli` (argv glue stays here).
+    Vcs(VcsCommand),
     /// `--help` attached to a command path — prints that topic's help.
     HelpTopic(String),
     Help,
@@ -1124,17 +1148,23 @@ pub fn remote_url_spec(url: &str) -> Option<String> {
     }
 }
 
-/// Repo spec plus one trailing positional (issue number, run id, …). When
-/// `-R`/`--repo` supplies the repo, positionals[0] is the trailing arg; a
-/// single positional with a detected repo is likewise the trailing arg.
+/// `-R`/`--repo` value when present — for commands whose positionals are
+/// args, not the repo spec (unlike `repo_spec`, which prefers positionals).
+fn flag_repo(f: &Flags) -> Option<String> {
+    f.values
+        .get("-R")
+        .or_else(|| f.values.get("--repo"))
+        .cloned()
+}
+
 fn repo_and_arg(
     f: &Flags,
     usage_str: &str,
     arg_name: &str,
 ) -> Result<(String, String), UsageError> {
     let want = || usage(format!("usage: ox {usage_str} <owner/name> <{arg_name}>"));
-    if f.values.contains_key("-R") || f.values.contains_key("--repo") {
-        let repo = repo_spec(f, usage_str)?;
+    if let Some(repo) = flag_repo(f) {
+        parse_repo(&repo)?;
         let arg = f.positionals.first().ok_or_else(want)?;
         return Ok((repo, arg.clone()));
     }
@@ -1161,6 +1191,88 @@ fn repo_and_number(f: &Flags, usage_str: &str) -> Result<(String, u64), UsageErr
         .parse::<u64>()
         .map_err(|_| usage(format!("invalid {usage_str} number: {raw}")))?;
     Ok((repo, number))
+}
+
+/// Repo spec plus two trailing positionals — `-R`/`--repo` or a detected
+/// repo makes every positional a real arg, like `repo_and_arg`.
+fn repo_and_two_args(
+    f: &Flags,
+    usage_str: &str,
+    arg_a: &str,
+    arg_b: &str,
+) -> Result<(String, String, String), UsageError> {
+    let want = || {
+        usage(format!(
+            "usage: ox {usage_str} <owner/name> <{arg_a}> <{arg_b}>"
+        ))
+    };
+    if let Some(repo) = flag_repo(f) {
+        parse_repo(&repo)?;
+        let a = f.positionals.first().cloned().ok_or_else(want)?;
+        let b = f.positionals.get(1).cloned().ok_or_else(want)?;
+        return Ok((repo, a, b));
+    }
+    if f.positionals.len() == 2 {
+        let repo = detected_repo().ok_or_else(want)?;
+        parse_repo(&repo)?;
+        return Ok((repo, f.positionals[0].clone(), f.positionals[1].clone()));
+    }
+    let repo = f.positionals.first().ok_or_else(want)?;
+    parse_repo(repo)?;
+    let a = f.positionals.get(1).cloned().ok_or_else(want)?;
+    let b = f.positionals.get(2).cloned().ok_or_else(want)?;
+    Ok((repo.clone(), a, b))
+}
+
+/// `RepoRef` for `ox vcs` — same `-R`/positional/detected-repo resolution as
+/// `repo_spec`, returned in the crate's typed shape.
+fn vcs_repo(f: &Flags, usage_str: &str) -> Result<RepoRef, UsageError> {
+    let spec = repo_spec(f, usage_str)?;
+    RepoRef::parse(&spec).map_err(|e| usage(e.to_string()))
+}
+
+/// `--limit <n>` → `Option<i64>` (wire limits are signed).
+fn opt_limit(f: &Flags) -> Result<Option<i64>, UsageError> {
+    opt_u64(f, "--limit")?
+        .map(|v| {
+            i64::try_from(v)
+                .map_err(|_| usage("--limit must fit in a signed 64-bit integer".to_string()))
+        })
+        .transpose()
+}
+
+/// All values of a repeatable flag, in order.
+fn multi_vals(f: &Flags, name: &str) -> Vec<String> {
+    f.multi
+        .iter()
+        .filter(|(k, _)| k == name)
+        .map(|(_, v)| v.clone())
+        .collect()
+}
+
+/// `<a>=<b>` for `--add vpath=local` / `--rename old=new` — splits on the
+/// first `=` (the local path may contain `=` itself).
+fn vcs_pair(raw: &str, flag: &str) -> Result<(String, String), UsageError> {
+    raw.split_once('=')
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .filter(|(a, b)| !a.is_empty() && !b.is_empty())
+        .ok_or_else(|| {
+            usage(format!(
+                "invalid {flag} value {raw:?} — expected <vcs-path>=<local-path>"
+            ))
+        })
+}
+
+/// `--mode` → the wire `VcsFileMode` octal strings.
+fn vcs_mode(raw: &str) -> Result<VcsFileMode, UsageError> {
+    match raw {
+        "100644" => Ok(VcsFileMode::Regular),
+        "100755" => Ok(VcsFileMode::Executable),
+        "120000" => Ok(VcsFileMode::Symlink),
+        _ => Err(usage(format!(
+            "invalid --mode {raw:?} — expected 100644, 100755, or 120000"
+        ))),
+    }
 }
 
 /// Reject stray positionals on commands that take none.
@@ -1321,6 +1433,7 @@ const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
         None,
     ),
     ("repo", "tag-protection", &["list", "set", "delete"], None),
+    ("vcs", "ref", &["list", "set"], Some("list")),
     (
         "repo",
         "mirror",
@@ -3395,6 +3508,250 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("api", _, _) => {
             return Err(usage("usage: ox api <procedure> [-f field=value]..."));
         }
+
+        // ── vcs ───────────────────────────────────────────────────
+        ("vcs", "enable", "") => {
+            let f = scan(tail, REPO_FLAGS, &["--disable"], &[])?;
+            Command::Vcs(VcsCommand::Enable {
+                repo: vcs_repo(&f, "vcs enable")?,
+                disable: f.bools.contains("--disable"),
+            })
+        }
+        ("vcs", "status", "") => {
+            let f = scan(tail, REPO_FLAGS, &[], &[])?;
+            Command::Vcs(VcsCommand::Status {
+                repo: vcs_repo(&f, "vcs status")?,
+            })
+        }
+        ("vcs", "commit", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "-m", "--message", "--mode"],
+                &[],
+                &["--parent", "--add", "--modify", "--delete", "--rename"],
+            )?;
+            let mode = f
+                .values
+                .get("--mode")
+                .map(|raw| vcs_mode(raw))
+                .transpose()?;
+            let mut files = Vec::new();
+            for (flag, raw) in &f.multi {
+                match flag.as_str() {
+                    "--add" | "--modify" => {
+                        let (path, local) = vcs_pair(raw, flag)?;
+                        files.push(FileSpec {
+                            path,
+                            local: local.into(),
+                            kind: if flag == "--add" {
+                                ManifestEntryKind::Add
+                            } else {
+                                ManifestEntryKind::Modify
+                            },
+                            mode,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Command::Vcs(VcsCommand::Commit {
+                repo: vcs_repo(&f, "vcs commit")?,
+                message: req(&f, "--message", "vcs commit")
+                    .or_else(|_| req(&f, "-m", "vcs commit"))?,
+                parents: multi_vals(&f, "--parent"),
+                files,
+                deletes: multi_vals(&f, "--delete"),
+                renames: multi_vals(&f, "--rename")
+                    .iter()
+                    .map(|raw| {
+                        let (old_path, path) = vcs_pair(raw, "--rename")?;
+                        Ok(RenameSpec { old_path, path })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+        }
+        ("vcs", "log", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--from", "--limit", "--cursor"],
+                &[],
+                &[],
+            )?;
+            Command::Vcs(VcsCommand::Log {
+                repo: vcs_repo(&f, "vcs log")?,
+                from: f.values.get("--from").cloned(),
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "diff", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--limit", "--cursor"],
+                &[],
+                &["--paths"],
+            )?;
+            let (repo, from, to) = repo_and_two_args(&f, "vcs diff", "from", "to")?;
+            Command::Vcs(VcsCommand::Diff {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                from,
+                to,
+                paths: multi_vals(&f, "--paths"),
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "show", "") => {
+            let f = scan(tail, REPO_FLAGS, &[], &[])?;
+            let (repo, id) = repo_and_arg(&f, "vcs show", "id")?;
+            Command::Vcs(VcsCommand::Show {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                id,
+            })
+        }
+        ("vcs", "cat", "") => {
+            let f = scan(tail, REPO_FLAGS, &[], &[])?;
+            let (repo, changeset, path) = repo_and_two_args(&f, "vcs cat", "changeset", "path")?;
+            Command::Vcs(VcsCommand::Cat {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                changeset,
+                path,
+            })
+        }
+        ("vcs", "blame", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--at", "--limit", "--cursor"],
+                &[],
+                &[],
+            )?;
+            let (repo, path) = repo_and_arg(&f, "vcs blame", "path")?;
+            Command::Vcs(VcsCommand::Blame {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                path,
+                at: f.values.get("--at").cloned(),
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "history", "") => {
+            let f = scan(tail, &["-R", "--repo", "--limit", "--cursor"], &[], &[])?;
+            let (repo, path) = repo_and_arg(&f, "vcs history", "path")?;
+            Command::Vcs(VcsCommand::History {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                path,
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "merge-base", "") => {
+            let f = scan(tail, REPO_FLAGS, &[], &[])?;
+            let (repo, a, b) = repo_and_two_args(&f, "vcs merge-base", "a", "b")?;
+            Command::Vcs(VcsCommand::MergeBase {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                a,
+                b,
+            })
+        }
+        ("vcs", "merge", "") => {
+            let f = scan(tail, &["-R", "--repo", "-m", "--message"], &[], &[])?;
+            let (repo, a, b) = repo_and_two_args(&f, "vcs merge", "a", "b")?;
+            Command::Vcs(VcsCommand::Merge {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                a,
+                b,
+                message: f
+                    .values
+                    .get("--message")
+                    .or_else(|| f.values.get("-m"))
+                    .cloned(),
+            })
+        }
+        ("vcs", "rebase", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--onto", "-m", "--message"],
+                &[],
+                &[],
+            )?;
+            let (repo, changeset) = repo_and_arg(&f, "vcs rebase", "changeset")?;
+            Command::Vcs(VcsCommand::Rebase {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                changeset,
+                onto: req(&f, "--onto", "vcs rebase")?,
+                message: f
+                    .values
+                    .get("--message")
+                    .or_else(|| f.values.get("-m"))
+                    .cloned(),
+            })
+        }
+        ("vcs", "checkout", "") => {
+            let f = scan(tail, &["-R", "--repo", "--dir"], &[], &["--paths"])?;
+            let (repo, changeset) = repo_and_arg(&f, "vcs checkout", "changeset")?;
+            let dir = f.values.get("--dir").cloned().unwrap_or_else(|| {
+                let name = repo.split('/').nth(1).unwrap_or("checkout");
+                format!("./{name}")
+            });
+            Command::Vcs(VcsCommand::Checkout {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                changeset,
+                paths: multi_vals(&f, "--paths"),
+                dir: dir.into(),
+            })
+        }
+        ("vcs", "ref", "list") => {
+            let f = scan(tail, &["-R", "--repo", "--limit", "--cursor"], &[], &[])?;
+            Command::Vcs(VcsCommand::RefList {
+                repo: vcs_repo(&f, "vcs ref list")?,
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "ref", "set") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--expect", "--to"],
+                &["--create", "--delete"],
+                &[],
+            )?;
+            let (repo, name) = repo_and_arg(&f, "vcs ref set", "ref")?;
+            Command::Vcs(VcsCommand::RefSet {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                name,
+                args: RefSetArgs {
+                    expect: f.values.get("--expect").cloned(),
+                    create: f.bools.contains("--create"),
+                    to: f.values.get("--to").cloned(),
+                    delete: f.bools.contains("--delete"),
+                },
+            })
+        }
+        ("vcs", "import", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--from", "--limit", "--cursor"],
+                &[],
+                &[],
+            )?;
+            Command::Vcs(VcsCommand::Import {
+                repo: vcs_repo(&f, "vcs import")?,
+                from: f.values.get("--from").cloned(),
+                limit: opt_limit(&f)?,
+                cursor: f.values.get("--cursor").cloned(),
+            })
+        }
+        ("vcs", "export", "") => {
+            let f = scan(tail, &["-R", "--repo", "--branch"], &["--force"], &[])?;
+            let (repo, head) = repo_and_arg(&f, "vcs export", "changeset")?;
+            Command::Vcs(VcsCommand::Export {
+                repo: RepoRef::parse(&repo).map_err(|e| usage(e.to_string()))?,
+                head,
+                branch: req(&f, "--branch", "vcs export")?,
+                force: f.bools.contains("--force"),
+            })
+        }
+
         (g, s, "") if NESTED.iter().any(|(g2, s2, ..)| *g2 == g && *s2 == s) => {
             let ops = NESTED
                 .iter()
@@ -3430,6 +3787,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "skill",
                 "mcp",
                 "api",
+                "vcs",
                 "completion",
             ];
             if GROUPS.contains(&group) {
@@ -3492,6 +3850,7 @@ fn json_u64(n: u64) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
@@ -4150,6 +4509,393 @@ mod tests {
             let mut got: Vec<&str> = entry.1.to_vec();
             got.sort_unstable();
             assert_eq!(want, got, "ops differ for {group} {sub}");
+        }
+    }
+
+    fn vcs_repo(owner: &str, name: &str) -> RepoRef {
+        RepoRef {
+            owner: owner.into(),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn vcs_enable_parses() {
+        let inv = parse(&argv(&["vcs", "enable", "acme/widgets"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Enable {
+                repo: vcs_repo("acme", "widgets"),
+                disable: false,
+            })
+        );
+        let inv = parse(&argv(&["vcs", "enable", "acme/widgets", "--disable"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Enable {
+                repo: vcs_repo("acme", "widgets"),
+                disable: true,
+            })
+        );
+    }
+
+    #[test]
+    fn vcs_status_uses_repo_flag() {
+        let inv = parse(&argv(&["vcs", "status", "-R", "acme/widgets"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Status {
+                repo: vcs_repo("acme", "widgets"),
+            })
+        );
+        let inv = parse(&argv(&["vcs", "status", "--repo", "o/n"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Status {
+                repo: vcs_repo("o", "n"),
+            })
+        );
+    }
+
+    #[test]
+    fn vcs_commit_collects_all_change_kinds() {
+        let inv = parse(&argv(&[
+            "vcs",
+            "commit",
+            "acme/widgets",
+            "-m",
+            "msg",
+            "--parent",
+            "cs_a",
+            "--parent",
+            "cs_b",
+            "--add",
+            "src/new.rs=./n.rs",
+            "--modify",
+            "src/old.rs=./o.rs",
+            "--delete",
+            "gone.txt",
+            "--rename",
+            "a.rs=b.rs",
+            "--mode",
+            "100755",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Commit {
+                repo: vcs_repo("acme", "widgets"),
+                message: "msg".into(),
+                parents: vec!["cs_a".into(), "cs_b".into()],
+                files: vec![
+                    FileSpec {
+                        path: "src/new.rs".into(),
+                        local: "./n.rs".into(),
+                        kind: ManifestEntryKind::Add,
+                        mode: Some(VcsFileMode::Executable),
+                    },
+                    FileSpec {
+                        path: "src/old.rs".into(),
+                        local: "./o.rs".into(),
+                        kind: ManifestEntryKind::Modify,
+                        mode: Some(VcsFileMode::Executable),
+                    },
+                ],
+                deletes: vec!["gone.txt".into()],
+                renames: vec![RenameSpec {
+                    old_path: "a.rs".into(),
+                    path: "b.rs".into(),
+                }],
+            })
+        );
+        // --message long form also works.
+        let inv = parse(&argv(&[
+            "vcs",
+            "commit",
+            "o/n",
+            "--message",
+            "m2",
+            "--delete",
+            "x",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Commit {
+                message,
+                deletes,
+                files,
+                ..
+            }) => {
+                assert_eq!(message, "m2");
+                assert_eq!(deletes, vec!["x".to_string()]);
+                assert!(files.is_empty());
+            }
+            other => panic!("expected vcs commit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vcs_commit_flag_validation() {
+        // --add needs <vpath>=<local>
+        assert!(parse(&argv(&[
+            "vcs",
+            "commit",
+            "o/n",
+            "-m",
+            "m",
+            "--add",
+            "no-equals",
+        ]))
+        .is_err());
+        // --mode must be a wire mode
+        assert!(parse(&argv(&[
+            "vcs", "commit", "o/n", "-m", "m", "--add", "a=b", "--mode", "644",
+        ]))
+        .is_err());
+        assert!(parse(&argv(&[
+            "vcs", "commit", "o/n", "-m", "m", "--add", "a=b", "--mode", "120000",
+        ]))
+        .is_ok());
+        // missing -m
+        assert!(parse(&argv(&["vcs", "commit", "o/n", "--delete", "x"])).is_err());
+    }
+
+    #[test]
+    fn vcs_log_diff_parse_flags() {
+        let inv = parse(&argv(&[
+            "vcs", "log", "o/n", "--from", "dev", "--limit", "20", "--cursor", "c1",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Log {
+                repo: vcs_repo("o", "n"),
+                from: Some("dev".into()),
+                limit: Some(20),
+                cursor: Some("c1".into()),
+            })
+        );
+        let inv = parse(&argv(&[
+            "vcs", "diff", "o/n", "cs_a", "cs_b", "--paths", "src", "--paths", "docs", "--limit",
+            "10",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Diff {
+                repo: vcs_repo("o", "n"),
+                from: "cs_a".into(),
+                to: "cs_b".into(),
+                paths: vec!["src".into(), "docs".into()],
+                limit: Some(10),
+                cursor: None,
+            })
+        );
+    }
+
+    #[test]
+    fn vcs_two_arg_commands_split_positionals() {
+        // merge-base / merge / cat / diff: <o/n> <a> <b>
+        let inv = parse(&argv(&["vcs", "merge-base", "o/n", "cs_a", "cs_b"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::MergeBase {
+                repo: vcs_repo("o", "n"),
+                a: "cs_a".into(),
+                b: "cs_b".into(),
+            })
+        );
+        // With -R the positionals are all args.
+        let inv = parse(&argv(&[
+            "vcs",
+            "merge",
+            "-R",
+            "o/n",
+            "cs_a",
+            "cs_b",
+            "-m",
+            "merge msg",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Merge {
+                repo: vcs_repo("o", "n"),
+                a: "cs_a".into(),
+                b: "cs_b".into(),
+                message: Some("merge msg".into()),
+            })
+        );
+        let inv = parse(&argv(&["vcs", "cat", "o/n", "cs_1", "src/f.rs"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Cat {
+                repo: vcs_repo("o", "n"),
+                changeset: "cs_1".into(),
+                path: "src/f.rs".into(),
+            })
+        );
+        // Two bare positionals ride the detected repo (same convention as
+        // `issue view <n>` in a repo checkout — this worktree has a remote).
+        let inv = parse(&argv(&["vcs", "merge-base", "cs_a", "cs_b"])).unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::MergeBase { repo, a, b }) => {
+                assert!(!repo.owner.is_empty() && !repo.name.is_empty());
+                assert_eq!((a.as_str(), b.as_str()), ("cs_a", "cs_b"));
+            }
+            other => panic!("expected merge-base, got {other:?}"),
+        }
+        // A lone positional is too few args even with detection.
+        assert!(parse(&argv(&["vcs", "merge-base", "cs_a"])).is_err());
+    }
+
+    #[test]
+    fn vcs_ref_set_flag_arms() {
+        let inv = parse(&argv(&[
+            "vcs", "ref", "set", "o/n", "main", "--expect", "cs_1", "--to", "cs_2",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::RefSet {
+                repo: vcs_repo("o", "n"),
+                name: "main".into(),
+                args: RefSetArgs {
+                    expect: Some("cs_1".into()),
+                    create: false,
+                    to: Some("cs_2".into()),
+                    delete: false,
+                },
+            })
+        );
+        let inv = parse(&argv(&[
+            "vcs", "ref", "set", "o/n", "dev", "--create", "--to", "cs_9",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::RefSet { args, name, .. }) => {
+                assert_eq!(name, "dev");
+                assert!(args.create && args.to == Some("cs_9".into()));
+            }
+            other => panic!("expected ref set, got {other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "vcs", "ref", "set", "o/n", "dev", "--expect", "cs_1", "--delete",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::RefSet { args, .. }) => {
+                assert!(args.delete && args.to.is_none());
+            }
+            other => panic!("expected ref set, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vcs_checkout_rebase_import_export_parse() {
+        let inv = parse(&argv(&[
+            "vcs", "checkout", "o/n", "cs_1", "--paths", "src", "--paths", "lib", "--dir", "./wc",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Checkout {
+                changeset,
+                paths,
+                dir,
+                ..
+            }) => {
+                assert_eq!(changeset, "cs_1");
+                assert_eq!(paths, vec!["src".to_string(), "lib".to_string()]);
+                assert_eq!(dir, PathBuf::from("./wc"));
+            }
+            other => panic!("expected checkout, got {other:?}"),
+        }
+        // Default dir derives from repo name.
+        let inv = parse(&argv(&["vcs", "checkout", "acme/widgets", "cs_1"])).unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Checkout { dir, paths, .. }) => {
+                assert_eq!(dir, PathBuf::from("./widgets"));
+                assert!(paths.is_empty());
+            }
+            other => panic!("expected checkout, got {other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "vcs", "rebase", "o/n", "cs_1", "--onto", "cs_2", "-m", "reb",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Rebase {
+                changeset,
+                onto,
+                message,
+                ..
+            }) => {
+                assert_eq!((changeset.as_str(), onto.as_str()), ("cs_1", "cs_2"));
+                assert_eq!(message, Some("reb".into()));
+            }
+            other => panic!("expected rebase, got {other:?}"),
+        }
+        // rebase requires --onto
+        assert!(parse(&argv(&["vcs", "rebase", "o/n", "cs_1"])).is_err());
+        let inv = parse(&argv(&[
+            "vcs", "import", "o/n", "--from", "main", "--limit", "500",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Import { from, limit, .. }) => {
+                assert_eq!(from, Some("main".into()));
+                assert_eq!(limit, Some(500));
+            }
+            other => panic!("expected import, got {other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "vcs", "export", "o/n", "cs_1", "--branch", "main", "--force",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::Vcs(VcsCommand::Export {
+                repo: vcs_repo("o", "n"),
+                head: "cs_1".into(),
+                branch: "main".into(),
+                force: true,
+            })
+        );
+        // export requires --branch
+        assert!(parse(&argv(&["vcs", "export", "o/n", "cs_1"])).is_err());
+    }
+
+    #[test]
+    fn vcs_show_blame_history_parse() {
+        let inv = parse(&argv(&["vcs", "show", "o/n", "40hexdeadbeef"])).unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Show { id, .. }) => assert_eq!(id, "40hexdeadbeef"),
+            other => panic!("expected show, got {other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "vcs", "blame", "o/n", "src/f.rs", "--at", "cs_9", "--limit", "50",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::Blame {
+                path, at, limit, ..
+            }) => {
+                assert_eq!(path, "src/f.rs");
+                assert_eq!(at, Some("cs_9".into()));
+                assert_eq!(limit, Some(50));
+            }
+            other => panic!("expected blame, got {other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "vcs", "history", "o/n", "src/f.rs", "--cursor", "c2",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::Vcs(VcsCommand::History { path, cursor, .. }) => {
+                assert_eq!(path, "src/f.rs");
+                assert_eq!(cursor, Some("c2".into()));
+            }
+            other => panic!("expected history, got {other:?}"),
         }
     }
 }
