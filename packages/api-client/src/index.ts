@@ -2140,6 +2140,16 @@ export type ActionRunGetResponse = {
   jobs: ActionJobPublic[];
 };
 
+export type ActionJobGetRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+};
+
+export type ActionJobGetResponse = {
+  job: ActionJobPublic;
+};
+
 export type ActionJobLogRequest = {
   owner: string;
   name: string;
@@ -5889,6 +5899,8 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRunsListResponse>(opts, "repo.actions.listRuns", input),
         getRun: (input: ActionRunGetRequest) =>
           rpcCall<ActionRunGetResponse>(opts, "repo.actions.getRun", input),
+        getJob: (input: ActionJobGetRequest) =>
+          rpcCall<ActionJobGetResponse>(opts, "repo.actions.getJob", input),
         getJobLog: (input: ActionJobLogRequest) =>
           rpcCall<ActionJobLogResponse>(opts, "repo.actions.getJobLog", input),
         jobAnnotations: (input: ActionJobAnnotationsRequest) =>
@@ -7492,6 +7504,20 @@ export function actionsGetRunQueryOptions(
     queryKey: ["repo", "actions", "getRun", input.owner, input.name, input.run_id] as const,
     queryFn: async () => {
       const res = await client.repo.actions.getRun(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsGetJobQueryOptions(
+  client: OxideanClient,
+  input: ActionJobGetRequest,
+) {
+  return {
+    queryKey: ["repo", "actions", "getJob", input.owner, input.name, input.job_id] as const,
+    queryFn: async () => {
+      const res = await client.repo.actions.getJob(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

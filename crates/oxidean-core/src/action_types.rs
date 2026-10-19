@@ -1068,6 +1068,20 @@ pub struct ActionArtifactGetResponse {
     pub artifact: ActionArtifactPublic,
 }
 
+/// `repo.actions.getJob` — Read+; one job's public detail by id (the
+/// `GET /actions/jobs/{job_id}` backing proc).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobGetResponse {
+    pub job: ActionJobPublic,
+}
+
 /// `repo.actions.deleteArtifact` — Write+; removes the record and payload.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionArtifactDeleteRequest {

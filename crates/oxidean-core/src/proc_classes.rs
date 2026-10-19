@@ -298,6 +298,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
 
         "repo.actions.listRuns"
         | "repo.actions.getRun"
+        | "repo.actions.getJob"
         | "repo.actions.getJobLog"
         | "repo.actions.jobAnnotations"
         | "repo.actions.listWorkflows"
@@ -309,13 +310,24 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.workflowTemplates.get" => ActionsRead,
 
         "repo.actions.dispatchWorkflow"
+        | "repo.actions.dispatchRepository"
         | "repo.actions.rerunRun"
         | "repo.actions.cancelRun"
         | "repo.actions.approveRun"
         | "repo.actions.approveJob"
         | "repo.actions.reviewDeployment"
+        | "repo.actions.deleteRun"
+        | "repo.actions.setWorkflowEnabled"
         | "repo.actions.deleteArtifact"
         | "repo.actions.deleteCache" => ActionsWrite,
+
+        // Configuration variables mirror the secrets families — GitHub
+        // groups both under the actions_variables fine-grained permission.
+        "repo.actions.variables.list" | "repo.actions.environments.variablesList" => SecretsRead,
+        "repo.actions.variables.put"
+        | "repo.actions.variables.delete"
+        | "repo.actions.environments.variablesPut"
+        | "repo.actions.environments.variablesDelete" => SecretsWrite,
 
         "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
         "repo.actions.environments.secretsList" => SecretsRead,
@@ -478,6 +490,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         // their repo-level siblings (FG `secrets` perm).
         "org.actions.secrets.list" | "org.actions.secrets.listRepos" => SecretsRead,
         "org.actions.secrets.put" | "org.actions.secrets.delete" => SecretsWrite,
+        "org.actions.variables.list" | "org.actions.variables.listRepos" => SecretsRead,
+        "org.actions.variables.put" | "org.actions.variables.delete" => SecretsWrite,
         "org.create"
         | "org.updateSettings"
         | "org.members.add"

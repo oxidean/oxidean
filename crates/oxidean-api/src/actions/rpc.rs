@@ -15,10 +15,11 @@ use oxidean_core::{
     ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
     ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobAnnotationsRequest,
     ActionJobAnnotationsResponse, ActionJobApproveRequest, ActionJobApproveResponse,
-    ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic, ActionListRunnersResponse,
-    ActionRegistrationTokenResponse, ActionRepoArtifactsListRequest, ActionRunGetRequest,
-    ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
-    ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
+    ActionJobGetRequest, ActionJobGetResponse, ActionJobLogRequest, ActionJobLogResponse,
+    ActionJobPublic, ActionListRunnersResponse, ActionRegistrationTokenResponse,
+    ActionRepoArtifactsListRequest, ActionRunGetRequest, ActionRunGetResponse,
+    ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
+    ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
     ActionSecretsListResponse, ActionSetEnabledRequest, ActionSetWorkflowEnabledRequest,
     ActionVariablePublic, ActionVariablesDeleteRequest, ActionVariablesListRequest,
@@ -424,6 +425,48 @@ pub async fn get_run(
     Ok(ActionRunGetResponse {
         run: run_public(&run, &actors, accessible.capability),
         jobs: jobs.iter().map(|j| job_public(j, &view)).collect(),
+    })
+}
+
+/// `repo.actions.getJob` — Read+; one job's public detail by id (the REST
+/// `GET /actions/jobs/{job_id}` backing proc).
+pub async fn get_job(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionJobGetResponse, AppError> {
+    let req: ActionJobGetRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.getJob input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let job = ctx
+        .db
+        .find_action_job_by_id(&req.job_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    let run = ctx
+        .db
+        .find_action_run_by_id(&job.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let jobs = ctx
+        .db
+        .list_action_jobs_for_run(&run.id)
+        .await
+        .map_err(db_err)?;
+    let view = job_view_ctx(ctx, &accessible.row.id, &run, &jobs, accessible.capability).await?;
+    Ok(ActionJobGetResponse {
+        job: job_public(&job, &view),
     })
 }
 
@@ -2086,10 +2129,11 @@ pub async fn dispatch_workflow(
             AppError::new("repo.actions.discovery_failed", "failed to read workflows")
         })?;
     let wanted = req.workflow_id.trim();
-    let wf = discovered
-        .workflows
-        .iter()
-        .find(|w| w.path == wanted || w.document.name == wanted);
+    // GitHub accepts the workflow id (our path), the file name, or the
+    // declared `name:`.
+    let wf = discovered.workflows.iter().find(|w| {
+        w.path == wanted || w.path.rsplit('/').next() == Some(wanted) || w.document.name == wanted
+    });
     let wf = match wf {
         Some(w) => w,
         None => {

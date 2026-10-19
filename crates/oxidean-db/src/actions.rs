@@ -2251,6 +2251,7 @@ macro_rules! bind_run_filter {
         let br = $branch_ref;
         $q.bind(f.status.as_deref())
             .bind(f.status.as_deref())
+            .bind(f.status.as_deref())
             .bind(f.event.as_deref())
             .bind(f.event.as_deref())
             .bind(f.branch.as_deref())
@@ -2277,16 +2278,19 @@ macro_rules! bind_run_filter_pg {
             .bind(f.workflow_path.as_deref())
             .bind(f.triggered_by.as_deref())
             .bind(f.title_like.as_deref())
+            .bind(f.status.as_deref())
     }};
 }
 
 // The status filter coalesces `approval_hold` + non-terminal stored status
 // into the public `waiting_approval` label so `?status=waiting_approval`
 // matches held runs — the stored CHECK vocabulary predates that status.
-// (`const &str` composition isn't available; the CASE is inlined.)
-const RUNS_FILTER_SQLITE: &str = " AND (? IS NULL OR CASE WHEN approval_hold != 0 AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = ?) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ? COLLATE NOCASE)";
-const RUNS_FILTER_MYSQL: &str = " AND (? IS NULL OR CASE WHEN approval_hold != 0 AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = ?) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ?)";
-const RUNS_FILTER_PG: &str = " AND ($2::text IS NULL OR CASE WHEN approval_hold AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = $2) AND ($3::text IS NULL OR event = $3) AND ($4::text IS NULL OR head_ref = $4 OR head_ref = $5) AND ($6::text IS NULL OR workflow_path = $6) AND ($7::text IS NULL OR triggered_by = $7) AND ($8::text IS NULL OR title ILIKE $8)";
+// `?status=completed` (GitHub's umbrella for every terminal row) is handled
+// by the trailing `IN` alternative rather than the CASE. (`const &str`
+// composition isn't available; the CASE is inlined.)
+const RUNS_FILTER_SQLITE: &str = " AND (? IS NULL OR CASE WHEN approval_hold != 0 AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = ? OR (? = 'completed' AND status IN ('success','failure','cancelled','skipped'))) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ? COLLATE NOCASE)";
+const RUNS_FILTER_MYSQL: &str = " AND (? IS NULL OR CASE WHEN approval_hold != 0 AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = ? OR (? = 'completed' AND status IN ('success','failure','cancelled','skipped'))) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ?)";
+const RUNS_FILTER_PG: &str = " AND ($2::text IS NULL OR CASE WHEN approval_hold AND status NOT IN ('success','failure','cancelled','skipped') THEN 'waiting_approval' ELSE status END = $2 OR ($9::text = 'completed' AND status IN ('success','failure','cancelled','skipped'))) AND ($3::text IS NULL OR event = $3) AND ($4::text IS NULL OR head_ref = $4 OR head_ref = $5) AND ($6::text IS NULL OR workflow_path = $6) AND ($7::text IS NULL OR triggered_by = $7) AND ($8::text IS NULL OR title ILIKE $8)";
 
 /// `refs/heads/` variant of `filter.branch` for the third branch bind.
 fn branch_ref_of(f: &ActionRunFilter) -> Option<String> {
@@ -2324,7 +2328,7 @@ pub async fn list_runs_for_repo(
         DbPool::Postgres(p) => {
             let rows = bind_run_filter_pg!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT {RUN_COLS}, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
+                    "SELECT {RUN_COLS}, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $10 OFFSET $11"
                 )))
                 .bind(repository_id),
                 filter,

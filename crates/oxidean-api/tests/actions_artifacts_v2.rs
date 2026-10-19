@@ -39,7 +39,8 @@ async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
         "development",
     )
     .with_actions_enabled(true)
-    .with_actions_artifacts_dir(dir.path().join("actions-artifacts"));
+    .with_actions_artifacts_dir(dir.path().join("actions-artifacts"))
+    .with_repos_dir(dir.path().join("repos"));
     let app = router_with_state(state, build_cors("development", None).unwrap());
     (app, db, dir)
 }
@@ -827,4 +828,301 @@ async fn v4_rest_artifact_facade_list_get_zip_delete() {
     )
     .await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+/// The `gh`-facing Actions REST core — runs/jobs/workflows reads and the
+/// rerun/cancel/delete mutations, authenticated with the job token.
+#[tokio::test]
+async fn rest_actions_runs_jobs_workflows_surface() {
+    let (app, db, dir) = app_db().await;
+    let (_token, run_id, job_id, job_token) = claim_full_yaml(
+        &app,
+        &db,
+        "ghcli",
+        b"name: CI\non: [push, workflow_dispatch]\npermissions:\n  contents: read\n  actions: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    )
+    .await;
+    // dispatchWorkflow requires a verified caller — mirror the signup path.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at("u-ghcli", &now).await.unwrap();
+    // Mutations past a cancel ride the owner's PAT — cancelling revokes the
+    // run's job tokens.
+    let pat = "oxidean_pat_ghcli_roundtrip";
+    db.create_pat(
+        "pat-ghcli",
+        "u-ghcli",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    // listWorkflows/dispatchWorkflow read the bare repo's tree — seed one.
+    let bare = dir.path().join("repos").join("ghcli").join("ghcli.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = oxidean_git::CliGitBackend::new();
+    oxidean_git::GitBackend::init_bare(&git, &bare, "main")
+        .await
+        .unwrap();
+    oxidean_git::GitBackend::seed_commit(
+        &git,
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/ci.yml".into(),
+            b"name: CI\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n".to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+    let base = "/api/v1/repos/ghcli/ghcli";
+
+    // gh run list — GitHub shape with workflow_runs.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let list = body_json(res).await;
+    assert_eq!(list["total_count"], 1, "{list}");
+    let run = &list["workflow_runs"][0];
+    assert_eq!(run["name"], "CI");
+    assert_eq!(run["event"], "push");
+    assert_eq!(run["id"], run_id);
+    assert!(run["conclusion"].is_null() || run["status"] == "completed");
+
+    // status=completed is the GitHub umbrella for terminal rows — a still
+    // running/queued run must not match.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs?status=completed"),
+        Some(&job_token),
+    )
+    .await;
+    let filtered = body_json(res).await;
+    let all_terminal = filtered["workflow_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["status"] == "completed");
+    assert!(all_terminal);
+
+    // gh run view.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let run = body_json(res).await;
+    assert_eq!(run["head_branch"], "main");
+    assert_eq!(run["path"], ".github/workflows/ci.yml");
+
+    // gh run view's jobs table.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{run_id}/jobs"),
+        Some(&job_token),
+    )
+    .await;
+    let jobs = body_json(res).await;
+    assert_eq!(jobs["total_count"], 1, "{jobs}");
+    assert_eq!(jobs["jobs"][0]["id"], job_id);
+
+    // gh run view --job.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/jobs/{job_id}"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let job = body_json(res).await;
+    assert_eq!(job["run_id"], run_id);
+
+    // gh workflow list + view (by filename and by name).
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows"),
+        Some(&job_token),
+    )
+    .await;
+    let wfs = body_json(res).await;
+    assert_eq!(wfs["total_count"], 1, "{wfs}");
+    assert_eq!(wfs["workflows"][0]["path"], ".github/workflows/ci.yml");
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/ci.yml"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/CI"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/nope.yml"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // gh run list --workflow.
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/ci.yml/runs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/nope/runs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Workflow disable → the workflow reports disabled state. The mutation
+    // RPCs gate on repo write capability — a `contents: read` job token is
+    // read-only even with `actions: write` (a GitHub divergence), so these
+    // calls ride the owner PAT.
+    let res = rest(
+        &app,
+        "PUT",
+        &format!("{base}/actions/workflows/ci.yml/disable"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::NO_CONTENT,
+        "disable: {}",
+        res.status()
+    );
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/workflows/ci.yml"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(body_json(res).await["state"], "disabled_manually");
+    let res = rest(
+        &app,
+        "PUT",
+        &format!("{base}/actions/workflows/ci.yml/enable"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // Dispatch → 204 + a second run appears.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{base}/actions/workflows/ci.yml/dispatches"))
+                .header("authorization", format!("Bearer {pat}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"ref":"main","inputs":{}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs?event=workflow_dispatch"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(body_json(res).await["total_count"], 1);
+
+    // Cancel the queued run → 202; the job token is revoked with it, so the
+    // rerun + delete ride the PAT like a real `gh` session would.
+    let res = rest(
+        &app,
+        "POST",
+        &format!("{base}/actions/runs/{run_id}/cancel"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs"),
+        Some(&job_token),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let res = rest(
+        &app,
+        "POST",
+        &format!("{base}/actions/runs/{run_id}/rerun"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "rerun: {}", res.status());
+
+    // The rerun re-queued the run — GitHub only deletes completed runs, so
+    // cancel once more before deleting.
+    let res = rest(
+        &app,
+        "POST",
+        &format!("{base}/actions/runs/{run_id}/cancel"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::ACCEPTED,
+        "recancel: {}",
+        res.status()
+    );
+
+    // Delete the run → 204.
+    let res = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/actions/runs/{run_id}"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::NO_CONTENT,
+        "delete: {}",
+        res.status()
+    );
 }

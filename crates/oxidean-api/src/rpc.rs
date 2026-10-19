@@ -359,6 +359,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.commitStatus.list",
     "repo.actions.listRuns",
     "repo.actions.getRun",
+    "repo.actions.getJob",
     "repo.actions.getJobLog",
     "repo.actions.jobAnnotations",
     "repo.actions.listWorkflows",
@@ -1522,6 +1523,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.actions.listRuns" => match crate::actions::rpc::list_runs(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.actions.getJob" => match crate::actions::rpc::get_job(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
