@@ -48,7 +48,7 @@ fn parse_u64_env(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-/// Spawn in-process orphan reconcile + scheduled gc + LFS GC + package blob GC + webhook delivery loops.
+/// Spawn in-process orphan reconcile + scheduled gc + LFS GC + package blob GC + VCS object GC + webhook delivery loops.
 pub fn spawn_background_jobs(
     db: Database,
     git: Arc<dyn GitBackend>,
@@ -56,6 +56,7 @@ pub fn spawn_background_jobs(
     lfs_dir: PathBuf,
     packages_dir: PathBuf,
     config: JobConfig,
+    vcs: Option<crate::vcs::SharedVcs>,
 ) {
     let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
     crate::webhook::worker::spawn_webhook_worker(db.clone(), env_name);
@@ -189,5 +190,50 @@ pub fn spawn_background_jobs(
         );
     } else {
         tracing::info!("package blob GC job disabled (interval 0)");
+    }
+
+    // VCS object-store GC — the interval is `OXIDEAN_VCS_GC_INTERVAL_SECS`
+    // (frozen default 3600; `0` disables). A `None` slot means VCS bootstrap
+    // refused — no objects dir exists to sweep, so the job simply isn't
+    // spawned. `gc_once` honors the `.gc-lock` and `gc_grace_secs` itself;
+    // stats/logs carry counts+bytes only, never object bytes (SD3.x).
+    match vcs {
+        Some(slot) if slot.gc_interval_secs > 0 => {
+            let period = Duration::from_secs(slot.gc_interval_secs);
+            let secs = slot.gc_interval_secs;
+            tokio::spawn(async move {
+                let mut ticker = interval(period);
+                ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                loop {
+                    ticker.tick().await;
+                    match slot.api.objects().gc_once().await {
+                        Ok(stats) => {
+                            if stats.orphans_removed > 0
+                                || stats.rowless_removed > 0
+                                || stats.tmp_removed > 0
+                                || stats.errors > 0
+                                || stats.skipped
+                            {
+                                tracing::info!(
+                                    orphans = stats.orphans_removed,
+                                    rowless = stats.rowless_removed,
+                                    tmp = stats.tmp_removed,
+                                    bytes = stats.bytes_reclaimed,
+                                    skipped = stats.skipped,
+                                    errors = stats.errors,
+                                    "vcs object gc completed"
+                                );
+                            } else {
+                                tracing::debug!("vcs object gc: nothing to do");
+                            }
+                        }
+                        Err(e) => tracing::error!(error = %e, "vcs object gc failed"),
+                    }
+                }
+            });
+            tracing::info!(secs, "vcs object gc job scheduled");
+        }
+        Some(_) => tracing::info!("vcs object gc job disabled (interval 0)"),
+        None => {}
     }
 }

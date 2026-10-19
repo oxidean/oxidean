@@ -401,7 +401,12 @@ pub async fn list(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
     if let Some(ref pt) = push_type {
-        if !VALID_PUSH_TYPES.contains(&pt.as_str()) {
+        // `vcs.*` rows land here via the shared activity recorder; their
+        // kinds are valid filter values too (`VCS_ACTIVITY_KINDS` — the
+        // extension point u1 seeded for u7).
+        if !VALID_PUSH_TYPES.contains(&pt.as_str())
+            && !oxidean_core::VCS_ACTIVITY_KINDS.contains(&pt.as_str())
+        {
             return Err(AppError::new(
                 "rpc.bad_input",
                 format!("invalid push_type filter: {pt}"),

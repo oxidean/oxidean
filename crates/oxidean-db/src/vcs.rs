@@ -97,7 +97,9 @@ pub struct VcsDerivedIndexRow {
     pub kind: String,
     pub index_key: String,
     pub payload: String,
-    pub covering_changeset: String,
+    /// `NULL` on u6 import marker rows (`active`/zero-import `cursor`) that
+    /// predate any changeset (migration 0055).
+    pub covering_changeset: Option<String>,
     pub updated_at: String,
 }
 
@@ -163,7 +165,9 @@ pub struct VcsDerivedIndexUpsert<'a> {
     pub kind: &'a str,
     pub index_key: &'a str,
     pub payload: &'a str,
-    pub covering_changeset: &'a str,
+    /// `None` writes `NULL` — u6 import marker rows (`active`/zero-import
+    /// `cursor`) carry no covering changeset (migration 0055).
+    pub covering_changeset: Option<&'a str>,
 }
 
 // ---------- row mapping ----------
@@ -2818,7 +2822,7 @@ mod tests {
             kind: "path_history",
             index_key: "a.txt",
             payload: "{\"seen\":1}",
-            covering_changeset: CS_A,
+            covering_changeset: Some(CS_A),
         }];
         let id = db
             .vcs_create_changeset_tx(&root, &files, &[HASH_A], &upserts)
@@ -2918,7 +2922,7 @@ mod tests {
             kind: "k",
             index_key: "i",
             payload: "{}",
-            covering_changeset: CS_A,
+            covering_changeset: Some(CS_A),
         }];
         let err = db
             .vcs_create_changeset_tx(&bad, &files, &[HASH_A], &upserts)
@@ -3123,13 +3127,13 @@ mod tests {
                 kind: "path_history",
                 index_key: "a.txt",
                 payload: "{\"v\":1}",
-                covering_changeset: CS_A,
+                covering_changeset: Some(CS_A),
             },
             VcsDerivedIndexUpsert {
                 kind: "path_history",
                 index_key: "b.txt",
                 payload: "{\"v\":1}",
-                covering_changeset: CS_A,
+                covering_changeset: Some(CS_A),
             },
         ];
         db.vcs_upsert_derived_index_rows(&rid, &rows).await.unwrap();
@@ -3138,7 +3142,7 @@ mod tests {
             kind: "path_history",
             index_key: "a.txt",
             payload: "{\"v\":2}",
-            covering_changeset: CS_A,
+            covering_changeset: Some(CS_A),
         }];
         db.vcs_upsert_derived_index_rows(&rid, &merge)
             .await
@@ -3231,7 +3235,7 @@ mod tests {
                 kind: "walk",
                 index_key: "k1",
                 payload: "{}",
-                covering_changeset: CS_A,
+                covering_changeset: Some(CS_A),
             }],
         )
         .await
@@ -3289,7 +3293,7 @@ mod tests {
                 kind: "walk",
                 index_key: "k1",
                 payload: "{}",
-                covering_changeset: CS_A,
+                covering_changeset: Some(CS_A),
             }],
         )
         .await

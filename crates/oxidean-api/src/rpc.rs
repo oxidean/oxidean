@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
+use futures_util::FutureExt;
 use oxidean_core::{
     wire_compatible, AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities,
-    ManifestResponse, RpcRequest, RpcResponse, VcsErrorCode, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
+    ManifestResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
     RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use oxidean_db::Database;
@@ -35,6 +36,7 @@ use crate::search;
 use crate::ssh_keys;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
+use crate::vcs;
 use crate::webhook;
 
 pub const VERSION_HEADER: &str = "Oxidean-RPC-Version";
@@ -111,6 +113,10 @@ pub struct RpcCtx {
     pub search_timeout_ms: u64,
     pub search_max_matches: u32,
     pub search_max_files: u32,
+    /// Agentic VCS slot — `None` when the `OXIDEAN_VCS_*` config is invalid
+    /// or the objects dir refused at boot; `vcs.*` procedures then answer
+    /// `vcs.disabled` (same wire shape as an unenabled repo).
+    pub vcs: Option<crate::vcs::SharedVcs>,
 }
 
 /// Wire-compat gate for `Oxidean-RPC-Version` (BR6.2). During the 0.x window
@@ -1852,80 +1858,81 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        // Agentic VCS protocol — registered with stub arms returning
-        // `vcs.disabled` until the domain handlers land (no repo can be
-        // enabled before then, so the stub is behaviorally correct). One
+        // Agentic VCS protocol — domain handlers in `crate::vcs`. One
         // single-name arm per procedure: `procedures_list_matches_dispatch`
         // scans `"name" =>` arm literals, so alternation arms are invisible
-        // to it.
-        "vcs.repo_enable" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.status" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.changeset_create" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.changeset_get" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.log" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.diff" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.tree" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.file_get" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.blame" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.path_history" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.merge_base" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.merge" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.rebase" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.ref_list" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.ref_update" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.git_import" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
-        "vcs.git_export" => RpcResponse::err(AppError::new(
-            VcsErrorCode::Disabled,
-            "VCS is not enabled for this repository",
-        )),
+        // to it. `.boxed()` on every arm: it statically enforces `Send` on
+        // each handler future AND keeps the deep VCS await graphs out of
+        // `dispatch`'s coroutine witness (rustc's Send-unroll overflows
+        // `recursion_depth_exceeding_limit` on the unboxed match).
+        "vcs.repo_enable" => match vcs::repo_enable(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.status" => match vcs::status(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.changeset_create" => match vcs::changeset_create(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.changeset_get" => match vcs::changeset_get(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.log" => match vcs::log(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.diff" => match vcs::diff(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.tree" => match vcs::tree(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.file_get" => match vcs::file_get(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.blame" => match vcs::blame(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.path_history" => match vcs::path_history(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.merge_base" => match vcs::merge_base(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.merge" => match vcs::merge(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.rebase" => match vcs::rebase(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.ref_list" => match vcs::ref_list(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.ref_update" => match vcs::ref_update(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.git_import" => match vcs::git_import(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "vcs.git_export" => match vcs::git_export(ctx, req.input).boxed().await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         other => RpcResponse::err(AppError::new(
             "rpc.unknown_procedure",
             format!("unknown procedure: {other}"),
@@ -2102,11 +2109,12 @@ mod tests {
         }
     }
 
-    /// The u1 dispatch arms are stubs: each `vcs.*` arm returns `vcs.disabled`
-    /// until the domain handlers land. Scans the arm's own lines so a real
-    /// handler swap-in fails here as a reminder that u7 owns the replacement.
+    /// Each `vcs.*` arm must call its real `crate::vcs::<proc>` handler —
+    /// no `vcs.disabled` stub may remain (u7's `dispatch_real_arms` row; a
+    /// handler's own `vcs.disabled` errors are returned by the domain layer,
+    /// never by the arm itself).
     #[test]
-    fn vcs_dispatch_arms_return_disabled() {
+    fn vcs_dispatch_arms_call_real_handlers() {
         let src = include_str!("rpc.rs");
         let lines: Vec<&str> = src.lines().collect();
         for name in oxidean_core::VCS_PROCEDURES {
@@ -2116,9 +2124,14 @@ mod tests {
                 .position(|l| l.trim_start().starts_with(&needle))
                 .unwrap_or_else(|| panic!("no dispatch arm for {name}"));
             let arm: String = lines[start..(start + 6).min(lines.len())].join("\n");
+            let handler = format!("vcs::{}(ctx, req.input)", &name["vcs.".len()..]);
             assert!(
-                arm.contains("VcsErrorCode::Disabled"),
-                "{name} arm must return vcs.disabled while stubbed:\n{arm}"
+                arm.contains(&handler),
+                "{name} arm must call the real handler ({handler}):\n{arm}"
+            );
+            assert!(
+                !arm.contains("VcsErrorCode::Disabled"),
+                "{name} arm still carries a disabled stub:\n{arm}"
             );
         }
     }

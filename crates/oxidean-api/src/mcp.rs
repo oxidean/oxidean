@@ -903,6 +903,29 @@ fn tool_defs() -> Vec<ToolDef> {
             }),
         },
     ]
+    .into_iter()
+    .chain(vcs_tool_defs())
+    .collect()
+}
+
+/// VCS tool descriptors produced by `oxidean-vcs` (C3/FR13.3): the crate
+/// emits name/description/procedure/access-tag/input-schema tuples; this
+/// host maps its `McpAccess` onto the private `Access` gate.
+fn vcs_tool_defs() -> Vec<ToolDef> {
+    use oxidean_vcs::client::mcp::{tool_descriptors, McpAccess};
+    tool_descriptors()
+        .into_iter()
+        .map(|d| ToolDef {
+            name: d.name,
+            description: d.description,
+            procedure: d.procedure,
+            access: match d.access {
+                McpAccess::RepoRead => Access::RepoRead,
+                McpAccess::RepoWrite => Access::RepoWrite,
+            },
+            input_schema: d.input_schema,
+        })
+        .collect()
 }
 
 fn tool_public(t: &ToolDef) -> Value {
@@ -943,6 +966,15 @@ fn build_rpc_input(tool: &ToolDef, args: &Value) -> Result<(String, Value), (i64
             let mut input = args.clone();
             if input.get("ref").is_none() {
                 input["ref"] = json!("");
+            }
+            Ok((tool.procedure.into(), input))
+        }
+        // Same pattern as `repo_tree`: `vcs.log` requires `from` on the wire
+        // while the tool schema keeps it optional — default to the branch.
+        "vcs_log" => {
+            let mut input = args.clone();
+            if input.get("from").is_none() {
+                input["from"] = json!("main");
             }
             Ok((tool.procedure.into(), input))
         }
@@ -1734,6 +1766,91 @@ mod tests {
         .unwrap();
         assert_eq!(input["ref"], "dev");
         assert_eq!(input["path"], "src");
+    }
+
+    #[test]
+    fn vcs_tools_present_with_access_classes() {
+        let defs = tool_defs();
+        let read_tools = [
+            "vcs_status",
+            "vcs_log",
+            "vcs_diff",
+            "vcs_tree",
+            "vcs_file_get",
+            "vcs_blame",
+            "vcs_path_history",
+            "vcs_merge_base",
+            "vcs_ref_list",
+            "vcs_changeset_get",
+        ];
+        let write_tools = ["vcs_changeset_create", "vcs_merge", "vcs_rebase"];
+        for name in read_tools {
+            let t = defs.iter().find(|t| t.name == name).unwrap_or_else(|| {
+                panic!("{name} missing from tool_defs");
+            });
+            assert!(
+                matches!(t.access, Access::RepoRead),
+                "{name} must gate RepoRead"
+            );
+            assert!(t.procedure.starts_with("vcs."));
+        }
+        for name in write_tools {
+            let t = defs.iter().find(|t| t.name == name).unwrap_or_else(|| {
+                panic!("{name} missing from tool_defs");
+            });
+            assert!(
+                matches!(t.access, Access::RepoWrite),
+                "{name} must gate RepoWrite"
+            );
+        }
+        for absent in [
+            "vcs_repo_enable",
+            "vcs_ref_update",
+            "vcs_git_import",
+            "vcs_git_export",
+            "checkout",
+        ] {
+            assert!(defs.iter().all(|t| t.name != absent), "{absent} present");
+        }
+    }
+
+    #[test]
+    fn build_rpc_input_vcs_log_from_default() {
+        let defs = tool_defs();
+        let tool = defs.iter().find(|t| t.name == "vcs_log").unwrap();
+        let (proc, input) = build_rpc_input(tool, &json!({"owner": "o", "name": "n"})).unwrap();
+        assert_eq!(proc, "vcs.log");
+        assert_eq!(input["from"], "main");
+        let (_, input) = build_rpc_input(
+            tool,
+            &json!({"owner": "o", "name": "n", "from": "cs_01ABC", "limit": 5}),
+        )
+        .unwrap();
+        assert_eq!(input["from"], "cs_01ABC");
+        assert_eq!(input["limit"], 5);
+    }
+
+    #[test]
+    fn build_rpc_input_vcs_passthrough() {
+        let defs = tool_defs();
+        let tool = defs.iter().find(|t| t.name == "vcs_merge").unwrap();
+        let args = json!({"owner": "o", "name": "n", "a": "cs_1", "b": "cs_2", "message": "m"});
+        let (proc, input) = build_rpc_input(tool, &args).unwrap();
+        assert_eq!(proc, "vcs.merge");
+        assert_eq!(input, args);
+    }
+
+    #[test]
+    fn tool_public_vcs_shape() {
+        let defs = tool_defs();
+        let tool = defs.iter().find(|t| t.name == "vcs_file_get").unwrap();
+        let pub_shape = tool_public(tool);
+        assert_eq!(pub_shape["name"], "vcs_file_get");
+        assert!(pub_shape["description"].is_string());
+        assert_eq!(
+            pub_shape["inputSchema"]["required"],
+            json!(["owner", "name", "changeset_id", "path"])
+        );
     }
 
     // -- tool result envelopes -------------------------------------------------

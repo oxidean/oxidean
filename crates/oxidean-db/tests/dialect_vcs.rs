@@ -93,7 +93,7 @@ async fn changeset_tx_round_trip_and_exact_sentinels() {
         kind: "path_touch",
         index_key: "pt\x01key",
         payload: "{}",
-        covering_changeset: CS_RT,
+        covering_changeset: Some(CS_RT),
     }];
     let changes = [VcsFileChangeInsert {
         path: "Src/Main.rs",
@@ -389,13 +389,13 @@ async fn case_variant_coexistence_and_keyset() {
             kind: "path_touch",
             index_key: "K\x01A",
             payload: "{\"v\":1}",
-            covering_changeset: CS_CV,
+            covering_changeset: Some(CS_CV),
         },
         VcsDerivedIndexUpsert {
             kind: "path_touch",
             index_key: "K\x01a",
             payload: "{\"v\":2}",
-            covering_changeset: CS_CV,
+            covering_changeset: Some(CS_CV),
         },
     ];
     db.vcs_upsert_derived_index_rows(repo, &upserts)
@@ -440,5 +440,54 @@ async fn case_variant_coexistence_and_keyset() {
             );
             assert_eq!(len, want_len, "{table}.{column} length");
         }
+    }
+}
+
+/// Migration 0055 (u6): `covering_changeset` admits NULL — the `active` and
+/// zero-import `cursor` marker rows exist before any changeset. Writes both
+/// arms and decodes `Option<String>` on read; sqlite rides the 0055 table
+/// rebuild (FK + covering index recreated), pg/mysql the ALTER.
+#[tokio::test]
+async fn nullable_covering_changeset_round_trip() {
+    let _serial = SERIAL.lock().await;
+    let Some(url) = database_url() else {
+        eprintln!("skip: DATABASE_URL unset");
+        return;
+    };
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let repo = "r-vcs-covering";
+    seed_repo(&db, repo).await;
+
+    db.vcs_upsert_derived_index_rows(
+        repo,
+        &[
+            VcsDerivedIndexUpsert {
+                kind: "vcs:import",
+                index_key: "active",
+                payload: "{\"state\":\"active\",\"nonce\":\"n\",\"started_at\":\"t\"}",
+                covering_changeset: None,
+            },
+            VcsDerivedIndexUpsert {
+                kind: "vcs:import",
+                index_key: "cursor",
+                payload: "{\"v\":1,\"tips\":[],\"skip\":0}",
+                covering_changeset: None,
+            },
+        ],
+    )
+    .await
+    .expect("NULL covering upserts");
+
+    for key in ["active", "cursor"] {
+        let rows = db
+            .vcs_query_derived_index(repo, "vcs:import", Some(key), None, 1)
+            .await
+            .expect("NULL covering probe");
+        assert_eq!(rows.len(), 1, "marker row {key} must land");
+        assert_eq!(
+            rows[0].covering_changeset, None,
+            "marker row {key} must decode covering_changeset = NULL"
+        );
     }
 }

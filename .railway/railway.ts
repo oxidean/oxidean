@@ -68,6 +68,7 @@ export default defineRailway((ctx) => {
       OXIDEAN_LFS_DIR: "/var/lfs",
       OXIDEAN_PACKAGES_DIR: "/var/packages",
       OXIDEAN_RELEASE_ASSETS_DIR: "/var/release-assets",
+      OXIDEAN_VCS_OBJECTS_DIR: "/var/vcs-objects",
       OXIDEAN_SSH_HOST_KEY_DIR: "/var/ssh",
       OXIDEAN_SSH_ENABLED: "true",
       // Default SSH port (clients expect 22). Railway still publishes a random

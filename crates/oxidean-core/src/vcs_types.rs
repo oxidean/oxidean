@@ -877,11 +877,13 @@ pub struct VcsRefUpdateResponse {
 }
 
 /// `vcs.git_import` head — where an imported branch landed.
+/// `changeset_id` is `null` while a tip resolves mid-page before its link
+/// row exists (u6 — wire-superset widening).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct VcsGitImportHead {
     pub name: String,
     pub git_oid: String,
-    pub changeset_id: ChangesetId,
+    pub changeset_id: Option<ChangesetId>,
 }
 
 /// `vcs.git_import` input — `from` accepts `ref | git_oid`; resumable via
@@ -904,6 +906,8 @@ pub struct VcsGitImportResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     pub done: bool,
+    /// Non-commit-peel tip drops (tag→tree/blob) — surfaced, never silent (u6).
+    pub skipped_tips: u64,
     pub heads: Vec<VcsGitImportHead>,
 }
 

@@ -240,7 +240,7 @@ pub(crate) struct PathTouchRow {
     pub(crate) kind: &'static str,
     pub(crate) index_key: String,
     pub(crate) payload: String,
-    pub(crate) covering_changeset: String,
+    pub(crate) covering_changeset: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +411,7 @@ impl ReadIndex {
                 kind: KIND_PATH_TOUCH,
                 index_key: format!("{}\x01{}\x01{}", path_hash32(&c.path), committed_at, id),
                 payload,
-                covering_changeset: id.to_string(),
+                covering_changeset: Some(id.to_string()),
             });
             if c.kind == ChangeKind::Rename {
                 // `old_path` presence is validated upstream; skip the r-row
@@ -436,7 +436,7 @@ impl ReadIndex {
                             id
                         ),
                         payload: payload_r,
-                        covering_changeset: id.to_string(),
+                        covering_changeset: Some(id.to_string()),
                     });
                 }
             }
@@ -724,7 +724,7 @@ impl ReadIndex {
                         kind: KIND_MERGE_BASE,
                         index_key: &cache_key,
                         payload: &payload,
-                        covering_changeset: &hi,
+                        covering_changeset: Some(hi.as_str()),
                     }],
                 )
                 .await?;
@@ -882,7 +882,7 @@ impl ReadIndex {
                     kind: KIND_TREE_ENTRY,
                     index_key: k,
                     payload: p,
-                    covering_changeset: cs,
+                    covering_changeset: Some(cs),
                 })
                 .collect();
             self.db
@@ -901,7 +901,7 @@ impl ReadIndex {
                     kind: KIND_TREE_SNAP,
                     index_key: cs,
                     payload: &snap,
-                    covering_changeset: cs,
+                    covering_changeset: Some(cs),
                 }],
             )
             .await
@@ -1497,7 +1497,7 @@ impl ReadIndex {
                 kind: KIND_BLAME,
                 index_key: key,
                 payload,
-                covering_changeset: at,
+                covering_changeset: Some(at),
             })
             .collect();
         if !upserts.is_empty() {
@@ -2297,7 +2297,7 @@ mod tests {
                 kind: KIND_TREE_ENTRY,
                 index_key: &format!("{}\x01a", c1.as_str()),
                 payload: "{\"mode\":33188,\"blob\":\"WRONG\"}",
-                covering_changeset: c1.as_str(),
+                covering_changeset: Some(c1.as_str()),
             }],
         )
         .await
@@ -2500,7 +2500,7 @@ mod tests {
                 kind: KIND_PATH_TOUCH,
                 index_key: &forged_key,
                 payload: "{\"path\":\"OTHER/p.rs\",\"kind\":\"add\",\"changeset_id\":\"x\",\"committed_at\":\"t\",\"mode\":33188}",
-                covering_changeset: c3.as_str(),
+                covering_changeset: Some(c3.as_str()),
             }],
         )
         .await

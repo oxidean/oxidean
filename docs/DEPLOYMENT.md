@@ -138,6 +138,7 @@ Default Compose publishes HTTP via Traefik and raw TCP for Git-over-SSH. Persist
 | `./var/repos` | `/var/repos` | Bare git repositories |
 | `./var/lfs` | `/var/lfs` (`OXIDEAN_LFS_DIR`) | Git LFS object store |
 | `./var/packages` | `/var/packages` (`OXIDEAN_PACKAGES_DIR`) | OCI / npm / generic blobs |
+| `./var/vcs-objects` | `/var/vcs-objects` (`OXIDEAN_VCS_OBJECTS_DIR`) | Agentic VCS object store (distinct from repos/LFS/packages) |
 | `./var/release-assets` | `/var/release-assets` (`OXIDEAN_RELEASE_ASSETS_DIR`) | Release asset files (distinct from LFS) |
 | `./var/ssh` | `/var/ssh` (`OXIDEAN_SSH_HOST_KEY_DIR`) | SSH host keys (TOFU) + web-flow commit signing key (`web-flow` / `web-flow.pub`) |
 | `./var/uploads` | `/var/uploads` | Avatars / uploads |

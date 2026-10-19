@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -75,6 +75,10 @@ pub struct AppState {
     pub search_timeout_ms: u64,
     pub search_max_matches: u32,
     pub search_max_files: u32,
+    /// Agentic VCS slot — `None` when the `OXIDEAN_VCS_*` config is invalid
+    /// or the objects dir refuses (`warn!` at boot); procedures then answer
+    /// `vcs.disabled`, the same wire shape an unenabled repo produces.
+    pub vcs: Option<crate::vcs::SharedVcs>,
 }
 
 impl AppState {
@@ -169,6 +173,8 @@ impl AppState {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50u32);
+        let git = Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>;
+        let vcs = build_vcs_slot(&db, &git, &repos_dir);
         Self {
             db,
             email: Arc::new(RwLock::new(email)),
@@ -183,7 +189,7 @@ impl AppState {
             actions_log_dir,
             actions_enabled,
             mcp_enabled,
-            git: Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>,
+            git,
             sessions: SessionService::new(env_name.clone()),
             pending: PendingAuthStore::new(),
             two_factor_store: crate::auth::two_factor::TwoFactorStore::new(),
@@ -196,6 +202,7 @@ impl AppState {
             search_timeout_ms,
             search_max_matches,
             search_max_files,
+            vcs,
         }
     }
 
@@ -247,6 +254,8 @@ impl AppState {
 
     pub fn with_git(mut self, git: Arc<dyn GitBackend>) -> Self {
         self.git = git;
+        // Rebuild the VCS slot so interop rides the injected backend too.
+        self.vcs = build_vcs_slot(&self.db, &self.git, &self.repos_dir);
         self
     }
 
@@ -388,6 +397,19 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
                 .put(git_lfs::put_object)
                 .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
         )
+        // Agentic VCS object transport (contract C2) — Bearer/PAT only, never
+        // the session cookie. The 512 MiB body limit sits above the 256 MiB
+        // per-object cap so the typed `vcs.quota_exceeded` answers before
+        // Axum's untyped 413.
+        .route(
+            "/api/vcs/{owner}/{name}/objects/{hash}",
+            get(crate::vcs_routes::object_get),
+        )
+        .route(
+            "/api/vcs/{owner}/{name}/objects",
+            axum::routing::post(crate::vcs_routes::object_put)
+                .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
         // CLI distribution — install script + ox binaries; must route to the
         // API at the edge (unauthenticated; ox self-update consumes it).
         .route("/cli/install.sh", get(cli_dist::install_script))
@@ -501,6 +523,94 @@ pub(crate) async fn resolve_session_token(
     }
 }
 
+/// Build the VCS slot from the `OXIDEAN_VCS_*` env (frozen defaults — the
+/// config's own `from_env` pins them). A malformed env, a refused objects dir
+/// (foreign content, dir-is-file), or a caps validation failure degrades to
+/// `None` + `warn!` — VCS never takes the instance down at boot; every
+/// procedure then answers `vcs.disabled`, identical wire shape to an
+/// unenabled repo.
+fn build_vcs_slot(
+    db: &Database,
+    git: &Arc<dyn GitBackend>,
+    repos_dir: &Path,
+) -> Option<crate::vcs::SharedVcs> {
+    use oxidean_vcs::{
+        api::VcsApi,
+        changeset_store::ChangesetStore,
+        git_interop::{GitInterop, InteropCaps},
+        merge_engine::{MergeCaps, MergeEngine},
+        object_store::{ObjectStore, ObjectStoreConfig},
+        read_index::{ReadIndex, ReadIndexCaps},
+    };
+
+    let mut config = match ObjectStoreConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "vcs disabled: invalid OXIDEAN_VCS_* config");
+            return None;
+        }
+    };
+    // Same absolutize rule as `repos_dir` — relative `./var/…` anchors at the
+    // process cwd so the dir is stable no matter where ops `-C` into.
+    if !config.objects_dir.is_absolute() {
+        config.objects_dir = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(&config.objects_dir);
+    }
+
+    /// Each engine component owns an `ObjectStore` handle over the SAME
+    /// directory — the store carries no mutable state, this is the u4/u5
+    /// construction pattern.
+    fn objects(db: &Database, cfg: &ObjectStoreConfig) -> Option<ObjectStore> {
+        match ObjectStore::new(db.clone(), cfg.clone()) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                tracing::warn!(error = %e, "vcs disabled: object store refused");
+                None
+            }
+        }
+    }
+
+    let api_objects = objects(db, &config)?;
+    let index = ReadIndex::new(db.clone(), objects(db, &config)?, ReadIndexCaps::default());
+    let merge = match MergeEngine::new(
+        db.clone(),
+        ReadIndex::new(db.clone(), objects(db, &config)?, ReadIndexCaps::default()),
+        ChangesetStore::new(db.clone()),
+        objects(db, &config)?,
+        MergeCaps::default(),
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(error = %e, "vcs disabled: merge caps refused");
+            return None;
+        }
+    };
+    let checker =
+        crate::vcs_protection::HostProtectionChecker::new(db.clone(), repos_dir.to_path_buf());
+    let interop = match GitInterop::new(
+        db.clone(),
+        objects(db, &config)?,
+        ChangesetStore::new(db.clone()),
+        ReadIndex::new(db.clone(), objects(db, &config)?, ReadIndexCaps::default()),
+        git.clone(),
+        checker,
+        InteropCaps::new(config.max_object_bytes),
+    ) {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::warn!(error = %e, "vcs disabled: interop caps refused");
+            return None;
+        }
+    };
+    tracing::info!(objects_dir = %config.objects_dir.display(), "vcs enabled");
+    Some(Arc::new(crate::vcs::VcsSlot {
+        api: VcsApi::new(db.clone(), api_objects, index, merge, Some(interop)),
+        objects_dir: config.objects_dir.clone(),
+        gc_interval_secs: config.gc_interval_secs,
+    }))
+}
+
 /// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
 /// Used by the MCP endpoint; PAT Bearer identity is applied separately there.
 pub(crate) fn build_rpc_ctx_with_session(
@@ -535,6 +645,7 @@ pub(crate) fn build_rpc_ctx_with_session(
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
+        vcs: state.vcs.clone(),
     }
 }
 
@@ -647,6 +758,7 @@ pub(crate) async fn build_rpc_ctx(
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
+        vcs: state.vcs.clone(),
     })
 }
 

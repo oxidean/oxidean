@@ -568,7 +568,7 @@ impl ChangesetStore {
                 kind: r.kind,
                 index_key: &r.index_key,
                 payload: &r.payload,
-                covering_changeset: &r.covering_changeset,
+                covering_changeset: r.covering_changeset.as_deref(),
             })
             .collect();
 
