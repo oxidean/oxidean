@@ -413,6 +413,7 @@ ox vcs rebase o/n <cs> --onto <cs> [-m msg]
 ox vcs checkout o/n <cs> [--paths f]... [--dir t]   # sparse working copy, shared object cache
 ox vcs ref list o/n                     # set: (--expect cs|--create) (--to cs|--delete) — CAS
 ox vcs import o/n [--from ref|oid --limit n --cursor c]   # resumable git → changesets
+                 [--publish]                              # + create-only vcs refs per imported head
 ox vcs export o/n <cs> --branch b [--force]  # git commits via the protected ref-update path
 
 # People & orgs

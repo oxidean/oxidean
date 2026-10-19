@@ -149,6 +149,7 @@ ox vcs checkout o/n cs_01XYZ --paths src/            # sparse working copy for f
 ox vcs merge o/n cs_01AAA cs_01BBB -m "merge branches"
 ox vcs ref set o/n main --expect cs_01AAA --to cs_01MERGED   # compare-and-swap head move
 ox vcs export o/n cs_01MERGED --branch main          # materialize to git via protected ref path
+ox vcs import o/n --publish                          # git → changesets, named vcs ref per head
 ```
 
 ## Install this skill

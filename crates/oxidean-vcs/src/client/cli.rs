@@ -186,6 +186,7 @@ pub enum VcsCommand {
         from: Option<String>,
         limit: Option<i64>,
         cursor: Option<String>,
+        publish: bool,
     },
     Export {
         repo: RepoRef,
@@ -513,11 +514,16 @@ pub async fn run(
             let pretty = ok_pretty(&envelope, |data| {
                 let mut out = String::new();
                 for e in data["entries"].as_array().cloned().unwrap_or_default() {
+                    let path = e["path"].as_str().unwrap_or("?");
+                    let shown = match e["old_path"].as_str() {
+                        Some(old) if old != path => format!("{old} -> {path}"),
+                        _ => path.to_string(),
+                    };
                     out.push_str(&format!(
                         "{}\t{}\t{}\t{}\n",
                         e["changeset_id"].as_str().unwrap_or("?"),
                         e["kind"].as_str().unwrap_or("?"),
-                        e["path"].as_str().unwrap_or("?"),
+                        shown,
                         e["committed_at"].as_str().unwrap_or("?"),
                     ));
                 }
@@ -684,12 +690,16 @@ pub async fn run(
             from,
             limit,
             cursor,
+            publish,
         } => {
             let mut input = repo.input();
             opt(&mut input, "from", from.clone().map(Value::from));
             opt(&mut input, "limit", limit.map(Value::from));
             opt(&mut input, "cursor", cursor.clone().map(Value::from));
-            let envelope = call(transport, "vcs.git_import", input).await?;
+            let mut envelope = call(transport, "vcs.git_import", input).await?;
+            if *publish {
+                publish_heads(transport, repo, &mut envelope).await?;
+            }
             let pretty = ok_pretty(&envelope, |data| {
                 let mut out = format!(
                     "imported {} commit(s) ({} tip(s) skipped)",
@@ -706,6 +716,23 @@ pub async fn run(
                 cursor_line(data, &mut out);
                 if data["done"] == json!(true) {
                     out.push_str("\ndone");
+                }
+                for p in data["published"].as_array().cloned().unwrap_or_default() {
+                    let r = p["ref"].as_str().unwrap_or("?");
+                    match p["state"].as_str().unwrap_or("?") {
+                        "published" => out.push_str(&format!(
+                            "\npublished ref {r} -> {}",
+                            p["changeset_id"].as_str().unwrap_or("?")
+                        )),
+                        "exists" => out.push_str(&format!(
+                            "\nref {r} exists (at {})",
+                            p["actual"].as_str().unwrap_or("?")
+                        )),
+                        s => out.push_str(&format!(
+                            "\nref {r}: publish failed ({})",
+                            p["code"].as_str().unwrap_or(s)
+                        )),
+                    }
                 }
                 out
             });
@@ -954,6 +981,62 @@ async fn file_meta(
         }
         RpcResponse::Err { .. } => Err(CliFault::Server(Box::new(envelope))),
     }
+}
+
+/// `--publish` — create-only CAS for each imported `refs/heads/*` tip so
+/// git-side branches are addressable as vcs refs. Never moves an existing
+/// ref (`expected_old: null` is create-only); per-head outcomes land in
+/// `data.published[]` so `--json` consumers see the same result.
+async fn publish_heads(
+    transport: &dyn VcsTransport,
+    repo: &RepoRef,
+    envelope: &mut RpcResponse,
+) -> Result<(), CliFault> {
+    let RpcResponse::Ok { data, .. } = envelope else {
+        return Ok(());
+    };
+    let heads = data["heads"].as_array().cloned().unwrap_or_default();
+    let mut results = Vec::new();
+    for h in heads {
+        let Some(name) = h["name"]
+            .as_str()
+            .and_then(|n| n.strip_prefix("refs/heads/"))
+        else {
+            continue;
+        };
+        let Some(cs) = h["changeset_id"].as_str() else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let mut upd = repo.input();
+        upd.insert("ref".into(), json!(name));
+        upd.insert("expected_old".into(), Value::Null);
+        upd.insert("new".into(), json!(cs));
+        let res = call(transport, "vcs.ref_update", upd).await?;
+        results.push(match &res {
+            RpcResponse::Ok { .. } => {
+                json!({"ref": name, "changeset_id": cs, "state": "published"})
+            }
+            RpcResponse::Err { error, .. } if error.code == "vcs.ref_conflict" => json!({
+                "ref": name,
+                "changeset_id": cs,
+                "state": "exists",
+                "actual": error.data.as_ref().and_then(|d| d["actual"].as_str()),
+            }),
+            RpcResponse::Err { error, .. } => json!({
+                "ref": name,
+                "changeset_id": cs,
+                "state": "error",
+                "code": error.code,
+            }),
+        });
+    }
+    if !results.is_empty() {
+        data["published"] = json!(results);
+    }
+    Ok(())
 }
 
 /// Read a local path for staging — symlinks yield their target string as the
@@ -1218,6 +1301,7 @@ mod tests {
                     from: None,
                     limit: None,
                     cursor: None,
+                    publish: false,
                 },
                 "vcs.git_import",
             ),
@@ -1648,5 +1732,93 @@ mod tests {
 
         let ok = RpcResponse::ok(json!({ "changeset_id": "cs_m", "fast_forward": true }));
         assert!(merge_pretty(&ok, "merge changeset").contains("cs_m (fast-forward)"));
+    }
+
+    #[tokio::test]
+    async fn import_publish_creates_refs_create_only() {
+        let mut conflict = RpcResponse::err(AppError::new("vcs.ref_conflict", "ref exists"));
+        if let RpcResponse::Err { error, .. } = &mut conflict {
+            error.data = Some(json!({ "actual": "cs_other" }));
+        }
+        let t = Rec::new(vec![
+            Rec::ok(json!({
+                "imported": 2,
+                "skipped_tips": 0,
+                "done": true,
+                "heads": [
+                    { "name": "refs/heads/git-side", "git_oid": "o1", "changeset_id": "cs_g" },
+                    { "name": "refs/heads/main", "git_oid": "o2", "changeset_id": "cs_m" },
+                    { "name": "refs/tags/v1", "git_oid": "o3", "changeset_id": "cs_t" },
+                    { "name": "refs/heads/pending", "git_oid": "o4", "changeset_id": null },
+                ]
+            })),
+            Rec::ok(json!({ "ref": "git-side", "changeset_id": "cs_g" })),
+            conflict,
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let out = run(
+            &t,
+            &VcsCommand::Import {
+                repo: repo(),
+                from: None,
+                limit: None,
+                cursor: None,
+                publish: true,
+            },
+            &mut cache(dir.path()),
+        )
+        .await
+        .unwrap();
+        let calls = t.calls.lock().unwrap();
+        assert_eq!(calls.len(), 3, "import + two ref_update publishes");
+        assert_eq!(calls[0].0, "vcs.git_import");
+        assert_eq!(calls[1].0, "vcs.ref_update");
+        assert_eq!(
+            calls[1].1["ref"],
+            json!("git-side"),
+            "refs/heads/ prefix strips"
+        );
+        assert_eq!(calls[1].1["expected_old"], Value::Null);
+        assert_eq!(calls[1].1["new"], json!("cs_g"));
+        assert_eq!(calls[2].1["ref"], json!("main"));
+        let published = match &out.envelope {
+            RpcResponse::Ok { data, .. } => data["published"].as_array().unwrap().clone(),
+            other => panic!("expected ok envelope, got {other:?}"),
+        };
+        assert_eq!(published.len(), 2, "tags and pending heads skip");
+        assert_eq!(published[0]["state"], json!("published"));
+        assert_eq!(published[1]["state"], json!("exists"));
+        assert_eq!(published[1]["actual"], json!("cs_other"));
+        assert!(out.pretty.contains("published ref git-side -> cs_g"));
+        assert!(out.pretty.contains("ref main exists (at cs_other)"));
+    }
+
+    #[tokio::test]
+    async fn import_without_publish_never_updates_refs() {
+        let t = Rec::new(vec![Rec::ok(json!({
+            "imported": 1,
+            "skipped_tips": 0,
+            "done": true,
+            "heads": [{ "name": "refs/heads/x", "git_oid": "o", "changeset_id": "cs_x" }]
+        }))]);
+        let dir = tempfile::tempdir().unwrap();
+        let out = run(
+            &t,
+            &VcsCommand::Import {
+                repo: repo(),
+                from: None,
+                limit: None,
+                cursor: None,
+                publish: false,
+            },
+            &mut cache(dir.path()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(t.calls.lock().unwrap().len(), 1, "import call only");
+        match &out.envelope {
+            RpcResponse::Ok { data, .. } => assert!(data["published"].is_null()),
+            other => panic!("expected ok envelope, got {other:?}"),
+        }
     }
 }

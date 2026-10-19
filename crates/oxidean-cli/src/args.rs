@@ -226,7 +226,7 @@ const HELP: &[(&str, &str)] = &[
     ("vcs rebase", "ox vcs rebase <o/n> <cs> --onto <cs> [-m <msg>]\n\nReplay one changeset's files onto a new parent."),
     ("vcs checkout", "ox vcs checkout <o/n> <cs> [--paths <f>...] [--dir <target>]\n\nSparse working copy: --paths selects subtrees (default all), blobs are\nfetched on demand into a shared local cache, files land atomically.\nA non-empty --dir that was not made by `ox vcs checkout` is refused."),
     ("vcs ref", "ox vcs ref list <o/n> [--limit <n>] [--cursor <c>]\n  ox vcs ref set <o/n> <name> (--expect <cs> | --create) (--to <cs> | --delete)\n\nNamed heads with compare-and-swap updates — --expect must match the\ncurrent head (or --create requires absence); --delete removes the ref."),
-    ("vcs import", "ox vcs import <o/n> [--from <ref|oid>] [--limit <n>] [--cursor <c>]\n\nImport git history into VCS changesets (resumable via --cursor)."),
+    ("vcs import", "ox vcs import <o/n> [--from <ref|oid>] [--limit <n>] [--cursor <c>]\n                         [--publish]\n\nImport git history into VCS changesets (resumable via --cursor).\n--publish creates a same-named vcs ref for each imported\nrefs/heads/* tip (create-only CAS — existing refs are left\nuntouched and reported as `exists`)."),
     ("vcs export", "ox vcs export <o/n> <cs> --branch <b> [--force]\n\nMaterialize a changeset chain as git commits and move <branch> through\nthe protected ref-update path (--force overrides fast-forward only)."),
 ];
 
@@ -3731,7 +3731,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let f = scan(
                 tail,
                 &["-R", "--repo", "--from", "--limit", "--cursor"],
-                &[],
+                &["--publish"],
                 &[],
             )?;
             Command::Vcs(VcsCommand::Import {
@@ -3739,6 +3739,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 from: f.values.get("--from").cloned(),
                 limit: opt_limit(&f)?,
                 cursor: f.values.get("--cursor").cloned(),
+                publish: f.bools.contains("--publish"),
             })
         }
         ("vcs", "export", "") => {
@@ -4838,13 +4839,26 @@ mod tests {
         // rebase requires --onto
         assert!(parse(&argv(&["vcs", "rebase", "o/n", "cs_1"])).is_err());
         let inv = parse(&argv(&[
-            "vcs", "import", "o/n", "--from", "main", "--limit", "500",
+            "vcs",
+            "import",
+            "o/n",
+            "--from",
+            "main",
+            "--limit",
+            "500",
+            "--publish",
         ]))
         .unwrap();
         match inv.command {
-            Command::Vcs(VcsCommand::Import { from, limit, .. }) => {
+            Command::Vcs(VcsCommand::Import {
+                from,
+                limit,
+                publish,
+                ..
+            }) => {
                 assert_eq!(from, Some("main".into()));
                 assert_eq!(limit, Some(500));
+                assert!(publish);
             }
             other => panic!("expected import, got {other:?}"),
         }

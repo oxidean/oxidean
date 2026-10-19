@@ -853,6 +853,77 @@ async fn vcs_ref_set_sends_cas_payload() {
 }
 
 #[tokio::test]
+async fn vcs_import_publish_creates_refs_per_head() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["vcs.git_import", "vcs.ref_update"]).await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "vcs.git_import",
+            "input": {"owner": "o", "name": "n"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "data": {
+                "imported": 1, "skipped_tips": 0, "done": true,
+                "heads": [
+                    {"name": "refs/heads/git-side", "git_oid": "o1",
+                     "changeset_id": "cs_g"},
+                    {"name": "refs/heads/main", "git_oid": "o2",
+                     "changeset_id": "cs_m"}
+                ]
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Create-only CAS per imported head — expected_old is explicit null.
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "vcs.ref_update",
+            "input": {"owner": "o", "name": "n", "ref": "git-side",
+                      "expected_old": null, "new": "cs_g"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true, "data": {"ref": "git-side", "changeset_id": "cs_g"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "vcs.ref_update",
+            "input": {"owner": "o", "name": "n", "ref": "main",
+                      "expected_old": null, "new": "cs_m"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": false,
+            "error": {"code": "vcs.ref_conflict", "message": "ref exists",
+                      "data": {"actual": "cs_other"}}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["vcs", "import", "o/n", "--publish"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { envelope, pretty } => {
+            assert!(matches!(envelope, RpcResponse::Ok { .. }));
+            assert!(
+                pretty.contains("published ref git-side -> cs_g"),
+                "{pretty}"
+            );
+            assert!(pretty.contains("ref main exists (at cs_other)"), "{pretty}");
+        }
+        _ => panic!("expected rpc out"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
 async fn vcs_object_route_error_keeps_vcs_code() {
     use sha2::{Digest, Sha256};
     let server = MockServer::start().await;
