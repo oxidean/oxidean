@@ -63,6 +63,96 @@ fn assert_actions_sql(dialect: &str, sql: &str) {
     );
 }
 
+/// Pre-rebase repair: a database that applied this branch's block at
+/// versions 53-78 (before main's VCS trio landed at 53-55) must re-seat
+/// those rows to 56-81 on the next migrate, then apply the VCS schema.
+#[tokio::test]
+async fn migrate_reseats_pre_rebase_versions() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("reseat.db").display());
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
+    db.migrate().await.expect("fresh migrate");
+
+    // Rewind into the pre-rebase shape: bookkeeping rows at 53-78 with the
+    // same checksums (file contents never changed), and no VCS state.
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("raw pool");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE description LIKE 'vcs %'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE _sqlx_migrations SET version = version - 3 WHERE version >= 56")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for t in [
+        "vcs_repo_surface_flags",
+        "vcs_object_links",
+        "vcs_file_changes",
+        "vcs_refs",
+        "vcs_derived_index",
+        "vcs_import_links",
+        "vcs_changesets",
+        "vcs_objects",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE IF EXISTS {t}")))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+
+    // The repair re-seats and the VCS trio applies — no validation error.
+    db.migrate().await.expect("migrate after rewind");
+
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("raw pool");
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT version, description FROM _sqlx_migrations WHERE version >= 53 ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|(v, d)| (*v, d.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (53, "vcs schema"),
+            (54, "vcs key collation"),
+            (55, "vcs derived index nullable covering"),
+            (56, "action job payloads"),
+            (57, "action artifacts"),
+            (58, "gitea task claims"),
+            (59, "actions pr trigger policy"),
+            (60, "actions permissions env oidc"),
+            (61, "actions stability"),
+            (62, "actions perf"),
+            (63, "oidc rsa keys"),
+            (64, "action deployment reviews"),
+            (65, "action cache"),
+            (67, "action reusable calls"),
+            (68, "action job coe"),
+            (69, "action variables"),
+            (70, "action job debug"),
+            (71, "action workflow state"),
+            (72, "action job strategy"),
+            (73, "action annotations"),
+            (74, "milestones"),
+            (75, "deployments public"),
+            (76, "checks"),
+            (77, "wiki"),
+            (78, "projects"),
+            (79, "discussions"),
+            (80, "pages"),
+            (81, "merge queue"),
+        ],
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-81"
+    );
+    // Repair is idempotent — a second migrate changes nothing.
+    db.migrate().await.expect("idempotent migrate");
+}
+
 #[tokio::test]
 async fn dialect_actions_schema_presence() {
     for dialect in ["sqlite", "postgres", "mysql"] {
