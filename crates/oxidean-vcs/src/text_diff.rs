@@ -1,12 +1,12 @@
 //! Binary-safe Myers O(ND) line diff (u4, shared with u5 merge).
 //!
-//! [`diff_lines`] compares byte-slice lines — NUL bytes, CRLF terminators,
+//! `diff_lines` compares byte-slice lines — NUL bytes, CRLF terminators,
 //! and arbitrary binary content compare verbatim (line *content* equality,
 //! not `\n` splitting, is the caller's contract). The divide-and-conquer
 //! middle-snake recursion keeps worst-case memory at O(N+M) working vectors
 //! plus O(log D) recursion depth.
 //!
-//! [`LINE_CAP`] is the whole-range-replacement tripwire: when the combined
+//! `LINE_CAP` is the whole-range-replacement tripwire: when the combined
 //! input exceeds it the diff degenerates to one hunk — call sites that
 //! page/blame through enormous blobs hit the cap instead of a quadratic
 //! crawl (SR4.8 honest-bounds register).

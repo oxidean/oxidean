@@ -1,6 +1,6 @@
 //! CAS-only ref registry (u4).
 //!
-//! All updates run through [`Database::vcs_cas_ref_update`]; conflict
+//! All updates run through `Database::vcs_cas_ref_update`; conflict
 //! determination comes from the CAS outcome itself — no pre-read, no
 //! `vcs_get_ref` point-read exists (R-05: an early-stop point read would be
 //! collation-unsafe anyway; resolution scans `vcs_list_refs` until match or

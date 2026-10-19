@@ -1,11 +1,11 @@
 //! Changeset identity + single-transaction creation (u4).
 //!
-//! [`ChangesetStore::create`] validates the full input fail-closed (no DB
+//! `ChangesetStore::create` validates the full input fail-closed (no DB
 //! calls until every field passes), derives the deterministic
-//! `cs_…` id via [`canonical_changeset`], builds the `path_touch` derived
-//! rows via [`crate::read_index::ReadIndex::update_for`], and lands the
+//! `cs_…` id via `canonical_changeset`, builds the `path_touch` derived
+//! rows via `ReadIndex::update_for`, and lands the
 //! changeset + file changes + object links + index rows in one
-//! [`Database::vcs_create_changeset_tx`] transaction.
+//! `Database::vcs_create_changeset_tx` transaction.
 //!
 //! Identity: `sha256(canonical_input)` where `canonical_input` is the compact
 //! JSON `{"v":1,"repo","parents","author","message","manifest_hash"}` —
@@ -17,7 +17,7 @@
 //! excluded. The id packs the first 128 bits MSB-first into 26 uppercase
 //! Crockford chars; `idem_key` keeps the full 256-bit digest so the
 //! accepted 128-bit prefix-collision tail stays distinguishable.
-//! [`canonical_changeset`] is THE identity recipe — u5/u6/u7 call it; prose
+//! `canonical_changeset` is THE identity recipe — u5/u6/u7 call it; prose
 //! re-implementation is a defect.
 
 use oxidean_core::vcs_types::ChangesetId;

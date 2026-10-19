@@ -1,6 +1,6 @@
 //! Derived-index read model (u4) — the walk side of the VCS core.
 //!
-//! Writes: [`ReadIndex::update_for`] builds the `path_touch` rows folded into
+//! Writes: `ReadIndex::update_for` builds the `path_touch` rows folded into
 //! the changeset-create transaction; tree snapshots (`tree_entry` +
 //! `tree_snap` written last, so a crash mid-materialize resumes cleanly —
 //! entries without a snap are just recomputed), `merge_base` cache rows, and
@@ -11,10 +11,10 @@
 //! from `hi`, canonical `(lo,hi)` cache key), `diff` (BTreeSet-ordered path
 //! candidates), `tree`/`file_at` (first-parent delta fold over snapshots),
 //! `path_history` (chronological `path_touch` block scan), `blame`
-//! (ancestry-ordered touch chain through [`crate::text_diff::diff_lines`]).
+//! (ancestry-ordered touch chain through `diff_lines`).
 //!
 //! Cursors are base64url-no-pad JSON, ≤1KB; malformed/wrong-shape decodes
-//! are [`IndexError::CursorMalformed`]. Every changeset input is
+//! are `IndexError::CursorMalformed`. Every changeset input is
 //! existence-checked before traversal (U4-AR-02) — `InvalidInput` on
 //! malformed ids, `NotFound` on absent rows. Hashed-path reads always
 //! re-check `payload.path == arg` — keys are the mechanism, payloads are the

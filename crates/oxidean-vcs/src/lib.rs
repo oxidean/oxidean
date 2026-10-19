@@ -27,3 +27,8 @@ pub mod read_index;
 /// Myers line diff on byte-slice lines — shared with the u5 merge engine.
 #[cfg(feature = "server")]
 pub mod text_diff;
+
+/// Three-way merge + first-parent rebase engine — deterministic two-pass
+/// writes through `ObjectStore::put` + `ChangesetStore::create`, zero refs.
+#[cfg(feature = "server")]
+pub mod merge_engine;
