@@ -262,6 +262,13 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |
 | `GET` | `/repos/{owner}/{repo}/labels` | `label.listForRepo` | `includeHidden` |
 | `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |
+| `GET` | `/repos/{owner}/{repo}/subscribers` | `repo.watchers.list` | `q`, `offset`, `limit` |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/subscription` | `user.listWatched` / `repo.watch` / `repo.unwatch` | Caller's watch state; `{subscribed, ignored}` → level; delete → 204 |
+| `GET`/`PUT`/`DELETE` | `/user/starred/{owner}/{repo}` | `user.listStarred` / `repo.star` / `repo.unstar` | Check → 204/404; star/unstar → 204 |
+| `GET` | `/repos/{owner}/{repo}/collaborators` | `repo.collaborators.list` | GitHub projection (`login`, `permissions`, `role_name`) |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/collaborators/{username}` | `repo.collaborators.list` / `.add` / `.update` / `.remove` | PUT: 201 new, 204 existing/updated; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/collaborators/{username}/permission` | `repo.collaborators.list` | Effective level; repo owner reports `admin` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/forks` | `repo.forks.list` / `repo.fork` | `sort`, `q`, paging; create → 202 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/hooks` | `webhook.list` / `webhook.create` | Repo Admin |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/hooks/{id}` | `webhook.get` / `webhook.update` / `webhook.delete` | Repo Admin |
 | `GET` | `/repos/{owner}/{repo}/hooks/{id}/deliveries` | `webhook.deliveries.list` | Repo Admin; GitHub delivery shape |
@@ -320,7 +327,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

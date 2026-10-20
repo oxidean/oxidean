@@ -13,8 +13,8 @@ use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::call;
 use super::spec::{BodySpec, RespSpec, RouteDef};
+use super::{call, call_map};
 use crate::app::AppState;
 
 pub const ROUTES: &[RouteDef] = &[
@@ -196,14 +196,23 @@ pub struct StarredQuery {
     limit: Option<i64>,
 }
 
-/// `GET /api/v1/user/starred` (`user.listStarred`).
+/// `GET /api/v1/user/starred` (`user.listStarred`) — GitHub answers a bare
+/// array of repo objects, not the `{repos: [...]}` RPC envelope.
 async fn list_starred(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<StarredQuery>,
 ) -> Response {
     let input = serde_json::to_value(&q).unwrap_or_else(|_| json!({}));
-    call(&state, &headers, "user.listStarred", input, StatusCode::OK).await
+    call_map(
+        &state,
+        &headers,
+        "user.listStarred",
+        input,
+        StatusCode::OK,
+        |d| d["repos"].clone(),
+    )
+    .await
 }
 
 #[derive(Deserialize)]

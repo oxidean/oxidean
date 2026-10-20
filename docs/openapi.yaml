@@ -1528,6 +1528,538 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/collaborators:
+    get:
+      tags:
+      - repos
+      summary: List collaborators (`repo.collaborators.list`) — GitHub permission projection
+      operationId: repos/listCollaborators
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/collaborators/{username}:
+    get:
+      tags:
+      - repos
+      summary: 204 when a collaborator, 404 otherwise (`repo.collaborators.list`)
+      operationId: repos/checkCollaborator
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - repos
+      summary: Add/update a collaborator (`repo.collaborators.add` / `.update`) — 201 new, 204 existing
+      operationId: repos/addCollaborator
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permission:
+                  type: string
+                  enum:
+                  - read
+                  - write
+                  - admin
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Remove a collaborator (`repo.collaborators.remove`) — 204
+      operationId: repos/removeCollaborator
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/collaborators/{username}/permission:
+    get:
+      tags:
+      - repos
+      summary: Effective collaborator permission (`repo.collaborators.list`, filtered)
+      operationId: repos/getCollaboratorPermissionLevel
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permission:
+                    type: string
+                  role_name:
+                    type: string
+                  user:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/forks:
+    get:
+      tags:
+      - repos
+      summary: List forks (`repo.forks.list`) — `sort`, `q`, paging
+      operationId: repos/listForks
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: q
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: sort
+        in: query
+        required: false
+        schema:
+          description: '`stars` (default) | `updated` | `created`'
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      summary: Fork the repo (`repo.fork`) — `{name, organization}` → 202
+      operationId: repos/createFork
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/subscribers:
+    get:
+      tags:
+      - repos
+      summary: List watchers (`repo.watchers.list`) — `q`, `offset`, `limit`
+      operationId: activity/listWatchers
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: q
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/subscription:
+    get:
+      tags:
+      - repos
+      summary: Caller's subscription (`user.listWatched`, filtered) — 404 when not watching
+      operationId: activity/getRepoSubscription
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscribed:
+                    type: boolean
+                  ignored:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - repos
+      summary: Set watch level (`repo.watch`) — `{subscribed, ignored}` map to levels
+      operationId: activity/setRepoSubscription
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscribed:
+                  type: boolean
+                ignored:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscribed:
+                    type: boolean
+                  ignored:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Stop watching (`repo.unwatch`) — 204
+      operationId: activity/deleteRepoSubscription
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/starred/{owner}/{repo}:
+    get:
+      tags:
+      - users
+      summary: 204 when starred, 404 otherwise (`user.listStarred`, filtered)
+      operationId: activity/checkRepoIsStarredByAuthenticatedUser
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - users
+      summary: Star a repo (`repo.star`) — 204
+      operationId: activity/starRepoForAuthenticatedUser
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - users
+      summary: Unstar a repo (`repo.unstar`) — 204
+      operationId: activity/unstarRepoForAuthenticatedUser
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/actions/artifacts:
     get:
       tags:
