@@ -210,6 +210,14 @@ jobs:
         run: |
           set -euo pipefail
           df -h /
+          ( while :; do \
+              date +%H:%M:%S; \
+              free -m | awk 'NR==2{printf "mem used=%dM avail=%dM\n",$3,$7}'; \
+              ps -eo rss,etime,args --sort=-rss | head -4 | cut -c1-150; \
+              sleep 30; \
+            done ) &
+          MON=$!
+          trap 'kill $MON 2>/dev/null || true' EXIT
           cargo build --workspace --bins
           mkdir -p target
           cargo nextest archive --workspace --features server \
@@ -473,8 +481,25 @@ jobs:
         # Collection only — the weighted gate composition (25/40/35) does not
         # consume these numbers.
         run: |
+          set -euo pipefail
           df -h /
-          make coverage-rust
+          mkdir -p var/coverage
+          ( while :; do \
+              date +%H:%M:%S; \
+              free -m | awk 'NR==2{printf "mem used=%dM avail=%dM\n",$3,$7}'; \
+              ps -eo rss,etime,args --sort=-rss | head -4 | cut -c1-150; \
+              sleep 30; \
+            done ) &
+          MON=$!
+          trap 'kill $MON 2>/dev/null || true' EXIT
+          # oxidean-api is a ~120 kLOC instrumented unit — build/run it in
+          # isolation so nothing else competes with its codegen for memory,
+          # then collect the rest of the workspace.
+          cargo llvm-cov nextest --no-report -p oxidean-api
+          cargo llvm-cov nextest --no-report --workspace --exclude oxidean-api
+          cargo llvm-cov report --lcov --output-path var/coverage/rust-lcov.info
+          cargo llvm-cov report --json --output-path var/coverage/rust-summary.json
+          echo "==> rust coverage in var/coverage/rust-*.{info,json}"
       - name: collect web coverage + weighted gate
         env:
           COVERAGE_WEIGHTED_FLOOR: "0.70"
