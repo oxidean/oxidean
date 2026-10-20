@@ -215,7 +215,176 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RepoListMineResponse'
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /notifications:
+    get:
+      tags:
+      - activity
+      summary: Notification threads (`notification.list`) — `all`, `participating`, `since`, `before`, paging
+      operationId: activity/listNotifications
+      parameters:
+      - name: all
+        in: query
+        required: false
+        schema:
+          description: '`true` → read + unread (`filter=all`); default unread only.'
+          type:
+          - boolean
+          - 'null'
+          default: null
+      - name: participating
+        in: query
+        required: false
+        schema:
+          description: |-
+            `true` → only threads where the caller is directly involved
+            (mention / review / assign reasons).
+          type:
+          - boolean
+          - 'null'
+          default: null
+      - name: since
+        in: query
+        required: false
+        schema:
+          description: ISO-8601 — only threads updated at or after.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: before
+        in: query
+        required: false
+        schema:
+          description: ISO-8601 — only threads updated at or before.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - activity
+      summary: Mark every notification read (`notification.markAllRead`) — 202
+      operationId: activity/markNotificationsRead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                last_read_at:
+                  type: string
+                  format: date-time
+                read:
+                  type: boolean
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /notifications/threads/{thread_id}:
+    get:
+      tags:
+      - activity
+      summary: One notification thread (`notification.list` filtered by id) — 404 when absent
+      operationId: activity/getThread
+      parameters:
+      - name: thread_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  repository:
+                    type: object
+                  subject:
+                    type: object
+                  reason:
+                    type: string
+                  unread:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - activity
+      summary: Mark a thread read (`notification.markRead`) — 205
+      operationId: activity/markThreadRead
+      parameters:
+      - name: thread_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '205':
+          description: OK
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -2508,6 +2677,119 @@ paths:
           type: string
       responses:
         '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/notifications:
+    get:
+      tags:
+      - activity
+      summary: This repo's notification threads (`notification.list`, filtered)
+      operationId: activity/listRepoNotifications
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: all
+        in: query
+        required: false
+        schema:
+          description: '`true` → read + unread (`filter=all`); default unread only.'
+          type:
+          - boolean
+          - 'null'
+          default: null
+      - name: participating
+        in: query
+        required: false
+        schema:
+          description: |-
+            `true` → only threads where the caller is directly involved
+            (mention / review / assign reasons).
+          type:
+          - boolean
+          - 'null'
+          default: null
+      - name: since
+        in: query
+        required: false
+        schema:
+          description: ISO-8601 — only threads updated at or after.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: before
+        in: query
+        required: false
+        schema:
+          description: ISO-8601 — only threads updated at or before.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - activity
+      summary: Mark this repo's threads read (`notification.markRead`) — 202
+      operationId: activity/markRepoNotificationsRead
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '202':
           description: OK
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status

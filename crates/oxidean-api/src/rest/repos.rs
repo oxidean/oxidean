@@ -807,6 +807,39 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || delete(delete_git_ref),
     },
+    // ---- repo-scoped notifications (GitHub REST) -----------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/notifications",
+        tags: &["activity"],
+        operation_id: "activity/listRepoNotifications",
+        summary: "This repo's notification threads (`notification.list`, filtered)",
+        procedure: "notification.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<
+            super::users::NotificationsQuery,
+        >),
+        body: None,
+        response: Some(RespSpec::Json(repo_notification_list_schema)),
+        mount: || get(list_repo_notifications),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/notifications",
+        tags: &["activity"],
+        operation_id: "activity/markRepoNotificationsRead",
+        summary: "Mark this repo's threads read (`notification.markRead`) — 202",
+        procedure: "notification.markRead",
+        ok: StatusCode::ACCEPTED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || put(mark_repo_notifications_read),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -2593,4 +2626,79 @@ async fn delete_git_ref(
         StatusCode::NO_CONTENT,
     )
     .await
+}
+
+fn repo_notification_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+// ---------------------------------------------------------------------------
+// Repo-scoped notifications (GitHub REST)
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v1/repos/{o}/{r}/notifications` — the global list filtered to
+/// this repo (`owner`/`repo` on `NotificationPublic`).
+async fn list_repo_notifications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<super::users::NotificationsQuery>,
+) -> Response {
+    match super::users::fetch_notifications(&state, &headers, &q).await {
+        Ok(rows) => {
+            let page = q.page.unwrap_or(1).max(1);
+            let per = q.per_page.unwrap_or(30).clamp(1, 100) as usize;
+            let start = ((page - 1) * per as i64).max(0) as usize;
+            let out: Vec<Value> = rows
+                .iter()
+                .filter(|n| {
+                    n["owner"].as_str() == Some(p.owner.as_str())
+                        && n["repo"].as_str() == Some(p.repo.as_str())
+                })
+                .skip(start)
+                .take(per)
+                .map(super::users::gh_notification)
+                .collect();
+            (StatusCode::OK, Json(json!(out))).into_response()
+        }
+        Err(r) => *r,
+    }
+}
+
+/// `PUT /api/v1/repos/{o}/{r}/notifications` — mark this repo's threads
+/// read: list unread → `markRead` the matching ids → 202.
+async fn mark_repo_notifications_read(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    let q = super::users::NotificationsQuery {
+        all: None,
+        participating: None,
+        since: None,
+        before: None,
+        page: Some(1),
+        per_page: Some(100),
+    };
+    match super::users::fetch_notifications(&state, &headers, &q).await {
+        Ok(rows) => {
+            let ids: Vec<&str> = rows
+                .iter()
+                .filter(|n| {
+                    n["owner"].as_str() == Some(p.owner.as_str())
+                        && n["repo"].as_str() == Some(p.repo.as_str())
+                })
+                .filter_map(|n| n["id"].as_str())
+                .collect();
+            call(
+                &state,
+                &headers,
+                "notification.markRead",
+                json!({"ids": ids}),
+                StatusCode::ACCEPTED,
+            )
+            .await
+        }
+        Err(r) => *r,
+    }
 }

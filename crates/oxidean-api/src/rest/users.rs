@@ -2,8 +2,8 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
-use axum::routing::{get, post};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
     CreateRepoRequest, ListStarredRequest, OrgListMineResponse, PublicUserProfile,
@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
-use super::{call, call_map};
+use super::{call, call_map, ctx_for};
 use crate::app::AppState;
 
 pub const ROUTES: &[RouteDef] = &[
@@ -100,10 +100,69 @@ pub const ROUTES: &[RouteDef] = &[
         path_fields: &[],
         query: Some(SchemaGenerator::into_root_schema_for::<ListStarredRequest>),
         body: None,
-        response: Some(RespSpec::Schema(
-            SchemaGenerator::subschema_for::<RepoListMineResponse>,
-        )),
+        response: Some(RespSpec::Json(repo_array_schema)),
         mount: || get(list_starred),
+    },
+    // ---- notifications (GitHub REST) ----------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/notifications",
+        tags: &["activity"],
+        operation_id: "activity/listNotifications",
+        summary: "Notification threads (`notification.list`) — `all`, `participating`, `since`, `before`, paging",
+        procedure: "notification.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<NotificationsQuery>),
+        body: None,
+        response: Some(RespSpec::Json(notification_list_schema)),
+        mount: || get(list_notifications_rest),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/notifications",
+        tags: &["activity"],
+        operation_id: "activity/markNotificationsRead",
+        summary: "Mark every notification read (`notification.markAllRead`) — 202",
+        procedure: "notification.markAllRead",
+        ok: StatusCode::ACCEPTED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(mark_notifications_body_schema)),
+        response: Some(RespSpec::Json(mark_notifications_schema)),
+        mount: || put(mark_notifications_read),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/notifications/threads/{thread_id}",
+        tags: &["activity"],
+        operation_id: "activity/getThread",
+        summary: "One notification thread (`notification.list` filtered by id) — 404 when absent",
+        procedure: "notification.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(notification_schema)),
+        mount: || get(get_notification_thread),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/notifications/threads/{thread_id}",
+        tags: &["activity"],
+        operation_id: "activity/markThreadRead",
+        summary: "Mark a thread read (`notification.markRead`) — 205",
+        procedure: "notification.markRead",
+        ok: StatusCode::RESET_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || patch(mark_notification_thread_read),
     },
     RouteDef {
         method: "GET",
@@ -249,6 +308,260 @@ async fn list_user_repos(
         "repo.listByOwner",
         json!({ "owner": p.username }),
         StatusCode::OK,
+    )
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (GitHub REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct NotificationsQuery {
+    /// `true` → read + unread (`filter=all`); default unread only.
+    #[serde(default)]
+    pub all: Option<bool>,
+    /// `true` → only threads where the caller is directly involved
+    /// (mention / review / assign reasons).
+    #[serde(default)]
+    pub participating: Option<bool>,
+    /// ISO-8601 — only threads updated at or after.
+    #[serde(default)]
+    pub since: Option<String>,
+    /// ISO-8601 — only threads updated at or before.
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub per_page: Option<i64>,
+}
+
+fn repo_array_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn notification_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn notification_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "repository": {"type": "object"},
+            "subject": {"type": "object"},
+            "reason": {"type": "string"},
+            "unread": {"type": "boolean"},
+        },
+    })
+}
+
+fn mark_notifications_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "last_read_at": {"type": "string", "format": "date-time"},
+            "read": {"type": "boolean"},
+        },
+    })
+}
+
+fn mark_notifications_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object", "properties": {"message": {"type": "string"}}})
+}
+
+/// `subject_kind` → GitHub's `subject.type` vocabulary.
+fn gh_subject_type(kind: &str) -> &'static str {
+    match kind {
+        "issue" => "Issue",
+        "pull_request" => "PullRequest",
+        "release" => "Release",
+        "workflow_run" => "CheckSuite",
+        _ => "Commit",
+    }
+}
+
+/// Subject deep-link → the matching REST URL (None → `null`).
+fn gh_subject_url(n: &Value) -> Value {
+    let owner = n["owner"].as_str().unwrap_or_default();
+    let repo = n["repo"].as_str().unwrap_or_default();
+    let num = n["subject_number"].as_i64();
+    let refr = n["subject_ref"].as_str();
+    let path = match n["subject_kind"].as_str().unwrap_or("") {
+        "issue" => num.map(|i| format!("issues/{i}")),
+        "pull_request" => num.map(|i| format!("pulls/{i}")),
+        "release" => refr.map(|t| format!("releases/tags/{t}")),
+        "workflow_run" => refr.map(|r| format!("actions/runs/{r}")),
+        _ => None,
+    };
+    match path {
+        Some(p) => json!(format!("/api/v1/repos/{owner}/{repo}/{p}")),
+        None => Value::Null,
+    }
+}
+
+/// `NotificationPublic` → GitHub's thread shape (`/notifications` rows).
+pub(crate) fn gh_notification(n: &Value) -> Value {
+    let owner = n["owner"].as_str().unwrap_or_default();
+    let repo = n["repo"].as_str().unwrap_or_default();
+    let id = n["id"].as_str().unwrap_or_default();
+    json!({
+        "id": id,
+        "unread": n["read_at"].is_null(),
+        "reason": n["reason"],
+        "updated_at": n["created_at"],
+        "last_read_at": n["read_at"],
+        "url": format!("/api/v1/notifications/threads/{id}"),
+        "repository": {
+            "id": n["subject_repo_id"],
+            "name": repo,
+            "full_name": format!("{owner}/{repo}"),
+            "owner": {"login": owner},
+        },
+        "subject": {
+            "title": n["subject_title"],
+            "url": gh_subject_url(n),
+            "latest_comment_url": Value::Null,
+            "type": gh_subject_type(n["subject_kind"].as_str().unwrap_or_default()),
+        },
+    })
+}
+
+/// Reasons that count as direct participation for `participating=true`.
+/// Our reason vocabulary is activity-style (`pr_mention`, `review_requested`,
+/// `assigned`, …) — substring-matched rather than enumerated so new kinds
+/// join automatically.
+fn is_participating(n: &Value) -> bool {
+    n["reason"]
+        .as_str()
+        .map(|r| {
+            r.contains("mention")
+                || r.contains("review")
+                || r.contains("assign")
+                || r.contains("author")
+                || r.contains("comment")
+        })
+        .unwrap_or(false)
+}
+
+/// Fetch the caller's notifications via `notification.list`, honoring
+/// `all`/`participating`/`since`/`before`/paging. Returns the raw
+/// `notifications` array for callers to filter further (repo scope).
+pub(crate) async fn fetch_notifications(
+    state: &AppState,
+    headers: &HeaderMap,
+    q: &NotificationsQuery,
+) -> Result<Vec<Value>, Box<Response>> {
+    let page = q.page.unwrap_or(1).max(1);
+    let per = q.per_page.unwrap_or(30).clamp(1, 100);
+    let filter = if q.all == Some(true) { "all" } else { "unread" };
+    // `since`/`before`/`participating` filter post-list, so over-fetch the
+    // window to keep `per_page` honest after filtering.
+    let input = json!({
+        "filter": filter,
+        "offset": 0,
+        "limit": (page * per) + 250,
+    });
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    let rows = match super::dispatch(&mut ctx, "notification.list", input).await {
+        super::RpcResponse::Ok { data, .. } => data["notifications"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        super::RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .filter(|n| {
+            let created = n["created_at"].as_str().unwrap_or_default();
+            q.since.as_deref().map(|s| created >= s).unwrap_or(true)
+                && q.before.as_deref().map(|b| created <= b).unwrap_or(true)
+                && (!q.participating.unwrap_or(false) || is_participating(n))
+        })
+        .collect())
+}
+
+async fn list_notifications_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<NotificationsQuery>,
+) -> Response {
+    match fetch_notifications(&state, &headers, &q).await {
+        Ok(rows) => {
+            let page = q.page.unwrap_or(1).max(1);
+            let per = q.per_page.unwrap_or(30).clamp(1, 100) as usize;
+            let start = ((page - 1) * per as i64).max(0) as usize;
+            let out: Vec<Value> = rows
+                .iter()
+                .skip(start)
+                .take(per)
+                .map(gh_notification)
+                .collect();
+            (StatusCode::OK, Json(json!(out))).into_response()
+        }
+        Err(r) => *r,
+    }
+}
+
+/// `PUT /api/v1/notifications` — mark all read; 202 like GitHub.
+async fn mark_notifications_read(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "notification.markAllRead",
+        json!({}),
+        StatusCode::ACCEPTED,
+        |d| json!({"message": format!("Marked {} notifications as read", d["marked"].as_i64().unwrap_or(0))}),
+    )
+    .await
+}
+
+/// `GET /api/v1/notifications/threads/{id}` — the list is the only read
+/// surface (notifications are subject-level, not thread-level).
+async fn get_notification_thread(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let q = NotificationsQuery {
+        all: Some(true),
+        participating: None,
+        since: None,
+        before: None,
+        page: Some(1),
+        per_page: Some(100),
+    };
+    match fetch_notifications(&state, &headers, &q).await {
+        Ok(rows) => match rows.iter().find(|n| n["id"].as_str() == Some(id.as_str())) {
+            Some(n) => (StatusCode::OK, Json(gh_notification(n))).into_response(),
+            None => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"code": "notification.not_found", "message": "thread not found"})),
+            )
+                .into_response(),
+        },
+        Err(r) => *r,
+    }
+}
+
+/// `PATCH /api/v1/notifications/threads/{id}` — mark read; 205 like GitHub.
+async fn mark_notification_thread_read(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "notification.markRead",
+        json!({"ids": [id]}),
+        StatusCode::RESET_CONTENT,
     )
     .await
 }

@@ -239,6 +239,11 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
 | `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
+| `GET` | `/notifications` | `notification.list` | GitHub thread shape (`repository`, `subject`, `unread`); `all`, `participating`, `since`, `before`, `page`/`per_page` |
+| `PUT` | `/notifications` | `notification.markAllRead` | 202 |
+| `GET` | `/notifications/threads/{thread_id}` | `notification.list` (id-filtered) | 404 when absent |
+| `PATCH` | `/notifications/threads/{thread_id}` | `notification.markRead` | 205 |
+| `GET`/`PUT` | `/repos/{owner}/{repo}/notifications` | `notification.list` / `notification.markRead` | Repo-scoped list; PUT marks the repo's threads read → 202 |
 | `POST` | `/orgs` | `org.create` | Session only |
 | `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
 | `GET` | `/orgs/{slug}/members` | `org.members.list` | |
@@ -335,7 +340,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, SSH/GPG keys, PAT management, email addresses, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 
