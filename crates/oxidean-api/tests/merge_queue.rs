@@ -633,3 +633,116 @@ async fn merge_queue_head_move_and_manual_dequeue() {
     assert_eq!(deq["data"]["entry"]["state"], "dequeued");
     assert_eq!(deq["data"]["entry"]["dequeue_reason"], "manual");
 }
+
+/// GitHub `/repos/{o}/{r}/merge-queue/entries*` REST surface.
+#[tokio::test]
+async fn rest_merge_queue_entries_surface() {
+    let t = test_app().await;
+    let (cookie, _uid) = seed(&t, "rq@ex.com", "rq", "restq").await;
+    let n = open_pr(&t, &cookie, "rq", "restq").await;
+    require_queue(&t, &cookie, "rq", "restq").await;
+
+    fn req(method: &str, uri: &str, cookie: &str, body: Option<String>) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("cookie", cookie)
+            .body(Body::from(body.unwrap_or_else(|| "{}".into())))
+            .unwrap()
+    }
+
+    // Enqueue → 201 entry.
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/api/v1/repos/rq/restq/merge-queue/entries",
+            &cookie,
+            Some(format!(r#"{{"number":{n}}}"#)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let entry: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(entry["pull_number"], n, "{entry}");
+    assert_eq!(entry["state"], "queued", "{entry}");
+    let entry_id = entry["id"].as_str().expect("entry id").to_string();
+
+    // List contains the entry.
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/api/v1/repos/rq/restq/merge-queue/entries",
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let list: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let entries = list.as_array().expect("entries array");
+    assert!(entries.iter().any(|e| e["id"] == entry_id), "{list}");
+
+    // GET by entry id.
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/api/v1/repos/rq/restq/merge-queue/entries/{entry_id}"),
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // DELETE → 204, entry leaves the queue (state=dequeued stays listed
+    // under `all`; queued list empties).
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "DELETE",
+            &format!("/api/v1/repos/rq/restq/merge-queue/entries/{entry_id}"),
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/api/v1/repos/rq/restq/merge-queue/entries",
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let list: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(list.as_array().expect("entries").is_empty(), "{list}");
+
+    // Unknown entry id → 404.
+    let res = t
+        .app
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/api/v1/repos/rq/restq/merge-queue/entries/nope",
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

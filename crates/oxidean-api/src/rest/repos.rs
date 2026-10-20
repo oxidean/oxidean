@@ -701,6 +701,98 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || post(create_fork),
     },
+    // ---- assignees (GitHub issues REST) ----------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/assignees",
+        tags: &["issues"],
+        operation_id: "issues/listAssignees",
+        summary: "List assignable users (`issue.assigneeCandidates`) — `prefix` filter",
+        procedure: "issue.assigneeCandidates",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<AssigneesQuery>),
+        body: None,
+        response: Some(RespSpec::Json(assignee_list_schema)),
+        mount: || get(list_assignees),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/assignees/{assignee}",
+        tags: &["issues"],
+        operation_id: "issues/checkUserCanBeAssigned",
+        summary: "204 when assignable, 404 otherwise (`issue.assigneeCandidates`, filtered)",
+        procedure: "issue.assigneeCandidates",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || get(check_assignee),
+    },
+    // ---- merge queue (GitHub REST) ---------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/merge-queue/entries",
+        tags: &["repos"],
+        operation_id: "repos/listMergeQueueEntries",
+        summary: "List merge-queue entries (`merge_queue.list`) — `state`/`base_ref` filters",
+        procedure: "merge_queue.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<MergeQueueEntriesQuery>),
+        body: None,
+        response: Some(RespSpec::Json(merge_queue_list_schema)),
+        mount: || get(list_merge_queue_entries),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/merge-queue/entries",
+        tags: &["repos"],
+        operation_id: "repos/addPullRequestToMergeQueue",
+        summary: "Enqueue a pull (`merge_queue.enqueue`) — `{number}`/`{pull_number}`",
+        procedure: "merge_queue.enqueue",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(merge_queue_enqueue_schema)),
+        response: Some(RespSpec::Json(merge_queue_entry_schema)),
+        mount: || post(enqueue_merge_queue_entry),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/merge-queue/entries/{entry_id}",
+        tags: &["repos"],
+        operation_id: "repos/getMergeQueueEntry",
+        summary: "One queue entry (`merge_queue.list`, resolved by entry id)",
+        procedure: "merge_queue.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(merge_queue_entry_schema)),
+        mount: || get(get_merge_queue_entry),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/merge-queue/entries/{entry_id}",
+        tags: &["repos"],
+        operation_id: "repos/removePullRequestFromMergeQueue",
+        summary: "Dequeue an entry (`merge_queue.dequeue`, resolved to its pull number) — 204",
+        procedure: "merge_queue.dequeue",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(remove_merge_queue_entry),
+    },
     RouteDef {
         method: "GET",
         path: "/repos/{owner}/{repo}/subscribers",
@@ -4227,6 +4319,303 @@ fn generate_repo_body_schema(_gen: &mut SchemaGenerator) -> Value {
             "private": {"type": "boolean"},
             "include_all_branches": {"type": "boolean", "description": "Accepted for compat; not modeled"},
             "include_avatar": {"type": "boolean", "description": "Accepted for compat; not modeled"}
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Assignees (GitHub `/repos/{o}/{r}/assignees*`)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct AssigneesQuery {
+    /// Username prefix filter (case-insensitive).
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AssigneePath {
+    owner: String,
+    repo: String,
+    assignee: String,
+}
+
+/// GitHub assignee-shape projection of `IssueAssigneePublic`.
+fn assignee_json(u: &Value) -> Value {
+    json!({
+        "login": u["username"],
+        "id": u["user_id"],
+        "type": "User",
+        "site_admin": false,
+        "avatar_url": serde_json::Value::Null,
+    })
+}
+
+/// `GET /repos/{o}/{r}/assignees` (`issue.assigneeCandidates`).
+async fn list_assignees(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<AssigneesQuery>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    if let Some(prefix) = q.prefix {
+        input["prefix"] = json!(prefix);
+    }
+    call_map(
+        &state,
+        &headers,
+        "issue.assigneeCandidates",
+        input,
+        StatusCode::OK,
+        |data| {
+            data["users"]
+                .as_array()
+                .map(|users| json!(users.iter().map(assignee_json).collect::<Vec<_>>()))
+                .unwrap_or_else(|| json!([]))
+        },
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/assignees/{assignee}` — 204/404 assignability check.
+async fn check_assignee(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<AssigneePath>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    match dispatch(
+        &mut ctx,
+        "issue.assigneeCandidates",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => {
+            let assignable = data["users"].as_array().is_some_and(|users| {
+                users
+                    .iter()
+                    .any(|u| u["username"].as_str() == Some(p.assignee.as_str()))
+            });
+            if assignable {
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"message": "user cannot be assigned"})),
+                )
+                    .into_response()
+            }
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Merge queue (GitHub `/repos/{o}/{r}/merge-queue/entries*`)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct MergeQueueEntriesQuery {
+    /// Bare branch name — filters to one train.
+    #[serde(default)]
+    pub base_ref: Option<String>,
+    /// `queued` (default) | `merged` | `dequeued` | `all`.
+    #[serde(default)]
+    pub state: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MergeQueueEntryPath {
+    owner: String,
+    repo: String,
+    entry_id: String,
+}
+
+/// Resolve an entry id via `merge_queue.list` (all states — dequeued
+/// entries stay addressable).
+async fn merge_queue_entry_row(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    entry_id: &str,
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    match dispatch(
+        &mut ctx,
+        "merge_queue.list",
+        json!({
+            "owner": owner,
+            "name": repo,
+            "state": "all",
+        }),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => data["entries"]
+            .as_array()
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|e| e["id"].as_str() == Some(entry_id))
+                    .cloned()
+            })
+            .ok_or_else(|| {
+                Box::new(
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"message": "merge queue entry not found"})),
+                    )
+                        .into_response(),
+                )
+            }),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+/// `GET /repos/{o}/{r}/merge-queue/entries` (`merge_queue.list`).
+async fn list_merge_queue_entries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<MergeQueueEntriesQuery>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    if let Some(base_ref) = q.base_ref {
+        input["base_ref"] = json!(base_ref);
+    }
+    if let Some(state) = q.state {
+        input["state"] = json!(state);
+    }
+    call_map(
+        &state,
+        &headers,
+        "merge_queue.list",
+        input,
+        StatusCode::OK,
+        |data| data["entries"].clone(),
+    )
+    .await
+}
+
+/// `POST /repos/{o}/{r}/merge-queue/entries` (`merge_queue.enqueue`) —
+/// body `{number}` (or GitHub's `pull_number`).
+async fn enqueue_merge_queue_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let number = body["number"]
+        .as_i64()
+        .or_else(|| body["pull_number"].as_i64())
+        .or_else(|| body["pullRequestId"].as_i64())
+        .unwrap_or_default();
+    call_map(
+        &state,
+        &headers,
+        "merge_queue.enqueue",
+        json!({
+            "owner": p.owner,
+            "name": p.repo,
+            "number": number,
+        }),
+        StatusCode::CREATED,
+        |data| data["entry"].clone(),
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/merge-queue/entries/{entry_id}`.
+async fn get_merge_queue_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<MergeQueueEntryPath>,
+) -> Response {
+    match merge_queue_entry_row(&state, &headers, &p.owner, &p.repo, &p.entry_id).await {
+        Ok(entry) => (StatusCode::OK, Json(entry)).into_response(),
+        Err(res) => *res,
+    }
+}
+
+/// `DELETE /repos/{o}/{r}/merge-queue/entries/{entry_id}` — resolve the
+/// entry to its pull number, then `merge_queue.dequeue`.
+async fn remove_merge_queue_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<MergeQueueEntryPath>,
+) -> Response {
+    let entry = match merge_queue_entry_row(&state, &headers, &p.owner, &p.repo, &p.entry_id).await
+    {
+        Ok(entry) => entry,
+        Err(res) => return *res,
+    };
+    call(
+        &state,
+        &headers,
+        "merge_queue.dequeue",
+        json!({
+            "owner": p.owner,
+            "name": p.repo,
+            "number": entry["pull_number"],
+        }),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn assignee_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "login": {"type": "string"},
+                "id": {"type": "string"},
+                "type": {"type": "string"},
+                "site_admin": {"type": "boolean"},
+                "avatar_url": {"type": ["string", "null"]}
+            }
+        }
+    })
+}
+
+fn merge_queue_entry_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "pull_number": {"type": "integer"},
+            "base_ref": {"type": "string"},
+            "position": {"type": "integer"},
+            "state": {"type": "string", "enum": ["queued", "merged", "dequeued"]},
+            "dequeue_reason": {"type": "string"},
+            "pull": {"type": "object"},
+            "enqueued_by_username": {"type": "string"},
+            "created_at": {"type": "string"},
+            "updated_at": {"type": "string"}
+        }
+    })
+}
+
+fn merge_queue_list_schema(gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": merge_queue_entry_schema(gen)})
+}
+
+fn merge_queue_enqueue_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "number": {"type": "integer", "description": "Pull request number"},
+            "pull_number": {"type": "integer", "description": "Alias of `number`"}
         }
     })
 }

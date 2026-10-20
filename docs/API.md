@@ -354,6 +354,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`POST`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels` | `issue.get` / `issue.labels.set` | GitHub name-array bodies (`{labels: [..]}`); POST unions, PUT replaces, DELETE clears; unknown names → 422 |
 | `DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels/{label_name}` | `issue.labels.set` | Removes one label by name; absent → 404 |
 | `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/assignees` | `issue.assignees.set` | `{assignees: [logins]}` resolved via `issue.assigneeCandidates`; unknown logins → 422 |
+| `GET` | `/repos/{owner}/{repo}/assignees` | `issue.assigneeCandidates` | GitHub assignee list; `prefix` filter; bare user array |
+| `GET` | `/repos/{owner}/{repo}/assignees/{assignee}` | `issue.assigneeCandidates` | 204 assignable / 404 otherwise |
+| `GET`/`POST` | `/repos/{owner}/{repo}/merge-queue/entries` | `merge_queue.list` / `merge_queue.enqueue` | `state`/`base_ref` filters; enqueue takes `{number}`/`{pull_number}` → 201 |
+| `GET`/`DELETE` | `/repos/{owner}/{repo}/merge-queue/entries/{entry_id}` | `merge_queue.list` / `merge_queue.dequeue` | Entry resolved to its pull number; delete → 204 |
 | `DELETE` | `/repos/{owner}/{repo}/issues/{number}` | `issue.delete` | Hard-delete; path `number` is the typed confirm → 204 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/links` | `issue.links.list` / `issue.links.add` | Bare array; `{kind, target_number?, title?}` → 201 |
 | `DELETE` | `/repos/{owner}/{repo}/issues/{number}/links/{link_id}` | `issue.links.remove` | → 204 |

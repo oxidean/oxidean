@@ -4399,6 +4399,323 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/assignees:
+    get:
+      tags:
+      - issues
+      summary: List assignable users (`issue.assigneeCandidates`) — `prefix` filter
+      operationId: issues/listAssignees
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: prefix
+        in: query
+        required: false
+        schema:
+          description: Username prefix filter (case-insensitive).
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                    id:
+                      type: string
+                    type:
+                      type: string
+                    site_admin:
+                      type: boolean
+                    avatar_url:
+                      type:
+                      - string
+                      - 'null'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/assignees/{assignee}:
+    get:
+      tags:
+      - issues
+      summary: 204 when assignable, 404 otherwise (`issue.assigneeCandidates`, filtered)
+      operationId: issues/checkUserCanBeAssigned
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: assignee
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/merge-queue/entries:
+    get:
+      tags:
+      - repos
+      summary: List merge-queue entries (`merge_queue.list`) — `state`/`base_ref` filters
+      operationId: repos/listMergeQueueEntries
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: base_ref
+        in: query
+        required: false
+        schema:
+          description: Bare branch name — filters to one train.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: state
+        in: query
+        required: false
+        schema:
+          description: '`queued` (default) | `merged` | `dequeued` | `all`.'
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    pull_number:
+                      type: integer
+                    base_ref:
+                      type: string
+                    position:
+                      type: integer
+                    state:
+                      type: string
+                      enum:
+                      - queued
+                      - merged
+                      - dequeued
+                    dequeue_reason:
+                      type: string
+                    pull:
+                      type: object
+                    enqueued_by_username:
+                      type: string
+                    created_at:
+                      type: string
+                    updated_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      summary: Enqueue a pull (`merge_queue.enqueue`) — `{number}`/`{pull_number}`
+      operationId: repos/addPullRequestToMergeQueue
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                number:
+                  type: integer
+                  description: Pull request number
+                pull_number:
+                  type: integer
+                  description: Alias of `number`
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  pull_number:
+                    type: integer
+                  base_ref:
+                    type: string
+                  position:
+                    type: integer
+                  state:
+                    type: string
+                    enum:
+                    - queued
+                    - merged
+                    - dequeued
+                  dequeue_reason:
+                    type: string
+                  pull:
+                    type: object
+                  enqueued_by_username:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/merge-queue/entries/{entry_id}:
+    get:
+      tags:
+      - repos
+      summary: One queue entry (`merge_queue.list`, resolved by entry id)
+      operationId: repos/getMergeQueueEntry
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: entry_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  pull_number:
+                    type: integer
+                  base_ref:
+                    type: string
+                  position:
+                    type: integer
+                  state:
+                    type: string
+                    enum:
+                    - queued
+                    - merged
+                    - dequeued
+                  dequeue_reason:
+                    type: string
+                  pull:
+                    type: object
+                  enqueued_by_username:
+                    type: string
+                  created_at:
+                    type: string
+                  updated_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Dequeue an entry (`merge_queue.dequeue`, resolved to its pull number) — 204
+      operationId: repos/removePullRequestFromMergeQueue
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: entry_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/subscribers:
     get:
       tags:
