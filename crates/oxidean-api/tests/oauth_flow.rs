@@ -715,3 +715,147 @@ async fn oauth_consent_scope_narrowing() {
         assert!(names.contains(&want), "missing {want} in {names:?}");
     }
 }
+
+fn rest_req(method: &str, uri: &str, cookie: &str, body: Option<&str>) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("cookie", cookie)
+        .body(Body::from(body.unwrap_or("{}").to_owned()))
+        .unwrap()
+}
+
+async fn body_json(res: axum::http::Response<Body>) -> serde_json::Value {
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null))
+}
+
+/// Gitea `/user/applications*` REST surface over `oauthApp.*`.
+#[tokio::test]
+async fn rest_oauth_applications_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("oauth_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+    let (cookie, _uid) = signup_login_verify(&app, &db, "oa@ex.com", "oauser").await;
+
+    // POST → 201 with one-time client_secret.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "POST",
+            "/api/v1/user/applications",
+            &cookie,
+            Some(r#"{"name":"rest-app","redirect_uris":["https://app.example/cb"]}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let v = body_json(res).await;
+    assert_eq!(v["name"], "rest-app", "{v}");
+    assert_eq!(v["confidential_client"], true, "{v}");
+    let app_id = v["id"].as_str().expect("id").to_string();
+    assert!(
+        v["client_secret"]
+            .as_str()
+            .unwrap()
+            .starts_with("oxidean_osec_"),
+        "{v}"
+    );
+
+    // GET list → the app, secret empty after create.
+    let res = app
+        .clone()
+        .oneshot(rest_req("GET", "/api/v1/user/applications", &cookie, None))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let items = v.as_array().expect("array");
+    assert_eq!(items.len(), 1, "{v}");
+    assert_eq!(items[0]["client_secret"], "", "list must omit secret");
+    assert_eq!(items[0]["id"], app_id, "{v}");
+
+    // GET one.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            &format!("/api/v1/user/applications/{app_id}"),
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_json(res).await["name"], "rest-app");
+
+    // PATCH rename.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "PATCH",
+            &format!("/api/v1/user/applications/{app_id}"),
+            &cookie,
+            Some(r#"{"name":"rest-app-2"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_json(res).await["name"], "rest-app-2");
+
+    // Grants list exists (empty for a fresh app — nothing authorized yet).
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            "/api/v1/user/applications/oauth2",
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(v.as_array().expect("array").is_empty(), "{v}");
+
+    // Unknown grant revoke → 404.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "DELETE",
+            "/api/v1/user/applications/oauth2/does-not-exist",
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // DELETE the app; GET then 404s.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "DELETE",
+            &format!("/api/v1/user/applications/{app_id}"),
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            &format!("/api/v1/user/applications/{app_id}"),
+            &cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

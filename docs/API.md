@@ -242,6 +242,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
 | `GET`/`POST` | `/users/{username}/tokens` | `pat.list` / `pat.createClassic` | Gitea token REST; self only; Gitea scope names translated |
 | `DELETE` | `/users/{username}/tokens/{token}` | `pat.revoke` | 204 |
+| `GET`/`POST` | `/user/applications` | `oauthApp.list` / `oauthApp.create` | Gitea OAuth2 app REST; `client_secret` on create only |
+| `GET`/`PATCH`/`DELETE` | `/user/applications/{id}` | `oauthApp.list` / `oauthApp.update` / `oauthApp.delete` | Owner-scoped; delete → 204 |
+| `GET` | `/user/applications/oauth2` | `oauthApp.listGrants` | Grants the user has authorized |
+| `DELETE` | `/user/applications/oauth2/{id}` | `oauthApp.revoke` | 204 |
 | `GET` | `/users/{username}/followers` and `/users/{username}/following` | `user.followers.list` / `user.following.list` | Bare `[{login, id, avatar_url, type}]` arrays; anonymous OK |
 | `GET` | `/users/{username}/following/{target}` | `user.following.list` | 204 / 404 |
 | `GET` | `/user/followers` and `/user/following` | `user.followers.list` / `user.following.list` (caller via `auth.me`) | |

@@ -565,6 +565,114 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || delete(delete_user_token),
     },
+    // Gitea OAuth2-app REST (`/user/applications`) — apps the session user
+    // owns; `/user/applications/oauth2` is the grant list (apps the user
+    // has authorized).
+    RouteDef {
+        method: "GET",
+        path: "/user/applications",
+        tags: &["user", "oauth"],
+        operation_id: "userGetOauth2Application",
+        summary: "List owned OAuth2 apps (`oauthApp.list`)",
+        procedure: "oauthApp.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(oauth_app_list_schema)),
+        mount: || get(list_oauth_apps),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/user/applications",
+        tags: &["user", "oauth"],
+        operation_id: "userCreateOAuth2Application",
+        summary: "Register an OAuth2 app (`oauthApp.create`) — `client_secret` shown once",
+        procedure: "oauthApp.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(oauth_app_body_schema)),
+        response: Some(RespSpec::Json(oauth_app_schema)),
+        mount: || post(create_oauth_app),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/applications/{id}",
+        tags: &["user", "oauth"],
+        operation_id: "userGetOAuth2Application",
+        summary: "Get one owned OAuth2 app (`oauthApp.list` resolved)",
+        procedure: "oauthApp.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(oauth_app_schema)),
+        mount: || get(get_oauth_app),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/user/applications/{id}",
+        tags: &["user", "oauth"],
+        operation_id: "userUpdateOAuth2Application",
+        summary: "Update name/redirect_uris (`oauthApp.update`)",
+        procedure: "oauthApp.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(oauth_app_body_schema)),
+        response: Some(RespSpec::Json(oauth_app_schema)),
+        mount: || patch(update_oauth_app),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/applications/{id}",
+        tags: &["user", "oauth"],
+        operation_id: "userDeleteOAuth2Application",
+        summary: "Delete an OAuth2 app (`oauthApp.delete`) — 204",
+        procedure: "oauthApp.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_oauth_app),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/applications/oauth2",
+        tags: &["user", "oauth"],
+        operation_id: "userGetTokens",
+        summary: "List OAuth grants the session user has authorized (`oauthApp.listGrants`)",
+        procedure: "oauthApp.listGrants",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(oauth_grant_list_schema)),
+        mount: || get(list_oauth_grants),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/applications/oauth2/{id}",
+        tags: &["user", "oauth"],
+        operation_id: "userDeleteOAuth2ApplicationGrant",
+        summary: "Revoke the session user's grant to an app (`oauthApp.revoke`) — 204",
+        procedure: "oauthApp.revoke",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(revoke_oauth_grant),
+    },
     RouteDef {
         method: "GET",
         path: "/search/repositories",
@@ -2272,6 +2380,241 @@ fn access_token_create_schema(_gen: &mut SchemaGenerator) -> Value {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Gitea scope names (write:repository, read:user, …)"
+            }
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// OAuth2 applications (Gitea `/user/applications*`)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct OauthAppPath {
+    id: String,
+}
+
+/// Gitea `OAuth2Application` projection of an `OAuthAppPublic` row.
+/// `client_secret` is populated only on the create response (one-time).
+fn oauth_app_json(app: &Value, client_secret: Option<&str>) -> Value {
+    json!({
+        "id": app["id"],
+        "name": app["name"],
+        "client_id": app["client_id"],
+        "client_secret": client_secret.unwrap_or_default(),
+        "confidential_client": true,
+        "redirect_uris": app["redirect_uris"],
+        "created": app["created_at"],
+        "created_at": app["created_at"],
+    })
+}
+
+/// `GET /api/v1/user/applications` — Gitea `userGetOauth2Application`.
+async fn list_oauth_apps(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "oauthApp.list",
+        json!({}),
+        StatusCode::OK,
+        |data| {
+            data.as_array()
+                .map(|apps| {
+                    json!(apps
+                        .iter()
+                        .map(|a| oauth_app_json(a, None))
+                        .collect::<Vec<_>>())
+                })
+                .unwrap_or(data)
+        },
+    )
+    .await
+}
+
+/// `POST /api/v1/user/applications` — Gitea `userCreateOAuth2Application`.
+async fn create_oauth_app(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "oauthApp.create",
+        json!({
+            "name": body["name"].as_str().unwrap_or_default(),
+            "redirect_uris": body["redirect_uris"],
+        }),
+        StatusCode::CREATED,
+        |data| oauth_app_json(&data["app"], data["client_secret"].as_str()),
+    )
+    .await
+}
+
+/// Resolve `{id}` to its `OAuthAppPublic` row (list + match — the read
+/// procs have no get-by-id variant).
+async fn owned_oauth_app(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    match dispatch(&mut ctx, "oauthApp.list", json!({})).await {
+        RpcResponse::Ok { data, .. } => data
+            .as_array()
+            .and_then(|apps| apps.iter().find(|a| a["id"].as_str() == Some(id)).cloned())
+            .ok_or_else(|| {
+                Box::new(
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"message": "oauth application not found"})),
+                    )
+                        .into_response(),
+                )
+            }),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+/// `GET /api/v1/user/applications/{id}` — Gitea `userGetOAuth2Application`.
+async fn get_oauth_app(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OauthAppPath>,
+) -> Response {
+    match owned_oauth_app(&state, &headers, &p.id).await {
+        Ok(app) => (StatusCode::OK, Json(oauth_app_json(&app, None))).into_response(),
+        Err(res) => *res,
+    }
+}
+
+/// `PATCH /api/v1/user/applications/{id}` — Gitea `userUpdateOAuth2Application`.
+async fn update_oauth_app(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OauthAppPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut input = json!({ "id": p.id });
+    for key in ["name", "redirect_uris"] {
+        if let Some(v) = body.get(key) {
+            input[key] = v.clone();
+        }
+    }
+    call_map(
+        &state,
+        &headers,
+        "oauthApp.update",
+        input,
+        StatusCode::OK,
+        |data| oauth_app_json(&data, None),
+    )
+    .await
+}
+
+/// `DELETE /api/v1/user/applications/{id}` — Gitea `userDeleteOAuth2Application`.
+async fn delete_oauth_app(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OauthAppPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "oauthApp.delete",
+        json!({ "id": p.id }),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `GET /api/v1/user/applications/oauth2` — Gitea `userGetTokens` (grants).
+async fn list_oauth_grants(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "oauthApp.listGrants",
+        json!({}),
+        StatusCode::OK,
+        |data| {
+            data.as_array()
+                .map(|grants| {
+                    json!(grants
+                        .iter()
+                        .map(|g| json!({
+                            "id": g["application_id"],
+                            "name": g["app_name"],
+                            "client_id": g["client_id"],
+                            "scopes": g["scopes"],
+                            "created": g["granted_at"],
+                        }))
+                        .collect::<Vec<_>>())
+                })
+                .unwrap_or(data)
+        },
+    )
+    .await
+}
+
+/// `DELETE /api/v1/user/applications/oauth2/{id}` — Gitea grant revoke.
+async fn revoke_oauth_grant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OauthAppPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "oauthApp.revoke",
+        json!({ "id": p.id }),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn oauth_app_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "client_id": {"type": "string"},
+            "client_secret": {"type": "string", "description": "Plaintext — create response only"},
+            "confidential_client": {"type": "boolean"},
+            "redirect_uris": {"type": "array", "items": {"type": "string"}},
+            "created": {"type": "string"},
+            "created_at": {"type": "string"}
+        }
+    })
+}
+
+fn oauth_app_list_schema(gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": oauth_app_schema(gen)})
+}
+
+fn oauth_app_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "redirect_uris": {"type": "array", "items": {"type": "string"}}
+        }
+    })
+}
+
+fn oauth_grant_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+                "client_id": {"type": "string"},
+                "scopes": {"type": "array", "items": {"type": "string"}},
+                "created": {"type": "string"}
             }
         }
     })

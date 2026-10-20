@@ -1154,6 +1154,282 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /user/applications:
+    get:
+      tags:
+      - user
+      - oauth
+      summary: List owned OAuth2 apps (`oauthApp.list`)
+      operationId: userGetOauth2Application
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    client_id:
+                      type: string
+                    client_secret:
+                      type: string
+                      description: Plaintext — create response only
+                    confidential_client:
+                      type: boolean
+                    redirect_uris:
+                      type: array
+                      items:
+                        type: string
+                    created:
+                      type: string
+                    created_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - user
+      - oauth
+      summary: Register an OAuth2 app (`oauthApp.create`) — `client_secret` shown once
+      operationId: userCreateOAuth2Application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                redirect_uris:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  client_id:
+                    type: string
+                  client_secret:
+                    type: string
+                    description: Plaintext — create response only
+                  confidential_client:
+                    type: boolean
+                  redirect_uris:
+                    type: array
+                    items:
+                      type: string
+                  created:
+                    type: string
+                  created_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/applications/{id}:
+    get:
+      tags:
+      - user
+      - oauth
+      summary: Get one owned OAuth2 app (`oauthApp.list` resolved)
+      operationId: userGetOAuth2Application
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  client_id:
+                    type: string
+                  client_secret:
+                    type: string
+                    description: Plaintext — create response only
+                  confidential_client:
+                    type: boolean
+                  redirect_uris:
+                    type: array
+                    items:
+                      type: string
+                  created:
+                    type: string
+                  created_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - user
+      - oauth
+      summary: Update name/redirect_uris (`oauthApp.update`)
+      operationId: userUpdateOAuth2Application
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                redirect_uris:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  client_id:
+                    type: string
+                  client_secret:
+                    type: string
+                    description: Plaintext — create response only
+                  confidential_client:
+                    type: boolean
+                  redirect_uris:
+                    type: array
+                    items:
+                      type: string
+                  created:
+                    type: string
+                  created_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - user
+      - oauth
+      summary: Delete an OAuth2 app (`oauthApp.delete`) — 204
+      operationId: userDeleteOAuth2Application
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/applications/oauth2:
+    get:
+      tags:
+      - user
+      - oauth
+      summary: List OAuth grants the session user has authorized (`oauthApp.listGrants`)
+      operationId: userGetTokens
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    client_id:
+                      type: string
+                    scopes:
+                      type: array
+                      items:
+                        type: string
+                    created:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/applications/oauth2/{id}:
+    delete:
+      tags:
+      - user
+      - oauth
+      summary: Revoke the session user's grant to an app (`oauthApp.revoke`) — 204
+      operationId: userDeleteOAuth2ApplicationGrant
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /search/repositories:
     get:
       tags:
