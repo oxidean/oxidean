@@ -78,6 +78,10 @@ struct Case {
     /// Seed-commit message override — skip-marker cases need `[skip ci]` in
     /// the head commit message.
     commit_message: Option<String>,
+    /// External binaries the case's steps spawn (`pwsh`, `python`). Same
+    /// policy as `docker_gated`: when a tool is absent the case asserts
+    /// dispatch only and skips execution assertions.
+    requires: Option<Vec<String>>,
 }
 
 fn base_case(id: &str) -> Case {
@@ -105,6 +109,7 @@ fn base_case(id: &str) -> Case {
         log_absent: None,
         divergence: None,
         commit_message: None,
+        requires: None,
     }
 }
 
@@ -137,6 +142,16 @@ fn sha256_hex(data: &[u8]) -> String {
 fn docker_present() -> bool {
     std::process::Command::new("docker")
         .args(["version", "--format", "{{.Server.Version}}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Shell interpreter reachable? `requires` cases assert dispatch only when
+/// the tool is absent (e.g. `pwsh`/`python` inside the cov image).
+fn tool_present(tool: &str) -> bool {
+    std::process::Command::new(tool)
+        .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -628,6 +643,28 @@ async fn run_case(case: &Case) {
                 assert!(
                     !jobs.is_empty() && jobs.iter().all(|j| j.job_key != "__validation"),
                     "{}: container/services jobs must dispatch (docker absent)",
+                    case.id
+                );
+                return;
+            }
+            if let Some(missing) = case
+                .requires
+                .as_deref()
+                .map(|req| {
+                    req.iter()
+                        .filter(|tool| !tool_present(tool))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|m| !m.is_empty())
+            {
+                eprintln!(
+                    "{}: tools absent ({missing:?}) — asserting dispatch only",
+                    case.id
+                );
+                let jobs = fx.db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
+                assert!(
+                    !jobs.is_empty() && jobs.iter().all(|j| j.job_key != "__validation"),
+                    "{}: tool-gated case must dispatch (tools absent)",
                     case.id
                 );
                 return;

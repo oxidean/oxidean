@@ -1071,6 +1071,7 @@
   {
    "id": "shell-python",
    "kind": "run",
+   "requires": ["python"],
    "expect_run": "success",
    "expect_jobs": {
     "build": "success"
@@ -1093,6 +1094,7 @@
   {
    "id": "shell-pwsh",
    "kind": "run",
+   "requires": ["pwsh"],
    "expect_run": "success",
    "expect_jobs": {
     "build": "success"
