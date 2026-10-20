@@ -486,6 +486,21 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || get(list_user_repos),
     },
+    RouteDef {
+        method: "GET",
+        path: "/topics",
+        tags: &["repos"],
+        operation_id: "searchTopics",
+        summary: "Topic search (`repo.topicsSuggest`) — bare array (Gitea)",
+        procedure: "repo.topicsSuggest",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<TopicsQuery>),
+        body: None,
+        response: Some(RespSpec::Json(topics_search_schema)),
+        mount: || get(search_topics),
+    },
 ];
 
 /// `GET /api/v1/user` (`auth.me`) — the authenticated account.
@@ -1428,4 +1443,40 @@ async fn delete_gpg_key(
         StatusCode::NO_CONTENT,
     )
     .await
+}
+
+/// `GET /topics` query — Gitea `q` + `limit`.
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct TopicsQuery {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// `GET /topics?q=` — Gitea topic search, bare array of `{name, repo_count}`.
+async fn search_topics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<TopicsQuery>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.topicsSuggest",
+        json!({"q": q.q, "limit": q.limit}),
+        StatusCode::OK,
+        |d| d["topics"].clone(),
+    )
+    .await
+}
+
+fn topics_search_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "name": {"type": "string"},
+            "repo_count": {"type": "integer"}
+        }}
+    })
 }

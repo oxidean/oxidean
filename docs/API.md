@@ -288,6 +288,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/contents/{path}` | `repo.blob` | `?ref=`; base64 content |
+| `PUT`/`DELETE` | `/repos/{owner}/{repo}/contents/{path}` | `repo.file.create` / `.update` / `.delete` | GitHub contents write; `sha` present → update; PUT create → 201, update → 200; response `{content, commit}` |
+| `GET` | `/repos/{owner}/{repo}/contributors` | `repo.contributors.list` | Bare array; unlinked authors project as `type: "Anonymous"` |
+| `GET`/`PUT` | `/repos/{owner}/{repo}/topics` | `repo.get` / `repo.updateMetadata` | `{names: [...]}` round-trip |
+| `GET` | `/topics` | `repo.topicsSuggest` | `q`, `limit`; bare array (Gitea); anonymous OK |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |
 | `GET` | `/repos/{owner}/{repo}/labels` | `label.listForRepo` | `includeHidden` |
 | `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |

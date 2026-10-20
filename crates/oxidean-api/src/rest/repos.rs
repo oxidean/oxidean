@@ -19,7 +19,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
-use super::{call, call_map, ctx_for, dispatch, merge_fields, repo_ref, RepoPath};
+use super::{
+    call, call_map, ctx_for, dispatch, merge_fields, repo_ref, status_for_error, RepoPath,
+};
 use crate::app::AppState;
 
 /// `repo.refs` entries filtered to `refs/tags/*` and renamed to short
@@ -239,6 +241,81 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<RepoBlobResponse>,
         )),
         mount: || get(get_contents),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/contents/{*path}",
+        tags: &["repos"],
+        operation_id: "putContents",
+        summary: "Create or update a file (`repo.file.create` / `.update`) — `sha` selects update",
+        procedure: "repo.file.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "path"],
+        query: None,
+        body: Some(BodySpec::Json(put_contents_body_schema)),
+        response: Some(RespSpec::Json(contents_write_schema)),
+        mount: || put(put_contents),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/contents/{*path}",
+        tags: &["repos"],
+        operation_id: "deleteContents",
+        summary: "Delete a file or directory (`repo.file.delete`)",
+        procedure: "repo.file.delete",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "path"],
+        query: None,
+        body: Some(BodySpec::Json(delete_contents_body_schema)),
+        response: Some(RespSpec::Json(contents_write_schema)),
+        mount: || delete(delete_contents),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/contributors",
+        tags: &["repos"],
+        operation_id: "listContributors",
+        summary: "Commit contributors (`repo.contributors.list`), GitHub projection",
+        procedure: "repo.contributors.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(contributors_schema)),
+        mount: || get(list_contributors),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/topics",
+        tags: &["repos"],
+        operation_id: "listTopics",
+        summary: "Repository topics (`repo.get`) — `{names}`",
+        procedure: "repo.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(topics_schema)),
+        mount: || get(list_topics),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/topics",
+        tags: &["repos"],
+        operation_id: "replaceTopics",
+        summary: "Replace all topics (`repo.updateMetadata`)",
+        procedure: "repo.updateMetadata",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(topics_body_schema)),
+        response: Some(RespSpec::Json(topics_schema)),
+        mount: || put(replace_topics),
     },
     RouteDef {
         method: "GET",
@@ -3486,4 +3563,260 @@ async fn mirror_sync_rest(
         |d| json!({"ok": d["enqueued"], "mirror": d["mirror"]}),
     )
     .await
+}
+
+/// `PUT /repos/{o}/{r}/contents/{path}` — GitHub create-or-update. `sha`
+/// in the body selects `repo.file.update`; absent → `repo.file.create`.
+/// `content` is base64 (GitHub convention) → `content_base64`.
+async fn put_contents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<TreePath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let path = p.path.clone().unwrap_or_default();
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["path"] = json!(path);
+    for k in [
+        "message",
+        "branch",
+        "new_branch",
+        "open_pr",
+        "pr_title",
+        "pr_body",
+    ] {
+        if let Some(v) = body.get(k) {
+            input[k] = v.clone();
+        }
+    }
+    if let Some(c) = body.get("content") {
+        input["content_base64"] = c.clone();
+    }
+    let update = body.get("sha").and_then(Value::as_str).is_some();
+    let (proc, status) = if update {
+        ("repo.file.update", StatusCode::OK)
+    } else {
+        ("repo.file.create", StatusCode::CREATED)
+    };
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let commit = match dispatch(&mut ctx, proc, input).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    // Follow-up read to project GitHub's `content` member.
+    let blob_input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"ref": commit["branch"], "path": path}),
+    );
+    let content = match dispatch(&mut ctx, "repo.blob", blob_input).await {
+        RpcResponse::Ok { data, .. } => json!({
+            "name": path.rsplit('/').next().unwrap_or(&path),
+            "path": data["path"],
+            "size": data["size"],
+            "encoding": "base64",
+            "content": data["content"],
+            "type": "file",
+        }),
+        RpcResponse::Err { .. } => Value::Null,
+    };
+    (
+        status,
+        Json(json!({
+            "content": content,
+            "commit": {
+                "sha": commit["commit_sha"],
+                "message": body["message"],
+            },
+        })),
+    )
+        .into_response()
+}
+
+/// `DELETE /repos/{o}/{r}/contents/{path}` — `{message, sha?, branch?}` →
+/// `repo.file.delete`; response `content` is null per GitHub.
+async fn delete_contents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<TreePath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["path"] = json!(p.path.unwrap_or_default());
+    for k in ["message", "branch", "new_branch"] {
+        if let Some(v) = body.get(k) {
+            input[k] = v.clone();
+        }
+    }
+    call_map(
+        &state,
+        &headers,
+        "repo.file.delete",
+        input,
+        StatusCode::OK,
+        |d| {
+            json!({
+                "content": Value::Null,
+                "commit": {
+                    "sha": d["commit_sha"],
+                    "message": body["message"],
+                },
+            })
+        },
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/contributors` — GitHub bare-array projection; rows
+/// without a linked account report as `Anonymous`.
+async fn list_contributors(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.contributors.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| {
+            json!(d["contributors"]
+                .as_array()
+                .map(|cs| cs
+                    .iter()
+                    .map(|c| {
+                        if let Some(login) = c["username"].as_str() {
+                            json!({
+                                "login": login,
+                                "avatar_url": c["avatar_url"],
+                                "contributions": c["commit_count"],
+                                "type": "User",
+                            })
+                        } else {
+                            json!({
+                                "name": c["display_name"],
+                                "contributions": c["commit_count"],
+                                "type": "Anonymous",
+                            })
+                        }
+                    })
+                    .collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/topics` — `{names: [...]}`.
+async fn list_topics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.get",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| json!({"names": d["topics"]}),
+    )
+    .await
+}
+
+/// `PUT /repos/{o}/{r}/topics` — GitHub `{names}` replaces the topic set.
+async fn replace_topics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"topics": body["names"]}),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.updateMetadata",
+        input,
+        StatusCode::OK,
+        |d| json!({"names": d["topics"]}),
+    )
+    .await
+}
+
+fn put_contents_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["message", "content"],
+        "properties": {
+            "message": {"type": "string"},
+            "content": {"type": "string", "description": "Base64-encoded file bytes"},
+            "sha": {"type": "string", "description": "Present → update; absent → create"},
+            "branch": {"type": "string"},
+            "new_branch": {"type": "string"},
+            "committer": {"type": "object", "description": "Accepted for compat; not persisted"},
+            "author": {"type": "object", "description": "Accepted for compat; not persisted"}
+        }
+    })
+}
+
+fn delete_contents_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+            "message": {"type": "string"},
+            "sha": {"type": "string", "description": "Accepted for compat; not enforced"},
+            "branch": {"type": "string"}
+        }
+    })
+}
+
+fn contents_write_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "content": {"type": ["object", "null"]},
+            "commit": {"type": "object", "properties": {
+                "sha": {"type": "string"},
+                "message": {"type": "string"}
+            }}
+        }
+    })
+}
+
+fn contributors_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "login": {"type": "string"},
+            "name": {"type": "string"},
+            "avatar_url": {"type": ["string", "null"]},
+            "contributions": {"type": "integer"},
+            "type": {"type": "string", "enum": ["User", "Anonymous"]}
+        }}
+    })
+}
+
+fn topics_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["names"],
+        "properties": {"names": {"type": "array", "items": {"type": "string"}}}
+    })
+}
+
+fn topics_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["names"],
+        "properties": {"names": {"type": "array", "items": {"type": "string"}}}
+    })
 }

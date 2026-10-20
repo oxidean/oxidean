@@ -614,3 +614,150 @@ async fn repo_file_edit_rejects_unsafe_paths() {
     assert_eq!(bin["ok"], false, "binary via text — {bin}");
     assert_eq!(bin["error"]["code"], "repo.binary_content");
 }
+
+async fn rest_all(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        b = b.header("cookie", cookie);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub contents-write + contributors/topics REST surface —
+/// `PUT/DELETE /repos/{o}/{r}/contents/{path}`, `GET /contributors`,
+/// `GET/PUT /topics`, and root `GET /topics` (Gitea).
+#[tokio::test]
+async fn rest_contents_contributors_topics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_files.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let cookie = seed_owner_repo(&app, &db, "rw@ex.com", "rwown", "rfiles", "public").await;
+
+    // PUT without sha → create → 201
+    let (s, v) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/repos/rwown/rfiles/contents/docs/rest.md",
+        &cookie,
+        Some(format!(
+            r#"{{"message":"Add rest.md","content":"{}"}}"#,
+            b64(b"# Rest\n")
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["content"]["name"], "rest.md", "{v}");
+    assert_eq!(v["content"]["path"], "docs/rest.md", "{v}");
+    assert_eq!(v["content"]["type"], "file", "{v}");
+    assert_eq!(v["commit"]["sha"].as_str().unwrap().len(), 40, "{v}");
+
+    // PUT with sha → update → 200
+    let (s, v) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/repos/rwown/rfiles/contents/docs/rest.md",
+        &cookie,
+        Some(format!(
+            r#"{{"message":"Update rest.md","content":"{}","sha":"0000000000000000000000000000000000000000"}}"#,
+            b64(b"# Rest v2\n")
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let blob = blob_content(&app, &cookie, "rwown", "rfiles", "main", "docs/rest.md").await;
+    assert_eq!(blob["data"]["content"], "# Rest v2\n", "{blob}");
+
+    // DELETE → 200, content null
+    let (s, v) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/repos/rwown/rfiles/contents/docs/rest.md",
+        &cookie,
+        Some(
+            r#"{"message":"Drop rest.md","sha":"0000000000000000000000000000000000000000"}"#.into(),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["content"].is_null(), "{v}");
+    assert_eq!(v["commit"]["sha"].as_str().unwrap().len(), 40, "{v}");
+    let gone = blob_content(&app, &cookie, "rwown", "rfiles", "main", "docs/rest.md").await;
+    assert_eq!(gone["ok"], false, "{gone}");
+
+    // contributors — bare array, owner credited
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rwown/rfiles/contributors",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let cs = v.as_array().expect("contributors array");
+    assert!(!cs.is_empty(), "{v}");
+    assert_eq!(cs[0]["login"], "rwown", "{v}");
+    assert!(cs[0]["contributions"].as_i64().unwrap() >= 1, "{v}");
+    assert_eq!(cs[0]["type"], "User", "{v}");
+
+    // topics — replace then read back
+    let (s, v) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/repos/rwown/rfiles/topics",
+        &cookie,
+        Some(r#"{"names":["rust","forge"]}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let mut names: Vec<String> = serde_json::from_value(v["names"].clone()).unwrap();
+    names.sort();
+    assert_eq!(names, ["forge", "rust"], "{v}");
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rwown/rfiles/topics",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let mut names: Vec<String> = serde_json::from_value(v["names"].clone()).unwrap();
+    names.sort();
+    assert_eq!(names, ["forge", "rust"], "{v}");
+
+    // root /topics (Gitea) — anonymous OK
+    let (s, v) = rest_all(&app, "GET", "/api/v1/topics?q=rust", "", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let topics = v.as_array().expect("topics array");
+    assert!(
+        topics
+            .iter()
+            .any(|t| t["name"] == "rust" && t["repo_count"].as_i64().unwrap_or(0) >= 1),
+        "{v}"
+    );
+}

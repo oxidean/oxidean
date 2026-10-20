@@ -960,6 +960,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /topics:
+    get:
+      tags:
+      - repos
+      summary: Topic search (`repo.topicsSuggest`) — bare array (Gitea)
+      operationId: searchTopics
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    repo_count:
+                      type: integer
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /orgs:
     post:
       tags:
@@ -1640,6 +1683,276 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RepoBlobResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - repos
+      summary: Create or update a file (`repo.file.create` / `.update`) — `sha` selects update
+      operationId: putContents
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - message
+              - content
+              properties:
+                message:
+                  type: string
+                content:
+                  type: string
+                  description: Base64-encoded file bytes
+                sha:
+                  type: string
+                  description: Present → update; absent → create
+                branch:
+                  type: string
+                new_branch:
+                  type: string
+                committer:
+                  type: object
+                  description: Accepted for compat; not persisted
+                author:
+                  type: object
+                  description: Accepted for compat; not persisted
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type:
+                    - object
+                    - 'null'
+                  commit:
+                    type: object
+                    properties:
+                      sha:
+                        type: string
+                      message:
+                        type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Delete a file or directory (`repo.file.delete`)
+      operationId: deleteContents
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - message
+              properties:
+                message:
+                  type: string
+                sha:
+                  type: string
+                  description: Accepted for compat; not enforced
+                branch:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type:
+                    - object
+                    - 'null'
+                  commit:
+                    type: object
+                    properties:
+                      sha:
+                        type: string
+                      message:
+                        type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/contributors:
+    get:
+      tags:
+      - repos
+      summary: Commit contributors (`repo.contributors.list`), GitHub projection
+      operationId: listContributors
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                    name:
+                      type: string
+                    avatar_url:
+                      type:
+                      - string
+                      - 'null'
+                    contributions:
+                      type: integer
+                    type:
+                      type: string
+                      enum:
+                      - User
+                      - Anonymous
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/topics:
+    get:
+      tags:
+      - repos
+      summary: Repository topics (`repo.get`) — `{names}`
+      operationId: listTopics
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - names
+                properties:
+                  names:
+                    type: array
+                    items:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - repos
+      summary: Replace all topics (`repo.updateMetadata`)
+      operationId: replaceTopics
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - names
+              properties:
+                names:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - names
+                properties:
+                  names:
+                    type: array
+                    items:
+                      type: string
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
