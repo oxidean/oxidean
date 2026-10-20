@@ -181,7 +181,7 @@ jobs:
     name: rust-build
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
@@ -219,10 +219,11 @@ jobs:
           MON=$!
           trap 'kill $MON 2>/dev/null || true' EXIT
           cargo build --workspace --bins
-          # Pre-build the ~4 GB oxidean-api libtest on its own so it cannot
-          # overlap other heavy units during the archive pass (same OOM as
-          # the coverage lane, where two 7.6 GB api rustc units collide).
-          cargo test -p oxidean-api --lib --features server --no-run
+          # Pre-build the ~12 GB oxidean-api libtest on its own so it cannot
+          # overlap other heavy units during the archive pass (the coverage
+          # lane OOMed on two concurrent 7.6 GB api rustc units). oxidean-api
+          # has no `server` feature — plain --lib matches the archive unit.
+          cargo test -p oxidean-api --lib --no-run
           mkdir -p target
           cargo nextest archive --workspace --features server \
             --archive-file target/nextest-archive.tar.zst
@@ -453,7 +454,7 @@ jobs:
     name: coverage-weighted
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
