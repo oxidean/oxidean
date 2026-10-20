@@ -366,3 +366,204 @@ async fn issue_reactions_toggle_off() {
     assert_eq!(group_count(&off["data"]["reactions"], "heart"), 0);
     assert_eq!(off["data"]["reacted"], false);
 }
+
+async fn rest_all(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        b = b.header("cookie", cookie);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub/Gitea REST surface for reactions + links + issue delete:
+/// `GET/POST/DELETE .../reactions`, `.../links` CRUD, `DELETE /issues/{n}`.
+#[tokio::test]
+async fn rest_reactions_links_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("react_rest.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let (owner_cookie, _) = setup_react_fixture(&app, &db).await;
+
+    // POST issue reaction → 201 + aggregates
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        Some(r#"{"content":"+1"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["reacted"], true, "{v}");
+    assert_eq!(group_count(&v["reactions"], "+1"), 1, "{v}");
+
+    // GET reactions → aggregate row
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(group_count(&v, "+1"), 1, "{v}");
+
+    // POST same content again → toggles off
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        Some(r#"{"content":"+1"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["reacted"], false, "{v}");
+    assert_eq!(group_count(&v["reactions"], "+1"), 0, "{v}");
+
+    // DELETE (with content) when not reacted → force-off, still 204
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        Some(r#"{"content":"+1"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(group_count(&v, "+1"), 0, "{v}");
+
+    // DELETE when reacted → removes it
+    let (s, _) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        Some(r#"{"content":"heart"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        Some(r#"{"content":"heart"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rx-org/core/issues/1/reactions",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(group_count(&v, "heart"), 0, "{v}");
+
+    // Comment reaction — create a comment then toggle on it
+    let comment = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"rx-org","name":"core","number":1,"body":"hi"}}"#,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+    let cid = comment["data"]["id"].as_str().unwrap().to_string();
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/rx-org/core/issues/1/comments/{cid}/reactions"),
+        &owner_cookie,
+        Some(r#"{"content":"rocket"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["reacted"], true, "{v}");
+
+    // Links CRUD
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/rx-org/core/issues/1/links",
+        &owner_cookie,
+        Some(r#"{"kind":"pr_stub","title":"tracking branch","target_number":7}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let link_id = v["id"].as_str().expect("link id").to_string();
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rx-org/core/issues/1/links",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let links = v.as_array().expect("links array");
+    assert_eq!(links.len(), 1, "{v}");
+    assert_eq!(links[0]["kind"], "pr_stub", "{v}");
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        &format!("/api/v1/repos/rx-org/core/issues/1/links/{link_id}"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    // Issue delete — URL is the typed confirm
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/repos/rx-org/core/issues/1",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let gone = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"issue.get","input":{"owner":"rx-org","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(gone["ok"], false, "{gone}");
+}

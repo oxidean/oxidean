@@ -315,6 +315,11 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`POST`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels` | `issue.get` / `issue.labels.set` | GitHub name-array bodies (`{labels: [..]}`); POST unions, PUT replaces, DELETE clears; unknown names → 422 |
 | `DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels/{label_name}` | `issue.labels.set` | Removes one label by name; absent → 404 |
 | `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/assignees` | `issue.assignees.set` | `{assignees: [logins]}` resolved via `issue.assigneeCandidates`; unknown logins → 422 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}` | `issue.delete` | Hard-delete; path `number` is the typed confirm → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/links` | `issue.links.list` / `issue.links.add` | Bare array; `{kind, target_number?, title?}` → 201 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}/links/{link_id}` | `issue.links.remove` | → 204 |
+| `GET`/`POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/reactions` | `issue.get` / `issue.reactions.toggle` | Aggregate `{content, count, viewerHasReacted}`; POST toggles → 201, DELETE force-off → 204 |
+| `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}/reactions` | `issue.reactions.toggle` | Comment-scoped toggle; POST → 201, DELETE → 204 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/milestones` | `milestone.list` / `milestone.create` | `state` filter; create → 201 |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/milestones/{number}` | `milestone.get` / `milestone.update` / `milestone.delete` | `number` is the milestone `#N` |
 | `POST` | `/repos/{owner}/{repo}/labels` | `label.create` | Repo-scope labels; 201 |
@@ -360,7 +365,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirror config CRUD, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirror config CRUD, LFS objects, `org.updateSettings` and org invites, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

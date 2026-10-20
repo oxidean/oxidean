@@ -427,6 +427,141 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Json(issue_schema)),
         mount: || delete(remove_assignees),
     },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}",
+        tags: &["issues"],
+        operation_id: "issues/delete",
+        summary: "Hard-delete an issue (`issue.delete`); URL is the typed confirm (Gitea)",
+        procedure: "issue.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_issue),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/issues/{number}/links",
+        tags: &["issues"],
+        operation_id: "issues/listLinks",
+        summary: "Linked issues/PR stubs (`issue.links.list`) — bare array",
+        procedure: "issue.links.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(links_schema)),
+        mount: || get(list_issue_links),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/issues/{number}/links",
+        tags: &["issues"],
+        operation_id: "issues/addLink",
+        summary: "Link an issue/PR stub (`issue.links.add`) — `{kind, target_number?, title?}`",
+        procedure: "issue.links.add",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(add_link_body_schema)),
+        response: Some(RespSpec::Json(links_schema)),
+        mount: || post(add_issue_link),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/links/{link_id}",
+        tags: &["issues"],
+        operation_id: "issues/removeLink",
+        summary: "Remove one link by id (`issue.links.remove`) → 204",
+        procedure: "issue.links.remove",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number", "link_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(remove_issue_link),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/issues/{number}/reactions",
+        tags: &["issues"],
+        operation_id: "issues/listReactions",
+        summary: "Aggregated reactions on the issue (`issue.get` → `reactions`)",
+        procedure: "issue.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(reactions_schema)),
+        mount: || get(list_issue_reactions),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/issues/{number}/reactions",
+        tags: &["issues"],
+        operation_id: "issues/createReaction",
+        summary: "Toggle a reaction on the issue (`issue.reactions.toggle`) — `{content}`",
+        procedure: "issue.reactions.toggle",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(reaction_body_schema)),
+        response: Some(RespSpec::Json(reactions_schema)),
+        mount: || post(toggle_issue_reaction),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/reactions",
+        tags: &["issues"],
+        operation_id: "issues/deleteReaction",
+        summary: "Remove a reaction (`issue.reactions.toggle` → off) — `{content}` → 204",
+        procedure: "issue.reactions.toggle",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(reaction_body_schema)),
+        response: None,
+        mount: || delete(remove_issue_reaction),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}/reactions",
+        tags: &["issues"],
+        operation_id: "issues/createCommentReaction",
+        summary: "Toggle a reaction on a comment (`issue.reactions.toggle`) — `{content}`",
+        procedure: "issue.reactions.toggle",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number", "comment_id"],
+        query: None,
+        body: Some(BodySpec::Json(reaction_body_schema)),
+        response: Some(RespSpec::Json(reactions_schema)),
+        mount: || post(toggle_comment_reaction),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}/reactions",
+        tags: &["issues"],
+        operation_id: "issues/deleteCommentReaction",
+        summary: "Remove a comment reaction (`issue.reactions.toggle` → off) → 204",
+        procedure: "issue.reactions.toggle",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number", "comment_id"],
+        query: None,
+        body: Some(BodySpec::Json(reaction_body_schema)),
+        response: None,
+        mount: || delete(remove_comment_reaction),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -1369,4 +1504,255 @@ async fn remove_assignees(
         })
         .unwrap_or_default();
     set_assignees_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await
+}
+
+#[derive(Deserialize)]
+struct LinkPath {
+    owner: String,
+    repo: String,
+    number: i64,
+    link_id: String,
+}
+
+/// `DELETE /repos/{o}/{r}/issues/{n}` — Gitea issue delete; the path
+/// `number` is the typed confirmation.
+async fn delete_issue(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "issue.delete",
+        merge_fields(p.ref_input(), json!({"confirm_number": p.number})),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/issues/{n}/links` — bare array.
+async fn list_issue_links(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "issue.links.list",
+        p.ref_input(),
+        StatusCode::OK,
+        |d| d["links"].clone(),
+    )
+    .await
+}
+
+/// `POST /repos/{o}/{r}/issues/{n}/links` — `{kind, target_number?,
+/// target_repo_id?, title?}` → created link row.
+async fn add_issue_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "issue.links.add",
+        merge_fields(p.ref_input(), body),
+        StatusCode::CREATED,
+        |d| d,
+    )
+    .await
+}
+
+/// `DELETE /repos/{o}/{r}/issues/{n}/links/{link_id}` → 204.
+async fn remove_issue_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<LinkPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "issue.links.remove",
+        merge_fields(
+            repo_ref(&p.owner, &p.repo),
+            json!({"number": p.number, "link_id": p.link_id}),
+        ),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/issues/{n}/reactions` — aggregated groups off
+/// `issue.get` (the issue embeds them).
+async fn list_issue_reactions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "issue.get",
+        p.ref_input(),
+        StatusCode::OK,
+        |d| d["reactions"].clone(),
+    )
+    .await
+}
+
+/// Reaction-toggle input builder shared by the issue/comment POST+DELETE.
+fn reaction_input(
+    p: &RepoNumberPath,
+    target: &str,
+    comment_id: Option<&str>,
+    body: &Value,
+) -> Value {
+    let mut input = merge_fields(
+        p.ref_input(),
+        json!({"target": target, "content": body["content"]}),
+    );
+    if let Some(id) = comment_id {
+        input["comment_id"] = json!(id);
+    }
+    input
+}
+
+/// Force-off semantics for DELETE: toggle once; when the result reports
+/// `reacted == true` (the caller had not reacted — toggle added it), toggle
+/// again so the end state is always "reaction absent".
+async fn remove_reaction_inner(state: &AppState, headers: &HeaderMap, input: Value) -> Response {
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let first = match dispatch(&mut ctx, "issue.reactions.toggle", input.clone()).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (super::status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    if first["reacted"].as_bool().unwrap_or(false) {
+        match dispatch(&mut ctx, "issue.reactions.toggle", input).await {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response();
+            }
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// `POST /repos/{o}/{r}/issues/{n}/reactions` — toggle `{content}` → 201
+/// with the aggregate result.
+async fn toggle_issue_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "issue.reactions.toggle",
+        reaction_input(&p, "issue", None, &body),
+        StatusCode::CREATED,
+        |d| d,
+    )
+    .await
+}
+
+/// `DELETE /repos/{o}/{r}/issues/{n}/reactions` — `{content}` → force-off → 204.
+async fn remove_issue_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    remove_reaction_inner(&state, &headers, reaction_input(&p, "issue", None, &body)).await
+}
+
+/// `POST /repos/{o}/{r}/issues/{n}/comments/{id}/reactions` — toggle → 201.
+async fn toggle_comment_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<CommentPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"number": p.number, "target": "comment", "comment_id": p.comment_id, "content": body["content"]}),
+    );
+    call_map(
+        &state,
+        &headers,
+        "issue.reactions.toggle",
+        input,
+        StatusCode::CREATED,
+        |d| d,
+    )
+    .await
+}
+
+/// `DELETE /repos/{o}/{r}/issues/{n}/comments/{id}/reactions` → 204.
+async fn remove_comment_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<CommentPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"number": p.number, "target": "comment", "comment_id": p.comment_id, "content": body["content"]}),
+    );
+    remove_reaction_inner(&state, &headers, input).await
+}
+
+fn links_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "id": {"type": "string"},
+            "kind": {"type": "string", "enum": ["issue", "pr_stub", "pr"]},
+            "target_number": {"type": ["integer", "null"]},
+            "target_repo_id": {"type": ["string", "null"]},
+            "title": {"type": ["string", "null"]},
+            "created_at": {"type": "string"}
+        }}
+    })
+}
+
+fn add_link_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+            "kind": {"type": "string", "enum": ["issue", "pr_stub", "pr"]},
+            "target_number": {"type": "integer"},
+            "target_repo_id": {"type": "string"},
+            "title": {"type": "string"}
+        }
+    })
+}
+
+fn reactions_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "content": {"type": "string"},
+            "count": {"type": "integer"},
+            "viewerHasReacted": {"type": "boolean"}
+        }}
+    })
+}
+
+fn reaction_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["content"],
+        "properties": {"content": {"type": "string"}}
+    })
 }
