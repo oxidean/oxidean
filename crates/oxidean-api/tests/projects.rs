@@ -754,3 +754,227 @@ jobs:
     // project_card.created → the unfiltered workflow runs, typed doesn't.
     assert_eq!(run_count(&db, &repo_id).await, before + 1);
 }
+
+/// REST surface — repo-scoped project routes over `projects.*`:
+/// board/column/card CRUD, moves, note→issue convert.
+#[tokio::test]
+async fn rest_projects_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos_dir = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("proj_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos_dir.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "pr@ex.com", "pr1").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    create_repo(&app, &cookie, "board", "public").await;
+
+    // Board create — GitHub `name` → `title`.
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/pr1/board/projects",
+        &cookie,
+        Some(r#"{"name":"Roadmap","body":"Q3"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["title"], "Roadmap", "{v}");
+    assert_eq!(v["number"], 1, "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/pr1/board/projects",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().expect("bare array").len(), 1, "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/pr1/board/projects/1",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["title"], "Roadmap", "{v}");
+
+    // Columns.
+    let (s, col) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/pr1/board/projects/1/columns",
+        &cookie,
+        Some(r#"{"name":"Todo"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{col}");
+    let col_id = col["id"].as_str().unwrap().to_string();
+
+    let (s, col2) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/pr1/board/projects/1/columns",
+        &cookie,
+        Some(r#"{"name":"Done"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{col2}");
+    let col2_id = col2["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest_json(
+        &app,
+        "PATCH",
+        &format!("/api/v1/repos/pr1/board/projects/1/columns/{col_id}"),
+        &cookie,
+        Some(r#"{"name":"Backlog"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["name"], "Backlog", "{v}");
+
+    // Column move — swap Done to position 0.
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/pr1/board/projects/1/columns/{col2_id}/moves"),
+        &cookie,
+        Some(r#"{"position":0}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["position"], 0, "{v}");
+
+    // Cards — note card in Done.
+    let (s, card) = rest_json(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/pr1/board/projects/1/columns/{col2_id}/cards"),
+        &cookie,
+        Some(r#"{"note":"Ship it\nwith tests"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{card}");
+    let card_id = card["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/pr1/board/projects/1/columns/{col2_id}/cards"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1, "{v}");
+
+    // Get-by-id via project-scoped path.
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/pr1/board/projects/1/cards/{card_id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        v["note"],
+        "Ship it
+with tests",
+        "{v}"
+    );
+
+    // Move the card to Backlog.
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/pr1/board/projects/1/cards/{card_id}/moves"),
+        &cookie,
+        Some(format!(r#"{{"column_id":"{col_id}","position":0}}"#)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["column_id"], col_id, "{v}");
+
+    // Convert the note card into a real issue.
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/pr1/board/projects/1/cards/{card_id}/convert"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["content_type"], "issue", "{v}");
+    let issue_number = v["content_number"].as_i64().expect("content_number");
+    let issue = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"issue.get","input":{{"owner":"pr1","name":"board","number":{issue_number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    assert_eq!(issue["data"]["title"], "Ship it", "{issue}");
+
+    // Delete board → columns and cards cascade.
+    let (s, _) = rest_json(
+        &app,
+        "DELETE",
+        "/api/v1/repos/pr1/board/projects/1",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/pr1/board/projects/1",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+async fn rest_json(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let req = match body {
+        Some(j) => Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie)
+            .header("content-type", "application/json")
+            .body(Body::from(j))
+            .unwrap(),
+        None => Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie)
+            .body(Body::empty())
+            .unwrap(),
+    };
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}

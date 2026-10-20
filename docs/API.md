@@ -309,6 +309,15 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `POST` | `/repos/{owner}/{repo}/wiki/new` | `wiki.pages.create` | `title` + `content` or `content_base64` → 201; returns the page object |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/wiki/page/{page_name}` | `wiki.pages.get` / `.update` / `.delete` | Page object with `content`; update accepts `message`; delete → 204 |
 | `GET` | `/repos/{owner}/{repo}/wiki/revisions/{page_name}` | `wiki.revisions.list` | Bare array; `?limit=` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects` | `projects.list` / `projects.create` | Bare array, `?state=`; `name` → `title`; create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}` | `projects.get` / `.update` / `.delete` | Board addressed by per-repo `#{project}`; delete → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects/{project}/columns` | `projects.columns.list` / `.create` | Bare array; `name` → `column_name`; → 201 |
+| `PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}` | `projects.columns.update` / `.delete` | delete → 204 |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}/moves` | `projects.columns.move` | `{position: int}` (GitHub word vocabulary not modeled) |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}/cards` | `projects.cards.list` / `.create` | Bare array, `?archived_state=`; `note` or `content_type`+`content_id` → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}` | `projects.cards.list` / `.update` / `.delete` | Get is list-filtered (404 absent); delete → 204 |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}/moves` | `projects.cards.move` | `{column_id?, position}` |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}/convert` | `projects.cards.convert` | Note card → real issue |
 | `GET`/`POST` | `/repos/{owner}/{repo}/invitations` | `repo.invites.list` / `repo.invites.create` | Bare array; `{email}` or `{emails:[]}` + `permission` → results array |
 | `DELETE` | `/repos/{owner}/{repo}/invitations/{invite_id}` | `repo.invites.revoke` | → 204 |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |

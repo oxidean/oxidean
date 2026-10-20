@@ -23,6 +23,7 @@ pub mod openapi;
 mod orgs;
 mod packages;
 mod pages;
+mod projects;
 mod pulls;
 mod releases;
 mod repos;

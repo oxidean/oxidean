@@ -14038,6 +14038,793 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects:
+    get:
+      tags:
+      - repos
+      - projects
+      summary: List project boards (`projects.list`) — bare array, `?state=`
+      operationId: listRepoProjects
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: false
+        schema:
+          description: '`open` (default) | `closed` | `all`.'
+          type:
+          - string
+          - 'null'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      - projects
+      summary: Create a project board (`projects.create`; `name` → `title`) → 201
+      operationId: createRepoProject
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Board title (GitHub `name`)
+                title:
+                  type: string
+                body:
+                  type: string
+                state:
+                  type: string
+                  enum:
+                  - open
+                  - closed
+                  description: PATCH only
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}:
+    get:
+      tags:
+      - repos
+      - projects
+      summary: Get one project board (`projects.get`)
+      operationId: getRepoProject
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - repos
+      - projects
+      summary: Update a board (`projects.update`; `name` → `title`, `body`, `state`)
+      operationId: updateRepoProject
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Board title (GitHub `name`)
+                title:
+                  type: string
+                body:
+                  type: string
+                state:
+                  type: string
+                  enum:
+                  - open
+                  - closed
+                  description: PATCH only
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      - projects
+      summary: Delete a board (`projects.delete`) → 204
+      operationId: deleteRepoProject
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/columns:
+    get:
+      tags:
+      - repos
+      - projects
+      summary: List columns (`projects.columns.list`) — bare array
+      operationId: listProjectColumns
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectColumnPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      - projects
+      summary: Create a column (`projects.columns.create`; `name` → `column_name`) → 201
+      operationId: createProjectColumn
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectColumnPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/columns/{column}:
+    patch:
+      tags:
+      - repos
+      - projects
+      summary: Rename a column (`projects.columns.update`; `name` → `column_name`)
+      operationId: updateProjectColumn
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectColumnPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      - projects
+      summary: Delete a column (`projects.columns.delete`) → 204
+      operationId: deleteProjectColumn
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/columns/{column}/moves:
+    post:
+      tags:
+      - repos
+      - projects
+      summary: 'Reorder a column (`projects.columns.move`) — `{position: int}`'
+      operationId: moveProjectColumn
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - position
+              properties:
+                position:
+                  type: integer
+                  description: 0-based destination index
+                column_id:
+                  type: string
+                  description: Card moves only — destination column id
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectColumnPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/columns/{column}/cards:
+    get:
+      tags:
+      - repos
+      - projects
+      summary: List cards (`projects.cards.list`) — bare array, `?archived_state=`
+      operationId: listProjectCards
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: archived_state
+        in: query
+        required: false
+        schema:
+          description: |-
+            `all` | `archived` | `not_archived` (GitHub vocabulary; only
+            `archived`/`all` surface archived cards).
+          type:
+          - string
+          - 'null'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      - projects
+      summary: Create a card (`projects.cards.create`; `note` or `content_type`+`content_id`) → 201
+      operationId: createProjectCard
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: column
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                content_type:
+                  type: string
+                  enum:
+                  - issue
+                  - pull_request
+                content_id:
+                  type: string
+                  description: Linked entity row id
+                archived:
+                  type: boolean
+                  description: PATCH only
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/cards/{card}:
+    get:
+      tags:
+      - repos
+      - projects
+      summary: One card (`projects.cards.list` filtered by id) — 404 when absent
+      operationId: getProjectCard
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: card
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - repos
+      - projects
+      summary: Update a card (`projects.cards.update`; `note`, `archived`)
+      operationId: updateProjectCard
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: card
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                content_type:
+                  type: string
+                  enum:
+                  - issue
+                  - pull_request
+                content_id:
+                  type: string
+                  description: Linked entity row id
+                archived:
+                  type: boolean
+                  description: PATCH only
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      - projects
+      summary: Delete a card (`projects.cards.delete`) → 204
+      operationId: deleteProjectCard
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: card
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/cards/{card}/moves:
+    post:
+      tags:
+      - repos
+      - projects
+      summary: Move a card (`projects.cards.move`; `{column_id?, position}`)
+      operationId: moveProjectCard
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: card
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - position
+              properties:
+                position:
+                  type: integer
+                  description: 0-based destination index
+                column_id:
+                  type: string
+                  description: Card moves only — destination column id
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/projects/{project}/cards/{card}/convert:
+    post:
+      tags:
+      - repos
+      - projects
+      summary: Convert a note card to an issue (`projects.cards.convert`)
+      operationId: convertProjectCard
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: card
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCardPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/wiki/pages:
     get:
       tags:
@@ -15935,6 +16722,149 @@ components:
       required:
       - token
       - scope
+    ProjectPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        repo_id:
+          type: string
+        number:
+          type: integer
+          format: int64
+          description: Per-repo sequential `#N` (same scheme as milestones/issues).
+        title:
+          type: string
+          description: GitHub `name` — the board title.
+        body:
+          type: string
+          description: GitHub `body` — the board description.
+        state:
+          type: string
+        creator_id:
+          type:
+          - string
+          - 'null'
+        creator_username:
+          type:
+          - string
+          - 'null'
+        html_url:
+          type: string
+          description: '`/{owner}/{repo}/projects/{number}` web route.'
+        closed_at:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+      - id
+      - repo_id
+      - number
+      - title
+      - body
+      - state
+      - html_url
+      - created_at
+      - updated_at
+      description: A repo-scoped project board.
+    ProjectColumnPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        position:
+          type: integer
+          format: int64
+          description: Contiguous 0-based position inside the board.
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+      - id
+      - project_id
+      - name
+      - position
+      - created_at
+      - updated_at
+      description: A column inside a board.
+    ProjectCardPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        column_id:
+          type: string
+        note:
+          type:
+          - string
+          - 'null'
+          description: Note text — `None` once the card is a linked entity.
+        content_type:
+          type:
+          - string
+          - 'null'
+          description: '`issue` | `pull_request` — the linked entity kind.'
+        content_id:
+          type:
+          - string
+          - 'null'
+          description: Linked entity row id.
+        content_number:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Linked entity `#N` — enrichment for the UI (issue/pull number).
+        content_title:
+          type:
+          - string
+          - 'null'
+          description: Linked entity title — enrichment for the UI.
+        content_state:
+          type:
+          - string
+          - 'null'
+          description: Linked entity state — enrichment for the UI.
+        content_url:
+          type:
+          - string
+          - 'null'
+          description: '`/{owner}/{repo}/{issues|pulls}/{number}` web route for linked cards.'
+        position:
+          type: integer
+          format: int64
+          description: Contiguous 0-based position inside the column.
+        archived:
+          type: boolean
+        creator_id:
+          type:
+          - string
+          - 'null'
+        creator_username:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+      - id
+      - column_id
+      - position
+      - archived
+      - created_at
+      - updated_at
+      description: A card inside a column — a note or a linked issue/pull.
     WikiPagesListResponse:
       type: object
       properties:
