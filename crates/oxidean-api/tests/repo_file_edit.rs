@@ -761,3 +761,69 @@ async fn rest_contents_contributors_topics() {
         "{v}"
     );
 }
+
+/// GitHub stats + search REST surface: `/stats/contributors`,
+/// `/stats/commit_activity`, `GET /search/repositories`.
+#[tokio::test]
+async fn rest_stats_and_search() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("stats_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let cookie = seed_owner_repo(&app, &db, "st@ex.com", "stown", "stattr", "public").await;
+    // One extra commit so there is real history to scan.
+    let (s, _) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/repos/stown/stattr/contents/stats.md",
+        &cookie,
+        Some(format!(r#"{{"message":"s","content":"{}"}}"#, b64(b"x"))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/stown/stattr/stats/contributors",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let cs = v.as_array().expect("contributors array");
+    assert!(!cs.is_empty(), "{v}");
+    assert!(cs[0]["total"].as_i64().unwrap() >= 1, "{v}");
+    assert!(cs[0]["author"].is_object(), "{v}");
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/stown/stattr/stats/commit_activity",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let weeks = v.as_array().expect("weeks array");
+    assert!(!weeks.is_empty(), "{v}");
+    assert_eq!(weeks[0]["days"].as_array().unwrap().len(), 7, "{v}");
+
+    // GitHub search envelope — anonymous OK
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/search/repositories?q=stattr",
+        "",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["incomplete_results"], false, "{v}");
+    let items = v["items"].as_array().expect("items array");
+    assert!(items.iter().any(|r| r["name"] == "stattr"), "{v}");
+}

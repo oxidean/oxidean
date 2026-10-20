@@ -571,4 +571,23 @@ async fn rest_patch_repo_archived_visibility_units() {
     )
     .await;
     assert_eq!(pulls["data"]["enabled"], false, "{pulls}");
+
+    // allow_squash_merge off → mergeSettings.update
+    let (s, _) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"allow_squash_merge":false}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let ms = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.mergeSettings.get","input":{"owner":"pown","name":"patchme"}}"#,
+    )
+    .await;
+    assert_eq!(ms["data"]["allow_squash_merge"], false, "{ms}");
+    assert_eq!(ms["data"]["allow_merge_commit"], true, "{ms}");
 }

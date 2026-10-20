@@ -289,6 +289,36 @@ pub const ROUTES: &[RouteDef] = &[
     },
     RouteDef {
         method: "GET",
+        path: "/repos/{owner}/{repo}/stats/contributors",
+        tags: &["repos"],
+        operation_id: "statsContributors",
+        summary: "Per-author commit totals (`repo.insights.contributors`) — GitHub projection",
+        procedure: "repo.insights.contributors",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(stats_contributors_schema)),
+        mount: || get(stats_contributors),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/stats/commit_activity",
+        tags: &["repos"],
+        operation_id: "statsCommitActivity",
+        summary: "Weekly commit buckets (`repo.insights.commitActivity`) — GitHub shape",
+        procedure: "repo.insights.commitActivity",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(stats_activity_schema)),
+        mount: || get(stats_commit_activity),
+    },
+    RouteDef {
+        method: "GET",
         path: "/repos/{owner}/{repo}/topics",
         tags: &["repos"],
         operation_id: "listTopics",
@@ -1206,6 +1236,9 @@ async fn update_repo(
             "has_wiki",
             "has_projects",
             "has_discussions",
+            "allow_merge_commit",
+            "allow_squash_merge",
+            "allow_rebase_merge",
         ] {
             m.remove(k);
         }
@@ -1234,8 +1267,17 @@ async fn update_repo(
         ("has_projects", "repo.projects.setEnabled"),
         ("has_discussions", "repo.discussions.setEnabled"),
     ];
+    let merge_keys = [
+        "allow_merge_commit",
+        "allow_squash_merge",
+        "allow_rebase_merge",
+    ];
+    let has_merge_settings = merge_keys
+        .iter()
+        .any(|k| body.get(*k).and_then(Value::as_bool).is_some());
     let meta_nonempty = meta.as_object().map(|m| !m.is_empty()).unwrap_or(false);
     let composed = renaming
+        || has_merge_settings
         || visibility.is_some()
         || archived.is_some()
         || unit_toggles
@@ -1299,6 +1341,15 @@ async fn update_repo(
                 merge_fields(repo_ref(&p.owner, &effective), json!({"enabled": enabled}))
             );
         }
+    }
+    if has_merge_settings {
+        let mut ms = repo_ref(&p.owner, &effective);
+        for k in merge_keys {
+            if let Some(b) = body.get(k) {
+                ms[k] = b.clone();
+            }
+        }
+        step!("repo.mergeSettings.update", ms);
     }
     call(
         &state,
@@ -4023,5 +4074,81 @@ fn repo_invite_body_schema(_gen: &mut SchemaGenerator) -> Value {
             "emails": {"type": "array", "items": {"type": "string"}},
             "permission": {"type": "string", "enum": ["read", "write", "admin"]}
         }
+    })
+}
+
+/// `GET /repos/{o}/{r}/stats/contributors` — GitHub `[{author, total}]`
+/// projection (no per-week breakdown; ours is a bounded history scan).
+async fn stats_contributors(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.insights.contributors",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| {
+            json!(d["contributors"]
+                .as_array()
+                .map(|cs| cs
+                    .iter()
+                    .map(|c| {
+                        json!({
+                            "author": {
+                                "login": c["username"],
+                                "name": c["name"],
+                                "email": c["email"],
+                                "avatar_url": c["avatar_url"],
+                                "type": if c["username"].is_string() { "User" } else { "Anonymous" },
+                            },
+                            "total": c["commit_count"],
+                        })
+                    })
+                    .collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `GET /repos/{o}/{r}/stats/commit_activity` — `repo.insights.commitActivity`
+/// already emits GitHub's `{week, days[7], total}` rows; return them bare.
+async fn stats_commit_activity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.insights.commitActivity",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| d["weeks"].clone(),
+    )
+    .await
+}
+
+fn stats_contributors_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "author": {"type": "object"},
+            "total": {"type": "integer"}
+        }}
+    })
+}
+
+fn stats_activity_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "week": {"type": "integer"},
+            "days": {"type": "array", "items": {"type": "integer"}},
+            "total": {"type": "integer"}
+        }}
     })
 }

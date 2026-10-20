@@ -264,7 +264,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
 | `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
-| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`, `.updateVisibility`, `.setArchived`, `repo.*.setEnabled`) | `description`, `homepage`, `topics`; a differing `name` renames first; `private`/`visibility`, `archived`, and `has_{issues,pull_requests,wiki,projects,discussions}` fan out to the sibling procs |
+| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`, `.updateVisibility`, `.setArchived`, `repo.*.setEnabled`) | `description`, `homepage`, `topics`; a differing `name` renames first; `private`/`visibility`, `archived`, `has_{issues,pull_requests,wiki,projects,discussions}`, and `allow_{merge_commit,squash_merge,rebase_merge}` fan out to the sibling procs |
 | `POST` | `/repos/{owner}/{repo}/transfer` | `repo.transfer` (+`repo.rename`) | `{new_owner, new_name?}`; `new_owner` resolved to user/org; → 202 + repo |
 | `GET`/`POST` | `/repos/{owner}/{repo}/keys` | `repo.deployKey.list` / `repo.deployKey.create` | Deploy keys; `{title, key, read_only}` ↔ `can_write` inverted |
 | `GET`/`DELETE` | `/repos/{owner}/{repo}/keys/{key_id}` | `repo.deployKey.list` / `repo.deployKey.delete` | Get → 404 when absent; delete → 204 |
@@ -296,6 +296,9 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/contributors` | `repo.contributors.list` | Bare array; unlinked authors project as `type: "Anonymous"` |
 | `GET`/`PUT` | `/repos/{owner}/{repo}/topics` | `repo.get` / `repo.updateMetadata` | `{names: [...]}` round-trip |
 | `GET` | `/topics` | `repo.topicsSuggest` | `q`, `limit`; bare array (Gitea); anonymous OK |
+| `GET` | `/search/repositories` | `repo.explore` | `q`, `page`, `per_page` → `{total_count, incomplete_results, items}`; `sort`/`order` accepted, not applied; anonymous OK |
+| `GET` | `/repos/{owner}/{repo}/stats/contributors` | `repo.insights.contributors` | `[{author, total}]` — no per-week breakdown |
+| `GET` | `/repos/{owner}/{repo}/stats/commit_activity` | `repo.insights.commitActivity` | `[{week, days[7], total}]` — GitHub shape |
 | `GET`/`POST` | `/repos/{owner}/{repo}/invitations` | `repo.invites.list` / `repo.invites.create` | Bare array; `{email}` or `{emails:[]}` + `permission` → results array |
 | `DELETE` | `/repos/{owner}/{repo}/invitations/{invite_id}` | `repo.invites.revoke` | → 204 |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |

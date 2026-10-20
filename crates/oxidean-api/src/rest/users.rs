@@ -488,6 +488,21 @@ pub const ROUTES: &[RouteDef] = &[
     },
     RouteDef {
         method: "GET",
+        path: "/search/repositories",
+        tags: &["repos"],
+        operation_id: "searchRepositories",
+        summary: "Repository search (`repo.explore`) — GitHub `{total_count, items}` envelope",
+        procedure: "repo.explore",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<RepoSearchQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_repos_schema)),
+        mount: || get(search_repositories),
+    },
+    RouteDef {
+        method: "GET",
         path: "/topics",
         tags: &["repos"],
         operation_id: "searchTopics",
@@ -1478,5 +1493,67 @@ fn topics_search_schema(_gen: &mut SchemaGenerator) -> Value {
             "name": {"type": "string"},
             "repo_count": {"type": "integer"}
         }}
+    })
+}
+
+/// `GET /search/repositories` query — GitHub `q`, `page`, `per_page`,
+/// `sort`, `order` (sort/order accepted; explore ordering is fixed).
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RepoSearchQuery {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub per_page: Option<i64>,
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub order: Option<String>,
+}
+
+/// `GET /search/repositories` — `repo.explore` under GitHub's search envelope.
+/// `total_count` is the page's item count (explore has no global count);
+/// `sort`/`order` are accepted but not applied.
+async fn search_repositories(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoSearchQuery>,
+) -> Response {
+    let page = q.page.unwrap_or(1).max(1);
+    let per_page = q.per_page.unwrap_or(30).clamp(1, 100);
+    let input = json!({
+        "q": q.q,
+        "offset": (page - 1) * per_page,
+        "limit": per_page,
+    });
+    let _ = (q.sort, q.order);
+    call_map(
+        &state,
+        &headers,
+        "repo.explore",
+        input,
+        StatusCode::OK,
+        |d| {
+            let items = d["repos"].clone();
+            json!({
+                "total_count": items.as_array().map(|a| a.len()).unwrap_or(0),
+                "incomplete_results": false,
+                "items": items,
+            })
+        },
+    )
+    .await
+}
+
+fn search_repos_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["total_count", "incomplete_results", "items"],
+        "properties": {
+            "total_count": {"type": "integer"},
+            "incomplete_results": {"type": "boolean"},
+            "items": {"type": "array", "items": {"type": "object"}}
+        }
     })
 }
