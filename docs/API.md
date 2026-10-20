@@ -370,6 +370,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `PUT` | `/repos/{owner}/{repo}/pulls/{number}/update-branch` | `pull.updateBranch` | 202 `{pull, status, merge_commit_sha}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/releases` | `release.list` / `release.create` | Tag must already exist |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
+| `GET` | `/repos/{owner}/{repo}/releases/latest` | `release.list` | Newest non-draft non-prerelease; 404 when none |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/{release_id}` | `release.list` → `release.get` / `.update` / `.delete` | Id resolved to tag; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/releases/{release_id}/assets` | `release.list` | Bare array |
+| `DELETE` | `/repos/{owner}/{repo}/releases/assets/{asset_id}` | `release.deleteAsset` | → 204 |
 | `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
 | `GET` | `/admin/actions/runners` | `admin.actions.listRunners` | Sys-admin session only |
@@ -398,7 +402,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, mirror config CRUD, LFS objects, `org.updateSettings` and shareable invite links (`*.createLink`), most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, mirror config CRUD, LFS objects, shareable invite links (`*.createLink`), most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

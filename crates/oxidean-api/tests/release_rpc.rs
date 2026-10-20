@@ -753,3 +753,175 @@ async fn release_asset_draft_and_private_acl() {
         .unwrap();
     assert_eq!(anon.status(), StatusCode::NOT_FOUND);
 }
+
+/// REST surface — latest + id-addressed CRUD + assets, over the
+/// tag-keyed `release.*` procs.
+#[tokio::test]
+async fn rest_releases_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rel_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let (cookie, login_v) = signup_and_login(&app, "rest@ex.com", "restrel").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
+
+    setup_repo_with_tag(&app, &db, &repos, &cookie, "restrel", "relio", "v1.0.0").await;
+    let status = Command::new("git")
+        .args([
+            "-C",
+            repos.join("restrel").join("relio.git").to_str().unwrap(),
+            "tag",
+            "v1.1.0",
+        ])
+        .status()
+        .expect("tag");
+    assert!(status.success());
+
+    // Create v1.0.0 (stable) + v1.1.0 (prerelease) via REST.
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/restrel/relio/releases",
+        &cookie,
+        Some(r#"{"tag_name":"v1.0.0","title":"One","body":"b"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let rel_id = v["id"].as_str().unwrap().to_string();
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/restrel/relio/releases",
+        &cookie,
+        Some(r#"{"tag_name":"v1.1.0","title":"Two-pre","prerelease":true}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // Latest = newest non-draft non-prerelease.
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/restrel/relio/releases/latest",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["tag_name"], "v1.0.0", "{v}");
+
+    // Seed an asset on v1.0.0 directly.
+    db.insert_release_asset(
+        "asset-1",
+        &rel_id,
+        "bin.zip",
+        "application/zip",
+        10,
+        &user_id,
+    )
+    .await
+    .expect("asset");
+
+    // GET by id + assets list.
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/restrel/relio/releases/{rel_id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["tag_name"], "v1.0.0", "{v}");
+    assert_eq!(v["assets"].as_array().unwrap().len(), 1, "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/restrel/relio/releases/{rel_id}/assets"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["filename"], "bin.zip", "{v}");
+
+    // PATCH by id — title only.
+    let (s, v) = rest_json(
+        &app,
+        "PATCH",
+        &format!("/api/v1/repos/restrel/relio/releases/{rel_id}"),
+        &cookie,
+        Some(r#"{"title":"One Renamed"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["title"], "One Renamed", "{v}");
+
+    // Asset delete → 204; then the release row.
+    let (s, _) = rest_json(
+        &app,
+        "DELETE",
+        "/api/v1/repos/restrel/relio/releases/assets/asset-1",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_json(
+        &app,
+        "DELETE",
+        &format!("/api/v1/repos/restrel/relio/releases/{rel_id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_json(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/restrel/relio/releases/{rel_id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+async fn rest_json(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let req = match body {
+        Some(j) => Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie)
+            .header("content-type", "application/json")
+            .body(Body::from(j))
+            .unwrap(),
+        None => Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie)
+            .body(Body::empty())
+            .unwrap(),
+    };
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
