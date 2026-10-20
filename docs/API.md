@@ -239,6 +239,11 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
 | `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
+| `GET` | `/users/{username}/followers` and `/users/{username}/following` | `user.followers.list` / `user.following.list` | Bare `[{login, id, avatar_url, type}]` arrays; anonymous OK |
+| `GET` | `/users/{username}/following/{target}` | `user.following.list` | 204 / 404 |
+| `GET` | `/user/followers` and `/user/following` | `user.followers.list` / `user.following.list` (caller via `auth.me`) | |
+| `GET`/`PUT`/`DELETE` | `/user/following/{username}` | `user.following.list` / `user.follow` / `user.unfollow` | Check → 204/404; follow/unfollow → 204 |
+| `GET`/`POST`/`DELETE` | `/user/emails` | `email.list` / `email.add` / `email.remove` | `{emails: [..]}` bodies; add → 201 + list; delete resolves addresses to ids → 204 |
 | `GET` | `/notifications` | `notification.list` | GitHub thread shape (`repository`, `subject`, `unread`); `all`, `participating`, `since`, `before`, `page`/`per_page` |
 | `PUT` | `/notifications` | `notification.markAllRead` | 202 |
 | `GET` | `/notifications/threads/{thread_id}` | `notification.list` (id-filtered) | 404 when absent |
@@ -251,7 +256,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
 | `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
-| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` | `description`, `homepage`, `topics` |
+| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`) | `description`, `homepage`, `topics`; a differing `name` renames first |
+| `POST` | `/repos/{owner}/{repo}/transfer` | `repo.transfer` (+`repo.rename`) | `{new_owner, new_name?}`; `new_owner` resolved to user/org; → 202 + repo |
+| `GET`/`POST` | `/repos/{owner}/{repo}/keys` | `repo.deployKey.list` / `repo.deployKey.create` | Deploy keys; `{title, key, read_only}` ↔ `can_write` inverted |
+| `GET`/`DELETE` | `/repos/{owner}/{repo}/keys/{key_id}` | `repo.deployKey.list` / `repo.deployKey.delete` | Get → 404 when absent; delete → 204 |
 | `DELETE` | `/repos/{owner}/{repo}` | `repo.softDelete` | URL is the typed confirmation |
 | `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` + `repo.branchProtection.list` | GitHub bare array: `{name, commit, protected}` |
 | `GET` | `/repos/{owner}/{repo}/branches/{branch}` | `repo.refs` + `repo.branchProtection.list` | One branch; absent → 404 |
@@ -340,7 +348,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, SSH/GPG keys, PAT management, email addresses, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, SSH/GPG keys, PAT management, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

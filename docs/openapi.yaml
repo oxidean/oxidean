@@ -391,6 +391,273 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /user/followers:
+    get:
+      tags:
+      - users
+      summary: Caller's followers (`user.followers.list`)
+      operationId: users/listFollowersOfMe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/following:
+    get:
+      tags:
+      - users
+      summary: Users the caller follows (`user.following.list`)
+      operationId: users/listFollowedByMe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/following/{username}:
+    get:
+      tags:
+      - users
+      summary: Caller follows `{username}` — 204 / 404
+      operationId: users/checkFollowedByMe
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - users
+      summary: Follow `{username}` (`user.follow`) — 204
+      operationId: users/follow
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - users
+      summary: Unfollow `{username}` (`user.unfollow`) — 204
+      operationId: users/unfollow
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/followers:
+    get:
+      tags:
+      - users
+      summary: User's followers (`user.followers.list`)
+      operationId: users/listFollowersOfUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/following:
+    get:
+      tags:
+      - users
+      summary: Users followed by `{username}` (`user.following.list`)
+      operationId: users/listFollowedByUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/following/{target}:
+    get:
+      tags:
+      - users
+      summary: '`{username}` follows `{target}` — 204 / 404'
+      operationId: users/checkFollowing
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: target
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/emails:
+    get:
+      tags:
+      - users
+      summary: Caller's email addresses (`email.list`) — GitHub `{email, primary, verified}` rows
+      operationId: users/listEmails
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - users
+      summary: 'Add addresses (`email.add` per entry) — `{emails: [..]}` → 201 + list'
+      operationId: users/addEmails
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - emails
+              properties:
+                emails:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - users
+      summary: 'Remove addresses (`email.remove` via list→id) — `{emails: [..]}` → 204'
+      operationId: users/deleteEmails
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - emails
+              properties:
+                emails:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /users/{username}:
     get:
       tags:
@@ -2791,6 +3058,217 @@ paths:
       responses:
         '202':
           description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/keys:
+    get:
+      tags:
+      - repos
+      summary: Deploy keys (`repo.deployKey.list`) — GitHub `{id, key, title, read_only}` rows
+      operationId: repos/listDeployKeys
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      summary: Add a deploy key (`repo.deployKey.create`) — `{title, key, read_only}` → 201
+      operationId: repos/createDeployKey
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - title
+              - key
+              properties:
+                title:
+                  type: string
+                key:
+                  type: string
+                read_only:
+                  type: boolean
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  key:
+                    type: string
+                  title:
+                    type: string
+                  read_only:
+                    type: boolean
+                  verified:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/keys/{key_id}:
+    get:
+      tags:
+      - repos
+      summary: One deploy key (`repo.deployKey.list`, id-filtered) — 404 when absent
+      operationId: repos/getDeployKey
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  key:
+                    type: string
+                  title:
+                    type: string
+                  read_only:
+                    type: boolean
+                  verified:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Remove a deploy key (`repo.deployKey.delete`) — 204
+      operationId: repos/deleteDeployKey
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/transfer:
+    post:
+      tags:
+      - repos
+      summary: Transfer ownership (`repo.transfer`) — `{new_owner, new_name?}`; confirm auto-filled from the path
+      operationId: repos/transfer
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - new_owner
+              properties:
+                new_owner:
+                  type: string
+                new_name:
+                  type: string
+                team_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:

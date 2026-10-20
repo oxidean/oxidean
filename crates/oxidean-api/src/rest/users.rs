@@ -3,7 +3,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
     CreateRepoRequest, ListStarredRequest, OrgListMineResponse, PublicUserProfile,
@@ -163,6 +163,173 @@ pub const ROUTES: &[RouteDef] = &[
         body: None,
         response: None,
         mount: || patch(mark_notification_thread_read),
+    },
+    // ---- follows (GitHub REST) ------------------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/user/followers",
+        tags: &["users"],
+        operation_id: "users/listFollowersOfMe",
+        summary: "Caller's followers (`user.followers.list`)",
+        procedure: "user.followers.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(follow_list_schema)),
+        mount: || get(list_my_followers),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/following",
+        tags: &["users"],
+        operation_id: "users/listFollowedByMe",
+        summary: "Users the caller follows (`user.following.list`)",
+        procedure: "user.following.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(follow_list_schema)),
+        mount: || get(list_my_following),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/following/{username}",
+        tags: &["users"],
+        operation_id: "users/checkFollowedByMe",
+        summary: "Caller follows `{username}` — 204 / 404",
+        procedure: "user.following.list",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || get(check_my_following),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/user/following/{username}",
+        tags: &["users"],
+        operation_id: "users/follow",
+        summary: "Follow `{username}` (`user.follow`) — 204",
+        procedure: "user.follow",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || put(follow_user),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/following/{username}",
+        tags: &["users"],
+        operation_id: "users/unfollow",
+        summary: "Unfollow `{username}` (`user.unfollow`) — 204",
+        procedure: "user.unfollow",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(unfollow_user),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/followers",
+        tags: &["users"],
+        operation_id: "users/listFollowersOfUser",
+        summary: "User's followers (`user.followers.list`)",
+        procedure: "user.followers.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["username"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(follow_list_schema)),
+        mount: || get(list_user_followers),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/following",
+        tags: &["users"],
+        operation_id: "users/listFollowedByUser",
+        summary: "Users followed by `{username}` (`user.following.list`)",
+        procedure: "user.following.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["username"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(follow_list_schema)),
+        mount: || get(list_user_following),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/following/{target}",
+        tags: &["users"],
+        operation_id: "users/checkFollowing",
+        summary: "`{username}` follows `{target}` — 204 / 404",
+        procedure: "user.following.list",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: true,
+        path_fields: &["username", "target"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || get(check_user_following),
+    },
+    // ---- account emails (GitHub REST) ----------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/user/emails",
+        tags: &["users"],
+        operation_id: "users/listEmails",
+        summary: "Caller's email addresses (`email.list`) — GitHub `{email, primary, verified}` rows",
+        procedure: "email.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(email_list_schema)),
+        mount: || get(list_emails),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/user/emails",
+        tags: &["users"],
+        operation_id: "users/addEmails",
+        summary: "Add addresses (`email.add` per entry) — `{emails: [..]}` → 201 + list",
+        procedure: "email.add",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(email_body_schema)),
+        response: Some(RespSpec::Json(email_list_schema)),
+        mount: || post(add_emails),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/emails",
+        tags: &["users"],
+        operation_id: "users/deleteEmails",
+        summary: "Remove addresses (`email.remove` via list→id) — `{emails: [..]}` → 204",
+        procedure: "email.remove",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(email_body_schema)),
+        response: None,
+        mount: || delete(delete_emails),
     },
     RouteDef {
         method: "GET",
@@ -564,4 +731,329 @@ async fn mark_notification_thread_read(
         StatusCode::RESET_CONTENT,
     )
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Follows + emails (GitHub REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct FollowPath {
+    username: String,
+}
+
+#[derive(Deserialize)]
+pub struct FollowPairPath {
+    username: String,
+    target: String,
+}
+
+fn follow_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn email_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn email_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["emails"],
+        "properties": {"emails": {"type": "array", "items": {"type": "string"}}},
+    })
+}
+
+/// `UserFollowPublic` → GitHub's user-list row.
+fn gh_follow_row(u: &Value) -> Value {
+    let login = u["username"].as_str().unwrap_or_default();
+    json!({
+        "login": login,
+        "id": u["user_id"],
+        "avatar_url": u["avatar_url"],
+        "type": "User",
+        "url": format!("/api/v1/users/{login}"),
+        "html_url": format!("/{login}"),
+    })
+}
+
+/// `user.followers.list`/`following.list` → GitHub bare user array.
+async fn follow_list(
+    state: &AppState,
+    headers: &HeaderMap,
+    proc: &'static str,
+    username: String,
+) -> Response {
+    call_map(
+        state,
+        headers,
+        proc,
+        json!({"username": username, "limit": 100}),
+        StatusCode::OK,
+        |d| {
+            json!(d["users"]
+                .as_array()
+                .map(|us| us.iter().map(gh_follow_row).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// Caller username via `auth.me` for the `/user/following*` routes.
+async fn me_username(state: &AppState, headers: &HeaderMap) -> Result<String, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    match super::dispatch(&mut ctx, "auth.me", json!({})).await {
+        super::RpcResponse::Ok { data, .. } => data["username"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Box::new(
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"code": "auth.me.no_username", "message": "session has no username"})),
+                    )
+                        .into_response(),
+                )
+            }),
+        super::RpcResponse::Err { error, .. } => Err(Box::new(
+            (super::status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+async fn list_user_followers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPath>,
+) -> Response {
+    follow_list(&state, &headers, "user.followers.list", p.username).await
+}
+
+async fn list_user_following(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPath>,
+) -> Response {
+    follow_list(&state, &headers, "user.following.list", p.username).await
+}
+
+async fn list_my_followers(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match me_username(&state, &headers).await {
+        Ok(me) => follow_list(&state, &headers, "user.followers.list", me).await,
+        Err(r) => *r,
+    }
+}
+
+async fn list_my_following(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match me_username(&state, &headers).await {
+        Ok(me) => follow_list(&state, &headers, "user.following.list", me).await,
+        Err(r) => *r,
+    }
+}
+
+/// `GET /users/{u}/following/{target}` — 204 when the edge exists, 404 else.
+async fn check_user_following(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPairPath>,
+) -> Response {
+    check_user_following_inner(&state, &headers, p.username, p.target).await
+}
+
+/// `GET /user/following/{u}` — same check against the caller's own list.
+async fn check_my_following(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPath>,
+) -> Response {
+    match me_username(&state, &headers).await {
+        Ok(me) => check_user_following_inner(&state, &headers, me, p.username).await,
+        Err(r) => *r,
+    }
+}
+
+async fn check_user_following_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    username: String,
+    target: String,
+) -> Response {
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match super::dispatch(
+        &mut ctx,
+        "user.following.list",
+        json!({"username": username, "limit": 100}),
+    )
+    .await
+    {
+        super::RpcResponse::Ok { data, .. } => {
+            let found = data["users"]
+                .as_array()
+                .map(|us| {
+                    us.iter()
+                        .any(|u| u["username"].as_str() == Some(target.as_str()))
+                })
+                .unwrap_or(false);
+            if found {
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            }
+        }
+        super::RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+async fn follow_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "user.follow",
+        json!({"username": p.username}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn unfollow_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<FollowPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "user.unfollow",
+        json!({"username": p.username}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `EmailListItem` → GitHub's `{email, primary, verified, visibility}` row.
+fn gh_email(e: &Value) -> Value {
+    json!({
+        "email": e["email"],
+        "primary": e["is_primary"],
+        "verified": e["verified"],
+        "visibility": "public",
+    })
+}
+
+async fn list_emails(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "email.list",
+        json!({}),
+        StatusCode::OK,
+        |d| {
+            json!(d
+                .as_array()
+                .map(|es| es.iter().map(gh_email).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `POST /user/emails {emails: [..]}` — fan out `email.add` per address.
+async fn add_emails(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let emails: Vec<String> = body["emails"]
+        .as_array()
+        .map(|es| {
+            es.iter()
+                .filter_map(|e| e.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if emails.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"message": "Validation Failed", "errors": ["emails is required"]})),
+        )
+            .into_response();
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    for email in &emails {
+        match super::dispatch(&mut ctx, "email.add", json!({"email": email})).await {
+            super::RpcResponse::Ok { .. } => {}
+            super::RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response();
+            }
+        }
+    }
+    // GitHub returns the full list after add.
+    match super::dispatch(&mut ctx, "email.list", json!({})).await {
+        super::RpcResponse::Ok { data, .. } => {
+            let out: Vec<Value> = data
+                .as_array()
+                .map(|es| es.iter().map(gh_email).collect())
+                .unwrap_or_default();
+            (StatusCode::CREATED, Json(json!(out))).into_response()
+        }
+        super::RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// `DELETE /user/emails {emails: [..]}` — resolve each address to its row id
+/// (`email.remove` takes ids), then remove; 204.
+async fn delete_emails(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let want: Vec<String> = body["emails"]
+        .as_array()
+        .map(|es| {
+            es.iter()
+                .filter_map(|e| e.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let rows = match super::dispatch(&mut ctx, "email.list", json!({})).await {
+        super::RpcResponse::Ok { data, .. } => data.as_array().cloned().unwrap_or_default(),
+        super::RpcResponse::Err { error, .. } => {
+            return (super::status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    for addr in &want {
+        let Some(id) = rows
+            .iter()
+            .find(|e| e["email"].as_str() == Some(addr.as_str()))
+            .and_then(|e| e["id"].as_str())
+        else {
+            continue; // unknown address → GitHub still 204s
+        };
+        match super::dispatch(&mut ctx, "email.remove", json!({"id": id})).await {
+            super::RpcResponse::Ok { .. } => {}
+            super::RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response();
+            }
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
 }

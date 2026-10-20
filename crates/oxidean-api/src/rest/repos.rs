@@ -840,6 +840,82 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || put(mark_repo_notifications_read),
     },
+    // ---- deploy keys + transfer (GitHub REST) --------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/keys",
+        tags: &["repos"],
+        operation_id: "repos/listDeployKeys",
+        summary: "Deploy keys (`repo.deployKey.list`) — GitHub `{id, key, title, read_only}` rows",
+        procedure: "repo.deployKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(deploy_key_list_schema)),
+        mount: || get(list_deploy_keys),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/keys/{key_id}",
+        tags: &["repos"],
+        operation_id: "repos/getDeployKey",
+        summary: "One deploy key (`repo.deployKey.list`, id-filtered) — 404 when absent",
+        procedure: "repo.deployKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "key_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(deploy_key_schema)),
+        mount: || get(get_deploy_key),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/keys",
+        tags: &["repos"],
+        operation_id: "repos/createDeployKey",
+        summary: "Add a deploy key (`repo.deployKey.create`) — `{title, key, read_only}` → 201",
+        procedure: "repo.deployKey.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(deploy_key_body_schema)),
+        response: Some(RespSpec::Json(deploy_key_schema)),
+        mount: || post(create_deploy_key),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/keys/{key_id}",
+        tags: &["repos"],
+        operation_id: "repos/deleteDeployKey",
+        summary: "Remove a deploy key (`repo.deployKey.delete`) — 204",
+        procedure: "repo.deployKey.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "key_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_deploy_key),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/transfer",
+        tags: &["repos"],
+        operation_id: "repos/transfer",
+        summary: "Transfer ownership (`repo.transfer`) — `{new_owner, new_name?}`; confirm auto-filled from the path",
+        procedure: "repo.transfer",
+        ok: StatusCode::ACCEPTED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(transfer_body_schema)),
+        response: Some(RespSpec::Json(transfer_repo_schema)),
+        mount: || post(transfer_repo_rest),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -875,15 +951,67 @@ async fn get_repo(
     .await
 }
 
-/// `PATCH /api/v1/repos/{owner}/{repo}` (`repo.updateMetadata`) —
-/// body: `description`, `homepage`, `topics` (all optional).
+/// `PATCH /api/v1/repos/{owner}/{repo}` — GitHub's update surface:
+/// `description`/`homepage`/`topics` → `repo.updateMetadata`; a `name`
+/// different from the path runs `repo.rename` first, then metadata under the
+/// new name (GitHub treats rename as a PATCH field).
 async fn update_repo(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoPath>,
     Json(body): Json<Value>,
 ) -> Response {
-    let input = merge_fields(repo_ref(&p.owner, &p.repo), body);
+    let new_name = body["name"].as_str().unwrap_or_default().to_string();
+    let renaming = !new_name.is_empty() && new_name != p.repo;
+    let mut meta = body.clone();
+    if let Some(m) = meta.as_object_mut() {
+        m.remove("name");
+    }
+    if renaming {
+        let mut ctx = match ctx_for(&state, &headers).await {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        match dispatch(
+            &mut ctx,
+            "repo.rename",
+            merge_fields(repo_ref(&p.owner, &p.repo), json!({"new_name": new_name})),
+        )
+        .await
+        {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response();
+            }
+        }
+        if meta.as_object().map(|m| !m.is_empty()).unwrap_or(false) {
+            match dispatch(
+                &mut ctx,
+                "repo.updateMetadata",
+                merge_fields(repo_ref(&p.owner, &new_name), meta),
+            )
+            .await
+            {
+                RpcResponse::Ok { data, .. } => {
+                    return (StatusCode::OK, Json(data)).into_response();
+                }
+                RpcResponse::Err { error, .. } => {
+                    return (super::status_for_error(&error), Json(error)).into_response();
+                }
+            }
+        }
+        // Metadata empty → return the renamed repo (matches PATCH's
+        // repo-object response; `repo.get` under the new name).
+        return call(
+            &state,
+            &headers,
+            "repo.get",
+            repo_ref(&p.owner, &new_name),
+            StatusCode::OK,
+        )
+        .await;
+    }
+    let input = merge_fields(repo_ref(&p.owner, &p.repo), meta);
     call(
         &state,
         &headers,
@@ -2700,5 +2828,255 @@ async fn mark_repo_notifications_read(
             .await
         }
         Err(r) => *r,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Deploy keys + transfer (GitHub REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct DeployKeyPath {
+    owner: String,
+    repo: String,
+    key_id: String,
+}
+
+fn deploy_key_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn deploy_key_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "key": {"type": "string"},
+            "title": {"type": "string"},
+            "read_only": {"type": "boolean"},
+            "verified": {"type": "boolean"},
+        },
+    })
+}
+
+fn deploy_key_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["title", "key"],
+        "properties": {
+            "title": {"type": "string"},
+            "key": {"type": "string"},
+            "read_only": {"type": "boolean"},
+        },
+    })
+}
+
+fn transfer_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["new_owner"],
+        "properties": {
+            "new_owner": {"type": "string"},
+            "new_name": {"type": "string"},
+            "team_ids": {"type": "array", "items": {"type": "integer"}},
+        },
+    })
+}
+
+fn transfer_repo_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+/// `DeployKeyPublic` → GitHub's deploy-key object.
+fn gh_deploy_key(k: &Value) -> Value {
+    json!({
+        "id": k["id"],
+        "key": k["public_key"],
+        "title": k["title"],
+        "verified": true,
+        "read_only": !k["can_write"].as_bool().unwrap_or(false),
+        "created_at": k["created_at"],
+        "last_used": k["last_used_at"],
+    })
+}
+
+async fn list_deploy_keys(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.deployKey.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| {
+            json!(d["keys"]
+                .as_array()
+                .map(|ks| ks.iter().map(gh_deploy_key).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+async fn get_deploy_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<DeployKeyPath>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "repo.deployKey.list", repo_ref(&p.owner, &p.repo)).await {
+        RpcResponse::Ok { data, .. } => {
+            let hit = data["keys"].as_array().and_then(|ks| {
+                ks.iter()
+                    .find(|k| k["id"].as_str() == Some(p.key_id.as_str()))
+            });
+            match hit {
+                Some(k) => (StatusCode::OK, Json(gh_deploy_key(k))).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "deploy_key.not_found", "message": "key not found"})),
+                )
+                    .into_response(),
+            }
+        }
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// `POST /repos/{o}/{r}/keys {title, key, read_only}` — `read_only` inverts
+/// `can_write` on `repo.deployKey.create`.
+async fn create_deploy_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let read_only = body["read_only"].as_bool().unwrap_or(false);
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({
+            "title": body["title"],
+            "public_key": body["key"],
+            "can_write": !read_only,
+        }),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.deployKey.create",
+        input,
+        StatusCode::CREATED,
+        |d| gh_deploy_key(&d),
+    )
+    .await
+}
+
+async fn delete_deploy_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<DeployKeyPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.deployKey.delete",
+        merge_fields(repo_ref(&p.owner, &p.repo), json!({"id": p.key_id})),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `POST /repos/{o}/{r}/transfer {new_owner, new_name?}` — resolve the login
+/// to user/org (`org.get` then `user.getPublicProfile`), `confirm_name`
+/// auto-fills from the path (the URL already names the repo), then rename
+/// when `new_name` is given. GitHub returns 202.
+async fn transfer_repo_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(new_owner) = body["new_owner"].as_str() else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"message": "Validation Failed", "errors": ["new_owner is required"]})),
+        )
+            .into_response();
+    };
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    // Resolve dest_owner_type — org first, then user profile.
+    let dest_type =
+        match dispatch(&mut ctx, "org.get", json!({"slug": new_owner})).await {
+            RpcResponse::Ok { .. } => "org",
+            _ => match dispatch(
+                &mut ctx,
+                "user.getPublicProfile",
+                json!({"username": new_owner}),
+            )
+            .await
+            {
+                RpcResponse::Ok { .. } => "user",
+                _ => return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(
+                        json!({"message": "Validation Failed", "errors": ["new_owner not found"]}),
+                    ),
+                )
+                    .into_response(),
+            },
+        };
+    match dispatch(
+        &mut ctx,
+        "repo.transfer",
+        merge_fields(
+            repo_ref(&p.owner, &p.repo),
+            json!({
+                "dest_owner": new_owner,
+                "dest_owner_type": dest_type,
+                "confirm_name": p.repo,
+            }),
+        ),
+    )
+    .await
+    {
+        RpcResponse::Err { error, .. } => {
+            return (super::status_for_error(&error), Json(error)).into_response();
+        }
+        RpcResponse::Ok { .. } => {}
+    }
+    let final_name = body["new_name"].as_str().unwrap_or(&p.repo).to_string();
+    if final_name != p.repo {
+        match dispatch(
+            &mut ctx,
+            "repo.rename",
+            merge_fields(
+                repo_ref(new_owner, &p.repo),
+                json!({"new_name": final_name}),
+            ),
+        )
+        .await
+        {
+            RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response();
+            }
+            RpcResponse::Ok { .. } => {}
+        }
+    }
+    match dispatch(&mut ctx, "repo.get", repo_ref(new_owner, &final_name)).await {
+        RpcResponse::Ok { data, .. } => (StatusCode::ACCEPTED, Json(data)).into_response(),
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
     }
 }
