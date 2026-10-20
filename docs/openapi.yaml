@@ -658,6 +658,257 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /user/keys:
+    get:
+      tags:
+      - users
+      summary: Caller's SSH keys (`sshKey.list`) — GitHub `{id, key, title, verified, read_only}` rows
+      operationId: users/listSshKeys
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - users
+      summary: Add an SSH key (`sshKey.add`) — `{title, key}` → 201
+      operationId: users/createSshKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - title
+              - key
+              properties:
+                title:
+                  type: string
+                key:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  key:
+                    type: string
+                  title:
+                    type: string
+                  verified:
+                    type: boolean
+                  read_only:
+                    type: boolean
+                  created_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/keys/{key_id}:
+    get:
+      tags:
+      - users
+      summary: One SSH key (`sshKey.list`, id-filtered) — 404 when absent
+      operationId: users/getSshKey
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  key:
+                    type: string
+                  title:
+                    type: string
+                  verified:
+                    type: boolean
+                  read_only:
+                    type: boolean
+                  created_at:
+                    type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - users
+      summary: Revoke an SSH key (`sshKey.revoke`) — 204
+      operationId: users/deleteSshKey
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/gpg_keys:
+    get:
+      tags:
+      - users
+      summary: Caller's GPG keys (`gpgKey.list`) — GitHub `{id, name, key_id, public_key, emails}` rows
+      operationId: users/listGpgKeys
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - users
+      summary: Add a GPG key (`gpgKey.add`) — `{name, armored_public_key}` → 201
+      operationId: users/createGpgKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - armored_public_key
+              properties:
+                name:
+                  type: string
+                armored_public_key:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  key_id:
+                    type: string
+                  public_key:
+                    type: string
+                  emails:
+                    type: array
+                    items:
+                      type: object
+                  can_sign:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/gpg_keys/{gpg_key_id}:
+    get:
+      tags:
+      - users
+      summary: One GPG key (`gpgKey.list`, id-filtered) — 404 when absent
+      operationId: users/getGpgKey
+      parameters:
+      - name: gpg_key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  key_id:
+                    type: string
+                  public_key:
+                    type: string
+                  emails:
+                    type: array
+                    items:
+                      type: object
+                  can_sign:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - users
+      summary: Revoke a GPG key (`gpgKey.revoke`) — 204
+      operationId: users/deleteGpgKey
+      parameters:
+      - name: gpg_key_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /users/{username}:
     get:
       tags:

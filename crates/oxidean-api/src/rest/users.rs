@@ -331,6 +331,127 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || delete(delete_emails),
     },
+    // ---- SSH / GPG keys (GitHub REST) ----------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/user/keys",
+        tags: &["users"],
+        operation_id: "users/listSshKeys",
+        summary: "Caller's SSH keys (`sshKey.list`) — GitHub `{id, key, title, verified, read_only}` rows",
+        procedure: "sshKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(ssh_key_list_schema)),
+        mount: || get(list_ssh_keys),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/user/keys",
+        tags: &["users"],
+        operation_id: "users/createSshKey",
+        summary: "Add an SSH key (`sshKey.add`) — `{title, key}` → 201",
+        procedure: "sshKey.add",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(ssh_key_body_schema)),
+        response: Some(RespSpec::Json(ssh_key_schema)),
+        mount: || post(create_ssh_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/keys/{key_id}",
+        tags: &["users"],
+        operation_id: "users/getSshKey",
+        summary: "One SSH key (`sshKey.list`, id-filtered) — 404 when absent",
+        procedure: "sshKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(ssh_key_schema)),
+        mount: || get(get_ssh_key),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/keys/{key_id}",
+        tags: &["users"],
+        operation_id: "users/deleteSshKey",
+        summary: "Revoke an SSH key (`sshKey.revoke`) — 204",
+        procedure: "sshKey.revoke",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_ssh_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/gpg_keys",
+        tags: &["users"],
+        operation_id: "users/listGpgKeys",
+        summary: "Caller's GPG keys (`gpgKey.list`) — GitHub `{id, name, key_id, public_key, emails}` rows",
+        procedure: "gpgKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(gpg_key_list_schema)),
+        mount: || get(list_gpg_keys),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/user/gpg_keys",
+        tags: &["users"],
+        operation_id: "users/createGpgKey",
+        summary: "Add a GPG key (`gpgKey.add`) — `{name, armored_public_key}` → 201",
+        procedure: "gpgKey.add",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(gpg_key_body_schema)),
+        response: Some(RespSpec::Json(gpg_key_schema)),
+        mount: || post(create_gpg_key),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/gpg_keys/{gpg_key_id}",
+        tags: &["users"],
+        operation_id: "users/getGpgKey",
+        summary: "One GPG key (`gpgKey.list`, id-filtered) — 404 when absent",
+        procedure: "gpgKey.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(gpg_key_schema)),
+        mount: || get(get_gpg_key),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/user/gpg_keys/{gpg_key_id}",
+        tags: &["users"],
+        operation_id: "users/deleteGpgKey",
+        summary: "Revoke a GPG key (`gpgKey.revoke`) — 204",
+        procedure: "gpgKey.revoke",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_gpg_key),
+    },
     RouteDef {
         method: "GET",
         path: "/users/{username}",
@@ -1056,4 +1177,255 @@ async fn delete_emails(
         }
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+// ---------------------------------------------------------------------------
+// SSH / GPG keys (GitHub REST)
+// ---------------------------------------------------------------------------
+
+fn ssh_key_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn ssh_key_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "key": {"type": "string"},
+            "title": {"type": "string"},
+            "verified": {"type": "boolean"},
+            "read_only": {"type": "boolean"},
+            "created_at": {"type": "string"},
+        },
+    })
+}
+
+fn ssh_key_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["title", "key"],
+        "properties": {
+            "title": {"type": "string"},
+            "key": {"type": "string"},
+        },
+    })
+}
+
+fn gpg_key_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn gpg_key_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "key_id": {"type": "string"},
+            "public_key": {"type": "string"},
+            "emails": {"type": "array", "items": {"type": "object"}},
+            "can_sign": {"type": "boolean"},
+        },
+    })
+}
+
+fn gpg_key_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["armored_public_key"],
+        "properties": {
+            "name": {"type": "string"},
+            "armored_public_key": {"type": "string"},
+        },
+    })
+}
+
+/// `SshKeyListItem` → GitHub's ssh-key object.
+fn gh_ssh_key(k: &Value) -> Value {
+    json!({
+        "id": k["id"],
+        "key": k["public_key"],
+        "title": k["title"],
+        "verified": true,
+        // Sign-only keys can't authenticate git — GitHub's closest field.
+        "read_only": !k["can_authenticate"].as_bool().unwrap_or(true),
+        "created_at": k["created_at"],
+        "last_used": k["last_used_at"],
+    })
+}
+
+/// `GpgKeyListItem` → GitHub's gpg-key object.
+fn gh_gpg_key(k: &Value) -> Value {
+    let emails: Vec<Value> = k["uid_emails"]
+        .as_array()
+        .map(|es| {
+            es.iter()
+                .map(|e| json!({"email": e, "verified": true}))
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "id": k["id"],
+        "name": k["title"],
+        "key_id": k["key_id"],
+        "public_key": k["armored_public_key"],
+        "emails": emails,
+        "subkeys": [],
+        "can_sign": true,
+        "can_encrypt_comms": false,
+        "can_encrypt_storage": false,
+        "can_certify": true,
+        "created_at": k["created_at"],
+        "expires_at": Value::Null,
+    })
+}
+
+async fn list_ssh_keys(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "sshKey.list",
+        json!({}),
+        StatusCode::OK,
+        |d| {
+            json!(d
+                .as_array()
+                .map(|ks| ks.iter().map(gh_ssh_key).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `GET /user/keys/{id}` — no per-key proc; list + id filter → 404.
+async fn get_ssh_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match super::dispatch(&mut ctx, "sshKey.list", json!({})).await {
+        super::RpcResponse::Ok { data, .. } => {
+            let hit = data
+                .as_array()
+                .and_then(|ks| ks.iter().find(|k| k["id"].as_str() == Some(id.as_str())));
+            match hit {
+                Some(k) => (StatusCode::OK, Json(gh_ssh_key(k))).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        super::RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// `POST /user/keys {title, key}` — `key` → `public_key`; GitHub returns 201 + key.
+async fn create_ssh_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "sshKey.add",
+        json!({"title": body["title"], "public_key": body["key"]}),
+        StatusCode::CREATED,
+        |d| gh_ssh_key(&d),
+    )
+    .await
+}
+
+async fn delete_ssh_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "sshKey.revoke",
+        json!({"id": id}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+async fn list_gpg_keys(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "gpgKey.list",
+        json!({}),
+        StatusCode::OK,
+        |d| {
+            json!(d
+                .as_array()
+                .map(|ks| ks.iter().map(gh_gpg_key).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+async fn get_gpg_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match super::dispatch(&mut ctx, "gpgKey.list", json!({})).await {
+        super::RpcResponse::Ok { data, .. } => {
+            let hit = data
+                .as_array()
+                .and_then(|ks| ks.iter().find(|k| k["id"].as_str() == Some(id.as_str())));
+            match hit {
+                Some(k) => (StatusCode::OK, Json(gh_gpg_key(k))).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        super::RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// `POST /user/gpg_keys {name, armored_public_key}` — `name` → `title`.
+async fn create_gpg_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "gpgKey.add",
+        json!({"title": body["name"], "armored_public_key": body["armored_public_key"]}),
+        StatusCode::CREATED,
+        |d| gh_gpg_key(&d),
+    )
+    .await
+}
+
+async fn delete_gpg_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "gpgKey.revoke",
+        json!({"id": id}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
 }

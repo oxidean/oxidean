@@ -244,6 +244,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/user/followers` and `/user/following` | `user.followers.list` / `user.following.list` (caller via `auth.me`) | |
 | `GET`/`PUT`/`DELETE` | `/user/following/{username}` | `user.following.list` / `user.follow` / `user.unfollow` | Check → 204/404; follow/unfollow → 204 |
 | `GET`/`POST`/`DELETE` | `/user/emails` | `email.list` / `email.add` / `email.remove` | `{emails: [..]}` bodies; add → 201 + list; delete resolves addresses to ids → 204 |
+| `GET`/`POST` | `/user/keys` | `sshKey.list` / `sshKey.add` | `{title, key}`; `read_only` ← `!can_authenticate` (sign-only keys) |
+| `GET`/`DELETE` | `/user/keys/{key_id}` | `sshKey.list` / `sshKey.revoke` | Get → 404 when absent; delete → 204 |
+| `GET`/`POST` | `/user/gpg_keys` | `gpgKey.list` / `gpgKey.add` | `{name, armored_public_key}`; `name` → `title` |
+| `GET`/`DELETE` | `/user/gpg_keys/{gpg_key_id}` | `gpgKey.list` / `gpgKey.revoke` | Get → 404 when absent; delete → 204 |
 | `GET` | `/notifications` | `notification.list` | GitHub thread shape (`repository`, `subject`, `unread`); `all`, `participating`, `since`, `before`, `page`/`per_page` |
 | `PUT` | `/notifications` | `notification.markAllRead` | 202 |
 | `GET` | `/notifications/threads/{thread_id}` | `notification.list` (id-filtered) | 404 when absent |
@@ -348,7 +352,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, SSH/GPG keys, PAT management, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 
