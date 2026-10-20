@@ -532,12 +532,40 @@ pub struct ActionRunnerDeleteResponse {
     pub deleted: bool,
 }
 
-/// `repo.actions.createRegistrationToken` — Admin; mints a one-shot
-/// repo-scoped token (registering runner claims only this repo's jobs).
+/// `repo.actions.createRegistrationToken` / `createRemoveToken` — Admin;
+/// mints a one-shot repo-scoped token (registering runner claims only this
+/// repo's jobs; a remove token authorizes runner deletion for this repo).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRepoRegistrationTokenRequest {
     pub owner: String,
     pub name: String,
+}
+
+/// `repo.actions.listRunApprovals` — Read+; environment-protection review
+/// decisions recorded against a run's jobs (GitHub `GET
+/// /actions/runs/{run_id}/approvals`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalsRequest {
+    pub owner: String,
+    pub name: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalPublic {
+    pub job_id: String,
+    pub environment: String,
+    pub reviewer_username: String,
+    /// `approved` | `rejected`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalsResponse {
+    pub approvals: Vec<ActionRunApprovalPublic>,
 }
 
 /// Provenance of a workflow template in the `repo.actions.workflowTemplates`

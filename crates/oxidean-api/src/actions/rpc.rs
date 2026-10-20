@@ -18,7 +18,8 @@ use oxidean_core::{
     ActionJobGetRequest, ActionJobGetResponse, ActionJobLogRequest, ActionJobLogResponse,
     ActionJobPublic, ActionListRunnersResponse, ActionRegistrationTokenResponse,
     ActionRepoArtifactsListRequest, ActionRepoRegistrationTokenRequest,
-    ActionRepoRunnersListRequest, ActionRunGetRequest, ActionRunGetResponse,
+    ActionRepoRunnersListRequest, ActionRunApprovalPublic, ActionRunApprovalsRequest,
+    ActionRunApprovalsResponse, ActionRunGetRequest, ActionRunGetResponse,
     ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
     ActionRunnerDeleteResponse, ActionRunnerGetResponse, ActionRunnerPublic, ActionRunnerRequest,
     ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
@@ -1908,6 +1909,78 @@ pub async fn create_registration_token(
     Ok(ActionRegistrationTokenResponse {
         token,
         scope: "repo".into(),
+    })
+}
+
+/// `repo.actions.createRemoveToken` — Admin; one-shot `repo-remove` token.
+/// `DELETE /actions/runners/{id}` accepts it as Bearer auth so a runner can
+/// self-remove without user credentials (GitHub's `remove-token` flow).
+pub async fn create_remove_token(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRegistrationTokenResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionRepoRegistrationTokenRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.createRemoveToken input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Admin) {
+        return Err(not_found());
+    }
+    let token = crate::actions::tokens::mint_remove_token(&ctx.db, &accessible.row.id)
+        .await
+        .map_err(|e| AppError::new("repo.actions.token_failed", e))?;
+    Ok(ActionRegistrationTokenResponse {
+        token,
+        scope: "repo".into(),
+    })
+}
+
+/// `repo.actions.listRunApprovals` — Read+; deployment-review decisions for a
+/// run — GitHub `GET /repos/{o}/{r}/actions/runs/{run_id}/approvals`.
+pub async fn list_run_approvals(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRunApprovalsResponse, AppError> {
+    let req: ActionRunApprovalsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.listRunApprovals input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let run = ctx
+        .db
+        .find_action_run_by_id(&req.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_deployment_reviews_for_run(&run.id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionRunApprovalsResponse {
+        approvals: rows
+            .into_iter()
+            .map(|r| ActionRunApprovalPublic {
+                job_id: r.job_id,
+                environment: r.environment,
+                reviewer_username: r.reviewer_username,
+                state: r.state,
+                comment: r.comment,
+                created_at: r.created_at,
+            })
+            .collect(),
     })
 }
 

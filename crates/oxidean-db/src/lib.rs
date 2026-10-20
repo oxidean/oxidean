@@ -4408,12 +4408,15 @@ impl Database {
         actions::runner_busy(self.require_pool()?, runner_id).await
     }
 
+    /// `purpose` separates credential kinds: `register` (runner bootstrap) vs
+    /// `remove` (GitHub's `remove-token` — authorizes runner deletion only).
     pub async fn insert_action_runner_token(
         &self,
         id: &str,
         token_hash: &str,
         scope_type: &str,
         scope_id: Option<&str>,
+        purpose: &str,
         active: bool,
     ) -> Result<(), String> {
         actions::insert_runner_token(
@@ -4422,6 +4425,7 @@ impl Database {
             token_hash,
             scope_type,
             scope_id,
+            purpose,
             active,
         )
         .await
@@ -5131,6 +5135,14 @@ impl Database {
         token_hash: &str,
     ) -> Result<Option<(String, Option<String>)>, String> {
         actions::consume_registration_token(self.require_pool()?, token_hash).await
+    }
+
+    /// Consume a `repo-remove` runner token — returns the bound repository id.
+    pub async fn consume_action_runner_remove_token(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<String>, String> {
+        actions::consume_remove_token(self.require_pool()?, token_hash).await
     }
 
     pub async fn find_action_runner_by_token_hash(

@@ -413,6 +413,8 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.getRunner",
     "repo.actions.deleteRunner",
     "repo.actions.createRegistrationToken",
+    "repo.actions.createRemoveToken",
+    "repo.actions.listRunApprovals",
     "repo.actions.organizationSecrets",
     "repo.actions.organizationVariables",
     "repo.actions.workflowTemplates.list",
@@ -1842,6 +1844,18 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.createRegistrationToken" => {
             match crate::actions::rpc::create_registration_token(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.createRemoveToken" => {
+            match crate::actions::rpc::create_remove_token(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listRunApprovals" => {
+            match crate::actions::rpc::list_run_approvals(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

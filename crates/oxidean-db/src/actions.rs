@@ -1176,23 +1176,24 @@ pub async fn insert_runner_token(
     token_hash: &str,
     scope_type: &str,
     scope_id: Option<&str>,
+    purpose: &str,
     active: bool,
 ) -> Result<(), String> {
     let active_i = if active { 1i64 } else { 0 };
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, active) VALUES ($1,$2,$3,$4,$5)"#)
-                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(active)
+            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, purpose, active) VALUES ($1,$2,$3,$4,$5,$6)"#)
+                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(purpose).bind(active)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, active) VALUES (?,?,?,?,?)"#)
-                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(active_i as i8)
+            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, purpose, active) VALUES (?,?,?,?,?,?)"#)
+                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(purpose).bind(active_i as i8)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
-            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, active) VALUES (?,?,?,?,?)"#)
-                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(active_i)
+            sqlx::query(r#"INSERT INTO action_runner_tokens (id, token_hash, scope_type, scope_id, purpose, active) VALUES (?,?,?,?,?,?)"#)
+                .bind(id).bind(token_hash).bind(scope_type).bind(scope_id).bind(purpose).bind(active_i)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
     }
@@ -1814,7 +1815,7 @@ pub async fn consume_registration_token(
         DbPool::Sqlite(p) => {
             let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1 \
-                 RETURNING scope_type, scope_id",
+                 AND purpose = 'register' AND scope_type IN ('instance','repo') RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1825,7 +1826,7 @@ pub async fn consume_registration_token(
         DbPool::Postgres(p) => {
             let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true \
-                 RETURNING scope_type, scope_id",
+                 AND purpose = 'register' AND scope_type IN ('instance','repo') RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1836,7 +1837,8 @@ pub async fn consume_registration_token(
         DbPool::MySql(p) => {
             // No UPDATE…RETURNING — read the scope, then deactivate.
             let row: Option<(String, Option<String>)> = sqlx::query_as(
-                "SELECT scope_type, scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1",
+                "SELECT scope_type, scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1 \
+                 AND purpose = 'register' AND scope_type IN ('instance','repo')",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1853,6 +1855,59 @@ pub async fn consume_registration_token(
             .await
             .map_err(|e| e.to_string())?;
             Ok(row)
+        }
+    }
+}
+
+/// Consume a `repo-remove` token — GitHub `POST …/actions/runners/remove-token`
+/// credential. Returns the bound repository id; the token is one-shot.
+pub async fn consume_remove_token(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<String>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row: Option<(Option<String>,)> = sqlx::query_as(
+                "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1 \
+                 AND scope_type = 'repo' AND purpose = 'remove' RETURNING scope_id",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.and_then(|r| r.0))
+        }
+        DbPool::Postgres(p) => {
+            let row: Option<(Option<String>,)> = sqlx::query_as(
+                "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true \
+                 AND scope_type = 'repo' AND purpose = 'remove' RETURNING scope_id",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.and_then(|r| r.0))
+        }
+        DbPool::MySql(p) => {
+            let row: Option<(Option<String>,)> = sqlx::query_as(
+                "SELECT scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1 \
+                 AND scope_type = 'repo' AND purpose = 'remove'",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            let Some((repo_id,)) = row else {
+                return Ok(None);
+            };
+            sqlx::query(
+                "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1",
+            )
+            .bind(token_hash)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(repo_id)
         }
     }
 }

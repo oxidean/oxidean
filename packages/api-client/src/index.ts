@@ -2472,6 +2472,26 @@ export type ActionRepoRegistrationTokenRequest = {
   name: string;
 };
 
+export type ActionRunApprovalsRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+};
+
+export type ActionRunApprovalPublic = {
+  job_id: string;
+  environment: string;
+  reviewer_username: string;
+  /** `approved` | `rejected`. */
+  state: string;
+  comment?: string;
+  created_at: string;
+};
+
+export type ActionRunApprovalsResponse = {
+  approvals: ActionRunApprovalPublic[];
+};
+
 export type ActionJobApproveRequest = {
   owner: string;
   name: string;
@@ -6146,6 +6166,18 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRegistrationTokenResponse>(
             opts,
             "repo.actions.createRegistrationToken",
+            input,
+          ),
+        createRemoveToken: (input: ActionRepoRegistrationTokenRequest) =>
+          rpcCall<ActionRegistrationTokenResponse>(
+            opts,
+            "repo.actions.createRemoveToken",
+            input,
+          ),
+        listRunApprovals: (input: ActionRunApprovalsRequest) =>
+          rpcCall<ActionRunApprovalsResponse>(
+            opts,
+            "repo.actions.listRunApprovals",
             input,
           ),
         organizationSecrets: (input: ActionRepoRunnersListRequest) =>

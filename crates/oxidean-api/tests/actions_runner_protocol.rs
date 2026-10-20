@@ -1940,6 +1940,160 @@ async fn actions_runner_repo_rest_surface() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    // ---- remove-token (`config.sh remove` credential): a repo remove-token
+    // authorizes DELETE on repo-bound runners without a user session; it
+    // cannot register a runner and cannot touch a shared instance runner.
+    let reg2 = oxidean_api::actions::mint_registration_token_for_scope(&db, "repo", Some("r-rrr"))
+        .await
+        .unwrap();
+    let reg_res2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "rest-runner-2",
+                        "labels": ["self-hosted"],
+                        "token": reg2
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let runner_id2 = serde_json::from_slice::<serde_json::Value>(
+        &reg_res2.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["runner_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Shared instance runner — the repo remove-token must not reach it.
+    let shared_reg = mint_registration_token(&db).await.unwrap();
+    let shared_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "rest-shared",
+                        "labels": ["self-hosted"],
+                        "token": shared_reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let shared_id = serde_json::from_slice::<serde_json::Value>(
+        &shared_res.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["runner_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    async fn mint_remove(app: &axum::Router, pat: &str, base: &str) -> String {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("{base}/remove-token"))
+                    .header("authorization", format!("Bearer {pat}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        serde_json::from_slice::<serde_json::Value>(
+            &res.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+    async fn rest_delete(
+        app: &axum::Router,
+        base: &str,
+        id: &str,
+        auth: Option<String>,
+    ) -> StatusCode {
+        let mut b = Request::builder()
+            .method("DELETE")
+            .uri(format!("{base}/{id}"));
+        if let Some(a) = auth {
+            b = b.header("authorization", a);
+        }
+        app.clone()
+            .oneshot(b.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status()
+    }
+
+    let rm_bad_target = mint_remove(&app, &pat, base).await;
+    assert_eq!(
+        rest_delete(
+            &app,
+            base,
+            &shared_id,
+            Some(format!("Bearer {rm_bad_target}"))
+        )
+        .await,
+        StatusCode::NOT_FOUND,
+        "remove-token cannot delete a shared instance runner"
+    );
+    let rm_reg = mint_remove(&app, &pat, base).await;
+    // A remove token is not a registration token.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "rm-as-reg",
+                        "labels": ["self-hosted"],
+                        "token": rm_reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let rm_ok = mint_remove(&app, &pat, base).await;
+    assert_eq!(
+        rest_delete(&app, base, &runner_id2, Some(format!("Bearer {rm_ok}"))).await,
+        StatusCode::NO_CONTENT,
+        "remove-token deletes a repo-bound runner"
+    );
+    // One-shot: the same token no longer authenticates.
+    assert_eq!(
+        rest_delete(&app, base, &runner_id2, Some(format!("Bearer {rm_ok}"))).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(db
+        .find_action_runner_by_id(&runner_id2)
+        .await
+        .unwrap()
+        .is_none());
+
     let res = app
         .clone()
         .oneshot(

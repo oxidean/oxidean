@@ -308,6 +308,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.listCaches"
         | "repo.actions.listRunners"
         | "repo.actions.getRunner"
+        | "repo.actions.listRunApprovals"
         | "repo.actions.workflowTemplates.list"
         | "repo.actions.workflowTemplates.get" => ActionsRead,
 
@@ -324,7 +325,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.deleteArtifact"
         | "repo.actions.deleteCache"
         | "repo.actions.deleteRunner"
-        | "repo.actions.createRegistrationToken" => ActionsWrite,
+        | "repo.actions.createRegistrationToken"
+        | "repo.actions.createRemoveToken" => ActionsWrite,
 
         // Configuration variables mirror the secrets families — GitHub
         // groups both under the actions_variables fine-grained permission.

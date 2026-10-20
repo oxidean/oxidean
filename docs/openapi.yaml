@@ -5171,6 +5171,98 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/runners/remove-token:
+    post:
+      tags:
+      - actions
+      summary: Mint a repo-scoped runner remove token (repo.actions.createRemoveToken)
+      operationId: actions/createRemoveTokenForRepo
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  expires_at:
+                    type:
+                    - string
+                    - 'null'
+                required:
+                - token
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/actions/runs/{run_id}/approvals:
+    get:
+      tags:
+      - actions
+      summary: Deployment-review decisions for a run (repo.actions.listRunApprovals)
+      operationId: actions/getReviewsForRun
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    environments:
+                      type: array
+                      items:
+                        type: object
+                    state:
+                      type: string
+                    comment:
+                      type: string
+                    user:
+                      type: object
+                  required:
+                  - environments
+                  - state
+                  - comment
+                  - user
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/actions/runners/{runner_id}:
     get:
       tags:

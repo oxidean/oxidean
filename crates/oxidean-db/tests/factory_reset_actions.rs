@@ -96,7 +96,7 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
     )
     .await
     .expect("instance runner");
-    db.insert_action_runner_token("tok-fr", "reghash", "instance", None, true)
+    db.insert_action_runner_token("tok-fr", "reghash", "instance", None, "register", true)
         .await
         .expect("token");
 

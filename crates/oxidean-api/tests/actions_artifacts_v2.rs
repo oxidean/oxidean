@@ -2135,6 +2135,23 @@ async fn rest_actions_deployments_permissions_dispatch_surface() {
         0,
         "no pending envs after approval"
     );
+
+    // Review decisions surface on `GET …/runs/{id}/approvals` (GitHub shape).
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/runs/{held_run}/approvals"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let approvals = body_json(res).await;
+    let approvals = approvals.as_array().unwrap();
+    assert_eq!(approvals.len(), 1, "{approvals:?}");
+    assert_eq!(approvals[0]["state"], "approved");
+    assert_eq!(approvals[0]["comment"], "ship");
+    assert_eq!(approvals[0]["environments"][0]["name"], "production");
+    assert_eq!(approvals[0]["user"]["login"], "dep");
 }
 
 /// `/api/v1` caches list/delete + run-attempt routes — `gh cache` and

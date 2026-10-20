@@ -1595,6 +1595,36 @@ pub const ROUTES: &[RouteDef] = &[
         mount: || post(create_runner_registration_token),
     },
     RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/actions/runners/remove-token",
+        tags: &["actions"],
+        operation_id: "actions/createRemoveTokenForRepo",
+        summary: "Mint a repo-scoped runner remove token (repo.actions.createRemoveToken)",
+        procedure: "repo.actions.createRemoveToken",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(registration_token_schema)),
+        mount: || post(create_runner_remove_token),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
+        tags: &["actions"],
+        operation_id: "actions/getReviewsForRun",
+        summary: "Deployment-review decisions for a run (repo.actions.listRunApprovals)",
+        procedure: "repo.actions.listRunApprovals",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "run_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(run_approvals_schema)),
+        mount: || get(list_run_approvals_rest),
+    },
+    RouteDef {
         method: "GET",
         path: "/repos/{owner}/{repo}/actions/runners/{runner_id}",
         tags: &["actions"],
@@ -5446,7 +5476,16 @@ async fn delete_runner_rest(
 ) -> Response {
     let mut ctx = match ctx_for(&state, &headers).await {
         Ok(ctx) => ctx,
-        Err(res) => return res,
+        Err(res) => {
+            // `config.sh remove` auth: a `repo-remove` Bearer token deletes a
+            // runner bound to its repo without a user session.
+            if let Some(res2) =
+                try_remove_token_delete(&state, &headers, &p.owner, &p.repo, &p.runner_id).await
+            {
+                return res2;
+            }
+            return res;
+        }
     };
     match dispatch(&mut ctx, "repo.actions.deleteRunner", p.ref_input()).await {
         RpcResponse::Ok { .. } => StatusCode::NO_CONTENT.into_response(),
@@ -5553,4 +5592,107 @@ async fn list_org_variables_for_repo(
         },
     )
     .await
+}
+
+fn run_approvals_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "environments": {"type": "array", "items": {"type": "object"}},
+                "state": {"type": "string"},
+                "comment": {"type": "string"},
+                "user": {"type": "object"},
+            },
+            "required": ["environments", "state", "comment", "user"],
+        },
+    })
+}
+
+/// POST /repos/{o}/{r}/actions/runners/remove-token → 201 `{token}` — GitHub's
+/// `config.sh remove` credential; `DELETE …/runners/{id}` accepts it as
+/// Bearer auth (self-removal without user credentials).
+async fn create_runner_remove_token(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.createRemoveToken",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::CREATED,
+        move |data| json!({"token": data["token"], "expires_at": Value::Null}),
+    )
+    .await
+}
+
+/// GET /repos/{o}/{r}/actions/runs/{run_id}/approvals — GitHub shape: a bare
+/// array of `{environments, state, comment, user}` review decisions.
+async fn list_run_approvals_rest(
+    State(state): State<AppState>,
+    Path(p): Path<RunPath>,
+    headers: HeaderMap,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.actions.listRunApprovals",
+        json!({"owner": p.owner, "name": p.repo, "run_id": p.run_id}),
+        StatusCode::OK,
+        move |data| {
+            data["approvals"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|a| {
+                    json!({
+                        "environments": [{"name": a["environment"]}],
+                        "state": a["state"],
+                        "comment": a["comment"].as_str().unwrap_or_default(),
+                        "user": {"login": a["reviewer_username"]},
+                    })
+                })
+                .collect::<Vec<Value>>()
+                .into()
+        },
+    )
+    .await
+}
+
+/// `config.sh remove`-style auth: a one-shot `repo-remove` token authorizes
+/// deleting a runner bound to its repository — no user session needed.
+/// Returns `None` when the bearer isn't a valid remove token.
+async fn try_remove_token_delete(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    runner_id: &str,
+) -> Option<Response> {
+    let raw = crate::actions::runner_proto::bearer_token(headers)?;
+    let hash = crate::actions::tokens::hash_token(&raw);
+    let repo_id = state
+        .db
+        .consume_action_runner_remove_token(&hash)
+        .await
+        .ok()??;
+    let pair = crate::repo::lookup_repo_row_or_redirect(&state.db, owner, repo)
+        .await
+        .ok()?;
+    let (row, _owner_ref) = pair?;
+    if row.id != repo_id {
+        return Some((StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response());
+    }
+    let runner = state.db.find_action_runner_by_id(runner_id).await.ok()??;
+    // A repo remove-token deletes only runners bound to that repo — never a
+    // shared instance runner.
+    if runner.repository_id.as_deref() != Some(row.id.as_str()) {
+        return Some((StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response());
+    }
+    let _ = state.db.delete_action_runner(runner_id).await;
+    Some(StatusCode::NO_CONTENT.into_response())
 }
