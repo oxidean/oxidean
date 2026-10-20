@@ -272,6 +272,13 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`PATCH` | `/repos/{owner}/{repo}/issues/{number}` | `issue.get` / `issue.update` (+`close`/`reopen` via `state`) | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/comments` | `issue.comments.list` / `issue.comments.create` | |
 | `PATCH`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}` | `issue.comments.update` / `issue.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/issues/comments/{id}` |
+| `GET`/`POST`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels` | `issue.get` / `issue.labels.set` | GitHub name-array bodies (`{labels: [..]}`); POST unions, PUT replaces, DELETE clears; unknown names → 422 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels/{label_name}` | `issue.labels.set` | Removes one label by name; absent → 404 |
+| `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/assignees` | `issue.assignees.set` | `{assignees: [logins]}` resolved via `issue.assigneeCandidates`; unknown logins → 422 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/milestones` | `milestone.list` / `milestone.create` | `state` filter; create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/milestones/{number}` | `milestone.get` / `milestone.update` / `milestone.delete` | `number` is the milestone `#N` |
+| `POST` | `/repos/{owner}/{repo}/labels` | `label.create` | Repo-scope labels; 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/labels/{label_name}` | `label.listForRepo` / `label.update` / `label.delete` | Name-keyed; PATCH `new_name` renames; delete → 204 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls` | `pull.list` / `pull.create` | `state` incl. `merged`; `review_state` filter |
 | `GET`/`PATCH` | `/repos/{owner}/{repo}/pulls/{number}` | `pull.get` / `pull.update` (+`close`/`reopen` via `state`) | |
 | `POST` | `/repos/{owner}/{repo}/pulls/{number}/merge` | `pull.merge` | `method`: `merge`\|`squash`\|`rebase` |
@@ -280,6 +287,9 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/comments` | `pull.comments.list` / `pull.comments.create` | Optional diff placement fields |
 | `PATCH`/`DELETE` | `/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}` | `pull.comments.update` / `pull.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/pulls/comments/{id}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews` | `pull.reviews.list` / `pull.reviews.submit` | `state`: `approved`\|`changes_requested`\|`commented` |
+| `POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/dismissals` | `pull.reviews.dismiss` | `message` maps to `reason` |
+| `GET`/`POST`/`DELETE` | `/repos/{owner}/{repo}/pulls/{number}/requested_reviewers` | `pull.reviewRequests.list` / `.add` / `.remove` | `{reviewers: [logins]}` fans out per login; list answers `{users, teams}` |
+| `PUT` | `/repos/{owner}/{repo}/pulls/{number}/update-branch` | `pull.updateBranch` | 202 `{pull, status, merge_commit_sha}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/releases` | `release.list` / `release.create` | Tag must already exist |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
 | `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
@@ -310,7 +320,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

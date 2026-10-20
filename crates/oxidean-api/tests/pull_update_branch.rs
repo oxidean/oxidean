@@ -530,3 +530,38 @@ async fn pull_update_branch_conflict_reports_conflict() {
     assert_eq!(upd["ok"], false, "{upd}");
     assert_eq!(upd["error"]["code"], "pull.update_conflict");
 }
+
+/// REST `PUT /pulls/{n}/update-branch` — GitHub's 202 + merge-commit payload.
+#[tokio::test]
+async fn pull_update_branch_rest_route() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ub_rest.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (cookie, n) = same_repo_pr(&app, &db, &repos, "o@ex.com", "ubown", "core").await;
+    let bare = repos.join("ubown").join("core.git");
+    commit_on_branch(&bare, "main", "base work", &[("BASE.md", "b\n")]).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/repos/ubown/core/pulls/{n}/update-branch"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["status"], "updated", "{v}");
+    let merge_sha = v["merge_commit_sha"].as_str().unwrap();
+    assert_eq!(bare_tip(&bare, "feature"), merge_sha);
+}

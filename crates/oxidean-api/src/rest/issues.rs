@@ -3,7 +3,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use schemars::SchemaGenerator;
 use serde::Deserialize;
@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{
-    call, ctx_for, dispatch, merge_fields, repo_ref, respond, CommentPath, RepoNumberPath, RepoPath,
+    call, call_map, ctx_for, dispatch, merge_fields, repo_ref, respond, CommentPath,
+    RepoNumberPath, RepoPath,
 };
 use crate::app::AppState;
 use oxidean_core::{
@@ -181,6 +182,250 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<DeleteIssueCommentResponse>,
         )),
         mount: || delete(delete_issue_comment),
+    },
+    // ---- milestones ---------------------------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/milestones",
+        tags: &["issues"],
+        operation_id: "issues/listMilestones",
+        summary: "List milestones (`milestone.list`) — `state` filter",
+        procedure: "milestone.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "repo"],
+        query: Some(SchemaGenerator::into_root_schema_for::<MilestoneListQuery>),
+        body: None,
+        response: Some(RespSpec::Json(milestone_list_schema)),
+        mount: || get(list_milestones),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/milestones",
+        tags: &["issues"],
+        operation_id: "issues/createMilestone",
+        summary: "Create a milestone (`milestone.create`)",
+        procedure: "milestone.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo"],
+        query: None,
+        body: Some(BodySpec::Json(milestone_body_schema)),
+        response: Some(RespSpec::Json(milestone_schema)),
+        mount: || post(create_milestone),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/milestones/{number}",
+        tags: &["issues"],
+        operation_id: "issues/getMilestone",
+        summary: "Get a milestone (`milestone.get`)",
+        procedure: "milestone.get",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(milestone_schema)),
+        mount: || get(get_milestone),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/milestones/{number}",
+        tags: &["issues"],
+        operation_id: "issues/updateMilestone",
+        summary: "Update a milestone (`milestone.update`)",
+        procedure: "milestone.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(milestone_update_body_schema)),
+        response: Some(RespSpec::Json(milestone_schema)),
+        mount: || patch(update_milestone),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/milestones/{number}",
+        tags: &["issues"],
+        operation_id: "issues/deleteMilestone",
+        summary: "Delete a milestone (`milestone.delete`)",
+        procedure: "milestone.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_milestone),
+    },
+    // ---- repo label CRUD (GET list lives in repos.rs) -----------------------
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/labels",
+        tags: &["issues"],
+        operation_id: "issues/createLabel",
+        summary: "Create a repo label (`label.create`)",
+        procedure: "label.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo"],
+        query: None,
+        body: Some(BodySpec::Json(label_body_schema)),
+        response: Some(RespSpec::Json(label_schema)),
+        mount: || post(create_label),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/labels/{label_name}",
+        tags: &["issues"],
+        operation_id: "issues/getLabel",
+        summary: "Get one label by name (`label.listForRepo`, filtered)",
+        procedure: "label.listForRepo",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "repo", "label_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(label_schema)),
+        mount: || get(get_label),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/labels/{label_name}",
+        tags: &["issues"],
+        operation_id: "issues/updateLabel",
+        summary: "Update a label (`label.update`)",
+        procedure: "label.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "label_name"],
+        query: None,
+        body: Some(BodySpec::Json(label_update_body_schema)),
+        response: Some(RespSpec::Json(label_schema)),
+        mount: || patch(update_label),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/labels/{label_name}",
+        tags: &["issues"],
+        operation_id: "issues/deleteLabel",
+        summary: "Delete a label (`label.delete`)",
+        procedure: "label.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "repo", "label_name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_label),
+    },
+    // ---- issue labels -------------------------------------------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/issues/{number}/labels",
+        tags: &["issues"],
+        operation_id: "issues/listLabelsOnIssue",
+        summary: "List an issue's labels (`issue.get`)",
+        procedure: "issue.get",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(label_list_schema)),
+        mount: || get(list_issue_labels),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/issues/{number}/labels",
+        tags: &["issues"],
+        operation_id: "issues/addLabels",
+        summary: "Add labels by name (`label.listForRepo` + `issue.labels.set`)",
+        procedure: "issue.labels.set",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(issue_labels_body_schema)),
+        response: Some(RespSpec::Json(label_list_schema)),
+        mount: || post(add_issue_labels),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/issues/{number}/labels",
+        tags: &["issues"],
+        operation_id: "issues/setLabels",
+        summary: "Replace an issue's labels (`issue.labels.set`)",
+        procedure: "issue.labels.set",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(issue_labels_body_schema)),
+        response: Some(RespSpec::Json(label_list_schema)),
+        mount: || put(set_issue_labels),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/labels",
+        tags: &["issues"],
+        operation_id: "issues/removeAllLabels",
+        summary: "Remove every label from an issue (`issue.labels.set`)",
+        procedure: "issue.labels.set",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(label_list_schema)),
+        mount: || delete(clear_issue_labels),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/labels/{label_name}",
+        tags: &["issues"],
+        operation_id: "issues/removeLabel",
+        summary: "Remove one label by name (`issue.labels.set`)",
+        procedure: "issue.labels.set",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number", "label_name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(label_list_schema)),
+        mount: || delete(remove_issue_label),
+    },
+    // ---- issue assignees -----------------------------------------------------
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/issues/{number}/assignees",
+        tags: &["issues"],
+        operation_id: "issues/addAssignees",
+        summary: "Add assignees by login (`issue.assigneeCandidates` + `issue.assignees.set`)",
+        procedure: "issue.assignees.set",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(assignees_body_schema)),
+        response: Some(RespSpec::Json(issue_schema)),
+        mount: || post(add_assignees),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/issues/{number}/assignees",
+        tags: &["issues"],
+        operation_id: "issues/removeAssignees",
+        summary: "Remove assignees by login (`issue.assigneeCandidates` + `issue.labels.set`)",
+        procedure: "issue.assignees.set",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "repo", "number"],
+        query: None,
+        body: Some(BodySpec::Json(assignees_body_schema)),
+        response: Some(RespSpec::Json(issue_schema)),
+        mount: || delete(remove_assignees),
     },
 ];
 
@@ -378,4 +623,750 @@ async fn delete_issue_comment(
         StatusCode::OK,
     )
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Milestones / labels / issue label+assignee sub-ops (GitHub Issues REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct LabelNamePath {
+    owner: String,
+    repo: String,
+    label_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct IssueLabelPath {
+    owner: String,
+    repo: String,
+    number: i64,
+    label_name: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct MilestoneListQuery {
+    /// `open` | `closed` | `all`.
+    #[serde(default)]
+    state: Option<String>,
+}
+
+fn milestone_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn milestone_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+fn milestone_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "due_on": {"type": "string", "description": "YYYY-MM-DD"},
+        },
+    })
+}
+
+fn milestone_update_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "due_on": {"type": ["string", "null"]},
+            "state": {"type": "string", "enum": ["open", "closed"]},
+        },
+    })
+}
+
+fn label_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+fn label_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn label_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string"},
+            "color": {"type": "string"},
+            "description": {"type": "string"},
+        },
+    })
+}
+
+fn label_update_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "new_name": {"type": "string"},
+            "name": {"type": "string"},
+            "color": {"type": "string"},
+            "description": {"type": "string"},
+        },
+    })
+}
+
+fn issue_labels_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["labels"],
+        "properties": {
+            "labels": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn assignees_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["assignees"],
+        "properties": {
+            "assignees": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn issue_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+/// `LabelPublic` → GitHub's label object (id stays a string).
+fn gh_label(l: &Value) -> Value {
+    json!({
+        "id": l["id"],
+        "name": l["name"],
+        "color": l["color"],
+        "description": l["description"],
+        "default": false,
+        "url": l["url"],
+    })
+}
+
+fn validation_failed(msg: &str) -> Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({"message": "Validation Failed", "errors": [msg]})),
+    )
+        .into_response()
+}
+
+/// Resolve the repo's label name → row (the RPC `label.*` mutations key by
+/// id; GitHub's REST keys labels by name). Returns Err(response) on failure.
+async fn find_label(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    label_name: &str,
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(&mut ctx, "label.listForRepo", repo_ref(owner, repo)).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    data["labels"]
+        .as_array()
+        .and_then(|ls| {
+            ls.iter()
+                .find(|l| l["name"].as_str() == Some(label_name))
+                .cloned()
+        })
+        .ok_or_else(|| {
+            Box::new(
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "label.not_found", "message": "label not found"})),
+                )
+                    .into_response(),
+            )
+        })
+}
+
+/// Resolve GitHub `labels: [names]` to label row ids — unknown names 422
+/// like GitHub's validation failure.
+async fn label_ids_for_names(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    names: &[String],
+) -> Result<Vec<String>, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(&mut ctx, "label.listForRepo", repo_ref(owner, repo)).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    let all = data["labels"].as_array().cloned().unwrap_or_default();
+    let mut ids = Vec::with_capacity(names.len());
+    for n in names {
+        match all.iter().find(|l| l["name"].as_str() == Some(n.as_str())) {
+            Some(l) => ids.push(l["id"].as_str().unwrap_or_default().to_string()),
+            None => {
+                return Err(Box::new(validation_failed(&format!(
+                    "label '{n}' does not exist in this repository"
+                ))))
+            }
+        }
+    }
+    Ok(ids)
+}
+
+/// Re-read the issue's labels after a set — the response is GitHub's label
+/// array (the set proc answers `{ok}`, not the new state).
+async fn issue_labels_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    number: i64,
+) -> Result<Vec<Value>, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(
+        &mut ctx,
+        "issue.get",
+        json!({"owner": owner, "name": repo, "number": number}),
+    )
+    .await;
+    match resp {
+        RpcResponse::Ok { data, .. } => Ok(data["labels"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(gh_label)
+            .collect()),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (super::status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+/// Current issue label ids + assignee ids for union/minus composition.
+async fn issue_substate(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    number: i64,
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(
+        &mut ctx,
+        "issue.get",
+        json!({"owner": owner, "name": repo, "number": number}),
+    )
+    .await;
+    match resp {
+        RpcResponse::Ok { data, .. } => Ok(data),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (super::status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+// ---- milestone handlers -----------------------------------------------------
+
+async fn list_milestones(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<MilestoneListQuery>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    if let Some(s) = q.state {
+        input["state"] = json!(s);
+    }
+    call_map(
+        &state,
+        &headers,
+        "milestone.list",
+        input,
+        StatusCode::OK,
+        |d| d["milestones"].clone(),
+    )
+    .await
+}
+
+async fn create_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "milestone.create",
+        merge_fields(repo_ref(&p.owner, &p.repo), body),
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+async fn get_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "milestone.get",
+        p.ref_input(),
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn update_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "milestone.update",
+        merge_fields(p.ref_input(), body),
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn delete_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "milestone.delete",
+        p.ref_input(),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- repo label handlers ----------------------------------------------------
+
+async fn create_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(
+        json!({"scope": "repo", "owner": p.owner, "repo": p.repo}),
+        body,
+    );
+    call_map(
+        &state,
+        &headers,
+        "label.create",
+        input,
+        StatusCode::CREATED,
+        |d| gh_label(&d),
+    )
+    .await
+}
+
+async fn get_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<LabelNamePath>,
+) -> Response {
+    match find_label(&state, &headers, &p.owner, &p.repo, &p.label_name).await {
+        Ok(l) => (StatusCode::OK, Json(gh_label(&l))).into_response(),
+        Err(r) => *r,
+    }
+}
+
+async fn update_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<LabelNamePath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let label = match find_label(&state, &headers, &p.owner, &p.repo, &p.label_name).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    let mut body = body;
+    // GitHub's rename field is `new_name`; the RPC rename field is `name`.
+    if let Some(n) = body.get("new_name").and_then(Value::as_str) {
+        body["name"] = json!(n);
+        if let Some(m) = body.as_object_mut() {
+            m.remove("new_name");
+        }
+    }
+    let input = merge_fields(
+        json!({"id": label["id"], "owner": p.owner, "repo": p.repo}),
+        body,
+    );
+    call_map(
+        &state,
+        &headers,
+        "label.update",
+        input,
+        StatusCode::OK,
+        |d| gh_label(&d),
+    )
+    .await
+}
+
+async fn delete_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<LabelNamePath>,
+) -> Response {
+    let label = match find_label(&state, &headers, &p.owner, &p.repo, &p.label_name).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    call(
+        &state,
+        &headers,
+        "label.delete",
+        json!({"id": label["id"], "owner": p.owner, "repo": p.repo}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---- issue label handlers ---------------------------------------------------
+
+async fn list_issue_labels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    match issue_labels_response(&state, &headers, &p.owner, &p.repo, p.number).await {
+        Ok(labels) => (StatusCode::OK, Json(json!(labels))).into_response(),
+        Err(r) => *r,
+    }
+}
+
+/// Shared set — `ids` is the resulting label-id set; the response is the
+/// issue's post-write labels (GitHub answers the label array).
+async fn set_issue_labels_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    number: i64,
+    ids: Vec<String>,
+) -> Response {
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let resp = dispatch(
+        &mut ctx,
+        "issue.labels.set",
+        json!({"owner": owner, "name": repo, "number": number, "labelIds": ids}),
+    )
+    .await;
+    match resp {
+        RpcResponse::Ok { .. } => {}
+        RpcResponse::Err { error, .. } => {
+            return (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+    match issue_labels_response(state, headers, owner, repo, number).await {
+        Ok(labels) => (StatusCode::OK, Json(json!(labels))).into_response(),
+        Err(r) => *r,
+    }
+}
+
+fn requested_label_names(body: &Value) -> Result<Vec<String>, Box<Response>> {
+    let names = body["labels"].as_array().map(|a| {
+        a.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    });
+    match names {
+        Some(n) => Ok(n),
+        None => Err(Box::new(validation_failed(
+            "`labels` must be an array of names",
+        ))),
+    }
+}
+
+async fn add_issue_labels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let names = match requested_label_names(&body) {
+        Ok(n) => n,
+        Err(r) => return *r,
+    };
+    let new_ids = match label_ids_for_names(&state, &headers, &p.owner, &p.repo, &names).await {
+        Ok(ids) => ids,
+        Err(r) => return *r,
+    };
+    let issue = match issue_substate(&state, &headers, &p.owner, &p.repo, p.number).await {
+        Ok(i) => i,
+        Err(r) => return *r,
+    };
+    let mut ids: Vec<String> = issue["labels"]
+        .as_array()
+        .map(|ls| {
+            ls.iter()
+                .filter_map(|l| l["id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    for id in new_ids {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    set_issue_labels_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await
+}
+
+async fn set_issue_labels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let names = match requested_label_names(&body) {
+        Ok(n) => n,
+        Err(r) => return *r,
+    };
+    let ids = match label_ids_for_names(&state, &headers, &p.owner, &p.repo, &names).await {
+        Ok(ids) => ids,
+        Err(r) => return *r,
+    };
+    set_issue_labels_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await
+}
+
+async fn clear_issue_labels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    set_issue_labels_inner(&state, &headers, &p.owner, &p.repo, p.number, vec![]).await
+}
+
+async fn remove_issue_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<IssueLabelPath>,
+) -> Response {
+    let issue = match issue_substate(&state, &headers, &p.owner, &p.repo, p.number).await {
+        Ok(i) => i,
+        Err(r) => return *r,
+    };
+    let labels = issue["labels"].as_array().cloned().unwrap_or_default();
+    let target = labels
+        .iter()
+        .find(|l| l["name"].as_str() == Some(p.label_name.as_str()));
+    let Some(t) = target else {
+        // GitHub 404s when the label isn't on the issue.
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"code": "label.not_found", "message": "label is not on this issue"})),
+        )
+            .into_response();
+    };
+    let ids: Vec<String> = labels
+        .iter()
+        .filter(|l| l["id"] != t["id"])
+        .filter_map(|l| l["id"].as_str().map(str::to_string))
+        .collect();
+    set_issue_labels_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await
+}
+
+// ---- issue assignee handlers ------------------------------------------------
+
+/// Login → user id via `issue.assigneeCandidates`; unknown logins 422.
+async fn ids_for_assignees(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    logins: &[String],
+) -> Result<Vec<String>, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(&mut ctx, "issue.assigneeCandidates", repo_ref(owner, repo)).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    let users = data["users"].as_array().cloned().unwrap_or_default();
+    let mut ids = Vec::with_capacity(logins.len());
+    for l in logins {
+        match users
+            .iter()
+            .find(|u| u["username"].as_str() == Some(l.as_str()))
+        {
+            Some(u) => ids.push(u["user_id"].as_str().unwrap_or_default().to_string()),
+            None => {
+                return Err(Box::new(validation_failed(&format!(
+                    "assignee '{l}' cannot be assigned to this repository's issues"
+                ))))
+            }
+        }
+    }
+    Ok(ids)
+}
+
+async fn set_assignees_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    number: i64,
+    user_ids: Vec<String>,
+) -> Response {
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let resp = dispatch(
+        &mut ctx,
+        "issue.assignees.set",
+        json!({"owner": owner, "name": repo, "number": number, "userIds": user_ids}),
+    )
+    .await;
+    match resp {
+        RpcResponse::Ok { .. } => {}
+        RpcResponse::Err { error, .. } => {
+            return (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+    // GitHub answers the updated issue.
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(
+        &mut ctx,
+        "issue.get",
+        json!({"owner": owner, "name": repo, "number": number}),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => (StatusCode::OK, Json(data)).into_response(),
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+fn requested_assignees(body: &Value) -> Result<Vec<String>, Box<Response>> {
+    match body["assignees"].as_array().map(|a| {
+        a.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    }) {
+        Some(a) => Ok(a),
+        None => Err(Box::new(validation_failed(
+            "`assignees` must be an array of logins",
+        ))),
+    }
+}
+
+async fn add_assignees(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let logins = match requested_assignees(&body) {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let new_ids = match ids_for_assignees(&state, &headers, &p.owner, &p.repo, &logins).await {
+        Ok(ids) => ids,
+        Err(r) => return *r,
+    };
+    let issue = match issue_substate(&state, &headers, &p.owner, &p.repo, p.number).await {
+        Ok(i) => i,
+        Err(r) => return *r,
+    };
+    let mut ids: Vec<String> = issue["assignees"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|u| u["user_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    for id in new_ids {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    let res = set_assignees_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await;
+    // GitHub answers 201 for add.
+    if res.status() == StatusCode::OK {
+        let (parts, body) = res.into_parts();
+        let bytes = axum::body::to_bytes(body, 1 << 22)
+            .await
+            .unwrap_or_default();
+        (StatusCode::CREATED, parts.headers, bytes).into_response()
+    } else {
+        res
+    }
+}
+
+async fn remove_assignees(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let logins = match requested_assignees(&body) {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let drop_ids = match ids_for_assignees(&state, &headers, &p.owner, &p.repo, &logins).await {
+        Ok(ids) => ids,
+        Err(r) => return *r,
+    };
+    let issue = match issue_substate(&state, &headers, &p.owner, &p.repo, p.number).await {
+        Ok(i) => i,
+        Err(r) => return *r,
+    };
+    let ids: Vec<String> = issue["assignees"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|u| u["user_id"].as_str().map(str::to_string))
+                .filter(|id| !drop_ids.contains(id))
+                .collect()
+        })
+        .unwrap_or_default();
+    set_assignees_inner(&state, &headers, &p.owner, &p.repo, p.number, ids).await
 }
