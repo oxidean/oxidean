@@ -639,7 +639,7 @@ paths:
     get:
       tags:
       - repos
-      summary: List branches (`repo.refs` filtered to `refs/heads/*`)
+      summary: List branches (`repo.refs` heads + `branchProtection.list`) — GitHub bare array
       operationId: listBranches
       parameters:
       - name: owner
@@ -658,14 +658,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required:
-                - branches
-                properties:
-                  branches:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/RepoRefEntry'
+                type: array
+                items:
+                  type: object
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -2047,6 +2042,466 @@ paths:
         schema:
           type: string
       - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/branches/{branch}:
+    get:
+      tags:
+      - repos
+      summary: One branch (`repo.refs` + `repo.branchProtection.list`) — 404 when absent
+      operationId: repos/getBranch
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: branch
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  commit:
+                    type: object
+                  protected:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/branches/{branch}/rename:
+    post:
+      tags:
+      - repos
+      summary: Rename a branch (`repo.branchRename`) — `{new_name}`; 201
+      operationId: repos/renameBranch
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: branch
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - new_name
+              properties:
+                new_name:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  commit:
+                    type: object
+                  protected:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/branches/{branch}/protection:
+    get:
+      tags:
+      - repos
+      summary: Effective protection for the branch (`repo.branchProtection.list`, pattern-matched)
+      operationId: repos/getBranchProtection
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: branch
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - repos
+      summary: Create/update protection pinned to the branch name (`repo.branchProtection.create|update`)
+      operationId: repos/updateBranchProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: branch
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                required_status_checks:
+                  anyOf:
+                  - type: 'null'
+                  - type: object
+                    properties:
+                      strict:
+                        type: boolean
+                      contexts:
+                        type: array
+                        items:
+                          type: string
+                      checks:
+                        type: array
+                        items:
+                          type: object
+                required_pull_request_reviews:
+                  anyOf:
+                  - type: 'null'
+                  - type: object
+                enforce_admins:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                allow_force_pushes:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                allow_deletions:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                required_linear_history:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                required_conversation_resolution:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                required_signatures:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                lock_branch:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+                required_merge_queue:
+                  anyOf:
+                  - type: 'null'
+                  - type: boolean
+                  - type: object
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Delete the exact-pattern protection rule (`repo.branchProtection.delete`) — 204
+      operationId: repos/deleteBranchProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: branch
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/merge-upstream:
+    post:
+      tags:
+      - repos
+      summary: Sync a fork from upstream (`repo.syncFork`) — `{branch}`
+      operationId: repos/mergeUpstream
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/git/matching-refs/{ref}:
+    get:
+      tags:
+      - git
+      summary: Refs under the given prefix (`repo.refs`, filtered) — GitHub bare array
+      operationId: git/listMatchingRefs
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/git/ref/{ref}:
+    get:
+      tags:
+      - git
+      summary: One exact ref (`repo.refs`, filtered) — 404 when absent
+      operationId: git/getRef
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ref:
+                    type: string
+                  object:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/git/refs:
+    post:
+      tags:
+      - git
+      summary: Create `refs/heads/*` (`repo.branchCreate`) — `{ref, sha}` → 201
+      operationId: git/createRef
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - ref
+              - sha
+              properties:
+                ref:
+                  type: string
+                sha:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ref:
+                    type: string
+                  object:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/git/refs/{ref}:
+    delete:
+      tags:
+      - git
+      summary: Delete `refs/heads/*` (`repo.branchDelete`) — 204
+      operationId: git/deleteRef
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: ref
         in: path
         required: true
         schema:

@@ -22,22 +22,8 @@ use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{call, call_map, ctx_for, dispatch, merge_fields, repo_ref, RepoPath};
 use crate::app::AppState;
 
-/// `repo.refs` entries filtered to `refs/heads/*` and renamed to short
-/// names — `{branches: [...]}`.
-fn branches_schema(gen: &mut SchemaGenerator) -> Value {
-    json!({
-        "type": "object",
-        "required": ["branches"],
-        "properties": {
-            "branches": {
-                "type": "array",
-                "items": gen.subschema_for::<RepoRefEntry>(),
-            },
-        },
-    })
-}
-
-/// Same for `refs/tags/*` — `{tags: [...]}`.
+/// `repo.refs` entries filtered to `refs/tags/*` and renamed to short
+/// names — `{tags: [...]}`.
 fn tags_schema(gen: &mut SchemaGenerator) -> Value {
     json!({
         "type": "object",
@@ -127,14 +113,14 @@ pub const ROUTES: &[RouteDef] = &[
         path: "/repos/{owner}/{repo}/branches",
         tags: &["repos"],
         operation_id: "listBranches",
-        summary: "List branches (`repo.refs` filtered to `refs/heads/*`)",
+        summary: "List branches (`repo.refs` heads + `branchProtection.list`) — GitHub bare array",
         procedure: "repo.refs",
         ok: StatusCode::OK,
         anonymous: false,
         path_fields: &["owner", "name"],
         query: None,
         body: None,
-        response: Some(RespSpec::Json(branches_schema)),
+        response: Some(RespSpec::Json(branch_list_schema)),
         mount: || get(list_branches),
     },
     RouteDef {
@@ -670,6 +656,157 @@ pub const ROUTES: &[RouteDef] = &[
         response: None,
         mount: || delete(unstar_repo),
     },
+    // ---- branches / protection / git refs (GitHub REST) ---------------------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/branches/{branch}",
+        tags: &["repos"],
+        operation_id: "repos/getBranch",
+        summary: "One branch (`repo.refs` + `repo.branchProtection.list`) — 404 when absent",
+        procedure: "repo.refs",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name", "branch"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(branch_schema)),
+        mount: || get(get_branch_rest),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/branches/{branch}/rename",
+        tags: &["repos"],
+        operation_id: "repos/renameBranch",
+        summary: "Rename a branch (`repo.branchRename`) — `{new_name}`; 201",
+        procedure: "repo.branchRename",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "branch"],
+        query: None,
+        body: Some(BodySpec::Json(branch_rename_body_schema)),
+        response: Some(RespSpec::Json(branch_schema)),
+        mount: || post(rename_branch_rest),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/branches/{branch}/protection",
+        tags: &["repos"],
+        operation_id: "repos/getBranchProtection",
+        summary: "Effective protection for the branch (`repo.branchProtection.list`, pattern-matched)",
+        procedure: "repo.branchProtection.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name", "branch"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(branch_protection_schema)),
+        mount: || get(get_branch_protection_rest),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/branches/{branch}/protection",
+        tags: &["repos"],
+        operation_id: "repos/updateBranchProtection",
+        summary: "Create/update protection pinned to the branch name (`repo.branchProtection.create|update`)",
+        procedure: "repo.branchProtection.create",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "branch"],
+        query: None,
+        body: Some(BodySpec::Json(branch_protection_body_schema)),
+        response: Some(RespSpec::Json(branch_protection_schema)),
+        mount: || put(put_branch_protection_rest),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/branches/{branch}/protection",
+        tags: &["repos"],
+        operation_id: "repos/deleteBranchProtection",
+        summary: "Delete the exact-pattern protection rule (`repo.branchProtection.delete`) — 204",
+        procedure: "repo.branchProtection.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "branch"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_branch_protection_rest),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/merge-upstream",
+        tags: &["repos"],
+        operation_id: "repos/mergeUpstream",
+        summary: "Sync a fork from upstream (`repo.syncFork`) — `{branch}`",
+        procedure: "repo.syncFork",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(merge_upstream_body_schema)),
+        response: Some(RespSpec::Json(merge_upstream_schema)),
+        mount: || post(merge_upstream_rest),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/git/matching-refs/{*ref}",
+        tags: &["git"],
+        operation_id: "git/listMatchingRefs",
+        summary: "Refs under the given prefix (`repo.refs`, filtered) — GitHub bare array",
+        procedure: "repo.refs",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name", "ref"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(git_ref_list_schema)),
+        mount: || get(list_matching_refs),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/git/ref/{*ref}",
+        tags: &["git"],
+        operation_id: "git/getRef",
+        summary: "One exact ref (`repo.refs`, filtered) — 404 when absent",
+        procedure: "repo.refs",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name", "ref"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(git_ref_schema)),
+        mount: || get(get_git_ref),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/git/refs",
+        tags: &["git"],
+        operation_id: "git/createRef",
+        summary: "Create `refs/heads/*` (`repo.branchCreate`) — `{ref, sha}` → 201",
+        procedure: "repo.branchCreate",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(git_create_ref_body_schema)),
+        response: Some(RespSpec::Json(git_ref_schema)),
+        mount: || post(create_git_ref),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/git/refs/{*ref}",
+        tags: &["git"],
+        operation_id: "git/deleteRef",
+        summary: "Delete `refs/heads/*` (`repo.branchDelete`) — 204",
+        procedure: "repo.branchDelete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "ref"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_git_ref),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -756,22 +893,21 @@ fn ref_list(data: Value, prefix: &str, key: &str) -> Value {
     json!({ key: items })
 }
 
-/// `GET /api/v1/repos/{owner}/{repo}/branches` — `repo.refs` filtered to
-/// `refs/heads/*` with short branch names.
+/// `GET /api/v1/repos/{owner}/{repo}/branches` — GitHub's bare
+/// `[{name, commit:{sha}, protected}]` over `repo.refs` + `branchProtection.list`.
 async fn list_branches(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoPath>,
 ) -> Response {
-    call_map(
-        &state,
-        &headers,
-        "repo.refs",
-        repo_ref(&p.owner, &p.repo),
-        StatusCode::OK,
-        |data| ref_list(data, "refs/heads/", "branches"),
-    )
-    .await
+    match refs_and_rules(&state, &headers, &p.owner, &p.repo).await {
+        Ok((refs, rules)) => (
+            StatusCode::OK,
+            Json(json!(branches_with_protection(&refs, &rules))),
+        )
+            .into_response(),
+        Err(r) => *r,
+    }
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}/tags` — `repo.refs` filtered to
@@ -1829,6 +1965,631 @@ async fn unstar_repo(
         &headers,
         "repo.unstar",
         repo_ref(&p.owner, &p.repo),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Branches / protection / git refs (GitHub REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct BranchPath {
+    owner: String,
+    repo: String,
+    branch: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitRefPath {
+    owner: String,
+    repo: String,
+    #[serde(rename = "ref")]
+    ref_name: String,
+}
+
+fn branch_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn branch_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "commit": {"type": "object"},
+            "protected": {"type": "boolean"},
+        },
+    })
+}
+
+fn branch_rename_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["new_name"],
+        "properties": {"new_name": {"type": "string"}},
+    })
+}
+
+fn branch_protection_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+/// GitHub's protection body — field names translated to the rule input.
+fn branch_protection_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "required_status_checks": {
+                "anyOf": [{"type": "null"}, {
+                    "type": "object",
+                    "properties": {
+                        "strict": {"type": "boolean"},
+                        "contexts": {"type": "array", "items": {"type": "string"}},
+                        "checks": {"type": "array", "items": {"type": "object"}},
+                    },
+                }],
+            },
+            "required_pull_request_reviews": {
+                "anyOf": [{"type": "null"}, {"type": "object"}],
+            },
+            "enforce_admins": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "allow_force_pushes": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "allow_deletions": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "required_linear_history": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "required_conversation_resolution": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "required_signatures": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "lock_branch": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+            "required_merge_queue": {"anyOf": [{"type": "null"}, {"type": "boolean"}, {"type": "object"}]},
+        },
+    })
+}
+
+fn merge_upstream_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {"branch": {"type": "string"}},
+    })
+}
+
+fn merge_upstream_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+fn git_ref_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn git_ref_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string"},
+            "object": {"type": "object"},
+        },
+    })
+}
+
+fn git_create_ref_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["ref", "sha"],
+        "properties": {
+            "ref": {"type": "string"},
+            "sha": {"type": "string"},
+        },
+    })
+}
+
+/// `RepoRefEntry` (a `refs/heads/*` row) → GitHub's branch object.
+fn gh_branch(r: &Value, protected: bool) -> Value {
+    json!({
+        "name": r["name"],
+        "commit": {"sha": r["oid"], "url": null},
+        "protected": protected,
+    })
+}
+
+/// `RepoRefEntry` → GitHub's git-ref object.
+fn gh_git_ref(r: &Value, owner: &str, repo: &str) -> Value {
+    json!({
+        "ref": r["name"],
+        "object": {"sha": r["oid"], "type": "commit"},
+        "url": format!(
+            "/api/v1/repos/{}/{}/git/ref/{}",
+            owner,
+            repo,
+            r["name"].as_str().unwrap_or_default().trim_start_matches("refs/")
+        ),
+    })
+}
+
+/// Fetch repo refs + protection rules once for the branch handlers.
+async fn refs_and_rules(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+) -> Result<(Vec<Value>, Vec<Value>), Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    let refs = match dispatch(&mut ctx, "repo.refs", repo_ref(owner, repo)).await {
+        RpcResponse::Ok { data, .. } => data["refs"].as_array().cloned().unwrap_or_default(),
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    let rules = match dispatch(
+        &mut ctx,
+        "repo.branchProtection.list",
+        repo_ref(owner, repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => data["rules"].as_array().cloned().unwrap_or_default(),
+        RpcResponse::Err { .. } => vec![], // Read-only callers without Admin see no rules
+    };
+    Ok((refs, rules))
+}
+
+/// Heads-only entries with the `protected` flag folded in.
+fn branches_with_protection(refs: &[Value], rules: &[Value]) -> Vec<Value> {
+    refs.iter()
+        .filter(|r| {
+            r["name"]
+                .as_str()
+                .map(|n| n.starts_with("refs/heads/"))
+                .unwrap_or(false)
+        })
+        .map(|r| {
+            let branch = r["name"]
+                .as_str()
+                .unwrap_or_default()
+                .trim_start_matches("refs/heads/");
+            let protected = rules.iter().any(|rule| {
+                rule["pattern"]
+                    .as_str()
+                    .map(|p| crate::protection::pattern_matches(p, branch))
+                    .unwrap_or(false)
+            });
+            gh_branch(&json!({"name": branch, "oid": r["oid"]}), protected)
+        })
+        .collect()
+}
+
+async fn get_branch_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<BranchPath>,
+) -> Response {
+    match refs_and_rules(&state, &headers, &p.owner, &p.repo).await {
+        Ok((refs, rules)) => {
+            let branches = branches_with_protection(&refs, &rules);
+            match branches
+                .iter()
+                .find(|b| b["name"].as_str() == Some(p.branch.as_str()))
+            {
+                Some(b) => (StatusCode::OK, Json(b.clone())).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "branch.not_found", "message": "branch not found"})),
+                )
+                    .into_response(),
+            }
+        }
+        Err(r) => *r,
+    }
+}
+
+/// `POST /branches/{b}/rename {new_name}` → `repo.branchRename {from,to}` → 201.
+async fn rename_branch_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<BranchPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"from": p.branch, "to": body["new_name"]}),
+    );
+    call(
+        &state,
+        &headers,
+        "repo.branchRename",
+        input,
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+/// `BranchProtectionRulePublic` → GitHub's protection object.
+fn gh_protection(rule: &Value) -> Value {
+    json!({
+        "required_status_checks": if rule["required_status_contexts"].as_array().map(|c| !c.is_empty()).unwrap_or(false) {
+            json!({
+                "strict": rule["strict_status_checks"],
+                "contexts": rule["required_status_contexts"],
+            })
+        } else { Value::Null },
+        "required_pull_request_reviews": if rule["require_reviews"].as_bool().unwrap_or(false) {
+            json!({
+                "required_approving_review_count": rule["required_approving_review_count"],
+                "dismiss_stale_reviews": rule["dismiss_stale_reviews"],
+                "require_last_push_approval": rule["require_last_push_approval"],
+            })
+        } else { Value::Null },
+        "enforce_admins": {"enabled": rule["enforce_admins"]},
+        "required_linear_history": {"enabled": rule["required_linear_history"]},
+        "allow_force_pushes": {"enabled": rule["allow_force_pushes"]},
+        "allow_deletions": {"enabled": rule["allow_deletions"]},
+        "required_conversation_resolution": {"enabled": rule["require_conversation_resolution"]},
+        "required_signatures": {"enabled": rule["require_signed_commits"]},
+        "lock_branch": {"enabled": rule["lock_branch"]},
+        "required_merge_queue": {"enabled": rule["required_merge_queue"]},
+    })
+}
+
+/// Merge the matching rules into one GitHub projection (bool = OR, contexts
+/// = union, review count = max) — mirrors `protection::union_rules`.
+fn merge_rules_for_branch(rules: &[Value], branch: &str) -> Option<Value> {
+    let matching: Vec<&Value> = rules
+        .iter()
+        .filter(|r| {
+            r["pattern"]
+                .as_str()
+                .map(|p| crate::protection::pattern_matches(p, branch))
+                .unwrap_or(false)
+        })
+        .collect();
+    if matching.is_empty() {
+        return None;
+    }
+    let any = |k: &str| matching.iter().any(|r| r[k].as_bool().unwrap_or(false));
+    let mut contexts: Vec<Value> = vec![];
+    for r in &matching {
+        for c in r["required_status_contexts"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            if !contexts.contains(&c) {
+                contexts.push(c);
+            }
+        }
+    }
+    let max_reviews = matching
+        .iter()
+        .filter_map(|r| r["required_approving_review_count"].as_i64())
+        .max()
+        .unwrap_or(1);
+    Some(gh_protection(&json!({
+        "required_status_contexts": contexts,
+        "strict_status_checks": any("strict_status_checks"),
+        "require_reviews": any("require_reviews"),
+        "required_approving_review_count": max_reviews,
+        "dismiss_stale_reviews": any("dismiss_stale_reviews"),
+        "require_last_push_approval": any("require_last_push_approval"),
+        "enforce_admins": any("enforce_admins"),
+        "required_linear_history": any("required_linear_history"),
+        "allow_force_pushes": any("allow_force_pushes"),
+        "allow_deletions": any("allow_deletions"),
+        "require_conversation_resolution": any("require_conversation_resolution"),
+        "require_signed_commits": any("require_signed_commits"),
+        "lock_branch": any("lock_branch"),
+        "required_merge_queue": any("required_merge_queue"),
+    })))
+}
+
+async fn get_branch_protection_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<BranchPath>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(
+        &mut ctx,
+        "repo.branchProtection.list",
+        repo_ref(&p.owner, &p.repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => {
+            let rules = data["rules"].as_array().cloned().unwrap_or_default();
+            match merge_rules_for_branch(&rules, &p.branch) {
+                Some(pj) => (StatusCode::OK, Json(pj)).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "protection.not_found", "message": "branch is not protected"})),
+                )
+                    .into_response(),
+            }
+        }
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// Translate GitHub's protection body to `BranchProtectionRuleInput` fields.
+fn gh_protection_to_rule(body: &Value, pattern: &str) -> Value {
+    let on = |k: &str| -> bool {
+        let v = &body[k];
+        v.as_bool()
+            .or_else(|| v["enabled"].as_bool())
+            .or_else(|| if v.is_object() { Some(true) } else { None })
+            .unwrap_or(false)
+    };
+    let contexts = body["required_status_checks"]["contexts"]
+        .as_array()
+        .cloned()
+        .or_else(|| {
+            // `checks: [{context, app_id}]` is the newer form.
+            body["required_status_checks"]["checks"]
+                .as_array()
+                .map(|cs| {
+                    cs.iter()
+                        .filter_map(|c| c["context"].as_str().map(|s| json!(s)))
+                        .collect()
+                })
+        })
+        .unwrap_or_default();
+    let reviews = &body["required_pull_request_reviews"];
+    json!({
+        "pattern": pattern,
+        "require_reviews": !reviews.is_null() && (reviews.is_object() || reviews.as_bool() == Some(true)),
+        "required_approving_review_count": reviews["required_approving_review_count"].as_i64().unwrap_or(1),
+        "dismiss_stale_reviews": reviews["dismiss_stale_reviews"].as_bool().unwrap_or(false),
+        "require_last_push_approval": reviews["require_last_push_approval"].as_bool().unwrap_or(false),
+        "require_conversation_resolution": on("required_conversation_resolution"),
+        "required_status_contexts": contexts,
+        "strict_status_checks": body["required_status_checks"]["strict"].as_bool().unwrap_or(false),
+        "allow_force_pushes": on("allow_force_pushes"),
+        "allow_deletions": on("allow_deletions"),
+        "enforce_admins": on("enforce_admins"),
+        "required_linear_history": on("required_linear_history"),
+        "lock_branch": on("lock_branch"),
+        "require_signed_commits": on("required_signatures"),
+        "required_merge_queue": on("required_merge_queue"),
+    })
+}
+
+/// Find the rule whose pattern is exactly this branch name (PUT/DELETE key).
+async fn exact_rule_id(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Result<Option<String>, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    match dispatch(
+        &mut ctx,
+        "repo.branchProtection.list",
+        repo_ref(owner, repo),
+    )
+    .await
+    {
+        RpcResponse::Ok { data, .. } => Ok(data["rules"].as_array().and_then(|rs| {
+            rs.iter()
+                .find(|r| r["pattern"].as_str() == Some(branch))
+                .and_then(|r| r["id"].as_str().map(str::to_string))
+        })),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (super::status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+async fn put_branch_protection_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<BranchPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let rule = gh_protection_to_rule(&body, &p.branch);
+    let input = merge_fields(repo_ref(&p.owner, &p.repo), rule);
+    let existing = match exact_rule_id(&state, &headers, &p.owner, &p.repo, &p.branch).await {
+        Ok(id) => id,
+        Err(r) => return *r,
+    };
+    let (proc, input) = match existing {
+        Some(id) => (
+            "repo.branchProtection.update",
+            merge_fields(input, json!({"id": id})),
+        ),
+        None => ("repo.branchProtection.create", input),
+    };
+    call(&state, &headers, proc, input, StatusCode::OK).await
+}
+
+async fn delete_branch_protection_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<BranchPath>,
+) -> Response {
+    match exact_rule_id(&state, &headers, &p.owner, &p.repo, &p.branch).await {
+        Ok(Some(id)) => {
+            call(
+                &state,
+                &headers,
+                "repo.branchProtection.delete",
+                merge_fields(repo_ref(&p.owner, &p.repo), json!({"id": id})),
+                StatusCode::NO_CONTENT,
+            )
+            .await
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"code": "protection.not_found", "message": "branch is not protected"})),
+        )
+            .into_response(),
+        Err(r) => *r,
+    }
+}
+
+async fn merge_upstream_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = merge_fields(repo_ref(&p.owner, &p.repo), body);
+    call_map(
+        &state,
+        &headers,
+        "repo.syncFork",
+        input,
+        StatusCode::OK,
+        |d| {
+            let merge_type = match d["status"].as_str().unwrap_or("") {
+                "merged" => "merge",
+                "fast_forwarded" => "fast-forward",
+                _ => "none",
+            };
+            json!({
+                "message": format!("Successfully fetched and fast-forwarded from upstream {}", d["upstream_branch"].as_str().unwrap_or("")),
+                "merge_type": merge_type,
+                "base_branch": d["upstream_branch"],
+            })
+        },
+    )
+    .await
+}
+
+async fn list_matching_refs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<GitRefPath>,
+) -> Response {
+    let prefix = format!("refs/{}", p.ref_name.trim_start_matches("refs/"));
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "repo.refs", repo_ref(&p.owner, &p.repo)).await {
+        RpcResponse::Ok { data, .. } => {
+            let out: Vec<Value> = data["refs"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter(|r| {
+                    r["name"]
+                        .as_str()
+                        .map(|n| n.starts_with(&prefix))
+                        .unwrap_or(false)
+                })
+                .map(|r| gh_git_ref(r, &p.owner, &p.repo))
+                .collect();
+            (StatusCode::OK, Json(json!(out))).into_response()
+        }
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+async fn get_git_ref(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<GitRefPath>,
+) -> Response {
+    let full = format!("refs/{}", p.ref_name.trim_start_matches("refs/"));
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "repo.refs", repo_ref(&p.owner, &p.repo)).await {
+        RpcResponse::Ok { data, .. } => {
+            let hit = data["refs"].as_array().and_then(|rs| {
+                rs.iter()
+                    .find(|r| r["name"].as_str() == Some(full.as_str()))
+            });
+            match hit {
+                Some(r) => (StatusCode::OK, Json(gh_git_ref(r, &p.owner, &p.repo))).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "ref.not_found", "message": "ref not found"})),
+                )
+                    .into_response(),
+            }
+        }
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// Only `refs/heads/*` can be created via `repo.branchCreate` — other
+/// namespaces 422 (GitHub creates tags too; tag refs ride the tag pipeline).
+async fn create_git_ref(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(branch) = body["ref"]
+        .as_str()
+        .and_then(|r| r.strip_prefix("refs/heads/"))
+    else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "message": "Validation Failed",
+                "errors": ["only refs/heads/* can be created via this endpoint"],
+            })),
+        )
+            .into_response();
+    };
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"branch": branch, "start": body["sha"]}),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.branchCreate",
+        input,
+        StatusCode::CREATED,
+        |d| {
+            json!({
+                "ref": format!("refs/heads/{}", d["branch"].as_str().unwrap_or_default()),
+                "object": {"sha": body["sha"], "type": "commit"},
+            })
+        },
+    )
+    .await
+}
+
+async fn delete_git_ref(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<GitRefPath>,
+) -> Response {
+    let Some(branch) = p
+        .ref_name
+        .trim_start_matches("refs/")
+        .strip_prefix("heads/")
+    else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "message": "Validation Failed",
+                "errors": ["only refs/heads/* can be deleted via this endpoint"],
+            })),
+        )
+            .into_response();
+    };
+    call(
+        &state,
+        &headers,
+        "repo.branchDelete",
+        merge_fields(repo_ref(&p.owner, &p.repo), json!({"branch": branch})),
         StatusCode::NO_CONTENT,
     )
     .await

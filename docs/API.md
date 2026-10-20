@@ -248,7 +248,15 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
 | `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` | `description`, `homepage`, `topics` |
 | `DELETE` | `/repos/{owner}/{repo}` | `repo.softDelete` | URL is the typed confirmation |
-| `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` | `refs/heads/*`, short names |
+| `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` + `repo.branchProtection.list` | GitHub bare array: `{name, commit, protected}` |
+| `GET` | `/repos/{owner}/{repo}/branches/{branch}` | `repo.refs` + `repo.branchProtection.list` | One branch; absent → 404 |
+| `POST` | `/repos/{owner}/{repo}/branches/{branch}/rename` | `repo.branchRename` | `{new_name}` → 201 |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/branches/{branch}/protection` | `repo.branchProtection.list` / `.create` / `.update` / `.delete` | GitHub protection body translated to a rule pinned on the branch name; GET merges every matching pattern (`?`/`*` glob), PUT upserts the exact-pattern rule |
+| `POST` | `/repos/{owner}/{repo}/merge-upstream` | `repo.syncFork` | `{branch}` → `{message, merge_type, base_branch}` |
+| `GET` | `/repos/{owner}/{repo}/git/matching-refs/{ref}` | `repo.refs` | Prefix match under `refs/`; bare array |
+| `GET` | `/repos/{owner}/{repo}/git/ref/{ref}` | `repo.refs` | Exact ref; absent → 404 |
+| `POST` | `/repos/{owner}/{repo}/git/refs` | `repo.branchCreate` | `{ref, sha}` — `refs/heads/*` only → 201 |
+| `DELETE` | `/repos/{owner}/{repo}/git/refs/{ref}` | `repo.branchDelete` | `refs/heads/*` only → 204 |
 | `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
 | `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
 | `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
@@ -327,7 +335,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

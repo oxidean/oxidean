@@ -381,3 +381,263 @@ async fn repo_branch_write_collaborator_can_create_read_cannot() {
         "Read mutate must soft not_found — {create_deny}"
     );
 }
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<&str>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or("").to_owned())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub REST surface: `/branches` list/get/rename, `/branches/{b}/protection`
+/// get/put/delete, `/git/matching-refs`, `/git/ref`, `/git/refs` create/delete.
+#[tokio::test]
+async fn repo_rest_branches_protection_refs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_branches.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let cookie = seed_owner_repo(&app, &db, "b@ex.com", "bown", "core").await;
+    let base = "/api/v1/repos/bown/core";
+
+    // ---- branches ------------------------------------------------------------
+    let (s, v) = rest(&app, "GET", &format!("{base}/branches"), &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let branches = v.as_array().unwrap();
+    assert_eq!(branches.len(), 1);
+    assert_eq!(branches[0]["name"], "main");
+    assert_eq!(branches[0]["protected"], false);
+    let main_sha = branches[0]["commit"]["sha"].as_str().unwrap().to_string();
+
+    let (s, v) = rest(&app, "GET", &format!("{base}/branches/main"), &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["commit"]["sha"], main_sha);
+    let (s, _) = rest(&app, "GET", &format!("{base}/branches/nope"), &cookie, None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // create a branch via the git-refs route
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/git/refs"),
+        &cookie,
+        Some(&format!(
+            r#"{{"ref":"refs/heads/feature","sha":"{main_sha}"}}"#
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["ref"], "refs/heads/feature");
+
+    // non-heads ref rejected
+    let (s, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/git/refs"),
+        &cookie,
+        Some(&format!(r#"{{"ref":"refs/tags/v1","sha":"{main_sha}"}}"#)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // git ref lookups
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/git/matching-refs/heads/f"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["ref"], "refs/heads/feature");
+    assert_eq!(v[0]["object"]["sha"], main_sha);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/git/ref/heads/main"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["ref"], "refs/heads/main");
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/git/ref/heads/ghost"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- protection ------------------------------------------------------------
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, v) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        Some(r#"{
+            "required_status_checks": {"strict": true, "checks": [{"context": "ci/test"}]},
+            "required_pull_request_reviews": {"required_approving_review_count": 2, "dismiss_stale_reviews": true},
+            "enforce_admins": true,
+            "required_linear_history": false,
+            "allow_force_pushes": false,
+            "allow_deletions": false
+        }"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["required_status_checks"]["strict"], true);
+    assert_eq!(v["required_status_checks"]["contexts"][0], "ci/test");
+    assert_eq!(
+        v["required_pull_request_reviews"]["required_approving_review_count"],
+        2
+    );
+    assert_eq!(v["enforce_admins"]["enabled"], true);
+
+    // the branch now reports protected
+    let (s, v) = rest(&app, "GET", &format!("{base}/branches/main"), &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["protected"], true);
+
+    // PUT again = update (same pattern) — relax reviews
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        Some(r#"{"required_pull_request_reviews": {"required_approving_review_count": 1}}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        v["required_pull_request_reviews"]["required_approving_review_count"],
+        1
+    );
+    // required_status_checks cleared by the second PUT
+    assert!(v["required_status_checks"].is_null());
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/main/protection"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- rename + ref delete -----------------------------------------------------
+    let (s, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/branches/feature/rename"),
+        &cookie,
+        Some(r#"{"new_name":"feat2"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/feature"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/feat2"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/git/refs/heads/feat2"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/branches/feat2"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
