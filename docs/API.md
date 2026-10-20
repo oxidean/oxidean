@@ -294,6 +294,16 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`DELETE` | `/orgs/{org}/packages/{package_type}/{package_name}` | `packages.list` / `packages.delete` | Org-owner delete |
 | `GET` | `/{user,users/{u},orgs/{o}}/packages/{type}/{name}/versions[/{version_id}]` | `packages.list` | Version list + single-version detail (row `id` is the version id) |
 | `DELETE` | `/user/packages/{type}/{name}/versions/{version_id}` and `/orgs/{o}/…` | `packages.deleteVersion` | Owner-scope only; 204 |
+| `POST` | `/repos/{owner}/{repo}/check-runs` | `check.runs.create` | `name` maps to `check_name`; `output.annotations` inline |
+| `GET`/`PATCH` | `/repos/{owner}/{repo}/check-runs/{id}` | `check.runs.get` / `check.runs.update` | PATCH `name` renames; explicit nulls clear |
+| `POST` | `/repos/{owner}/{repo}/check-runs/{id}/rerequest` | `check.runs.rerequest` | 201 |
+| `GET` | `/repos/{owner}/{repo}/check-runs/{id}/annotations` | `check.annotations.list` | Bare array |
+| `GET` | `/repos/{owner}/{repo}/check-suites/{id}/check-runs` | `check.runs.listForSuite` | `{total_count, check_runs}`; `check_name`/`status`/`per_page` |
+| `GET` | `/repos/{owner}/{repo}/commits/{ref}/check-runs` | `check.runs.listForRef` | Same envelope; plus `conclusion` filter |
+| `POST` | `/repos/{owner}/{repo}/check-suites` | `check.suites.create` | `{head_sha}`; 201 |
+| `GET` | `/repos/{owner}/{repo}/check-suites/{id}` | `check.suites.get` | |
+| `POST` | `/repos/{owner}/{repo}/check-suites/{id}/rerequest` | `check.suites.rerequest` | 201 |
+| `GET` | `/repos/{owner}/{repo}/commits/{ref}/check-suites` | `check.suites.list` | `{total_count, check_suites}` |
 
 Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 

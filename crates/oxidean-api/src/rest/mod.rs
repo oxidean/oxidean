@@ -17,6 +17,7 @@
 
 mod actions;
 mod admin;
+mod checks;
 mod issues;
 pub mod openapi;
 mod orgs;

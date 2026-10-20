@@ -8266,6 +8266,539 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-runs:
+    post:
+      tags:
+      - checks
+      summary: Create a check run (check.runs.create)
+      operationId: checks/create
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - head_sha
+              properties:
+                name:
+                  type: string
+                head_sha:
+                  type: string
+                details_url:
+                  type: string
+                external_id:
+                  type: string
+                status:
+                  type: string
+                conclusion:
+                  type: string
+                started_at:
+                  type: string
+                completed_at:
+                  type: string
+                output:
+                  type: object
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-runs/{id}:
+    get:
+      tags:
+      - checks
+      summary: Get a check run (check.runs.get)
+      operationId: checks/get
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - checks
+      summary: Update a check run (check.runs.update)
+      operationId: checks/update
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                details_url:
+                  type:
+                  - string
+                  - 'null'
+                external_id:
+                  type:
+                  - string
+                  - 'null'
+                status:
+                  type: string
+                conclusion:
+                  type:
+                  - string
+                  - 'null'
+                started_at:
+                  type:
+                  - string
+                  - 'null'
+                completed_at:
+                  type:
+                  - string
+                  - 'null'
+                output:
+                  type: object
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-runs/{id}/rerequest:
+    post:
+      tags:
+      - checks
+      summary: Rerequest a check run (check.runs.rerequest)
+      operationId: checks/rerequestRun
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-runs/{id}/annotations:
+    get:
+      tags:
+      - checks
+      summary: List a check run's annotations (check.annotations.list)
+      operationId: checks/listAnnotations
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-suites/{id}/check-runs:
+    get:
+      tags:
+      - checks
+      summary: List check runs in a suite (check.runs.listForSuite)
+      operationId: checks/listForSuite
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: check_name
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: status
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: conclusion
+        in: query
+        required: false
+        schema:
+          description: 'Server-side extra over GitHub: fold a conclusion filter in directly.'
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - check_runs
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/commits/{ref}/check-runs:
+    get:
+      tags:
+      - checks
+      summary: List check runs for a git ref (check.runs.listForRef)
+      operationId: checks/listForRef
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: check_name
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: status
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: conclusion
+        in: query
+        required: false
+        schema:
+          description: 'Server-side extra over GitHub: fold a conclusion filter in directly.'
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - check_runs
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-suites:
+    post:
+      tags:
+      - checks
+      summary: Create a check suite (check.suites.create)
+      operationId: checks/createSuite
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - head_sha
+              properties:
+                head_sha:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-suites/{id}:
+    get:
+      tags:
+      - checks
+      summary: Get a check suite (check.suites.get)
+      operationId: checks/getSuite
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/check-suites/{id}/rerequest:
+    post:
+      tags:
+      - checks
+      summary: Rerequest a check suite (check.suites.rerequest)
+      operationId: checks/rerequestSuite
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/commits/{ref}/check-suites:
+    get:
+      tags:
+      - checks
+      summary: List check suites for a git ref (check.suites.list)
+      operationId: checks/listSuitesForRef
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - check_suites
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   schemas:
     Error:

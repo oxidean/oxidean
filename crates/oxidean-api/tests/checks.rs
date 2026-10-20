@@ -849,3 +849,237 @@ jobs:
     );
     assert_eq!(runs[0].event, "push");
 }
+
+/// GitHub-shaped Checks REST under `/api/v1/repos/{o}/{r}` — create/get/
+/// patch/rerequest check runs, suite CRUD + ref listings, annotations.
+#[tokio::test]
+async fn checks_rest_github_surface() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, me) = signup_and_login(&app, "chkrest@ex.com", "chkrest").await;
+    verify_user(&db, me["data"]["id"].as_str().unwrap()).await;
+    create_repo(&app, &cookie, "demo", "public").await;
+    let (_git, _bare, tip) = seed_repo_git(
+        dir.path().join("repos").as_path(),
+        "chkrest",
+        "demo",
+        &[("a.txt", b"x")],
+    )
+    .await;
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: Option<&str>,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder().method(method).uri(uri.to_string());
+        if let Some(c) = cookie {
+            b = b.header("cookie", c.to_string());
+        }
+        let req = match body {
+            Some(v) => b
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&v).unwrap()))
+                .unwrap(),
+            None => b.body(Body::empty()).unwrap(),
+        };
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null));
+        (status, v)
+    }
+
+    // POST /check-runs — GitHub `name` field maps to the RPC `check_name`;
+    // response carries the flat ids plus nested check_suite/app objects.
+    let (status, run) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/chkrest/demo/check-runs",
+        Some(&cookie),
+        Some(serde_json::json!({
+            "name": "ci/test",
+            "head_sha": tip,
+            "status": "completed",
+            "conclusion": "success",
+            "external_id": "ext-rest",
+            "output": {
+                "title": "t", "summary": "s",
+                "annotations": [{
+                    "path": "a.txt", "start_line": 1, "end_line": 1,
+                    "annotation_level": "warning", "message": "watch it"
+                }]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    assert_eq!(run["name"], "ci/test");
+    assert_eq!(run["conclusion"], "success");
+    let run_id = run["id"].as_str().unwrap().to_string();
+    let suite_id = run["check_suite_id"].as_str().unwrap().to_string();
+    assert_eq!(run["check_suite"]["id"], suite_id);
+    assert!(run["app"]["slug"].as_str().is_some_and(|s| !s.is_empty()));
+
+    // GET /check-runs/{id}
+    let (status, got) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/check-runs/{run_id}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["id"], run_id);
+
+    // PATCH /check-runs/{id} — `name` renames; explicit null clears.
+    let (status, upd) = rest(
+        &app,
+        "PATCH",
+        &format!("/api/v1/repos/chkrest/demo/check-runs/{run_id}"),
+        Some(&cookie),
+        Some(serde_json::json!({"name": "ci/renamed", "external_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upd}");
+    assert_eq!(upd["name"], "ci/renamed");
+    assert!(upd["external_id"].is_null(), "{upd}");
+
+    // GET …/annotations — bare array like GitHub.
+    let (status, ann) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/check-runs/{run_id}/annotations"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ann}");
+    let ann = ann.as_array().expect("annotations array");
+    assert_eq!(ann.len(), 1);
+    assert_eq!(ann[0]["message"], "watch it");
+
+    // GET /commits/{ref}/check-runs → {total_count, check_runs}.
+    let (status, list) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/commits/{tip}/check-runs?status=completed"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["total_count"], 1);
+    assert_eq!(list["check_runs"][0]["name"], "ci/renamed");
+
+    // GET /check-suites/{id}/check-runs.
+    let (status, list) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/check-suites/{suite_id}/check-runs"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["total_count"], 1);
+
+    // POST /check-suites + GET it; POST rerequest on both levels → 201.
+    let (status, suite) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/chkrest/demo/check-suites",
+        Some(&cookie),
+        Some(serde_json::json!({"head_sha": tip})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{suite}");
+    let s2 = suite["id"].as_str().unwrap().to_string();
+
+    let (status, got) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/check-suites/{s2}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["head_sha"], tip);
+
+    let (status, _) = rest(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/chkrest/demo/check-suites/{s2}/rerequest"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, _) = rest(
+        &app,
+        "POST",
+        &format!("/api/v1/repos/chkrest/demo/check-runs/{run_id}/rerequest"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // GET /commits/{ref}/check-suites → {total_count, check_suites}.
+    let (status, list) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/commits/{tip}/check-suites"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list["total_count"].as_i64().unwrap() >= 2, "{list}");
+
+    // Anonymous read on the public repo → 200 (ACL is read-level).
+    let (status, _) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/chkrest/demo/check-runs/{run_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Unauthenticated write → 401/403, unknown run → 404.
+    let (status, _) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/chkrest/demo/check-runs",
+        None,
+        Some(serde_json::json!({"name": "x", "head_sha": tip})),
+    )
+    .await;
+    assert!(
+        matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN),
+        "{status}"
+    );
+    let (status, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/chkrest/demo/check-runs/nope",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
