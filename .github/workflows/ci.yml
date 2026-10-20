@@ -219,6 +219,10 @@ jobs:
           MON=$!
           trap 'kill $MON 2>/dev/null || true' EXIT
           cargo build --workspace --bins
+          # Pre-build the ~4 GB oxidean-api libtest on its own so it cannot
+          # overlap other heavy units during the archive pass (same OOM as
+          # the coverage lane, where two 7.6 GB api rustc units collide).
+          cargo test -p oxidean-api --lib --features server --no-run
           mkdir -p target
           cargo nextest archive --workspace --features server \
             --archive-file target/nextest-archive.tar.zst
@@ -492,9 +496,11 @@ jobs:
             done ) &
           MON=$!
           trap 'kill $MON 2>/dev/null || true' EXIT
-          # oxidean-api is a ~120 kLOC instrumented unit — build/run it in
-          # isolation so nothing else competes with its codegen for memory,
-          # then collect the rest of the workspace.
+          # oxidean-api compiles twice per run — dev-profile rlib + test-profile
+          # libtest — at ~7.6 GB RSS each under instrumentation; concurrent
+          # they OOM the 16 GB runner. Build libtest alone first so the two
+          # giants never overlap, then let nextest reuse the cached units.
+          cargo llvm-cov --no-report --lib -p oxidean-api
           cargo llvm-cov nextest --no-report -p oxidean-api
           cargo llvm-cov nextest --no-report --workspace --exclude oxidean-api
           cargo llvm-cov report --lcov --output-path var/coverage/rust-lcov.info
