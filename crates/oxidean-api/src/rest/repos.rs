@@ -1174,6 +1174,23 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Json(mirror_sync_schema)),
         mount: || post(mirror_sync_rest),
     },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/generate",
+        tags: &["repos"],
+        operation_id: "generateRepo",
+        summary: "Create a repo from this template (`repo.get` → `repo.create` `template_repo_id`)",
+        procedure: "repo.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(generate_repo_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoPublic>,
+        )),
+        mount: || post(generate_repo),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -1239,6 +1256,7 @@ async fn update_repo(
             "allow_merge_commit",
             "allow_squash_merge",
             "allow_rebase_merge",
+            "is_template",
         ] {
             m.remove(k);
         }
@@ -1275,9 +1293,11 @@ async fn update_repo(
     let has_merge_settings = merge_keys
         .iter()
         .any(|k| body.get(*k).and_then(Value::as_bool).is_some());
+    let is_template = body.get("is_template").and_then(Value::as_bool);
     let meta_nonempty = meta.as_object().map(|m| !m.is_empty()).unwrap_or(false);
     let composed = renaming
         || has_merge_settings
+        || is_template.is_some()
         || visibility.is_some()
         || archived.is_some()
         || unit_toggles
@@ -1350,6 +1370,12 @@ async fn update_repo(
             }
         }
         step!("repo.mergeSettings.update", ms);
+    }
+    if let Some(t) = is_template {
+        step!(
+            "repo.templates.setEnabled",
+            merge_fields(repo_ref(&p.owner, &effective), json!({"enabled": t}))
+        );
     }
     call(
         &state,
@@ -4150,5 +4176,57 @@ fn stats_activity_schema(_gen: &mut SchemaGenerator) -> Value {
             "days": {"type": "array", "items": {"type": "integer"}},
             "total": {"type": "integer"}
         }}
+    })
+}
+
+/// `POST /repos/{o}/{r}/generate` — GitHub create-from-template. Resolves the
+/// template repo's id via `repo.get`, then `repo.create` with
+/// `template_repo_id` (`owner` in the body targets the new repo's owner).
+async fn generate_repo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let template = match dispatch(&mut ctx, "repo.get", repo_ref(&p.owner, &p.repo)).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    let mut input = json!({
+        "name": body["name"],
+        "template_repo_id": template["id"],
+    });
+    for k in ["owner", "description", "private"] {
+        if let Some(v) = body.get(k) {
+            input[k] = v.clone();
+        }
+    }
+    // `private` maps to `visibility`; `include_all_branches`/`include_avatar`
+    // are not modeled (templates copy the default-branch tree).
+    if let Some(privv) = body.get("private").and_then(Value::as_bool) {
+        input["visibility"] = json!(if privv { "private" } else { "public" });
+    }
+    let _ = input.as_object_mut().map(|m| m.remove("private"));
+    call(&state, &headers, "repo.create", input, StatusCode::CREATED).await
+}
+
+fn generate_repo_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string", "description": "New repository name"},
+            "owner": {"type": "string", "description": "New repo owner (username/org slug); default: caller"},
+            "description": {"type": "string"},
+            "private": {"type": "boolean"},
+            "include_all_branches": {"type": "boolean", "description": "Accepted for compat; not modeled"},
+            "include_avatar": {"type": "boolean", "description": "Accepted for compat; not modeled"}
+        }
     })
 }

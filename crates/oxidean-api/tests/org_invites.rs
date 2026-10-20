@@ -718,7 +718,19 @@ async fn rest_memberships_and_invitations() {
     assert_eq!(v["role"], "admin", "{v}");
 
     // DELETE membership → 204
-    let (s, _) = rest_all(
+    // PATCH /orgs/{slug} — GitHub aliases land on updateSettings
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/orgs/memb-org",
+        &owner_cookie,
+        Some(r#"{"name":"Memb Org Renamed","default_repository_permission":"write"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["display_name"], "Memb Org Renamed", "{v}");
+
+    let (s, v) = rest_all(
         &app,
         "DELETE",
         "/api/v1/orgs/memb-org/memberships/member2",
@@ -726,7 +738,7 @@ async fn rest_memberships_and_invitations() {
         None,
     )
     .await;
-    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(s, StatusCode::NO_CONTENT, "{v}");
     let (s, _) = rest_all(
         &app,
         "GET",

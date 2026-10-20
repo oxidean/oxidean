@@ -3,7 +3,7 @@
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
     CreateOrgRequest, CreateRepoRequest, OrgPublic, RepoListMineResponse, RepoPublic, RpcResponse,
@@ -52,6 +52,23 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<OrgPublic>,
         )),
         mount: || get(get_org),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/orgs/{slug}",
+        tags: &["orgs"],
+        operation_id: "updateOrg",
+        summary: "Update org settings (`org.updateSettings`) — `name`/`display_name`/`full_name`, `default_repository_permission`, `two_factor_requirement_enabled`",
+        procedure: "org.updateSettings",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: Some(BodySpec::Json(org_patch_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<OrgPublic>,
+        )),
+        mount: || patch(update_org),
     },
     RouteDef {
         method: "GET",
@@ -553,6 +570,60 @@ fn invite_body_schema(_gen: &mut SchemaGenerator) -> Value {
             "email": {"type": "string"},
             "emails": {"type": "array", "items": {"type": "string"}},
             "role": {"type": "string", "enum": ["owner", "admin", "member"]}
+        }
+    })
+}
+
+/// `PATCH /orgs/{slug}` — GitHub/Gitea update aliases onto
+/// `org.updateSettings` (`name`/`display_name`/`full_name` → `display_name`;
+/// `default_repository_permission` → `member_base_permission`;
+/// `two_factor_requirement_enabled`/`require_two_factor` → `require_two_factor`).
+async fn update_org(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OrgPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut input = json!({"slug": p.slug});
+    let display_name = body
+        .get("display_name")
+        .or_else(|| body.get("name"))
+        .or_else(|| body.get("full_name"));
+    if let Some(d) = display_name {
+        input["display_name"] = d.clone();
+    }
+    if let Some(perm) = body
+        .get("member_base_permission")
+        .or_else(|| body.get("default_repository_permission"))
+    {
+        input["member_base_permission"] = perm.clone();
+    }
+    if let Some(tfa) = body
+        .get("require_two_factor")
+        .or_else(|| body.get("two_factor_requirement_enabled"))
+    {
+        input["require_two_factor"] = tfa.clone();
+    }
+    call(
+        &state,
+        &headers,
+        "org.updateSettings",
+        input,
+        StatusCode::OK,
+    )
+    .await
+}
+
+fn org_patch_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "GitHub alias for display_name"},
+            "display_name": {"type": "string"},
+            "full_name": {"type": "string", "description": "Gitea alias for display_name"},
+            "description": {"type": "string", "description": "Accepted for compat; not modeled"},
+            "default_repository_permission": {"type": "string", "enum": ["none", "read", "write"]},
+            "two_factor_requirement_enabled": {"type": "boolean"}
         }
     })
 }

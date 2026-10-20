@@ -827,3 +827,52 @@ async fn rest_stats_and_search() {
     let items = v["items"].as_array().expect("items array");
     assert!(items.iter().any(|r| r["name"] == "stattr"), "{v}");
 }
+
+/// `is_template` PATCH fold + `POST /repos/{o}/{r}/generate` (GitHub).
+#[tokio::test]
+async fn rest_template_generate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("tmpl_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let cookie = seed_owner_repo(&app, &db, "tmpl@ex.com", "tmplown", "tmplsrc", "public").await;
+    let (s, _) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/repos/tmplown/tmplsrc/contents/stats.md",
+        &cookie,
+        Some(format!(r#"{{"message":"s","content":"{}"}}"#, b64(b"x"))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    // is_template + generate — mark the repo a template via PATCH, then
+    // POST /generate creates a copy under the caller.
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/tmplown/tmplsrc",
+        &cookie,
+        Some(r#"{"is_template":true}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["is_template"], true, "{v}");
+
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/tmplown/tmplsrc/generate",
+        &cookie,
+        Some(r#"{"name":"from-tmpl","description":"gen"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name"], "from-tmpl", "{v}");
+    // Template content copied — stats.md exists in the new repo.
+    let blob = blob_content(&app, &cookie, "tmplown", "from-tmpl", "main", "stats.md").await;
+    assert_eq!(blob["ok"], true, "{blob}");
+}

@@ -255,6 +255,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`PUT` | `/repos/{owner}/{repo}/notifications` | `notification.list` / `notification.markRead` | Repo-scoped list; PUT marks the repo's threads read → 202 |
 | `POST` | `/orgs` | `org.create` | Session only |
 | `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
+| `PATCH` | `/orgs/{slug}` | `org.updateSettings` | `{name, display_name, default_repository_permission, two_factor_requirement_enabled}` |
 | `GET` | `/orgs/{slug}/members` | `org.members.list` | Bare array `{login, id, type, role}` |
 | `GET`/`PUT`/`DELETE` | `/orgs/{slug}/memberships/{username}` | `org.members.list` / `.add` / `.updateRole` / `.remove` | `{state, role, user}`; PUT adds-or-updates; delete → 204; absent → 404 |
 | `DELETE` | `/orgs/{slug}/members/{username}` | `org.members.remove` | GitHub/Gitea remove-member alias → 204 |
@@ -291,6 +292,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/compare/{basehead}` | `repo.compare` | `base...head` (`..` accepted) |
 | `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
+| `POST` | `/repos/{owner}/{repo}/generate` | `repo.get` → `repo.create` | GitHub/Gitea template-repo generate — creates a copy under the caller via `template_repo_id`; `owner`/`name`/`private`/`description` accepted; → 201 |
 | `GET` | `/repos/{owner}/{repo}/contents/{path}` | `repo.blob` | `?ref=`; base64 content |
 | `PUT`/`DELETE` | `/repos/{owner}/{repo}/contents/{path}` | `repo.file.create` / `.update` / `.delete` | GitHub contents write; `sha` present → update; PUT create → 201, update → 200; response `{content, commit}` |
 | `GET` | `/repos/{owner}/{repo}/contributors` | `repo.contributors.list` | Bare array; unlinked authors project as `type: "Anonymous"` |
