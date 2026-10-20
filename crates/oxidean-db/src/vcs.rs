@@ -1861,9 +1861,7 @@ async fn cas_ref_update_mysql(
             .await
             .map_err(|e| format!("vcs cas_ref update: {e}"))?;
             if res.rows_affected() == 1 {
-                return Ok(CasOutcome::Applied(
-                    ref_row_mysql(p, repo_id, name).await?,
-                ));
+                return Ok(CasOutcome::Applied(ref_row_mysql(p, repo_id, name).await?));
             }
             if expected_old.is_none() {
                 // Create path: the unique key arbitrates the insert — a
@@ -1884,9 +1882,7 @@ async fn cas_ref_update_mysql(
                         None => Err(format!("vcs cas_ref create: {e}")),
                     };
                 }
-                return Ok(CasOutcome::Applied(
-                    ref_row_mysql(p, repo_id, name).await?,
-                ));
+                return Ok(CasOutcome::Applied(ref_row_mysql(p, repo_id, name).await?));
             }
             let actual = ref_actual_mysql(p, repo_id, name).await?;
             Ok(CasOutcome::Conflict { actual })
