@@ -263,6 +263,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |
 | `GET`/`POST` | `/repos/{owner}/{repo}/hooks` | `webhook.list` / `webhook.create` | Repo Admin |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/hooks/{id}` | `webhook.get` / `webhook.update` / `webhook.delete` | Repo Admin |
+| `GET` | `/repos/{owner}/{repo}/hooks/{id}/deliveries` | `webhook.deliveries.list` | Repo Admin; GitHub delivery shape |
+| `GET` | `/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}` | `webhook.deliveries.get` | Repo Admin; adds `request`/`response` |
+| `POST` | `/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}/attempts` | `webhook.redeliver` | Repo Admin; 202 |
+| `POST` | `/repos/{owner}/{repo}/hooks/{id}/pings` | `webhook.ping` | Repo Admin; 201 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues` | `issue.list` / `issue.create` | Filters: `state`, `author`, `label`, `assignee`, `q`, `offset`, `limit` |
 | `GET`/`PATCH` | `/repos/{owner}/{repo}/issues/{number}` | `issue.get` / `issue.update` (+`close`/`reopen` via `state`) | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/comments` | `issue.comments.list` / `issue.comments.create` | |
@@ -279,8 +283,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
 | `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
+| `GET` | `/admin/actions/runners` | `admin.actions.listRunners` | Sys-admin session only |
+| `POST` | `/admin/actions/runners/registration-token` | `admin.actions.createRegistrationToken` | Sys-admin session only; 201 |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, Actions runs, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

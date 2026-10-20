@@ -1317,6 +1317,173 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/hooks/{id}/deliveries:
+    get:
+      tags:
+      - repos
+      summary: List webhook deliveries, GitHub shape (`webhook.deliveries.list`; repo Admin)
+      operationId: listHookDeliveries
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    guid:
+                      type: string
+                    delivered_at:
+                      type: string
+                    redelivery:
+                      type: boolean
+                    duration:
+                      type:
+                      - number
+                      - 'null'
+                    status:
+                      type: string
+                    status_code:
+                      type: integer
+                    event:
+                      type: string
+                    action:
+                      type:
+                      - string
+                      - 'null'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}:
+    get:
+      tags:
+      - repos
+      summary: Get a webhook delivery incl. request/response (`webhook.deliveries.get`; repo Admin)
+      operationId: getHookDelivery
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}/attempts:
+    post:
+      tags:
+      - repos
+      summary: Redeliver a webhook delivery (`webhook.redeliver`; repo Admin)
+      operationId: redeliverHookDelivery
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '202':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/hooks/{id}/pings:
+    post:
+      tags:
+      - repos
+      summary: Ping a webhook (`webhook.ping`; repo Admin)
+      operationId: pingHook
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Created
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/actions/artifacts:
     get:
       tags:

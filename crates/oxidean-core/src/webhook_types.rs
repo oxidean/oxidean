@@ -89,6 +89,15 @@ pub struct WebhookDeliveryPublic {
     pub error_message: Option<String>,
     #[serde(default)]
     pub attempt_count: i64,
+    /// The event payload JSON, verbatim as posted (or as queued).
+    #[serde(default)]
+    pub payload: Option<String>,
+    /// Latest attempt round-trip in milliseconds.
+    #[serde(default)]
+    pub duration_ms: Option<i64>,
+    /// Truncated response body from the latest attempt (≤512 bytes).
+    #[serde(default)]
+    pub response_snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

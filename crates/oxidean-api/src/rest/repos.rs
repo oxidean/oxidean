@@ -393,6 +393,67 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || delete(delete_hook),
     },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/hooks/{id}/deliveries",
+        tags: &["repos"],
+        operation_id: "listHookDeliveries",
+        summary: "List webhook deliveries, GitHub shape (`webhook.deliveries.list`; repo Admin)",
+        procedure: "webhook.deliveries.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(deliveries_list_schema)),
+        mount: || get(list_hook_deliveries),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}",
+        tags: &["repos"],
+        operation_id: "getHookDelivery",
+        summary:
+            "Get a webhook delivery incl. request/response (`webhook.deliveries.get`; repo Admin)",
+        procedure: "webhook.deliveries.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id", "delivery_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(delivery_schema)),
+        mount: || get(get_hook_delivery),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}/attempts",
+        tags: &["repos"],
+        operation_id: "redeliverHookDelivery",
+        summary: "Redeliver a webhook delivery (`webhook.redeliver`; repo Admin)",
+        procedure: "webhook.redeliver",
+        ok: StatusCode::ACCEPTED,
+        anonymous: false,
+        path_fields: &["owner", "name", "id", "delivery_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || post(redeliver_hook_delivery),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/hooks/{id}/pings",
+        tags: &["repos"],
+        operation_id: "pingHook",
+        summary: "Ping a webhook (`webhook.ping`; repo Admin)",
+        procedure: "webhook.ping",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || post(ping_hook),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -823,6 +884,174 @@ async fn delete_hook(
         "webhook.delete",
         p.input(),
         StatusCode::OK,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+pub struct DeliveryPath {
+    owner: String,
+    repo: String,
+    id: String,
+    delivery_id: String,
+}
+
+impl DeliveryPath {
+    fn input(&self) -> Value {
+        json!({
+            "owner": self.owner,
+            "name": self.repo,
+            "webhook_id": self.id,
+            "delivery_id": self.delivery_id,
+        })
+    }
+}
+
+/// `WebhookDeliveryPublic` → GitHub's delivery object (`status`/`status_code`
+/// split; `redelivery` is false — our redeliveries are their own rows).
+fn gh_delivery(d: &Value, detail: bool) -> Value {
+    let status = match d["status"].as_str().unwrap_or("pending") {
+        "success" => json!("OK"),
+        "failed" => d["error_message"].clone(),
+        other => json!(match other {
+            "pending" => "Pending",
+            s => s,
+        }),
+    };
+    let mut out = json!({
+        "id": d["id"],
+        "guid": d["delivery_guid"],
+        "delivered_at": d["created_at"],
+        "redelivery": false,
+        "duration": d["duration_ms"].as_i64().map(|ms| ms as f64 / 1000.0),
+        "status": status,
+        "status_code": d["http_status"].as_i64().unwrap_or(0),
+        "event": d["event"],
+        "action": match d["action"].as_str() {
+            Some("") | None => Value::Null,
+            v => json!(v),
+        },
+        "installation_id": Value::Null,
+        "repository_id": Value::Null,
+        "throttled_at": Value::Null,
+        "url": Value::Null,
+    });
+    if detail {
+        // Stored request headers aren't kept; the payload is verbatim.
+        let payload = d["payload"]
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .unwrap_or(Value::Null);
+        out["request"] = json!({"headers": {}, "payload": payload});
+        out["response"] = json!({
+            "headers": {},
+            "payload": d["response_snippet"].as_str().unwrap_or(""),
+        });
+    }
+    out
+}
+
+fn deliveries_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "guid": {"type": "string"},
+                "delivered_at": {"type": "string"},
+                "redelivery": {"type": "boolean"},
+                "duration": {"type": ["number", "null"]},
+                "status": {"type": "string"},
+                "status_code": {"type": "integer"},
+                "event": {"type": "string"},
+                "action": {"type": ["string", "null"]},
+            },
+        },
+    })
+}
+
+fn delivery_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+/// `GET /api/v1/repos/{owner}/{repo}/hooks/{id}/deliveries`
+/// (`webhook.deliveries.list`) → GitHub's delivery array.
+async fn list_hook_deliveries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<HookPath>,
+) -> Response {
+    let input = json!({
+        "owner": p.owner,
+        "name": p.repo,
+        "webhook_id": p.id,
+    });
+    call_map(
+        &state,
+        &headers,
+        "webhook.deliveries.list",
+        input,
+        StatusCode::OK,
+        |data| {
+            json!(data["deliveries"]
+                .as_array()
+                .map(|rows| rows
+                    .iter()
+                    .map(|d| gh_delivery(d, false))
+                    .collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `GET …/deliveries/{delivery_id}` (`webhook.deliveries.get`) — adds
+/// `request`/`response` blocks.
+async fn get_hook_delivery(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<DeliveryPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "webhook.deliveries.get",
+        p.input(),
+        StatusCode::OK,
+        |data| gh_delivery(&data, true),
+    )
+    .await
+}
+
+/// `POST …/deliveries/{delivery_id}/attempts` (`webhook.redeliver`) → 202.
+async fn redeliver_hook_delivery(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<DeliveryPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "webhook.redeliver",
+        p.input(),
+        StatusCode::ACCEPTED,
+    )
+    .await
+}
+
+/// `POST …/hooks/{id}/pings` (`webhook.ping`) → 201.
+async fn ping_hook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<HookPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "webhook.ping",
+        p.input(),
+        StatusCode::CREATED,
     )
     .await
 }

@@ -113,8 +113,11 @@ async fn delivery_public(
         status: row.status.clone(),
         created_at: row.created_at.clone(),
         http_status: latest.as_ref().and_then(|a| a.http_status),
-        error_message: latest.and_then(|a| a.error_message),
+        error_message: latest.as_ref().and_then(|a| a.error_message.clone()),
         attempt_count: row.attempt_count,
+        payload: Some(row.payload_json.clone()),
+        duration_ms: latest.as_ref().and_then(|a| a.duration_ms),
+        response_snippet: latest.and_then(|a| a.response_snippet),
     })
 }
 

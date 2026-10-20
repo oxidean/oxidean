@@ -5161,6 +5161,9 @@ export type WebhookDeliveryPublic = {
   http_status?: number | null;
   error_message?: string | null;
   attempt_count?: number;
+  payload?: string | null;
+  duration_ms?: number | null;
+  response_snippet?: string | null;
 };
 
 export type WebhookDeliveriesListRequest = {

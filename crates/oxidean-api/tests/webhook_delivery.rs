@@ -2509,3 +2509,155 @@ fn basic_auth(user: &str, password: &str) -> String {
     }
     format!("Basic {out}")
 }
+
+/// GitHub-shaped hook deliveries REST: `GET …/hooks/{id}/deliveries[/{did}]`,
+/// `POST …/attempts` (redeliver → 202), `POST …/pings` (→ 201) — all repo-admin.
+#[tokio::test]
+async fn webhook_deliveries_rest_surface() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("deliv_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "rest@ex.com", "restown").await;
+    rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"private","description":""}}"#,
+        &cookie,
+    )
+    .await;
+
+    let hook_url = format!("{}/hook", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"restown","name":"demo","url":"{hook_url}","secret":"hooksecret","events":["issues","push"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // Seed one delivered row + its attempt directly (no async wait).
+    db.insert_webhook_delivery(
+        "d-seed",
+        &hook_id,
+        "guid-seed",
+        "issues",
+        "opened",
+        r#"{"action":"opened","issue":{"number":1}}"#,
+    )
+    .await
+    .expect("seed delivery");
+    db.insert_webhook_delivery_attempt(
+        "a-seed",
+        "d-seed",
+        1,
+        Some(200),
+        None,
+        Some(42),
+        Some("ok"),
+    )
+    .await
+    .expect("seed attempt");
+    db.mark_webhook_delivery_result("d-seed", "success", 1, None)
+        .await
+        .expect("mark");
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null));
+        (status, v)
+    }
+
+    // List — GitHub shape.
+    let base = format!("/api/v1/repos/restown/demo/hooks/{hook_id}");
+    let (status, v) = rest(&app, "GET", &format!("{base}/deliveries"), &cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let arr = v.as_array().expect("array");
+    assert_eq!(arr.len(), 1, "{v}");
+    let d = &arr[0];
+    assert_eq!(d["id"], "d-seed");
+    assert_eq!(d["guid"], "guid-seed");
+    assert_eq!(d["event"], "issues");
+    assert_eq!(d["action"], "opened");
+    assert_eq!(d["status"], "OK");
+    assert_eq!(d["status_code"], 200);
+    assert_eq!(d["redelivery"], false);
+    assert!((d["duration"].as_f64().unwrap() - 0.042).abs() < 0.001);
+
+    // Detail — adds request/response.
+    let (status, v) = rest(&app, "GET", &format!("{base}/deliveries/d-seed"), &cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["request"]["payload"]["action"], "opened");
+    assert_eq!(v["response"]["payload"], "ok");
+
+    // Redeliver → 202 and a fresh delivery row carrying the same payload.
+    let (status, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/deliveries/d-seed/attempts"),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let rows = db.list_webhook_deliveries(&hook_id, 10).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    let redelivery = rows.iter().find(|r| r.id != "d-seed").expect("new row");
+    assert_eq!(redelivery.event, "issues");
+    assert!(redelivery.payload_json.contains("\"opened\""));
+
+    // Ping → 201.
+    let (status, _) = rest(&app, "POST", &format!("{base}/pings"), &cookie).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Cross-hook ids 404; a non-admin cookie is refused.
+    let (status, _) = rest(&app, "GET", &format!("{base}/deliveries/nope"), &cookie).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let other = verified_owner(&app, &db, "other@ex.com", "otherusr").await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("{base}/deliveries"))
+                .header("cookie", other)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.status() == StatusCode::FORBIDDEN || res.status() == StatusCode::NOT_FOUND,
+        "non-admin refused: {}",
+        res.status()
+    );
+}
