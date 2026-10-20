@@ -375,9 +375,13 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/releases/{release_id}/assets` | `release.list` | Bare array |
 | `DELETE` | `/repos/{owner}/{repo}/releases/assets/{asset_id}` | `release.deleteAsset` | → 204 |
 | `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
+| `GET` | `/admin/users/{username}` | `admin.users.list` (resolved) | Sys-admin session only |
+| `PATCH` | `/admin/users/{username}` | `admin.users.updateRole` + `admin.users.ban`/`unban` | Sys-admin session only; `admin`/`active` fields |
+| `DELETE` | `/admin/users/{username}` | `admin.users.delete` | Sys-admin session only; 204; `?purge=` maps `delete_orgs` |
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
 | `GET` | `/admin/actions/runners` | `admin.actions.listRunners` | Sys-admin session only |
 | `POST` | `/admin/actions/runners/registration-token` | `admin.actions.createRegistrationToken` | Sys-admin session only; 201 |
+| `POST` | `/admin/cron/{task}` | `admin.repos.gc` | Sys-admin session only; `repo_gc_check` only; 204 |
 | `GET` | `/user/packages` | `packages.list` | Session user's packages; `package_type`/`visibility` filters |
 | `GET` | `/users/{username}/packages` | `packages.list` | Anonymous OK (public packages only) |
 | `GET` | `/orgs/{org}/packages` | `packages.list` | Anonymous OK (public packages only) |

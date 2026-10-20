@@ -1444,3 +1444,177 @@ async fn admin_users_delete_requires_delete_orgs_for_shared_org() {
         .expect("find member")
         .is_some());
 }
+
+fn rest_req(method: &str, uri: &str, cookie: Option<&str>, body: Option<&str>) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json");
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    b.body(Body::from(body.unwrap_or("{}").to_owned())).unwrap()
+}
+
+async fn body_json(res: axum::http::Response<Body>) -> serde_json::Value {
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null))
+}
+
+/// REST surface over `admin.users.*` / `admin.repos.gc` — the Gitea-shaped
+/// admin routes (`adminGetUser`/`adminEditUser`/`adminDeleteUser`/`adminCronRun`).
+#[tokio::test]
+async fn rest_admin_users_and_cron() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("admin_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder_repos(db.clone(), Some(dir.path().join("repos"))).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+    let (_vcookie, login_v) = signup_and_login(&app, "victim@ex.com", "victim").await;
+    let victim_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &victim_id).await;
+    let (user_cookie, _lv) = signup_and_login(&app, "other@ex.com", "otheruser").await;
+
+    // Non-admin gets the procedure's forbidden on every route.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            "/api/v1/admin/users/victim",
+            Some(&user_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // GET — Gitea User projection.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["login"], "victim", "{v}");
+    assert_eq!(v["is_admin"], false, "{v}");
+    assert_eq!(v["active"], true, "{v}");
+
+    // GET unknown → 404.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "GET",
+            "/api/v1/admin/users/nobody",
+            Some(&admin_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // PATCH admin:true → sys-admin; admin:false → demote.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "PATCH",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            Some(r#"{"admin":true}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["is_admin"], true, "{v}");
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "PATCH",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            Some(r#"{"admin":false}"#),
+        ))
+        .await
+        .unwrap();
+    let v = body_json(res).await;
+    assert_eq!(v["is_admin"], false, "{v}");
+
+    // PATCH active:false → ban; active:true → unban.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "PATCH",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            Some(r#"{"active":false}"#),
+        ))
+        .await
+        .unwrap();
+    let v = body_json(res).await;
+    assert_eq!(v["active"], false, "{v}");
+    assert_eq!(v["prohibit_login"], true, "{v}");
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "PATCH",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            Some(r#"{"active":true}"#),
+        ))
+        .await
+        .unwrap();
+    let v = body_json(res).await;
+    assert_eq!(v["active"], true, "{v}");
+
+    // Cron: only repo_gc_check maps.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "POST",
+            "/api/v1/admin/cron/repo_gc_check",
+            Some(&admin_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "POST",
+            "/api/v1/admin/cron/archive_cleanup",
+            Some(&admin_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // DELETE removes the user (typed confirmation = path username).
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "DELETE",
+            "/api/v1/admin/users/victim",
+            Some(&admin_cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert!(db
+        .find_user_by_username("victim")
+        .await
+        .expect("find")
+        .is_none());
+}

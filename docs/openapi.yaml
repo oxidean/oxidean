@@ -13155,6 +13155,159 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /admin/users/{username}:
+    get:
+      tags:
+      - admin
+      summary: Get one user (resolved via `admin.users.list`; sys-admin session only)
+      operationId: adminGetUser
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  login:
+                    type: string
+                  username:
+                    type: string
+                  full_name:
+                    type: string
+                  email:
+                    type: string
+                  is_admin:
+                    type: boolean
+                  active:
+                    type: boolean
+                  prohibit_login:
+                    type: boolean
+                  restricted:
+                    type: boolean
+                  visibility:
+                    type: string
+                  created:
+                    type: string
+                  email_verified:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - admin
+      summary: Edit a user's admin/active state (`admin.users.updateRole` + ban/unban)
+      operationId: adminEditUser
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                admin:
+                  type: boolean
+                  description: Grant or revoke the sys-admin role (`admin.users.updateRole`)
+                active:
+                  type: boolean
+                  description: false bans the account, true lifts the ban (`admin.users.ban`/`unban`)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  login:
+                    type: string
+                  username:
+                    type: string
+                  full_name:
+                    type: string
+                  email:
+                    type: string
+                  is_admin:
+                    type: boolean
+                  active:
+                    type: boolean
+                  prohibit_login:
+                    type: boolean
+                  restricted:
+                    type: boolean
+                  visibility:
+                    type: string
+                  created:
+                    type: string
+                  email_verified:
+                    type: boolean
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - admin
+      summary: Delete a user (`admin.users.delete`; sys-admin session only)
+      operationId: adminDeleteUser
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /admin/cron/{task}:
+    post:
+      tags:
+      - admin
+      summary: Run a maintenance task — `repo_gc_check` only (`admin.repos.gc`)
+      operationId: adminCronRun
+      parameters:
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /user/packages:
     get:
       tags:
