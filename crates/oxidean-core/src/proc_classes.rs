@@ -228,9 +228,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.listByOwner"
         | "search.global" => RepoRead,
 
-        // Contents writes + create/fork (the `repo.file.*` editor ops all
-        // commit through the contents domain).
-        "repo.create" | "repo.fork" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
+        // Contents writes + create/fork/migrate (the `repo.file.*` editor ops
+        // all commit through the contents domain).
+        "repo.create" | "repo.fork" | "repo.migrate" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
         | "repo.branchDelete" | "repo.syncFork" | "repo.file.create" | "repo.file.delete"
         | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload"
         | "wiki.pages.create" | "wiki.pages.update" | "wiki.pages.delete" => RepoWrite,

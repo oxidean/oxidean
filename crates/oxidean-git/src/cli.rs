@@ -521,6 +521,12 @@ impl RemoteAuthFiles {
     fn prepare(credentials: &RemoteCredentials) -> Result<Self, GitError> {
         let dir = tempfile::tempdir().map_err(GitError::Io)?;
         let mut env = Vec::new();
+        // An empty HTTPS secret means anonymous access — injecting a
+        // `Basic <user>:` header makes strict servers 401 instead of serving
+        // the public repo, so skip auth materialization entirely.
+        if credentials.kind == RemoteAuthKind::HttpsToken && credentials.secret.is_empty() {
+            return Ok(Self { _dir: dir, env });
+        }
         match credentials.kind {
             RemoteAuthKind::HttpsToken => {
                 let user = credentials.username.as_deref().unwrap_or("git").trim();
@@ -3776,6 +3782,24 @@ impl GitBackend for CliGitBackend {
         }
         let repo_s = repo_str(repo)?;
         run_git(&["-C", repo_s, "update-ref", refname, sha]).await
+    }
+
+    async fn set_head_branch(&self, repo: &Path, branch: &str) -> Result<(), GitError> {
+        let branch = validate_treeish(branch)?;
+        if branch.starts_with("refs/") || branch.contains(':') || branch.is_empty() {
+            return Err(GitError::InvalidArg(format!(
+                "set_head_branch wants a short branch name: {branch}"
+            )));
+        }
+        let repo_s = repo_str(repo)?;
+        run_git(&[
+            "-C",
+            repo_s,
+            "symbolic-ref",
+            "HEAD",
+            &format!("refs/heads/{branch}"),
+        ])
+        .await
     }
 
     // ------------------------------------------------------------------

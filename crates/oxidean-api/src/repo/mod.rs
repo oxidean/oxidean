@@ -94,12 +94,14 @@ use oxidean_core::{
     RepoLfsEnabledResponse, RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest,
     RepoLfsListObjectsResponse, RepoLfsObjectEntry, RepoLfsSetEnabledRequest,
     RepoLfsStatusResponse, RepoLfsUsageResponse, RepoListByOwnerRequest, RepoListMineResponse,
-    RepoPublic, RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest,
-    RepoSetQuotaRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption,
-    RepoTreeEntry, RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
-    TemplateProvenance,
+    RepoMigrateRequest, RepoPublic, RepoQuotaPublic, RepoRefEntry, RepoRefsResponse,
+    RepoSetArchivedRequest, RepoSetQuotaRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse,
+    RepoTemplateOption, RepoTreeEntry, RepoTreeRequest, RepoTreeResponse,
+    RepoUpdateVisibilityRequest, RepoVisibility, TemplateProvenance,
 };
 use uuid::Uuid;
+
+use oxidean_git::{RemoteAuthKind, RemoteCredentials};
 
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
@@ -2548,6 +2550,220 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         fork_network_id: None,
         forked_from: None,
     })
+}
+
+/// `repo.migrate` — Gitea `POST /repos/migrate`: create a repository whose git
+/// content is cloned from a remote URL. `mirror: true` additionally registers
+/// the remote as an ongoing two-way mirror; `wiki: true` best-effort clones
+/// the `<repo>.wiki` sidecar. Only `service: "git"` is supported — forge-object
+/// migration (issues / PRs / releases) is out of scope.
+pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: RepoMigrateRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.migrate input: {e}")))?;
+
+    match req
+        .service
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        None | Some("git") => {}
+        Some(other) => {
+            return Err(AppError::new(
+                "repo.migrate.unsupported",
+                format!("service '{other}' is not supported; only git clones are"),
+            ));
+        }
+    }
+
+    let clone_addr = oxidean_git::validate_remote_url(req.clone_addr.trim())
+        .map_err(|e| AppError::new("repo.migrate.invalid_url", e.to_string()))?
+        .to_string();
+    let lower = clone_addr.to_ascii_lowercase();
+    if !lower.starts_with("https://") && !lower.starts_with("http://") {
+        return Err(AppError::new(
+            "repo.migrate.unsupported",
+            "ssh:// and git@ remotes are not supported for migration; use an https:// clone URL",
+        ));
+    }
+
+    let name = {
+        let n = req.repo_name.trim();
+        if n.is_empty() {
+            clone_addr
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(".git")
+                .to_string()
+        } else {
+            n.to_string()
+        }
+    };
+    validate_repo_name(&name).map_err(|msg| AppError::new("repo.invalid_name", msg))?;
+
+    let credentials = RemoteCredentials {
+        kind: RemoteAuthKind::HttpsToken,
+        username: req
+            .auth_username
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .or_else(|| Some("git".to_string())),
+        secret: req
+            .auth_token
+            .clone()
+            .or(req.auth_password.clone())
+            .unwrap_or_default(),
+        known_hosts: None,
+    };
+
+    let mut repo = create(
+        ctx,
+        serde_json::json!({
+            "name": name,
+            "owner": req.repo_owner,
+            "description": req.description,
+            "visibility": if req.private.unwrap_or(false) { "private" } else { "public" },
+        }),
+    )
+    .await?;
+
+    let bare = bare_repo_path(&ctx.repos_dir, &repo.owner_username, &repo.name)?;
+    let remote_refs = match ctx.git.ls_remote_url(&clone_addr, &credentials).await {
+        Ok(r) => r,
+        Err(e) => {
+            compensate_failed_create(ctx, &repo.id, &bare).await;
+            return Err(AppError::new(
+                "repo.migrate.unreachable",
+                format!("cannot read remote refs: {e}"),
+            ));
+        }
+    };
+    if let Err(e) = ctx
+        .git
+        .fetch_from_url(&bare, &clone_addr, &credentials)
+        .await
+    {
+        compensate_failed_create(ctx, &repo.id, &bare).await;
+        return Err(AppError::new(
+            "repo.migrate.clone_failed",
+            format!("git fetch failed: {e}"),
+        ));
+    }
+    // Publish remote heads/tags verbatim — ls-remote names are already
+    // fully-qualified `refs/heads/*` / `refs/tags/*`.
+    for r in &remote_refs {
+        if let Err(e) = ctx.git.update_ref(&bare, &r.name, &r.oid).await {
+            compensate_failed_create(ctx, &repo.id, &bare).await;
+            return Err(AppError::new(
+                "repo.migrate.clone_failed",
+                format!("publish {} failed: {e}", r.name),
+            ));
+        }
+    }
+
+    // Re-point the default branch when the remote lacks the one chosen at
+    // create time (prefer `master`, else the first remote head).
+    let mut heads: Vec<&str> = remote_refs
+        .iter()
+        .filter_map(|r| r.name.strip_prefix("refs/heads/"))
+        .collect();
+    heads.sort_unstable();
+    if !heads.is_empty() && !heads.contains(&repo.default_branch.as_str()) {
+        let pick = if heads.contains(&"master") {
+            "master"
+        } else {
+            heads[0]
+        };
+        ctx.git
+            .set_head_branch(&bare, pick)
+            .await
+            .map_err(|e| AppError::new("repo.migrate.head", e.to_string()))?;
+        repo.default_branch = ctx
+            .db
+            .update_repository_default_branch(&repo.id, pick)
+            .await
+            .map_err(db_err)?
+            .default_branch;
+    }
+
+    if let Err(e) = crate::git::quota::refresh_repo_size_bytes(&ctx.db, &repo.id, &bare).await {
+        tracing::warn!(error = %e, "post-migrate size refresh failed");
+    }
+
+    if req.mirror.unwrap_or(false) {
+        // A configured mirror needs outbound credentials on this instance
+        // (anonymous pull mirrors are not supported — mirror secret_required).
+        crate::mirror::upsert(
+            ctx,
+            serde_json::json!({
+                "owner": repo.owner_username,
+                "name": repo.name,
+                "remote_url": clone_addr,
+                "auth_kind": "https_token",
+                "username": credentials.username,
+                "secret": credentials.secret,
+                "enabled": true,
+                "sync_mode": "merge",
+            }),
+        )
+        .await?;
+        let _ = crate::mirror::sync_now(
+            ctx,
+            serde_json::json!({"owner": repo.owner_username, "name": repo.name}),
+        )
+        .await;
+    }
+
+    if req.wiki.unwrap_or(false) {
+        migrate_wiki(ctx, &repo, &clone_addr, &credentials).await;
+    }
+
+    Ok(repo)
+}
+
+/// Best-effort wiki sidecar clone: `<clone_addr minus .git>.wiki.git` →
+/// `{repos_dir}/{owner}/{name}.wiki.git`. Silent no-op when the remote has no
+/// wiki repository.
+async fn migrate_wiki(
+    ctx: &RpcCtx,
+    repo: &RepoPublic,
+    clone_addr: &str,
+    credentials: &RemoteCredentials,
+) {
+    let wiki_addr = format!(
+        "{}.wiki.git",
+        clone_addr.trim_end_matches('/').trim_end_matches(".git")
+    );
+    let Ok(refs) = ctx.git.ls_remote_url(&wiki_addr, credentials).await else {
+        return;
+    };
+    if refs.is_empty() {
+        return;
+    }
+    let Ok(wiki_path) = bare_repo_path(
+        &ctx.repos_dir,
+        &repo.owner_username,
+        &format!("{}.wiki", repo.name),
+    ) else {
+        return;
+    };
+    if !wiki_path.exists() && ctx.git.init_bare(&wiki_path, "master").await.is_err() {
+        return;
+    }
+    if ctx
+        .git
+        .fetch_from_url(&wiki_path, &wiki_addr, credentials)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    for r in &refs {
+        let _ = ctx.git.update_ref(&wiki_path, &r.name, &r.oid).await;
+    }
 }
 
 /// `repo.fork` — Read+ on **public** source; bare copy + fork network (D-SOC-12…18, extends Phase 12).

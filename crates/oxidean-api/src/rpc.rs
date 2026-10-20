@@ -281,6 +281,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.createDefaults",
     "repo.create",
     "repo.fork",
+    "repo.migrate",
     "repo.star",
     "repo.unstar",
     "repo.watch",
@@ -1223,6 +1224,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.fork" => match repo::fork(ctx, req.input).await {
+            Ok(repo) => RpcResponse::ok(repo),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.migrate" => match repo::migrate(ctx, req.input).await {
             Ok(repo) => RpcResponse::ok(repo),
             Err(e) => RpcResponse::err(e),
         },

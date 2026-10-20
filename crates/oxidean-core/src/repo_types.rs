@@ -125,6 +125,40 @@ pub struct CreateRepoRequest {
     pub owner: Option<String>,
 }
 
+/// `repo.migrate` — clone a remote git URL into a new repository (Gitea
+/// `POST /repos/migrate` shape). `service` is accepted for tolerance but only
+/// `"git"` (or empty) is honored — forge-object migration is out of scope.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoMigrateRequest {
+    /// Remote clone URL (https:// / http://; ssh/git@ currently unsupported).
+    pub clone_addr: String,
+    #[serde(default)]
+    pub auth_username: Option<String>,
+    #[serde(default)]
+    pub auth_token: Option<String>,
+    /// Gitea clients may send `auth_password`; treated as an auth_token alias.
+    #[serde(default)]
+    pub auth_password: Option<String>,
+    /// New repository name. Empty → derived from the clone URL basename.
+    #[serde(default)]
+    pub repo_name: String,
+    /// Target owner slug; omit → caller.
+    #[serde(default)]
+    pub repo_owner: Option<String>,
+    /// Keep the remote as a pull mirror after migrating.
+    #[serde(default)]
+    pub mirror: Option<bool>,
+    #[serde(default)]
+    pub private: Option<bool>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Also clone `{clone_addr}.wiki` into the repository wiki bare.
+    #[serde(default)]
+    pub wiki: Option<bool>,
+    #[serde(default)]
+    pub service: Option<String>,
+}
+
 /// Public create-form defaults + catalog metadata (D-02–D-04, D-08, issue #18).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCreateDefaults {

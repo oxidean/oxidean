@@ -314,6 +314,65 @@ WHERE id = ?1 AND deleted_at IS NULL",
         .ok_or_else(|| "repository not found after name update".into())
 }
 
+/// Set `default_branch` — repo.migrate re-points it when the remote's default
+/// differs from the one chosen at create time.
+pub async fn update_default_branch(
+    pool: &DbPool,
+    id: &str,
+    default_branch: &str,
+) -> Result<RepositoryRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET default_branch = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(default_branch)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository default_branch failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET default_branch = ?, updated_at = NOW()
+WHERE id = ? AND deleted_at IS NULL",
+            )
+            .bind(default_branch)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository default_branch failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET default_branch = ?2, updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(default_branch)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository default_branch failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "repository not found after default_branch update".into())
+}
+
 /// Rewrite polymorphic owner for transfer (GIT-17 / D-REL-10).
 pub async fn update_owner(
     pool: &DbPool,

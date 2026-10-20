@@ -563,6 +563,20 @@ export type ForkRepoRequest = {
   into_name?: string | null;
 };
 
+export type RepoMigrateRequest = {
+  clone_addr: string;
+  auth_username?: string | null;
+  auth_token?: string | null;
+  auth_password?: string | null;
+  repo_name?: string;
+  repo_owner?: string | null;
+  mirror?: boolean | null;
+  private?: boolean | null;
+  description?: string | null;
+  wiki?: boolean | null;
+  service?: string | null;
+};
+
 export type RepoTemplateOption = {
   id: string;
   label: string;
@@ -5804,6 +5818,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoCreateDefaults>(opts, "repo.createDefaults", {}),
       create: (input: CreateRepoRequest) => rpcCall<RepoPublic>(opts, "repo.create", input),
       fork: (input: ForkRepoRequest) => rpcCall<RepoPublic>(opts, "repo.fork", input),
+      migrate: (input: RepoMigrateRequest) =>
+        rpcCall<RepoPublic>(opts, "repo.migrate", input),
       star: (input: RepoStarRequest) => rpcCall<RepoPublic>(opts, "repo.star", input),
       unstar: (input: RepoStarRequest) => rpcCall<RepoPublic>(opts, "repo.unstar", input),
       watch: (input: RepoWatchRequest) => rpcCall<RepoPublic>(opts, "repo.watch", input),

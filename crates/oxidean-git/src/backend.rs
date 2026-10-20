@@ -904,6 +904,11 @@ pub trait GitBackend: Send + Sync {
     /// ensure `sha` resolves to an object already present in `repo`.
     async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError>;
 
+    /// Repoint the bare `HEAD` symref at `refs/heads/<branch>`
+    /// (`git symbolic-ref HEAD …`) — used when a migration discovers the
+    /// remote's default branch differs from the one chosen at `init_bare`.
+    async fn set_head_branch(&self, repo: &Path, branch: &str) -> Result<(), GitError>;
+
     // ------------------------------------------------------------------
     // VCS git-interop plumbing (u6 / TD6.2)
     // ------------------------------------------------------------------

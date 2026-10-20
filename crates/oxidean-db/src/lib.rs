@@ -1139,6 +1139,14 @@ impl Database {
         repositories::update_name(self.require_pool()?, id, name).await
     }
 
+    pub async fn update_repository_default_branch(
+        &self,
+        id: &str,
+        default_branch: &str,
+    ) -> Result<RepositoryRow, String> {
+        repositories::update_default_branch(self.require_pool()?, id, default_branch).await
+    }
+
     pub async fn update_repository_owner(
         &self,
         id: &str,

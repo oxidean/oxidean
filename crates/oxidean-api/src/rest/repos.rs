@@ -8,7 +8,7 @@ use axum::Json;
 use oxidean_core::{
     CreateWebhookRequest, LabelsListResponse, ListLabelsForRepoRequest, RepoCommitResponse,
     RepoCommitsResponse, RepoCompareResponse, RepoExploreRequest, RepoLanguagesResponse,
-    RepoListMineResponse, RepoPublic, RepoRefEntry, RepoSoftDeleteResponse,
+    RepoListMineResponse, RepoMigrateRequest, RepoPublic, RepoRefEntry, RepoSoftDeleteResponse,
     RepoStargazersListRequest, RepoStargazersListResponse, RepoTreeResponse,
     RepoUpdateMetadataRequest, RpcResponse, UpdateWebhookRequest, WebhookListResponse,
     WebhookPublic,
@@ -56,6 +56,25 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<RepoListMineResponse>,
         )),
         mount: || get(list_repositories),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/migrate",
+        tags: &["repos"],
+        operation_id: "repoMigrate",
+        summary: "Migrate a repository by cloning a remote git URL (`repo.migrate`; Gitea-compatible)",
+        procedure: "repo.migrate",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<RepoMigrateRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoPublic>,
+        )),
+        mount: || post(migrate_repo),
     },
     RouteDef {
         method: "GET",
@@ -1300,6 +1319,15 @@ async fn list_repositories(
 ) -> Response {
     let input = serde_json::to_value(&q).unwrap_or_else(|_| json!({}));
     call(&state, &headers, "repo.explore", input, StatusCode::OK).await
+}
+
+/// `POST /api/v1/repos/migrate` (`repo.migrate`) — Gitea-compatible clone-in.
+async fn migrate_repo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    call(&state, &headers, "repo.migrate", body, StatusCode::CREATED).await
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}` (`repo.get`).

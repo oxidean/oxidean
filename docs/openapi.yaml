@@ -2608,6 +2608,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/migrate:
+    post:
+      tags:
+      - repos
+      summary: Migrate a repository by cloning a remote git URL (`repo.migrate`; Gitea-compatible)
+      operationId: repoMigrate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              required:
+              - clone_addr
+              title: RepoMigrateRequest
+              description: |-
+                `repo.migrate` — clone a remote git URL into a new repository (Gitea
+                `POST /repos/migrate` shape). `service` is accepted for tolerance but only
+                `"git"` (or empty) is honored — forge-object migration is out of scope.
+              type: object
+              properties:
+                clone_addr:
+                  description: Remote clone URL (https:// / http://; ssh/git@ currently unsupported).
+                  type: string
+                auth_username:
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+                auth_token:
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+                auth_password:
+                  description: Gitea clients may send `auth_password`; treated as an auth_token alias.
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+                repo_name:
+                  description: New repository name. Empty → derived from the clone URL basename.
+                  type: string
+                  default: ''
+                repo_owner:
+                  description: Target owner slug; omit → caller.
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+                mirror:
+                  description: Keep the remote as a pull mirror after migrating.
+                  type:
+                  - boolean
+                  - 'null'
+                  default: null
+                private:
+                  type:
+                  - boolean
+                  - 'null'
+                  default: null
+                description:
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+                wiki:
+                  description: Also clone `{clone_addr}.wiki` into the repository wiki bare.
+                  type:
+                  - boolean
+                  - 'null'
+                  default: null
+                service:
+                  type:
+                  - string
+                  - 'null'
+                  default: null
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}:
     get:
       tags:
