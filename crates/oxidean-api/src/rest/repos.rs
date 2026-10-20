@@ -916,6 +916,112 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Json(transfer_repo_schema)),
         mount: || post(transfer_repo_rest),
     },
+    // ---- tag protections / activity / mirror-sync (GitHub+Gitea REST) ---------
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/tag_protections",
+        tags: &["repos"],
+        operation_id: "repos/listTagProtections",
+        summary: "Tag protection rules (`repo.tagProtection.list`) — Gitea `{id, name_pattern, …}` rows",
+        procedure: "repo.tagProtection.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(tag_protection_list_schema)),
+        mount: || get(list_tag_protections),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/tag_protections",
+        tags: &["repos"],
+        operation_id: "repos/createTagProtection",
+        summary: "Create a rule (`repo.tagProtection.create`) — `{name_pattern}` → 201",
+        procedure: "repo.tagProtection.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(tag_protection_body_schema)),
+        response: Some(RespSpec::Json(tag_protection_schema)),
+        mount: || post(create_tag_protection),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/tag_protections/{id}",
+        tags: &["repos"],
+        operation_id: "repos/getTagProtection",
+        summary: "One rule (`repo.tagProtection.list`, id-filtered) — 404 when absent",
+        procedure: "repo.tagProtection.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(tag_protection_schema)),
+        mount: || get(get_tag_protection),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/tag_protections/{id}",
+        tags: &["repos"],
+        operation_id: "repos/updateTagProtection",
+        summary: "Update a rule (`repo.tagProtection.update`) — `{name_pattern}`; existing flags retained when omitted",
+        procedure: "repo.tagProtection.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: Some(BodySpec::Json(tag_protection_patch_schema)),
+        response: Some(RespSpec::Json(tag_protection_schema)),
+        mount: || patch(update_tag_protection),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/tag_protections/{id}",
+        tags: &["repos"],
+        operation_id: "repos/deleteTagProtection",
+        summary: "Delete a rule (`repo.tagProtection.delete`) — 204",
+        procedure: "repo.tagProtection.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_tag_protection),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/activity",
+        tags: &["repos"],
+        operation_id: "activity/listRepoActivities",
+        summary: "Repo activity feed (`repo.activity.list`) — GitHub `{ref, activity_type, actor, before, after}` rows",
+        procedure: "repo.activity.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<RepoActivityQuery>),
+        body: None,
+        response: Some(RespSpec::Json(activity_list_schema)),
+        mount: || get(list_repo_activity),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/mirror-sync",
+        tags: &["repos"],
+        operation_id: "repos/mirrorSync",
+        summary: "Kick a pull-mirror sync (`repo.mirror.syncNow`) — Gitea parity; 200",
+        procedure: "repo.mirror.syncNow",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(mirror_sync_schema)),
+        mount: || post(mirror_sync_rest),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -3079,4 +3185,305 @@ async fn transfer_repo_rest(
             (super::status_for_error(&error), Json(error)).into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tag protections / activity / mirror-sync (GitHub+Gitea REST)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct TagProtectionPath {
+    owner: String,
+    repo: String,
+    id: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RepoActivityQuery {
+    /// GitHub's name for our `push_type` filter.
+    #[serde(default)]
+    activity_type: Option<String>,
+    /// `week` | `month` | `year` | `all`.
+    #[serde(default)]
+    time_period: Option<String>,
+    /// GitHub `actor`/`direction` params are accepted but unmapped (the proc
+    /// has no actor filter and only emits newest-first).
+    #[serde(default)]
+    per_page: Option<i64>,
+    #[serde(default)]
+    page: Option<i64>,
+}
+
+fn tag_protection_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn tag_protection_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name_pattern": {"type": "string"},
+            "whitelist_usernames": {"type": "array", "items": {"type": "string"}},
+            "whitelist_teams": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn tag_protection_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["name_pattern"],
+        "properties": {"name_pattern": {"type": "string"}},
+    })
+}
+
+fn tag_protection_patch_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name_pattern": {"type": "string"},
+            "allow_create": {"type": "boolean"},
+            "allow_update": {"type": "boolean"},
+            "allow_delete": {"type": "boolean"},
+            "enforce_admins": {"type": "boolean"},
+        },
+    })
+}
+
+fn activity_list_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": {"type": "object"}})
+}
+
+fn mirror_sync_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "object"})
+}
+
+/// `TagProtectionRulePublic` → Gitea's `TagProtection` shape.
+fn gitea_tag_protection(r: &Value) -> Value {
+    json!({
+        "id": r["id"],
+        "name_pattern": r["pattern"],
+        "whitelist_usernames": [],
+        "whitelist_teams": [],
+        "allow_create": r["allow_create"],
+        "allow_update": r["allow_update"],
+        "allow_delete": r["allow_delete"],
+        "enforce_admins": r["enforce_admins"],
+        "created_at": r["created_at"],
+        "updated_at": r["updated_at"],
+    })
+}
+
+async fn list_tag_protections(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.tagProtection.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| {
+            json!(d["rules"]
+                .as_array()
+                .map(|rs| rs.iter().map(gitea_tag_protection).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// Fetch a single tag-protection rule by id for get/patch guards.
+async fn fetch_tag_rule(
+    state: &AppState,
+    headers: &HeaderMap,
+    owner: &str,
+    repo: &str,
+    id: &str,
+) -> Result<Option<Value>, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await.map_err(Box::new)?;
+    match dispatch(&mut ctx, "repo.tagProtection.list", repo_ref(owner, repo)).await {
+        RpcResponse::Ok { data, .. } => Ok(data["rules"]
+            .as_array()
+            .and_then(|rs| rs.iter().find(|r| r["id"].as_str() == Some(id)).cloned())),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (super::status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+async fn create_tag_protection(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    // Gitea creates a fully-deny rule (empty whitelist); our input takes the
+    // allow_* flags explicitly — default all false = nobody may write the tag.
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"pattern": body["name_pattern"]}),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.tagProtection.create",
+        input,
+        StatusCode::CREATED,
+        |d| gitea_tag_protection(&d),
+    )
+    .await
+}
+
+async fn get_tag_protection(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<TagProtectionPath>,
+) -> Response {
+    match fetch_tag_rule(&state, &headers, &p.owner, &p.repo, &p.id).await {
+        Ok(Some(r)) => (StatusCode::OK, Json(gitea_tag_protection(&r))).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"code": "tag_protection.not_found", "message": "rule not found"})),
+        )
+            .into_response(),
+        Err(r) => *r,
+    }
+}
+
+/// Gitea PATCH merges — omitted fields keep the stored values.
+async fn update_tag_protection(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<TagProtectionPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let existing = match fetch_tag_rule(&state, &headers, &p.owner, &p.repo, &p.id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"code": "tag_protection.not_found", "message": "rule not found"})),
+            )
+                .into_response()
+        }
+        Err(r) => return *r,
+    };
+    let pick = |key: &str| -> Value {
+        if body.get(key).is_some() {
+            body[key].clone()
+        } else {
+            existing[key].clone()
+        }
+    };
+    let pattern = body["name_pattern"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| existing["pattern"].as_str().unwrap_or_default().to_string());
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({
+            "id": p.id,
+            "pattern": pattern,
+            "allow_create": pick("allow_create"),
+            "allow_update": pick("allow_update"),
+            "allow_delete": pick("allow_delete"),
+            "enforce_admins": pick("enforce_admins"),
+        }),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.tagProtection.update",
+        input,
+        StatusCode::OK,
+        |d| gitea_tag_protection(&d),
+    )
+    .await
+}
+
+async fn delete_tag_protection(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<TagProtectionPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.tagProtection.delete",
+        merge_fields(repo_ref(&p.owner, &p.repo), json!({"id": p.id})),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+/// `RepoActivityItem` → GitHub's activity row.
+fn gh_activity(a: &Value) -> Value {
+    json!({
+        "id": a["id"],
+        "ref": a["ref_name"],
+        "activity_type": a["push_type"],
+        "before": a["before"],
+        "after": a["after"],
+        "timestamp": a["pushed_at"],
+        "actor": {
+            "login": a["pusher"]["login"],
+            "name": a["pusher"]["name"],
+            "avatar_url": a["pusher"]["avatar_url"],
+        },
+    })
+}
+
+/// `GET /repos/{o}/{r}/activity` — GitHub query names onto `repo.activity.list`.
+async fn list_repo_activity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Query(q): Query<RepoActivityQuery>,
+) -> Response {
+    let per = q.per_page.unwrap_or(30).clamp(1, 100);
+    let page = q.page.unwrap_or(1).max(1);
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({
+            "push_type": q.activity_type,
+            "period": q.time_period,
+            "offset": (page - 1) * per,
+            "limit": per,
+        }),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.activity.list",
+        input,
+        StatusCode::OK,
+        |d| {
+            json!(d["items"]
+                .as_array()
+                .map(|is| is.iter().map(gh_activity).collect::<Vec<_>>())
+                .unwrap_or_default())
+        },
+    )
+    .await
+}
+
+/// `POST /repos/{o}/{r}/mirror-sync` — Gitea returns 200 + `{ok: true}`.
+async fn mirror_sync_rest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.mirror.syncNow",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| json!({"ok": d["enqueued"], "mirror": d["mirror"]}),
+    )
+    .await
 }

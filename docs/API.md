@@ -275,6 +275,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `POST` | `/repos/{owner}/{repo}/git/refs` | `repo.branchCreate` | `{ref, sha}` — `refs/heads/*` only → 201 |
 | `DELETE` | `/repos/{owner}/{repo}/git/refs/{ref}` | `repo.branchDelete` | `refs/heads/*` only → 204 |
 | `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
+| `GET`/`POST` | `/repos/{owner}/{repo}/tag_protections` | `repo.tagProtection.list` / `.create` | Gitea shape (`name_pattern`); create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/tag_protections/{id}` | `repo.tagProtection.list` / `.update` / `.delete` | Get → 404 when absent; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/activity` | `repo.activity.list` | GitHub query names (`activity_type`, `time_period`, `page`, `per_page`) map to the activity request; `actor`/`direction` accepted, not yet filtered |
+| `POST` | `/repos/{owner}/{repo}/mirror-sync` | `repo.mirror.syncNow` | Gitea shape; → `{enqueued, mirror}` |
 | `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
 | `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/statuses/{sha}` | `repo.commitStatus.list` / `repo.commitStatus.create` | GitHub-shaped fields — see [GitHub compatibility](#github-compatibility) |
@@ -352,7 +356,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirrors, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, `repo.rename`/`transfer`, tag protection, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirror config CRUD, LFS objects, issue delete/reactions/links, `org.updateSettings` and org invites, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 

@@ -3526,6 +3526,335 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/tag_protections:
+    get:
+      tags:
+      - repos
+      summary: Tag protection rules (`repo.tagProtection.list`) — Gitea `{id, name_pattern, …}` rows
+      operationId: repos/listTagProtections
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      summary: Create a rule (`repo.tagProtection.create`) — `{name_pattern}` → 201
+      operationId: repos/createTagProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name_pattern
+              properties:
+                name_pattern:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name_pattern:
+                    type: string
+                  whitelist_usernames:
+                    type: array
+                    items:
+                      type: string
+                  whitelist_teams:
+                    type: array
+                    items:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/tag_protections/{id}:
+    get:
+      tags:
+      - repos
+      summary: One rule (`repo.tagProtection.list`, id-filtered) — 404 when absent
+      operationId: repos/getTagProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name_pattern:
+                    type: string
+                  whitelist_usernames:
+                    type: array
+                    items:
+                      type: string
+                  whitelist_teams:
+                    type: array
+                    items:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - repos
+      summary: Update a rule (`repo.tagProtection.update`) — `{name_pattern}`; existing flags retained when omitted
+      operationId: repos/updateTagProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name_pattern:
+                  type: string
+                allow_create:
+                  type: boolean
+                allow_update:
+                  type: boolean
+                allow_delete:
+                  type: boolean
+                enforce_admins:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name_pattern:
+                    type: string
+                  whitelist_usernames:
+                    type: array
+                    items:
+                      type: string
+                  whitelist_teams:
+                    type: array
+                    items:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      summary: Delete a rule (`repo.tagProtection.delete`) — 204
+      operationId: repos/deleteTagProtection
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/activity:
+    get:
+      tags:
+      - repos
+      summary: Repo activity feed (`repo.activity.list`) — GitHub `{ref, activity_type, actor, before, after}` rows
+      operationId: activity/listRepoActivities
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: activity_type
+        in: query
+        required: false
+        schema:
+          description: GitHub's name for our `push_type` filter.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: time_period
+        in: query
+        required: false
+        schema:
+          description: '`week` | `month` | `year` | `all`.'
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          description: |-
+            GitHub `actor`/`direction` params are accepted but unmapped (the proc
+            has no actor filter and only emits newest-first).
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/mirror-sync:
+    post:
+      tags:
+      - repos
+      summary: Kick a pull-mirror sync (`repo.mirror.syncNow`) — Gitea parity; 200
+      operationId: repos/mirrorSync
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/actions/artifacts:
     get:
       tags:
