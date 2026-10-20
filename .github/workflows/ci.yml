@@ -181,7 +181,7 @@ jobs:
     name: rust-build
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: read
@@ -219,13 +219,11 @@ jobs:
           cargo build --workspace --bins
           # oxidean-api's libtest + rlib are each ~7-13 GB rustc units; two at
           # once OOM the runner (telemetry: 2×7.6 GB → 97 MB avail → 137).
-          # --exclude builds api only as a dep (rlib) alongside the small
-          # units; the second pass then has just api's own targets left —
-          # workspace-wide --all-targets keeps dep fingerprints identical to
-          # the archive's so nothing recompiles.
-          cargo test --workspace --all-targets --features server \
-            --exclude oxidean-api --no-run
-          cargo test --workspace --all-targets --features server --no-run
+          # api is a leaf crate — nothing else links it — so --exclude can't
+          # split the pair. Workspace-scoped --lib resolves the same dep
+          # graph as --all-targets, so this libtest caches straight into the
+          # archive; its rlib then builds alone (test bins queue behind it).
+          cargo test --workspace --lib --features server --no-run
           mkdir -p target
           cargo nextest archive --workspace --features server \
             --archive-file target/nextest-archive.tar.zst
