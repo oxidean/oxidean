@@ -518,6 +518,53 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || get(list_user_repos),
     },
+    // Gitea access-token REST (`/users/{username}/tokens`) — self-service
+    // PAT management; what `tea login`-style clients mint tokens through.
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/tokens",
+        tags: &["users"],
+        operation_id: "getTokens",
+        summary: "List the session user's access tokens (self only; `pat.list`)",
+        procedure: "pat.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(access_token_list_schema)),
+        mount: || get(list_user_tokens),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/users/{username}/tokens",
+        tags: &["users"],
+        operation_id: "createToken",
+        summary: "Create an access token from a name + Gitea scope list (`pat.createClassic`)",
+        procedure: "pat.createClassic",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(access_token_create_schema)),
+        response: Some(RespSpec::Json(access_token_schema)),
+        mount: || post(create_user_token),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/users/{username}/tokens/{token}",
+        tags: &["users"],
+        operation_id: "deleteToken",
+        summary: "Revoke an access token by id (`pat.revoke`) — 204",
+        procedure: "pat.revoke",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_user_token),
+    },
     RouteDef {
         method: "GET",
         path: "/search/repositories",
@@ -1995,6 +2042,237 @@ fn search_envelope_schema(_gen: &mut SchemaGenerator) -> Value {
             "total_count": {"type": "integer"},
             "incomplete_results": {"type": "boolean"},
             "items": {"type": "array", "items": {"type": "object"}}
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Access tokens (Gitea `/users/{username}/tokens`)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct UserTokenPath {
+    username: String,
+    token: String,
+}
+
+/// 403 when `{username}` isn't the session user — these routes are
+/// self-service only (Gitea lets admins too; our `pat.*` procs don't).
+async fn tokens_self_gate(
+    state: &AppState,
+    headers: &HeaderMap,
+    username: &str,
+) -> Result<(), Box<Response>> {
+    let me = me_username(state, headers).await?;
+    if me != username {
+        return Err(Box::new(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"message": "access tokens are self-service only"})),
+            )
+                .into_response(),
+        ));
+    }
+    Ok(())
+}
+
+/// Gitea scope name → our classic-PAT scopes (the request direction).
+/// Upstream families with no analogue (`admin:*`, `activitypub:*`) don't map.
+fn gitea_scopes_in(scopes: &[String]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for s in scopes {
+        for mapped in match s.as_str() {
+            "read:user" => &["read:user"][..],
+            "write:user" => &["user"][..],
+            "read:repository" => &["public_repo"][..],
+            "write:repository" | "read:issue" | "write:issue" => &["repo"][..],
+            "read:organization" => &["read:org"][..],
+            "write:organization" => &["write:org"][..],
+            "read:notification" | "write:notification" => &["notifications"][..],
+            "read:package" => &["package:read"][..],
+            "write:package" => &["package:write"][..],
+            "read:misc" => &["read:public_key", "read:gpg_key"][..],
+            "write:misc" => &["write:public_key", "write:gpg_key"][..],
+            _ => &[][..],
+        } {
+            if !out.contains(mapped) {
+                out.push(*mapped);
+            }
+        }
+    }
+    out
+}
+
+/// Our classic-PAT scope → Gitea scope names (list response direction).
+fn gitea_scopes_out(scopes: &[Value]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for s in scopes {
+        for mapped in match s.as_str().unwrap_or_default() {
+            "repo" => &["write:repository", "write:issue"][..],
+            "public_repo" => &["read:repository"][..],
+            "user" => &["write:user"][..],
+            "read:user" => &["read:user"][..],
+            "read:org" => &["read:organization"][..],
+            "write:org" => &["write:organization"][..],
+            "notifications" => &["read:notification", "write:notification"][..],
+            "package:read" => &["read:package"][..],
+            "package:write" | "package:delete" => &["write:package"][..],
+            "read:public_key" | "read:gpg_key" => &["read:misc"][..],
+            "write:public_key" | "write:gpg_key" | "admin:public_key" | "admin:gpg_key" => {
+                &["write:misc"][..]
+            }
+            _ => &[][..],
+        } {
+            if !out.contains(mapped) {
+                out.push(*mapped);
+            }
+        }
+    }
+    out
+}
+
+/// Gitea `AccessToken` shape. `sha1` is the plaintext token — populated on
+/// create only; `token_last_eight` carries the display fingerprint tail.
+fn access_token_json(item: &Value, plaintext: Option<&str>) -> Value {
+    let fingerprint =
+        plaintext.unwrap_or_else(|| item["token_prefix"].as_str().unwrap_or_default());
+    let last_eight: String = fingerprint
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    json!({
+        "id": item["id"],
+        "name": item["name"],
+        "sha1": plaintext.unwrap_or_default(),
+        "token_last_eight": last_eight,
+        "scopes": gitea_scopes_out(
+            item["scopes"].as_array().map(Vec::as_slice).unwrap_or_default()
+        ),
+    })
+}
+
+/// `GET /api/v1/users/{username}/tokens` — Gitea `getTokens`.
+async fn list_user_tokens(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<UserPath>,
+) -> Response {
+    if let Err(res) = tokens_self_gate(&state, &headers, &p.username).await {
+        return *res;
+    }
+    call_map(
+        &state,
+        &headers,
+        "pat.list",
+        json!({}),
+        StatusCode::OK,
+        |data| {
+            data.as_array()
+                .map(|items| {
+                    json!(items
+                        .iter()
+                        .map(|i| access_token_json(i, None))
+                        .collect::<Vec<_>>())
+                })
+                .unwrap_or(data)
+        },
+    )
+    .await
+}
+
+/// `POST /api/v1/users/{username}/tokens` — Gitea `createToken`. `sha1` in
+/// the response is the plaintext token (one-time, same as upstream).
+async fn create_user_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<UserPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Err(res) = tokens_self_gate(&state, &headers, &p.username).await {
+        return *res;
+    }
+    let name = body["name"].as_str().unwrap_or_default().trim().to_string();
+    let scopes = body["scopes"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    // Legacy clients that omit scopes get a sane read/write set rather than
+    // Gitea's full-access legacy default.
+    let mapped = if scopes.is_empty() {
+        vec!["repo", "read:user", "notifications"]
+    } else {
+        gitea_scopes_in(&scopes)
+    };
+    call_map(
+        &state,
+        &headers,
+        "pat.createClassic",
+        json!({ "name": name, "scopes": mapped }),
+        StatusCode::CREATED,
+        |data| {
+            let token = data["token"].as_str().map(str::to_string);
+            access_token_json(&data["item"], token.as_deref())
+        },
+    )
+    .await
+}
+
+/// `DELETE /api/v1/users/{username}/tokens/{token}` — Gitea `deleteToken`.
+/// `{token}` is our token id (upstream uses a numeric id; same slot).
+async fn delete_user_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<UserTokenPath>,
+) -> Response {
+    if let Err(res) = tokens_self_gate(&state, &headers, &p.username).await {
+        return *res;
+    }
+    call(
+        &state,
+        &headers,
+        "pat.revoke",
+        json!({ "id": p.token }),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn access_token_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "name": {"type": "string"},
+            "sha1": {"type": "string", "description": "Plaintext token — create response only"},
+            "token_last_eight": {"type": "string"},
+            "scopes": {"type": "array", "items": {"type": "string"}}
+        }
+    })
+}
+
+fn access_token_list_schema(gen: &mut SchemaGenerator) -> Value {
+    json!({"type": "array", "items": access_token_schema(gen)})
+}
+
+fn access_token_create_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string"},
+            "scopes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Gitea scope names (write:repository, read:user, …)"
+            }
         }
     })
 }

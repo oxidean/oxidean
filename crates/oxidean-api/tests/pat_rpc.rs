@@ -1582,3 +1582,179 @@ async fn pat_bearer_fg_account_perms() {
         assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
     }
 }
+
+fn encode_b64(input: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let mut n = (chunk[0] as u32) << 16;
+        if chunk.len() > 1 {
+            n |= (chunk[1] as u32) << 8;
+        }
+        if chunk.len() > 2 {
+            n |= chunk[2] as u32;
+        }
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn rest_req(
+    method: &str,
+    uri: &str,
+    auth_header: Option<String>,
+    body: Option<&str>,
+) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json");
+    if let Some(a) = auth_header {
+        b = b.header("authorization", a);
+    }
+    b.body(Body::from(body.unwrap_or("{}").to_owned())).unwrap()
+}
+
+/// Gitea `/users/{username}/tokens` REST surface + Basic `user:pat` edge auth.
+#[tokio::test]
+async fn rest_tokens_and_basic_pat_auth() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "tok@ex.com", "tokuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
+    let (_c2, _l2) = signup_and_login(&app, "other@ex.com", "otheruser").await;
+
+    // POST creates a classic PAT; sha1 carries the one-time plaintext.
+    let res = app
+        .clone()
+        .oneshot(rest_req(
+            "POST",
+            "/api/v1/users/tokuser/tokens",
+            None,
+            Some(r#"{"name":"tea","scopes":["write:repository","write:notification"]}"#),
+        ))
+        .await
+        .unwrap();
+    // cookie is required — this first call used no auth → 401.
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    let res = app
+        .clone()
+        .oneshot({
+            let b = Request::builder()
+                .method("POST")
+                .uri("/api/v1/users/tokuser/tokens")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie);
+            b.body(Body::from(
+                r#"{"name":"tea","scopes":["write:repository","write:notification"]}"#.to_owned(),
+            ))
+            .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let created: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(created["name"], "tea", "{created}");
+    let token = created["sha1"]
+        .as_str()
+        .expect("sha1 plaintext")
+        .to_string();
+    assert!(token.starts_with(CLASSIC_PAT_PREFIX), "{token}");
+    let scopes = created["scopes"].as_array().expect("scopes");
+    assert!(scopes.iter().any(|s| s == "write:repository"), "{scopes:?}");
+    assert!(
+        scopes.iter().any(|s| s == "write:notification"),
+        "{scopes:?}"
+    );
+
+    // Cross-user access is refused (self-service surface).
+    let res = app
+        .clone()
+        .oneshot({
+            let b = Request::builder()
+                .method("GET")
+                .uri("/api/v1/users/tokuser/tokens")
+                .header("cookie", &_c2);
+            b.body(Body::empty()).unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // GET lists tokens (no plaintext; sha1 empty).
+    let res = app
+        .clone()
+        .oneshot({
+            let b = Request::builder()
+                .method("GET")
+                .uri("/api/v1/users/tokuser/tokens")
+                .header("cookie", &cookie);
+            b.body(Body::empty()).unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let list: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let items = list.as_array().expect("array");
+    assert_eq!(items.len(), 1, "{list}");
+    assert_eq!(items[0]["sha1"], "", "list must omit plaintext");
+    let token_id = items[0]["id"].as_str().expect("id").to_string();
+
+    // Basic <user>:<pat> authenticates the REST edge (Gitea-style).
+    let basic = format!(
+        "Basic {}",
+        encode_b64(format!("tokuser:{token}").as_bytes())
+    );
+    let res = app
+        .clone()
+        .oneshot(rest_req("GET", "/api/v1/user", Some(basic.clone()), None))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let me: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(me["username"], "tokuser", "{me}");
+
+    // DELETE revokes the token; the Basic pair then 401s.
+    let res = app
+        .clone()
+        .oneshot({
+            let b = Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/users/tokuser/tokens/{token_id}"))
+                .header("cookie", &cookie);
+            b.body(Body::empty()).unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = app
+        .clone()
+        .oneshot(rest_req("GET", "/api/v1/user", Some(basic), None))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}

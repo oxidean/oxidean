@@ -1033,6 +1033,127 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /users/{username}/tokens:
+    get:
+      tags:
+      - users
+      summary: List the session user's access tokens (self only; `pat.list`)
+      operationId: getTokens
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    sha1:
+                      type: string
+                      description: Plaintext token — create response only
+                    token_last_eight:
+                      type: string
+                    scopes:
+                      type: array
+                      items:
+                        type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - users
+      summary: Create an access token from a name + Gitea scope list (`pat.createClassic`)
+      operationId: createToken
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                  description: Gitea scope names (write:repository, read:user, …)
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  sha1:
+                    type: string
+                    description: Plaintext token — create response only
+                  token_last_eight:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/tokens/{token}:
+    delete:
+      tags:
+      - users
+      summary: Revoke an access token by id (`pat.revoke`) — 204
+      operationId: deleteToken
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /search/repositories:
     get:
       tags:

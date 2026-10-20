@@ -24,7 +24,7 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 - Manual HTTP: include `Cookie: oxidean_session=<token>`.
 - Signup, login, and WorkOS/OIDC callbacks attach `Set-Cookie`. Logout / logout-all clear the cookie (`Max-Age=0`).
 
-**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
+**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. The REST + RPC edge additionally accepts **Gitea-style `Authorization: Basic <user>:<pat>`** — the password slot must carry a PAT (or Actions job token); raw account passwords are never honored, matching Git Smart HTTP. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
 
 **Provider modes** (instance setting via `admin.auth.*`): `local` | `workos` | `oidc`. Local signup/login RPC only works when mode is `local`. SSO browser flows require matching mode and ENV secrets (see [CONFIGURATION.md](CONFIGURATION.md)).
 
@@ -240,6 +240,8 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
 | `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
+| `GET`/`POST` | `/users/{username}/tokens` | `pat.list` / `pat.createClassic` | Gitea token REST; self only; Gitea scope names translated |
+| `DELETE` | `/users/{username}/tokens/{token}` | `pat.revoke` | 204 |
 | `GET` | `/users/{username}/followers` and `/users/{username}/following` | `user.followers.list` / `user.following.list` | Bare `[{login, id, avatar_url, type}]` arrays; anonymous OK |
 | `GET` | `/users/{username}/following/{target}` | `user.following.list` | 204 / 404 |
 | `GET` | `/user/followers` and `/user/following` | `user.followers.list` / `user.following.list` (caller via `auth.me`) | |

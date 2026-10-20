@@ -762,11 +762,68 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
+/// `Authorization: Basic <b64 user:token>` → the token when its password
+/// slot carries a PAT / job token (same pairs git Smart HTTP accepts —
+/// raw account passwords are never honored). Lets Gitea-style Basic
+/// clients authenticate the whole REST/RPC edge, e.g. `tea` CLI.
+fn basic_pat_from_headers(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let encoded = raw
+        .strip_prefix("Basic ")
+        .or_else(|| raw.strip_prefix("basic "))?;
+    let decoded = String::from_utf8(base64_decode(encoded.trim())?).ok()?;
+    let (_user, pass) = decoded.split_once(':')?;
+    let pass = pass.trim();
+    (pass.starts_with(oxidean_core::CLASSIC_PAT_PREFIX)
+        || pass.starts_with(oxidean_core::FINE_GRAINED_PAT_PREFIX)
+        || pass.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX))
+    .then(|| pass.to_string())
+}
+
+/// Small base64 decoder (same shape as `git_smart_http`/`lfs::auth` — no
+/// new crate dep for one header).
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    let bytes: Vec<u8> = input
+        .bytes()
+        .filter(|&b| !b.is_ascii_whitespace())
+        .collect();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: i32 = 0;
+    for &b in &bytes {
+        if b == b'=' {
+            break;
+        }
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32;
+        buf = (buf << 6) | val;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 pub(crate) fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     if let Some(token) = session_token_from_headers(headers) {
         return RpcCredential::Cookie(token);
     }
     if let Some(token) = bearer_token_from_headers(headers) {
+        return RpcCredential::Bearer(token);
+    }
+    if let Some(token) = basic_pat_from_headers(headers) {
         return RpcCredential::Bearer(token);
     }
     RpcCredential::Anonymous
