@@ -181,6 +181,7 @@ jobs:
     name: rust-build
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: read
@@ -199,6 +200,13 @@ jobs:
         # Consumers run the exact artifacts this produces.
         env:
           CARGO_TARGET_DIR: /ci/target-dev
+          # Test binaries only need line tables — full DWARF doubles link
+          # memory and produced a ~4 GB archive. Deps build under
+          # profile.dev, so cooked fingerprints are unaffected.
+          CARGO_PROFILE_TEST_DEBUG: "1"
+          # 4-way parallel codegen+link of debug binaries tips the 16 GB
+          # runner into memory pressure; 3 jobs trades wall time for headroom.
+          CARGO_BUILD_JOBS: "3"
         run: |
           set -euo pipefail
           df -h /
@@ -433,6 +441,7 @@ jobs:
     name: coverage-weighted
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: read
@@ -449,6 +458,11 @@ jobs:
     env:
       CARGO_LLVM_COV_TARGET_DIR: /ci/target-cov
       NEXTEST_PROFILE: "ci"
+      # Instrumented test binaries + full DWARF push concurrent links past
+      # the runner's memory ceiling. Line tables are enough for llvm-cov
+      # region mapping; deps still build under profile.dev fingerprints.
+      CARGO_PROFILE_TEST_DEBUG: "1"
+      CARGO_BUILD_JOBS: "3"
     steps:
       - uses: actions/checkout@v7
       - name: bun install
