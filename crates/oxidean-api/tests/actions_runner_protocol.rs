@@ -2535,3 +2535,122 @@ async fn actions_org_runners_scope_and_isolation() {
         .unwrap()
         .is_none());
 }
+
+/// Instance-admin REST: `/admin/actions/runners` + registration-token are
+/// sys-admin session routes — PATs are denied by the `admin.*` dispatch gate
+/// before role checks (API-02).
+#[tokio::test]
+async fn admin_actions_runners_rest() {
+    let (app, db, _dir) = app_db().await;
+
+    // Seed one runner so the list is non-trivial.
+    let reg = mint_registration_token(&db).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "adm-runner",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let admin = db
+        .list_users_page(None, 10, 0)
+        .await
+        .unwrap()
+        .0
+        .into_iter()
+        .find(|u| u.role.is_sys_admin())
+        .expect("sys-admin from unlock_signup");
+    let sessions = oxidean_api::auth::SessionService::new("development");
+    let (raw, _cookie) = sessions
+        .create(&db, &admin.id, false, None, None)
+        .await
+        .expect("session");
+    let cookie = format!("oxidean_session={raw}");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/admin/actions/runners")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let names: Vec<&str> = v["runners"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["name"].as_str())
+        .collect();
+    assert!(names.contains(&"adm-runner"), "{v}");
+
+    // Registration-token mint returns an instance-scoped token.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/actions/runners/registration-token")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(v["token"].as_str().unwrap().len() > 8);
+
+    // A PAT is refused by the session-only gate even for a sys-admin user.
+    let pat_plain = format!("oxidean_pat_{}", uuid::Uuid::new_v4().simple());
+    db.create_pat(
+        "pat-adm",
+        &admin.id,
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(pat_plain.as_bytes())),
+        Some(r#"["repo","workflow","admin:org"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/admin/actions/runners")
+                .header("authorization", format!("Bearer {pat_plain}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}

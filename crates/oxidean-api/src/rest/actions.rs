@@ -1421,6 +1421,36 @@ pub const ROUTES: &[RouteDef] = &[
     },
     RouteDef {
         method: "GET",
+        path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-approval",
+        tags: &["actions"],
+        operation_id: "actions/getForkPrApproval",
+        summary: "Fork-PR run approval policy (repo.actions.getForkPrApproval)",
+        procedure: "repo.actions.getForkPrApproval",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(fork_pr_approval_schema)),
+        mount: || get(get_fork_pr_approval),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-approval",
+        tags: &["actions"],
+        operation_id: "actions/setForkPrApproval",
+        summary: "Set fork-PR run approval policy (repo.actions.setForkPrApproval)",
+        procedure: "repo.actions.setForkPrApproval",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(fork_pr_approval_schema)),
+        response: None,
+        mount: || put(set_fork_pr_approval),
+    },
+    RouteDef {
+        method: "GET",
         path: "/repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments",
         tags: &["actions"],
         operation_id: "actions/getPendingDeployments",
@@ -5920,6 +5950,58 @@ async fn create_org_runner_remove_token(
         org_ref(&p.org),
         StatusCode::CREATED,
         move |data| json!({"token": data["token"], "expires_at": Value::Null}),
+    )
+    .await
+}
+
+// ---- fork-PR approval policy ----
+
+#[derive(Debug, Deserialize)]
+struct ForkPrApprovalBody {
+    policy: String,
+}
+
+fn fork_pr_approval_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["policy"],
+        "properties": {
+            "policy": {"type": "string", "enum": ["never", "first-time", "always"]},
+        },
+    })
+}
+
+/// GET /repos/{o}/{r}/actions/permissions/fork-pr-approval → 200 `{policy}`.
+async fn get_fork_pr_approval(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "repo.actions.getForkPrApproval",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// PUT /repos/{o}/{r}/actions/permissions/fork-pr-approval → 204.
+async fn set_fork_pr_approval(
+    State(state): State<AppState>,
+    Path(p): Path<RepoPath>,
+    headers: HeaderMap,
+    Json(body): Json<ForkPrApprovalBody>,
+) -> Response {
+    let mut input = repo_ref(&p.owner, &p.repo);
+    input["policy"] = json!(body.policy);
+    call(
+        &state,
+        &headers,
+        "repo.actions.setForkPrApproval",
+        input,
+        StatusCode::NO_CONTENT,
     )
     .await
 }

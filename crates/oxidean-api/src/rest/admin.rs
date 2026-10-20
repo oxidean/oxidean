@@ -5,8 +5,11 @@
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use axum::routing::get;
-use oxidean_core::{AdminLfsUsageResponse, AdminUsersListRequest, AdminUsersListResponse};
+use axum::routing::{get, post};
+use oxidean_core::{
+    ActionListRunnersResponse, ActionRegistrationTokenResponse, AdminLfsUsageResponse,
+    AdminUsersListRequest, AdminUsersListResponse,
+};
 use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -50,6 +53,40 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || get(lfs_usage),
     },
+    RouteDef {
+        method: "GET",
+        path: "/admin/actions/runners",
+        tags: &["admin"],
+        operation_id: "adminListActionsRunners",
+        summary: "List self-hosted runners (`admin.actions.listRunners`; sys-admin session only)",
+        procedure: "admin.actions.listRunners",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<ActionListRunnersResponse>,
+        )),
+        mount: || get(admin_runners),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/admin/actions/runners/registration-token",
+        tags: &["admin"],
+        operation_id: "adminCreateActionsRegistrationToken",
+        summary: "Mint an instance-scoped runner registration token (`admin.actions.createRegistrationToken`)",
+        procedure: "admin.actions.createRegistrationToken",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<ActionRegistrationTokenResponse>,
+        )),
+        mount: || post(admin_runner_token),
+    },
 ];
 
 #[derive(serde::Serialize, Deserialize)]
@@ -82,6 +119,33 @@ async fn lfs_usage(State(state): State<AppState>, headers: HeaderMap) -> Respons
         "admin.lfs.getUsage",
         Value::Object(serde_json::Map::new()),
         StatusCode::OK,
+    )
+    .await
+}
+
+/// `GET /api/v1/admin/actions/runners` (`admin.actions.listRunners`) —
+/// every registered runner on the instance, sys-admin only.
+async fn admin_runners(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call(
+        &state,
+        &headers,
+        "admin.actions.listRunners",
+        Value::Object(serde_json::Map::new()),
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// `POST /api/v1/admin/actions/runners/registration-token`
+/// (`admin.actions.createRegistrationToken`) — instance-scoped token,
+/// sys-admin only.
+async fn admin_runner_token(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call(
+        &state,
+        &headers,
+        "admin.actions.createRegistrationToken",
+        Value::Object(serde_json::Map::new()),
+        StatusCode::CREATED,
     )
     .await
 }

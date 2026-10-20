@@ -2021,6 +2021,48 @@ async fn rest_actions_deployments_permissions_dispatch_surface() {
     .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
+    // ---- actions/permissions/fork-pr-approval ----
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions/fork-pr-approval"),
+        Some(pat),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let fp = body_json(res).await;
+    assert_eq!(fp["policy"], "never");
+
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions/fork-pr-approval"),
+        Some(pat),
+        r#"{"policy":"first-time"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = rest(
+        &app,
+        "GET",
+        &format!("{base}/actions/permissions/fork-pr-approval"),
+        Some(pat),
+    )
+    .await;
+    let fp = body_json(res).await;
+    assert_eq!(fp["policy"], "first-time");
+
+    // invalid policy vocabulary → 400.
+    let res = rest_json(
+        &app,
+        "PUT",
+        &format!("{base}/actions/permissions/fork-pr-approval"),
+        Some(pat),
+        r#"{"policy":"sometimes"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
     // ---- repository_dispatch ----
     let res = rest_json(
         &app,
