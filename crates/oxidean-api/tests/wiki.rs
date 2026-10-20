@@ -807,3 +807,130 @@ jobs:
     assert_eq!(edited["pages"][0]["page_name"], "Home");
     let _ = c1;
 }
+
+/// REST surface — Gitea `wiki` routes: create (`content_base64`), list,
+/// get, update, revisions, delete.
+#[tokio::test]
+async fn rest_wiki_pages() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos_dir = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wiki_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos_dir.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "wr@ex.com", "wr").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    create_repo(&app, &cookie, "wdemo", "public").await;
+
+    // Gitea create shape: content_base64.
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(b"# REST wiki");
+    let (s, v) = rest_json(
+        &app,
+        "POST",
+        "/api/v1/repos/wr/wdemo/wiki/new",
+        &cookie,
+        Some(format!(
+            r#"{{"title":"Rest Page","content_base64":"{b64}"}}"#
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["page_name"], "Rest-Page", "{v}");
+    assert_eq!(v["content"], serde_json::Value::Null, "create unwraps page");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/wr/wdemo/wiki/pages",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let pages = v.as_array().expect("bare array");
+    assert_eq!(pages.len(), 1, "{v}");
+    assert_eq!(pages[0]["page_name"], "Rest-Page", "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/wr/wdemo/wiki/page/Rest-Page",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["content"], "# REST wiki", "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "PATCH",
+        "/api/v1/repos/wr/wdemo/wiki/page/Rest-Page",
+        &cookie,
+        Some(r##"{"content":"# Updated","message":"edit"}"##.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["page_name"], "Rest-Page", "{v}");
+
+    let (s, v) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/wr/wdemo/wiki/revisions/Rest-Page",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let revs = v.as_array().expect("revisions array");
+    assert!(revs.len() >= 2, "{v}");
+
+    let (s, _) = rest_json(
+        &app,
+        "DELETE",
+        "/api/v1/repos/wr/wdemo/wiki/page/Rest-Page",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_json(
+        &app,
+        "GET",
+        "/api/v1/repos/wr/wdemo/wiki/page/Rest-Page",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+async fn rest_json(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    let req = match body {
+        Some(j) => b
+            .header("content-type", "application/json")
+            .body(Body::from(j))
+            .unwrap(),
+        None => b.body(Body::empty()).unwrap(),
+    };
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}

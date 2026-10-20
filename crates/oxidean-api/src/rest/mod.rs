@@ -29,6 +29,7 @@ mod repos;
 pub mod spec;
 mod statuses;
 mod users;
+mod wiki;
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};

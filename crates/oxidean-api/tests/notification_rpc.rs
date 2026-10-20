@@ -1041,3 +1041,22 @@ async fn notification_rest_surface() {
     let (s, _) = rest(&app, "PUT", "/api/v1/notifications", &author_cookie).await;
     assert_eq!(s, StatusCode::ACCEPTED);
 }
+
+/// `GET /notifications/new` — Gitea unread-count shape `{new: N}`.
+#[tokio::test]
+async fn rest_notifications_new_count() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("notif_new.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, v) = signup_and_login(&app, "new@ex.com", "newc").await;
+    verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
+
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications/new", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["new"], 0, "{v}");
+}

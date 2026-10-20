@@ -58,6 +58,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - users
+      summary: Update profile (`user.update_profile`; `name` → display_name; unspecified fields keep current values)
+      operationId: updateAuthenticatedUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: GitHub display-name field
+                display_name:
+                  type: string
+                username:
+                  type: string
+                bio:
+                  type: string
+                default_branch:
+                  type: string
+                company:
+                  type: string
+                  description: Accepted for compat; not modeled
+                blog:
+                  type: string
+                  description: Accepted for compat; not modeled
+                location:
+                  type: string
+                  description: Accepted for compat; not modeled
+                hireable:
+                  type: boolean
+                  description: Accepted for compat; not modeled
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /user/repos:
     get:
       tags:
@@ -329,6 +377,31 @@ paths:
                 properties:
                   message:
                     type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /notifications/new:
+    get:
+      tags:
+      - notifications
+      summary: 'Unread notification count (`notification.unreadCount`) → `{new: N}`'
+      operationId: unreadNotificationCount
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - new
+                properties:
+                  new:
+                    type: integer
+                    description: Unread notification count
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -1574,6 +1647,146 @@ paths:
                       type: string
                     created_at:
                       type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/labels:
+    get:
+      tags:
+      - orgs
+      - issues
+      summary: List org label definitions (`label.listForOrg`) — bare array
+      operationId: listOrgLabels
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelsListResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - orgs
+      - issues
+      summary: Create an org label (`label.create` scope=org) → 201
+      operationId: createOrgLabel
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                new_name:
+                  type: string
+                  description: GitHub rename field (PATCH)
+                color:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/labels/{name}:
+    patch:
+      tags:
+      - orgs
+      - issues
+      summary: Rename/recolor an org label (`label.update`; `new_name` → `name`)
+      operationId: updateOrgLabel
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                new_name:
+                  type: string
+                  description: GitHub rename field (PATCH)
+                color:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - orgs
+      - issues
+      summary: Delete an org label (`label.delete`) → 204
+      operationId: deleteOrgLabel
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -13825,6 +14038,256 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/wiki/pages:
+    get:
+      tags:
+      - repos
+      - wiki
+      summary: List wiki pages (`wiki.pages.list`) — bare array
+      operationId: listWikiPages
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPagesListResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/wiki/new:
+    post:
+      tags:
+      - repos
+      - wiki
+      summary: Create a wiki page (`wiki.pages.create`; `content` or `content_base64`) → 201
+      operationId: createWikiPage
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Page title (create)
+                content:
+                  type: string
+                  description: Markdown body
+                content_base64:
+                  type: string
+                  description: Base64 Markdown body (Gitea shape)
+                message:
+                  type: string
+                  description: Commit message
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPagePublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/wiki/revisions/{page_name}:
+    get:
+      tags:
+      - repos
+      - wiki
+      summary: Page revision history (`wiki.revisions.list`) — bare array
+      operationId: listWikiRevisions
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: page_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: uint32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiRevisionsListResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/wiki/page/{page_name}:
+    get:
+      tags:
+      - repos
+      - wiki
+      summary: Get a wiki page with content (`wiki.pages.get`)
+      operationId: getWikiPage
+      security: []
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: page_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPagePublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags:
+      - repos
+      - wiki
+      summary: Update a wiki page (`wiki.pages.update`; `content` or `content_base64`)
+      operationId: updateWikiPage
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: page_name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Page title (create)
+                content:
+                  type: string
+                  description: Markdown body
+                content_base64:
+                  type: string
+                  description: Base64 Markdown body (Gitea shape)
+                message:
+                  type: string
+                  description: Commit message
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPagePublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - repos
+      - wiki
+      summary: Delete a wiki page (`wiki.pages.delete`) → 204
+      operationId: deleteWikiPage
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: page_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   schemas:
     Error:
@@ -14230,6 +14693,53 @@ components:
       - created_at
       - updated_at
       description: Public organization profile returned over RPC (ORG-01).
+    LabelsListResponse:
+      type: object
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabelPublic'
+      required:
+      - labels
+    LabelPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          type: string
+        description:
+          type: string
+        scope:
+          $ref: '#/components/schemas/LabelScope'
+        org_id:
+          type:
+          - string
+          - 'null'
+        repo_id:
+          type:
+          - string
+          - 'null'
+        hidden:
+          type: boolean
+          description: True when this org label is hidden for the current repo effective set.
+          default: false
+      required:
+      - id
+      - name
+      - color
+      - description
+      - scope
+      description: Label definition returned over RPC.
+    LabelScope:
+      type: string
+      enum:
+      - org
+      - repo
+      description: Label definition scope (D-ISS-05).
     RepoSoftDeleteResponse:
       type: object
       properties:
@@ -14516,53 +15026,6 @@ components:
       - name
       - bytes
       description: One language in the About sidebar breakdown (linguist-lite, byte-weighted).
-    LabelsListResponse:
-      type: object
-      properties:
-        labels:
-          type: array
-          items:
-            $ref: '#/components/schemas/LabelPublic'
-      required:
-      - labels
-    LabelPublic:
-      type: object
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        color:
-          type: string
-        description:
-          type: string
-        scope:
-          $ref: '#/components/schemas/LabelScope'
-        org_id:
-          type:
-          - string
-          - 'null'
-        repo_id:
-          type:
-          - string
-          - 'null'
-        hidden:
-          type: boolean
-          description: True when this org label is hidden for the current repo effective set.
-          default: false
-      required:
-      - id
-      - name
-      - color
-      - description
-      - scope
-      description: Label definition returned over RPC.
-    LabelScope:
-      type: string
-      enum:
-      - org
-      - repo
-      description: Label definition scope (D-ISS-05).
     RepoStargazersListResponse:
       type: object
       properties:
@@ -15472,6 +15935,78 @@ components:
       required:
       - token
       - scope
+    WikiPagesListResponse:
+      type: object
+      properties:
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/WikiPagePublic'
+      required:
+      - pages
+    WikiPagePublic:
+      type: object
+      properties:
+        page_name:
+          type: string
+          description: GitHub `page_name` — the file stem (`Home`, `Page-Name`, `_Sidebar`).
+        html_url:
+          type: string
+          description: '`/owner/repo/wiki/{page_name}` web route.'
+        reserved:
+          type: boolean
+          description: '`_Sidebar` / `_Footer` / `_Header` — GitHub''s reserved meta pages.'
+        sha:
+          type: string
+          description: |-
+            Tip commit touching the page (empty on a fresh create response before
+            history exists — create/update responses always carry it).
+          default: ''
+        updated_at:
+          type:
+          - string
+          - 'null'
+        content:
+          type:
+          - string
+          - 'null'
+          description: Present on `wiki.pages.get` — raw Markdown body.
+      required:
+      - page_name
+      - html_url
+      - reserved
+      description: A wiki page entry (file name without `.md`).
+    WikiRevisionsListResponse:
+      type: object
+      properties:
+        revisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WikiRevisionPublic'
+      required:
+      - revisions
+    WikiRevisionPublic:
+      type: object
+      properties:
+        sha:
+          type: string
+        message:
+          type: string
+        author_name:
+          type: string
+          default: ''
+        author_username:
+          type:
+          - string
+          - 'null'
+          default: null
+        timestamp:
+          type: string
+      required:
+      - sha
+      - message
+      - timestamp
+      description: A wiki page revision from git history.
   securitySchemes:
     sessionCookie:
       type: apiKey

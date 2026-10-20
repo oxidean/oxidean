@@ -6,7 +6,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
-    CreateOrgRequest, CreateRepoRequest, OrgPublic, RepoListMineResponse, RepoPublic, RpcResponse,
+    CreateOrgRequest, CreateRepoRequest, LabelPublic, LabelsListResponse, OrgPublic,
+    RepoListMineResponse, RepoPublic, RpcResponse,
 };
 use schemars::SchemaGenerator;
 use serde::Deserialize;
@@ -211,6 +212,72 @@ pub const ROUTES: &[RouteDef] = &[
         body: Some(BodySpec::Json(invite_body_schema)),
         response: Some(RespSpec::Json(invites_schema)),
         mount: || post(create_org_invite),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{slug}/labels",
+        tags: &["orgs", "issues"],
+        operation_id: "listOrgLabels",
+        summary: "List org label definitions (`label.listForOrg`) — bare array",
+        procedure: "label.listForOrg",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<LabelsListResponse>,
+        )),
+        mount: || get(list_org_labels),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/orgs/{slug}/labels",
+        tags: &["orgs", "issues"],
+        operation_id: "createOrgLabel",
+        summary: "Create an org label (`label.create` scope=org) → 201",
+        procedure: "label.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: Some(BodySpec::Json(org_label_write_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<LabelPublic>,
+        )),
+        mount: || post(create_org_label),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/orgs/{slug}/labels/{name}",
+        tags: &["orgs", "issues"],
+        operation_id: "updateOrgLabel",
+        summary: "Rename/recolor an org label (`label.update`; `new_name` → `name`)",
+        procedure: "label.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "name"],
+        query: None,
+        body: Some(BodySpec::Json(org_label_write_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<LabelPublic>,
+        )),
+        mount: || patch(update_org_label),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{slug}/labels/{name}",
+        tags: &["orgs", "issues"],
+        operation_id: "deleteOrgLabel",
+        summary: "Delete an org label (`label.delete`) → 204",
+        procedure: "label.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "name"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_org_label),
     },
     RouteDef {
         method: "DELETE",
@@ -624,6 +691,145 @@ fn org_patch_body_schema(_gen: &mut SchemaGenerator) -> Value {
             "description": {"type": "string", "description": "Accepted for compat; not modeled"},
             "default_repository_permission": {"type": "string", "enum": ["none", "read", "write"]},
             "two_factor_requirement_enabled": {"type": "boolean"}
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Org labels — GitHub/Gitea `GET/POST/PATCH/DELETE /orgs/{o}/labels[{name}]`.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct OrgLabelPath {
+    slug: String,
+    name: String,
+}
+
+/// `GET /orgs/{slug}/labels` (`label.listForOrg`) — GitHub bare array.
+async fn list_org_labels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OrgPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "label.listForOrg",
+        json!({"slug": p.slug}),
+        StatusCode::OK,
+        |d| d["labels"].clone(),
+    )
+    .await
+}
+
+/// `POST /orgs/{slug}/labels` — `label.create` with `scope: "org"` → 201.
+async fn create_org_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OrgPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let input = json!({
+        "scope": "org",
+        "owner": p.slug,
+        "name": body["name"],
+        "color": body["color"],
+        "description": body.get("description"),
+    });
+    call(&state, &headers, "label.create", input, StatusCode::CREATED).await
+}
+
+/// Name-keyed org label row lookup (GitHub routes address labels by name).
+async fn find_org_label(
+    state: &AppState,
+    headers: &HeaderMap,
+    slug: &str,
+    name: &str,
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let resp = dispatch(&mut ctx, "label.listForOrg", json!({"slug": slug})).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    data["labels"]
+        .as_array()
+        .and_then(|ls| {
+            ls.iter()
+                .find(|l| l["name"].as_str() == Some(name))
+                .cloned()
+        })
+        .ok_or_else(|| {
+            Box::new(
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"code": "label.not_found", "message": "label not found"})),
+                )
+                    .into_response(),
+            )
+        })
+}
+
+/// `PATCH /orgs/{slug}/labels/{name}` — `new_name` maps to `label.update.name`.
+async fn update_org_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OrgLabelPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let label = match find_org_label(&state, &headers, &p.slug, &p.name).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    let mut input = json!({
+        "id": label["id"],
+        "owner": p.slug,
+    });
+    for (rest_key, rpc_key) in [
+        ("new_name", "name"),
+        ("name", "name"),
+        ("color", "color"),
+        ("description", "description"),
+    ] {
+        if let Some(v) = body.get(rest_key) {
+            input[rpc_key] = v.clone();
+        }
+    }
+    call(&state, &headers, "label.update", input, StatusCode::OK).await
+}
+
+/// `DELETE /orgs/{slug}/labels/{name}` → 204.
+async fn delete_org_label(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<OrgLabelPath>,
+) -> Response {
+    let label = match find_org_label(&state, &headers, &p.slug, &p.name).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    call(
+        &state,
+        &headers,
+        "label.delete",
+        json!({"id": label["id"], "owner": p.slug}),
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn org_label_write_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "new_name": {"type": "string", "description": "GitHub rename field (PATCH)"},
+            "color": {"type": "string"},
+            "description": {"type": "string"}
         }
     })
 }

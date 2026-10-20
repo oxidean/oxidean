@@ -186,3 +186,59 @@ async fn user_public_profile_repos_acl() {
     assert!(repos.iter().any(|r| r["name"] == "pub"));
     assert!(repos.iter().all(|r| r["name"] != "priv"));
 }
+
+/// `PATCH /api/v1/user` — GitHub update-authenticated-user shape: `name`
+/// maps to `display_name`; fields absent from the body keep current values.
+#[tokio::test]
+async fn rest_patch_user() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("patch_user.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, v) = signup_and_login(&app, "pu@ex.com", "pu").await;
+    verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/user")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"name":"Pu Renamed","bio":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["display_name"], "Pu Renamed", "{v}");
+    assert_eq!(v["bio"], "hello", "{v}");
+    assert_eq!(v["username"], "pu", "{v}");
+
+    // Omitted fields keep current values; username immutability is enforced
+    // by `user.update_profile` (mismatched username is refused upstream).
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/user")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"bio":"only-bio"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(v["display_name"], "Pu Renamed", "{v}");
+    assert_eq!(v["bio"], "only-bio", "{v}");
+}

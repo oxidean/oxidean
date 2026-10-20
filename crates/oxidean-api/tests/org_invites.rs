@@ -842,3 +842,63 @@ async fn rest_memberships_and_invitations() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v.as_array().unwrap().len(), 1, "{v}");
 }
+
+/// GitHub/Gitea org labels REST: `GET/POST /orgs/{o}/labels`,
+/// `PATCH/DELETE /orgs/{o}/labels/{name}` (name-keyed).
+#[tokio::test]
+async fn rest_org_labels() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("org_labels_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _recorder) = test_app_with_recorder(db.clone()).await;
+
+    let cookie = setup_owner_org(&app, &db, "lbl@ex.com", "lblown", "lbl-org").await;
+
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/orgs/lbl-org/labels",
+        &cookie,
+        Some(r#"{"name":"bug","color":"ff0000","description":"bugs"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name"], "bug", "{v}");
+
+    let (s, v) = rest_all(&app, "GET", "/api/v1/orgs/lbl-org/labels", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let labels = v.as_array().expect("bare array");
+    assert!(labels.iter().any(|l| l["name"] == "bug"), "{v}");
+
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/orgs/lbl-org/labels/bug",
+        &cookie,
+        Some(r#"{"new_name":"defect","color":"00ff00"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["name"], "defect", "{v}");
+
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/orgs/lbl-org/labels/defect",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/orgs/lbl-org/labels/defect",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

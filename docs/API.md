@@ -233,6 +233,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | --- | --- | --- | --- |
 | `GET` | `/health` | `system.health` | Anonymous |
 | `GET` | `/user` | `auth.me` | Authenticated account |
+| `PATCH` | `/user` | `user.update_profile` | `name` → `display_name`; `bio`, `username`, `default_branch`; omitted fields keep current values |
 | `GET` | `/user/repos` | `repo.listMine` | Caller's repos |
 | `POST` | `/user/repos` | `repo.create` | Caller-owned repo |
 | `GET` | `/user/orgs` | `org.listMine` | |
@@ -253,6 +254,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/notifications/threads/{thread_id}` | `notification.list` (id-filtered) | 404 when absent |
 | `PATCH` | `/notifications/threads/{thread_id}` | `notification.markRead` | 205 |
 | `GET`/`PUT` | `/repos/{owner}/{repo}/notifications` | `notification.list` / `notification.markRead` | Repo-scoped list; PUT marks the repo's threads read → 202 |
+| `GET` | `/notifications/new` | `notification.unreadCount` | Gitea unread count → `{new: N}` |
 | `POST` | `/orgs` | `org.create` | Session only |
 | `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
 | `PATCH` | `/orgs/{slug}` | `org.updateSettings` | `{name, display_name, default_repository_permission, two_factor_requirement_enabled}` |
@@ -262,6 +264,8 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`POST` | `/orgs/{slug}/invitations` | `org.invites.list` / `org.invites.create` | Bare array; `{email}` or `{emails:[]}` + `role` → results array |
 | `DELETE` | `/orgs/{slug}/invitations/{invite_id}` | `org.invites.revoke` | → 204 |
 | `GET` | `/orgs/{slug}/repos` | `repo.listByOwner` | |
+| `GET`/`POST` | `/orgs/{slug}/labels` | `label.listForOrg` / `label.create` | Bare array; create → 201 |
+| `PATCH`/`DELETE` | `/orgs/{slug}/labels/{name}` | `label.update` / `label.delete` | Name-keyed; `new_name` renames; delete → 204 |
 | `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
 | `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
@@ -301,6 +305,10 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/search/repositories` | `repo.explore` | `q`, `page`, `per_page` → `{total_count, incomplete_results, items}`; `sort`/`order` accepted, not applied; anonymous OK |
 | `GET` | `/repos/{owner}/{repo}/stats/contributors` | `repo.insights.contributors` | `[{author, total}]` — no per-week breakdown |
 | `GET` | `/repos/{owner}/{repo}/stats/commit_activity` | `repo.insights.commitActivity` | `[{week, days[7], total}]` — GitHub shape |
+| `GET` | `/repos/{owner}/{repo}/wiki/pages` | `wiki.pages.list` | Bare array |
+| `POST` | `/repos/{owner}/{repo}/wiki/new` | `wiki.pages.create` | `title` + `content` or `content_base64` → 201; returns the page object |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/wiki/page/{page_name}` | `wiki.pages.get` / `.update` / `.delete` | Page object with `content`; update accepts `message`; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/wiki/revisions/{page_name}` | `wiki.revisions.list` | Bare array; `?limit=` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/invitations` | `repo.invites.list` / `repo.invites.create` | Bare array; `{email}` or `{emails:[]}` + `permission` → results array |
 | `DELETE` | `/repos/{owner}/{repo}/invitations/{invite_id}` | `repo.invites.revoke` | → 204 |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |

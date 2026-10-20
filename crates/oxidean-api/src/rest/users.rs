@@ -7,14 +7,14 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
     CreateRepoRequest, ListStarredRequest, OrgListMineResponse, PublicUserProfile,
-    RepoListMineResponse, RepoPublic, UserPublic,
+    RepoListMineResponse, RepoPublic, RpcResponse, UserPublic,
 };
 use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
-use super::{call, call_map, ctx_for};
+use super::{call, call_map, ctx_for, dispatch, status_for_error};
 use crate::app::AppState;
 
 pub const ROUTES: &[RouteDef] = &[
@@ -34,6 +34,23 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<UserPublic>,
         )),
         mount: || get(current_user),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/user",
+        tags: &["users"],
+        operation_id: "updateAuthenticatedUser",
+        summary: "Update profile (`user.update_profile`; `name` → display_name; unspecified fields keep current values)",
+        procedure: "user.update_profile",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Json(user_patch_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<UserPublic>,
+        )),
+        mount: || patch(update_current_user),
     },
     RouteDef {
         method: "GET",
@@ -133,6 +150,21 @@ pub const ROUTES: &[RouteDef] = &[
         body: Some(BodySpec::Json(mark_notifications_body_schema)),
         response: Some(RespSpec::Json(mark_notifications_schema)),
         mount: || put(mark_notifications_read),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/notifications/new",
+        tags: &["notifications"],
+        operation_id: "unreadNotificationCount",
+        summary: "Unread notification count (`notification.unreadCount`) → `{new: N}`",
+        procedure: "notification.unreadCount",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(unread_count_schema)),
+        mount: || get(unread_notification_count),
     },
     RouteDef {
         method: "GET",
@@ -1554,6 +1586,92 @@ fn search_repos_schema(_gen: &mut SchemaGenerator) -> Value {
             "total_count": {"type": "integer"},
             "incomplete_results": {"type": "boolean"},
             "items": {"type": "array", "items": {"type": "object"}}
+        }
+    })
+}
+
+/// `PATCH /api/v1/user` (`user.update_profile`) — GitHub's update-the-
+/// authenticated-user endpoint. `name` maps to `display_name`; fields absent
+/// from the body keep their current values (the proc requires all fields).
+async fn update_current_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let me = match dispatch(&mut ctx, "auth.me", json!({})).await {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    let input = json!({
+        "display_name": body
+            .get("name")
+            .or_else(|| body.get("display_name"))
+            .cloned()
+            .unwrap_or_else(|| me["display_name"].clone()),
+        "username": body
+            .get("username")
+            .cloned()
+            .unwrap_or_else(|| me["username"].clone()),
+        "bio": body
+            .get("bio")
+            .cloned()
+            .unwrap_or_else(|| me["bio"].clone()),
+        "default_branch": body
+            .get("default_branch")
+            .cloned()
+            .unwrap_or_else(|| me["default_branch"].clone()),
+    });
+    call(
+        &state,
+        &headers,
+        "user.update_profile",
+        input,
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// `GET /api/v1/notifications/new` (`notification.unreadCount`) — Gitea
+/// `{new: N}` shape.
+async fn unread_notification_count(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "notification.unreadCount",
+        json!({}),
+        StatusCode::OK,
+        |d| json!({"new": d["count"]}),
+    )
+    .await
+}
+
+fn unread_count_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["new"],
+        "properties": {"new": {"type": "integer", "description": "Unread notification count"}}
+    })
+}
+
+fn user_patch_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "GitHub display-name field"},
+            "display_name": {"type": "string"},
+            "username": {"type": "string"},
+            "bio": {"type": "string"},
+            "default_branch": {"type": "string"},
+            "company": {"type": "string", "description": "Accepted for compat; not modeled"},
+            "blog": {"type": "string", "description": "Accepted for compat; not modeled"},
+            "location": {"type": "string", "description": "Accepted for compat; not modeled"},
+            "hireable": {"type": "boolean", "description": "Accepted for compat; not modeled"}
         }
     })
 }
