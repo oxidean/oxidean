@@ -1070,7 +1070,7 @@ paths:
     get:
       tags:
       - orgs
-      summary: Org members (`org.members.list`)
+      summary: Org members (`org.members.list`) — GitHub bare-array user projection
       operationId: listOrgMembers
       parameters:
       - name: slug
@@ -1084,7 +1084,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgMembersListResponse'
+                type: array
+                items:
+                  type: object
+                  properties:
+                    login:
+                      type: string
+                    id:
+                      type: string
+                    type:
+                      type: string
+                    role:
+                      type: string
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -1196,6 +1207,275 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RepoPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/memberships/{username}:
+    get:
+      tags:
+      - orgs
+      summary: Caller-visible membership for a user (`org.members.list`) — `{state, role, user}`
+      operationId: orgs/getMembership
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                  role:
+                    type: string
+                  user:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - orgs
+      summary: Add or update a membership (`org.members.add` / `.updateRole`) — `{role}`
+      operationId: orgs/setMembership
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum:
+                  - owner
+                  - admin
+                  - member
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                  role:
+                    type: string
+                  user:
+                    type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - orgs
+      summary: Remove a member (`org.members.remove`) → 204
+      operationId: orgs/removeMembership
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/members/{username}:
+    delete:
+      tags:
+      - orgs
+      summary: Remove a member (`org.members.remove`) → 204 — GitHub/Gitea path alias
+      operationId: orgs/removeMember
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/invitations:
+    get:
+      tags:
+      - orgs
+      summary: Pending org invitations (`org.invites.list`) — bare array
+      operationId: orgs/listInvitations
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    email:
+                      type:
+                      - string
+                      - 'null'
+                    role:
+                      type: string
+                    expires_at:
+                      type:
+                      - string
+                      - 'null'
+                    invited_by:
+                      type: string
+                    created_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - orgs
+      summary: Invite by email (`org.invites.create`) — `{email}` or `{emails:[]}` + `role`
+      operationId: orgs/createInvitation
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                emails:
+                  type: array
+                  items:
+                    type: string
+                role:
+                  type: string
+                  enum:
+                  - owner
+                  - admin
+                  - member
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    email:
+                      type:
+                      - string
+                      - 'null'
+                    role:
+                      type: string
+                    expires_at:
+                      type:
+                      - string
+                      - 'null'
+                    invited_by:
+                      type: string
+                    created_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{slug}/invitations/{invite_id}:
+    delete:
+      tags:
+      - orgs
+      summary: Revoke a pending invitation (`org.invites.revoke`) → 204
+      operationId: orgs/cancelInvitation
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: invite_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -1953,6 +2233,153 @@ paths:
                     type: array
                     items:
                       type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/invitations:
+    get:
+      tags:
+      - repos
+      summary: Pending collaborator invitations (`repo.invites.list`) — bare array
+      operationId: repos/listInvitations
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    email:
+                      type:
+                      - string
+                      - 'null'
+                    permission:
+                      type: string
+                    expires_at:
+                      type:
+                      - string
+                      - 'null'
+                    invited_by:
+                      type: string
+                    created_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - repos
+      summary: Invite by email (`repo.invites.create`) — `{email}` or `{emails:[]}` + `permission`
+      operationId: repos/createInvitation
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                emails:
+                  type: array
+                  items:
+                    type: string
+                permission:
+                  type: string
+                  enum:
+                  - read
+                  - write
+                  - admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    email:
+                      type:
+                      - string
+                      - 'null'
+                    permission:
+                      type: string
+                    expires_at:
+                      type:
+                      - string
+                      - 'null'
+                    invited_by:
+                      type: string
+                    created_at:
+                      type: string
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/invitations/{invite_id}:
+    delete:
+      tags:
+      - repos
+      summary: Revoke a pending invitation (`repo.invites.revoke`) → 204
+      operationId: repos/cancelInvitation
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: invite_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -13546,33 +13973,6 @@ components:
       - created_at
       - updated_at
       description: Public organization profile returned over RPC (ORG-01).
-    OrgMembersListResponse:
-      type: object
-      properties:
-        members:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrgMemberPublic'
-      required:
-      - members
-      description: '`org.members.list` response.'
-    OrgMemberPublic:
-      type: object
-      properties:
-        user_id:
-          type: string
-        username:
-          type: string
-        role:
-          $ref: '#/components/schemas/OrgRole'
-        created_at:
-          type: string
-      required:
-      - user_id
-      - username
-      - role
-      - created_at
-      description: Public membership row — no email (ORG-01).
     RepoSoftDeleteResponse:
       type: object
       properties:

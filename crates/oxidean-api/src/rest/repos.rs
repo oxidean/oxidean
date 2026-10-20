@@ -319,6 +319,51 @@ pub const ROUTES: &[RouteDef] = &[
     },
     RouteDef {
         method: "GET",
+        path: "/repos/{owner}/{repo}/invitations",
+        tags: &["repos"],
+        operation_id: "repos/listInvitations",
+        summary: "Pending collaborator invitations (`repo.invites.list`) — bare array",
+        procedure: "repo.invites.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(repo_invites_schema)),
+        mount: || get(list_repo_invites),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/invitations",
+        tags: &["repos"],
+        operation_id: "repos/createInvitation",
+        summary: "Invite by email (`repo.invites.create`) — `{email}` or `{emails:[]}` + `permission`",
+        procedure: "repo.invites.create",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Json(repo_invite_body_schema)),
+        response: Some(RespSpec::Json(repo_invites_schema)),
+        mount: || post(create_repo_invite),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/invitations/{invite_id}",
+        tags: &["repos"],
+        operation_id: "repos/cancelInvitation",
+        summary: "Revoke a pending invitation (`repo.invites.revoke`) → 204",
+        procedure: "repo.invites.revoke",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["owner", "name", "invite_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(revoke_repo_invite),
+    },
+    RouteDef {
+        method: "GET",
         path: "/repos/{owner}/{repo}/languages",
         tags: &["repos"],
         operation_id: "getLanguages",
@@ -1137,7 +1182,9 @@ async fn get_repo(
 /// `PATCH /api/v1/repos/{owner}/{repo}` — GitHub's update surface:
 /// `description`/`homepage`/`topics` → `repo.updateMetadata`; a `name`
 /// different from the path runs `repo.rename` first, then metadata under the
-/// new name (GitHub treats rename as a PATCH field).
+/// new name (GitHub treats rename as a PATCH field). `private`/`visibility`
+/// → `repo.updateVisibility`; `archived` → `repo.setArchived`; the `has_*`
+/// unit toggles map to `repo.{issues,pulls,wiki,projects,discussions}.setEnabled`.
 async fn update_repo(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1148,58 +1195,116 @@ async fn update_repo(
     let renaming = !new_name.is_empty() && new_name != p.repo;
     let mut meta = body.clone();
     if let Some(m) = meta.as_object_mut() {
-        m.remove("name");
+        // Keys owned by sibling procs, not `repo.updateMetadata`.
+        for k in [
+            "name",
+            "archived",
+            "private",
+            "visibility",
+            "has_issues",
+            "has_pull_requests",
+            "has_wiki",
+            "has_projects",
+            "has_discussions",
+        ] {
+            m.remove(k);
+        }
     }
-    if renaming {
-        let mut ctx = match ctx_for(&state, &headers).await {
-            Ok(c) => c,
-            Err(r) => return r,
-        };
-        match dispatch(
-            &mut ctx,
-            "repo.rename",
-            merge_fields(repo_ref(&p.owner, &p.repo), json!({"new_name": new_name})),
-        )
-        .await
-        {
-            RpcResponse::Ok { .. } => {}
-            RpcResponse::Err { error, .. } => {
-                return (super::status_for_error(&error), Json(error)).into_response();
-            }
-        }
-        if meta.as_object().map(|m| !m.is_empty()).unwrap_or(false) {
-            match dispatch(
-                &mut ctx,
-                "repo.updateMetadata",
-                merge_fields(repo_ref(&p.owner, &new_name), meta),
-            )
-            .await
-            {
-                RpcResponse::Ok { data, .. } => {
-                    return (StatusCode::OK, Json(data)).into_response();
-                }
-                RpcResponse::Err { error, .. } => {
-                    return (super::status_for_error(&error), Json(error)).into_response();
-                }
-            }
-        }
-        // Metadata empty → return the renamed repo (matches PATCH's
-        // repo-object response; `repo.get` under the new name).
+    let effective = if renaming {
+        new_name.clone()
+    } else {
+        p.repo.clone()
+    };
+
+    // Any composed step needed beyond metadata → run one ctx + `repo.get`.
+    let visibility = body
+        .get("visibility")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            body.get("private")
+                .and_then(Value::as_bool)
+                .map(|b| if b { "private" } else { "public" }.to_string())
+        });
+    let archived = body.get("archived").and_then(Value::as_bool);
+    let unit_toggles: &[(&str, &str)] = &[
+        ("has_issues", "repo.issues.setEnabled"),
+        ("has_pull_requests", "repo.pulls.setEnabled"),
+        ("has_wiki", "repo.wiki.setEnabled"),
+        ("has_projects", "repo.projects.setEnabled"),
+        ("has_discussions", "repo.discussions.setEnabled"),
+    ];
+    let meta_nonempty = meta.as_object().map(|m| !m.is_empty()).unwrap_or(false);
+    let composed = renaming
+        || visibility.is_some()
+        || archived.is_some()
+        || unit_toggles
+            .iter()
+            .any(|(k, _)| body.get(*k).and_then(Value::as_bool).is_some());
+
+    if !composed {
+        let input = merge_fields(repo_ref(&p.owner, &p.repo), meta);
         return call(
             &state,
             &headers,
-            "repo.get",
-            repo_ref(&p.owner, &new_name),
+            "repo.updateMetadata",
+            input,
             StatusCode::OK,
         )
         .await;
     }
-    let input = merge_fields(repo_ref(&p.owner, &p.repo), meta);
+
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    macro_rules! step {
+        ($proc:expr, $input:expr) => {
+            match dispatch(&mut ctx, $proc, $input).await {
+                RpcResponse::Ok { data, .. } => data,
+                RpcResponse::Err { error, .. } => {
+                    return (super::status_for_error(&error), Json(error)).into_response();
+                }
+            }
+        };
+    }
+    if renaming {
+        step!(
+            "repo.rename",
+            merge_fields(repo_ref(&p.owner, &p.repo), json!({"new_name": new_name}))
+        );
+    }
+    if meta_nonempty {
+        step!(
+            "repo.updateMetadata",
+            merge_fields(repo_ref(&p.owner, &effective), meta)
+        );
+    }
+    if let Some(v) = visibility {
+        step!(
+            "repo.updateVisibility",
+            merge_fields(repo_ref(&p.owner, &effective), json!({"visibility": v}))
+        );
+    }
+    if let Some(a) = archived {
+        step!(
+            "repo.setArchived",
+            merge_fields(repo_ref(&p.owner, &effective), json!({"archived": a}))
+        );
+    }
+    for (key, proc) in unit_toggles {
+        if let Some(enabled) = body.get(*key).and_then(Value::as_bool) {
+            step!(
+                proc,
+                merge_fields(repo_ref(&p.owner, &effective), json!({"enabled": enabled}))
+            );
+        }
+    }
     call(
         &state,
         &headers,
-        "repo.updateMetadata",
-        input,
+        "repo.get",
+        repo_ref(&p.owner, &effective),
         StatusCode::OK,
     )
     .await
@@ -3818,5 +3923,105 @@ fn topics_body_schema(_gen: &mut SchemaGenerator) -> Value {
         "type": "object",
         "required": ["names"],
         "properties": {"names": {"type": "array", "items": {"type": "string"}}}
+    })
+}
+
+#[derive(Deserialize)]
+struct RepoInvitePath {
+    owner: String,
+    repo: String,
+    invite_id: String,
+}
+
+/// `GET /repos/{o}/{r}/invitations` — GitHub bare array.
+async fn list_repo_invites(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.invites.list",
+        repo_ref(&p.owner, &p.repo),
+        StatusCode::OK,
+        |d| d["invites"].clone(),
+    )
+    .await
+}
+
+/// `POST /repos/{o}/{r}/invitations` — `{email}` or `{emails:[]}` +
+/// `permission` → per-recipient results array.
+async fn create_repo_invite(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let emails = match body.get("emails").and_then(Value::as_array) {
+        Some(e) => e.clone(),
+        None => match body.get("email").and_then(Value::as_str) {
+            Some(e) => vec![json!(e)],
+            None => vec![],
+        },
+    };
+    let permission = body["permission"].as_str().unwrap_or("read");
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"emails": emails, "permission": permission}),
+    );
+    call_map(
+        &state,
+        &headers,
+        "repo.invites.create",
+        input,
+        StatusCode::OK,
+        |d| d["results"].clone(),
+    )
+    .await
+}
+
+/// `DELETE /repos/{o}/{r}/invitations/{invite_id}` → 204.
+async fn revoke_repo_invite(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoInvitePath>,
+) -> Response {
+    let input = merge_fields(
+        repo_ref(&p.owner, &p.repo),
+        json!({"invite_id": p.invite_id}),
+    );
+    call(
+        &state,
+        &headers,
+        "repo.invites.revoke",
+        input,
+        StatusCode::NO_CONTENT,
+    )
+    .await
+}
+
+fn repo_invites_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "object", "properties": {
+            "id": {"type": "string"},
+            "email": {"type": ["string", "null"]},
+            "permission": {"type": "string"},
+            "expires_at": {"type": ["string", "null"]},
+            "invited_by": {"type": "string"},
+            "created_at": {"type": "string"}
+        }}
+    })
+}
+
+fn repo_invite_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "email": {"type": "string"},
+            "emails": {"type": "array", "items": {"type": "string"}},
+            "permission": {"type": "string", "enum": ["read", "write", "admin"]}
+        }
     })
 }

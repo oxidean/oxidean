@@ -610,3 +610,223 @@ fn has_plaintext_token_column(sql: &str) -> bool {
         t.starts_with("token ") || t.starts_with("token\t") || t == "token"
     })
 }
+
+async fn rest_all(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        b = b.header("cookie", cookie);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub/Gitea membership + invitations REST surface:
+/// `/orgs/{o}/members`, `.../memberships/{u}`, `.../members/{u}`,
+/// `.../invitations`, and repo-scoped `/repos/{o}/{r}/invitations`.
+#[tokio::test]
+async fn rest_memberships_and_invitations() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!("sqlite:{}", dir.path().join("memb_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _recorder) = test_app_with_recorder(db.clone()).await;
+
+    let owner_cookie = setup_owner_org(&app, &db, "mown@ex.com", "mown", "memb-org").await;
+    let (_, member_v) = signup_and_login(&app, "member2@ex.com", "member2").await;
+    verify_user(&db, member_v["data"]["id"].as_str().unwrap()).await;
+
+    // GET /members — bare array with the owner
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/orgs/memb-org/members",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let ms = v.as_array().expect("members array");
+    assert_eq!(ms.len(), 1, "{v}");
+    assert_eq!(ms[0]["login"], "mown", "{v}");
+
+    // GET membership for a non-member → 404
+    let (s, _) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // PUT membership — adds the user with a role
+    let (s, v) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        Some(r#"{"role":"member"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["state"], "active", "{v}");
+    assert_eq!(v["role"], "member", "{v}");
+    assert_eq!(v["user"]["login"], "member2", "{v}");
+
+    // PUT again with a new role → updateRole
+    let (s, v) = rest_all(
+        &app,
+        "PUT",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        Some(r#"{"role":"admin"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["role"], "admin", "{v}");
+
+    // GET membership reflects it
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["role"], "admin", "{v}");
+
+    // DELETE membership → 204
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/orgs/memb-org/memberships/member2",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Org invitations — create, list, revoke
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/orgs/memb-org/invitations",
+        &owner_cookie,
+        Some(r#"{"email":"hire@ex.com","role":"member"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let results = v.as_array().expect("results array");
+    assert_eq!(results[0]["ok"], true, "{v}");
+    let invite_id = results[0]["invite"]["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/orgs/memb-org/invitations",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let invs = v.as_array().expect("invites array");
+    assert_eq!(invs.len(), 1, "{v}");
+    assert_eq!(invs[0]["email"], "hire@ex.com", "{v}");
+
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        &format!("/api/v1/orgs/memb-org/invitations/{invite_id}"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    // Repo invitations — create a repo under the org, then CRUD
+    let (_, repo_v) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"shared","visibility":"private","owner":"memb-org"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(repo_v["ok"], true, "{repo_v}");
+
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/memb-org/shared/invitations",
+        &owner_cookie,
+        Some(r#"{"emails":["dev1@ex.com","dev2@ex.com"],"permission":"write"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let results = v.as_array().expect("results array");
+    assert_eq!(results.len(), 2, "{v}");
+    let rid = results[0]["invite"]["id"].as_str().expect("id").to_string();
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/memb-org/shared/invitations",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 2, "{v}");
+
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        &format!("/api/v1/repos/memb-org/shared/invitations/{rid}"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/memb-org/shared/invitations",
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1, "{v}");
+}

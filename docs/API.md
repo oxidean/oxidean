@@ -255,12 +255,16 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`PUT` | `/repos/{owner}/{repo}/notifications` | `notification.list` / `notification.markRead` | Repo-scoped list; PUT marks the repo's threads read → 202 |
 | `POST` | `/orgs` | `org.create` | Session only |
 | `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
-| `GET` | `/orgs/{slug}/members` | `org.members.list` | |
+| `GET` | `/orgs/{slug}/members` | `org.members.list` | Bare array `{login, id, type, role}` |
+| `GET`/`PUT`/`DELETE` | `/orgs/{slug}/memberships/{username}` | `org.members.list` / `.add` / `.updateRole` / `.remove` | `{state, role, user}`; PUT adds-or-updates; delete → 204; absent → 404 |
+| `DELETE` | `/orgs/{slug}/members/{username}` | `org.members.remove` | GitHub/Gitea remove-member alias → 204 |
+| `GET`/`POST` | `/orgs/{slug}/invitations` | `org.invites.list` / `org.invites.create` | Bare array; `{email}` or `{emails:[]}` + `role` → results array |
+| `DELETE` | `/orgs/{slug}/invitations/{invite_id}` | `org.invites.revoke` | → 204 |
 | `GET` | `/orgs/{slug}/repos` | `repo.listByOwner` | |
 | `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
 | `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
-| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`) | `description`, `homepage`, `topics`; a differing `name` renames first |
+| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`, `.updateVisibility`, `.setArchived`, `repo.*.setEnabled`) | `description`, `homepage`, `topics`; a differing `name` renames first; `private`/`visibility`, `archived`, and `has_{issues,pull_requests,wiki,projects,discussions}` fan out to the sibling procs |
 | `POST` | `/repos/{owner}/{repo}/transfer` | `repo.transfer` (+`repo.rename`) | `{new_owner, new_name?}`; `new_owner` resolved to user/org; → 202 + repo |
 | `GET`/`POST` | `/repos/{owner}/{repo}/keys` | `repo.deployKey.list` / `repo.deployKey.create` | Deploy keys; `{title, key, read_only}` ↔ `can_write` inverted |
 | `GET`/`DELETE` | `/repos/{owner}/{repo}/keys/{key_id}` | `repo.deployKey.list` / `repo.deployKey.delete` | Get → 404 when absent; delete → 204 |
@@ -292,6 +296,8 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/contributors` | `repo.contributors.list` | Bare array; unlinked authors project as `type: "Anonymous"` |
 | `GET`/`PUT` | `/repos/{owner}/{repo}/topics` | `repo.get` / `repo.updateMetadata` | `{names: [...]}` round-trip |
 | `GET` | `/topics` | `repo.topicsSuggest` | `q`, `limit`; bare array (Gitea); anonymous OK |
+| `GET`/`POST` | `/repos/{owner}/{repo}/invitations` | `repo.invites.list` / `repo.invites.create` | Bare array; `{email}` or `{emails:[]}` + `permission` → results array |
+| `DELETE` | `/repos/{owner}/{repo}/invitations/{invite_id}` | `repo.invites.revoke` | → 204 |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |
 | `GET` | `/repos/{owner}/{repo}/labels` | `label.listForRepo` | `includeHidden` |
 | `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |
@@ -365,7 +371,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
 | `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, invitations, mirror config CRUD, LFS objects, `org.updateSettings` and org invites, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, mirror config CRUD, LFS objects, `org.updateSettings` and shareable invite links (`*.createLink`), most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 
