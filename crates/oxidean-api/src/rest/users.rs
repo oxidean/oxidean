@@ -548,6 +548,81 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Json(topics_search_schema)),
         mount: || get(search_topics),
     },
+    RouteDef {
+        method: "GET",
+        path: "/search/users",
+        tags: &["users"],
+        operation_id: "searchUsers",
+        summary: "User search (`search.global` users group) — `{total_count, items}`; anonymous callers see an empty group",
+        procedure: "search.global",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<GlobalSearchQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_envelope_schema)),
+        mount: || get(search_users),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/search/issues",
+        tags: &["issues"],
+        operation_id: "searchIssues",
+        summary: "Issue/PR search (`search.global`; `is:pr`/`is:issue` selects the group) — `{total_count, items}`",
+        procedure: "search.global",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<GlobalSearchQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_envelope_schema)),
+        mount: || get(search_issues),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/search/commits",
+        tags: &["repos"],
+        operation_id: "searchCommits",
+        summary: "Commit search (`search.global` commits group) — `{total_count, items}`",
+        procedure: "search.global",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<GlobalSearchQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_envelope_schema)),
+        mount: || get(search_commits),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/search/code",
+        tags: &["repos"],
+        operation_id: "searchCode",
+        summary: "Code search (`search.global` code group) — `{total_count, items}`",
+        procedure: "search.global",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<GlobalSearchQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_envelope_schema)),
+        mount: || get(search_code),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/search/topics",
+        tags: &["repos"],
+        operation_id: "searchTopicsEnvelope",
+        summary: "Topic search (`repo.topicsSuggest`) — GitHub `{total_count, items}` envelope",
+        procedure: "repo.topicsSuggest",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<TopicsQuery>),
+        body: None,
+        response: Some(RespSpec::Json(search_envelope_schema)),
+        mount: || get(search_topics_envelope),
+    },
 ];
 
 /// `GET /api/v1/user` (`auth.me`) — the authenticated account.
@@ -1672,6 +1747,254 @@ fn user_patch_body_schema(_gen: &mut SchemaGenerator) -> Value {
             "blog": {"type": "string", "description": "Accepted for compat; not modeled"},
             "location": {"type": "string", "description": "Accepted for compat; not modeled"},
             "hireable": {"type": "boolean", "description": "Accepted for compat; not modeled"}
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// GitHub `/search/*` — one `search.global` call per endpoint, projected into
+// the `{total_count, incomplete_results, items}` envelope.
+// ---------------------------------------------------------------------------
+
+/// Shared `q`/`page`/`per_page`/`sort`/`order` query for the `/search/*`
+/// endpoints (`sort`/`order` are accepted but not applied — group ordering
+/// is fixed).
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct GlobalSearchQuery {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub per_page: Option<i64>,
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub order: Option<String>,
+}
+
+async fn global_search(
+    state: &AppState,
+    headers: &HeaderMap,
+    q: &GlobalSearchQuery,
+    types: &[&str],
+) -> Result<Value, Box<Response>> {
+    let mut ctx = ctx_for(state, headers).await?;
+    let page = q.page.unwrap_or(1).max(1);
+    let per_page = q.per_page.unwrap_or(30).clamp(1, 100);
+    let input = json!({
+        "q": q.q,
+        "types": types,
+        "offset": (page - 1) * per_page,
+        "limit": per_page,
+    });
+    match dispatch(&mut ctx, "search.global", input).await {
+        RpcResponse::Ok { data, .. } => Ok(data),
+        RpcResponse::Err { error, .. } => Err(Box::new(
+            (status_for_error(&error), Json(error)).into_response(),
+        )),
+    }
+}
+
+/// Project one `search.global` group into GitHub's search envelope.
+fn search_envelope(group: &Value, items: Value) -> Value {
+    json!({
+        "total_count": group["total"],
+        "incomplete_results": group["truncated"],
+        "items": items,
+    })
+}
+
+/// `GET /search/users` — GitHub user hits (`login`, `type`, `avatar_url`,
+/// `html_url`).
+async fn search_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<GlobalSearchQuery>,
+) -> Response {
+    let _ = (&q.sort, &q.order);
+    let data = match global_search(&state, &headers, &q, &["users"]).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    let items: Vec<Value> = data["users"]["hits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|u| {
+            json!({
+                "login": u["username"],
+                "name": u["display_name"],
+                "type": "User",
+                "avatar_url": u["avatar_url"],
+                "html_url": format!("/{}", u["username"].as_str().unwrap_or("")),
+            })
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(search_envelope(&data["users"], json!(items))),
+    )
+        .into_response()
+}
+
+/// `GET /search/issues` — `is:pr` searches pulls, `is:issue` issues, plain
+/// `q` returns issues only (GitHub defaults the issues surface to issues;
+/// PRs surface under `is:pr`).
+async fn search_issues(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<GlobalSearchQuery>,
+) -> Response {
+    let _ = (&q.sort, &q.order);
+    let is_pr = q.q.split_whitespace().any(|t| t == "is:pr");
+    let types: &[&str] = if is_pr { &["pulls"] } else { &["issues"] };
+    let group_key = if is_pr { "pulls" } else { "issues" };
+    let data = match global_search(&state, &headers, &q, types).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    let items: Vec<Value> = data[group_key]["hits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|i| {
+            let owner = i["repo_owner"].as_str().unwrap_or("");
+            let name = i["repo_name"].as_str().unwrap_or("");
+            let number = i["number"].as_i64().unwrap_or(0);
+            let mut v = json!({
+                "number": number,
+                "title": i["title"],
+                "state": i["state"],
+                "comments": i["comment_count"],
+                "repository_url": format!("/api/v1/repos/{owner}/{name}"),
+                "html_url": format!("/{owner}/{name}/issues/{number}"),
+                "updated_at": i["updated_at"],
+            });
+            if is_pr {
+                v["pull_request"] = json!({"html_url": format!("/{owner}/{name}/pulls/{number}")});
+            }
+            if let Some(a) = i["author_username"].as_str() {
+                v["user"] = json!({"login": a, "type": "User"});
+            }
+            v
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(search_envelope(&data[group_key], json!(items))),
+    )
+        .into_response()
+}
+
+/// `GET /search/commits` — git-log grep hits under the search envelope.
+async fn search_commits(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<GlobalSearchQuery>,
+) -> Response {
+    let _ = (&q.sort, &q.order);
+    let data = match global_search(&state, &headers, &q, &["commits"]).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    let items: Vec<Value> = data["commits"]["hits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| {
+            json!({
+                "sha": c["sha"],
+                "commit": {"message": c["subject"], "author": {"name": c["author_name"], "date": c["authored_at"]}},
+                "repository_url": format!("/api/v1/repos/{}/{}", c["repo_owner"].as_str().unwrap_or(""), c["repo_name"].as_str().unwrap_or("")),
+                "html_url": format!("/{}/{}/commit/{}", c["repo_owner"].as_str().unwrap_or(""), c["repo_name"].as_str().unwrap_or(""), c["sha"].as_str().unwrap_or("")),
+            })
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(search_envelope(&data["commits"], json!(items))),
+    )
+        .into_response()
+}
+
+/// `GET /search/code` — `git grep` hits under the search envelope.
+async fn search_code(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<GlobalSearchQuery>,
+) -> Response {
+    let _ = (&q.sort, &q.order);
+    let data = match global_search(&state, &headers, &q, &["code"]).await {
+        Ok(d) => d,
+        Err(r) => return *r,
+    };
+    let items: Vec<Value> = data["code"]["hits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| {
+            let owner = c["repo_owner"].as_str().unwrap_or("");
+            let name = c["repo_name"].as_str().unwrap_or("");
+            let path = c["path"].as_str().unwrap_or("");
+            json!({
+                "name": path.rsplit('/').next().unwrap_or(path),
+                "path": path,
+                "repository": {"full_name": format!("{owner}/{name}")},
+                "html_url": format!("/{owner}/{name}/src/branch/{}/{}", c["ref"].as_str().unwrap_or("main"), path),
+            })
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(search_envelope(&data["code"], json!(items))),
+    )
+        .into_response()
+}
+
+/// `GET /search/topics` — `repo.topicsSuggest` under the GitHub envelope.
+async fn search_topics_envelope(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<TopicsQuery>,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "repo.topicsSuggest",
+        json!({"q": q.q, "limit": q.limit}),
+        StatusCode::OK,
+        |d| {
+            let topics = d["topics"].clone();
+            let items: Vec<Value> = topics
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|t| json!({"name": t["name"], "display_name": t["name"], "short_description": t["name"], "description": t["name"], "created_by": serde_json::Value::Null, "featured": false}))
+                .collect();
+            json!({
+                "total_count": items.len(),
+                "incomplete_results": false,
+                "items": items,
+            })
+        },
+    )
+    .await
+}
+
+fn search_envelope_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["total_count", "incomplete_results", "items"],
+        "properties": {
+            "total_count": {"type": "integer"},
+            "incomplete_results": {"type": "boolean"},
+            "items": {"type": "array", "items": {"type": "object"}}
         }
     })
 }

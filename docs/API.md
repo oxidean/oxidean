@@ -303,6 +303,11 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`PUT` | `/repos/{owner}/{repo}/topics` | `repo.get` / `repo.updateMetadata` | `{names: [...]}` round-trip |
 | `GET` | `/topics` | `repo.topicsSuggest` | `q`, `limit`; bare array (Gitea); anonymous OK |
 | `GET` | `/search/repositories` | `repo.explore` | `q`, `page`, `per_page` → `{total_count, incomplete_results, items}`; `sort`/`order` accepted, not applied; anonymous OK |
+| `GET` | `/search/users` | `search.global` | GitHub envelope; `{login, type: "User"}` items; anonymous callers see an empty group |
+| `GET` | `/search/issues` | `search.global` | `q` → issues; `is:pr` → pulls group; items carry `repository_url`/`pull_request` link |
+| `GET` | `/search/commits` | `search.global` | Bounded `git log --grep` scan; `incomplete_results` when coverage was partial |
+| `GET` | `/search/code` | `search.global` | Bounded `git grep` scan; `{name, path, repository.full_name}` items |
+| `GET` | `/search/topics` | `repo.topicsSuggest` | GitHub envelope over the same suggestion set as `GET /topics` |
 | `GET` | `/repos/{owner}/{repo}/stats/contributors` | `repo.insights.contributors` | `[{author, total}]` — no per-week breakdown |
 | `GET` | `/repos/{owner}/{repo}/stats/commit_activity` | `repo.insights.commitActivity` | `[{week, days[7], total}]` — GitHub shape |
 | `GET` | `/repos/{owner}/{repo}/wiki/pages` | `wiki.pages.list` | Bare array |

@@ -1150,6 +1150,351 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /search/users:
+    get:
+      tags:
+      - users
+      summary: User search (`search.global` users group) — `{total_count, items}`; anonymous callers see an empty group
+      operationId: searchUsers
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: order
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - incomplete_results
+                - items
+                properties:
+                  total_count:
+                    type: integer
+                  incomplete_results:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /search/issues:
+    get:
+      tags:
+      - issues
+      summary: Issue/PR search (`search.global`; `is:pr`/`is:issue` selects the group) — `{total_count, items}`
+      operationId: searchIssues
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: order
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - incomplete_results
+                - items
+                properties:
+                  total_count:
+                    type: integer
+                  incomplete_results:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /search/commits:
+    get:
+      tags:
+      - repos
+      summary: Commit search (`search.global` commits group) — `{total_count, items}`
+      operationId: searchCommits
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: order
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - incomplete_results
+                - items
+                properties:
+                  total_count:
+                    type: integer
+                  incomplete_results:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /search/code:
+    get:
+      tags:
+      - repos
+      summary: Code search (`search.global` code group) — `{total_count, items}`
+      operationId: searchCode
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: order
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - incomplete_results
+                - items
+                properties:
+                  total_count:
+                    type: integer
+                  incomplete_results:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /search/topics:
+    get:
+      tags:
+      - repos
+      summary: Topic search (`repo.topicsSuggest`) — GitHub `{total_count, items}` envelope
+      operationId: searchTopicsEnvelope
+      security: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - total_count
+                - incomplete_results
+                - items
+                properties:
+                  total_count:
+                    type: integer
+                  incomplete_results:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /orgs:
     post:
       tags:
