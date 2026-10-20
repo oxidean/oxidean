@@ -529,7 +529,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "org.invites.revoke" => OrgWrite,
 
         "packages.list" => PackageRead,
-        "packages.deleteVersion" => PackageDelete,
+        "packages.deleteVersion" | "packages.delete" => PackageDelete,
 
         // Narrow self-management: a token may list its owner's tokens and
         // revoke itself (handler enforces `id == self`). `pat.create*` stays

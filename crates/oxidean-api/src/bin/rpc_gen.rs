@@ -4107,6 +4107,7 @@ export type PackagesListRequest = {
 };
 
 export type PackageVersionPublic = {
+  id?: string;
   version: string;
   digest?: string | null;
   created_at: string;
@@ -4120,6 +4121,9 @@ export type PackagePublic = {
   format: string;
   visibility: string;
   repository_id?: string | null;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
   versions: PackageVersionPublic[];
 };
 
@@ -4134,6 +4138,15 @@ export type PackagesDeleteVersionRequest = {
 };
 
 export type PackagesDeleteVersionResponse = {
+  ok: boolean;
+};
+
+export type PackagesDeleteRequest = {
+  package_id: string;
+  confirm: string;
+};
+
+export type PackagesDeleteResponse = {
   ok: boolean;
 };
 
@@ -6809,6 +6822,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PackagesListResponse>(opts, "packages.list", input),
       deleteVersion: (input: PackagesDeleteVersionRequest) =>
         rpcCall<PackagesDeleteVersionResponse>(opts, "packages.deleteVersion", input),
+      delete: (input: PackagesDeleteRequest) =>
+        rpcCall<PackagesDeleteResponse>(opts, "packages.delete", input),
       adminUsage: (input: PackagesAdminUsageRequest) =>
         rpcCall<PackagesAdminUsageResponse>(opts, "packages.adminUsage", input),
       adminSetQuota: (input: PackagesAdminSetQuotaRequest) =>
@@ -7834,6 +7849,17 @@ export function packagesDeleteVersionMutationOptions(client: OxideanClient) {
     mutationKey: ["packages", "deleteVersion"] as const,
     mutationFn: async (input: PackagesDeleteVersionRequest) => {
       const res = await client.packages.deleteVersion(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function packagesDeleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["packages", "delete"] as const,
+    mutationFn: async (input: PackagesDeleteRequest) => {
+      const res = await client.packages.delete(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

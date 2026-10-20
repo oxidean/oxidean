@@ -14,6 +14,9 @@ pub struct PackagesListRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PackageVersionPublic {
+    /// Row id — the `{version_id}` the GitHub-shaped REST routes address.
+    #[serde(default)]
+    pub id: String,
     pub version: String,
     pub digest: Option<String>,
     pub created_at: String,
@@ -28,6 +31,12 @@ pub struct PackagePublic {
     pub format: String,
     pub visibility: String,
     pub repository_id: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
     pub versions: Vec<PackageVersionPublic>,
 }
 
@@ -46,6 +55,18 @@ pub struct PackagesDeleteVersionRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PackagesDeleteVersionResponse {
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PackagesDeleteRequest {
+    pub package_id: String,
+    /// Must equal the package name (same safety gate as deleteVersion).
+    pub confirm: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PackagesDeleteResponse {
     pub ok: bool,
 }
 

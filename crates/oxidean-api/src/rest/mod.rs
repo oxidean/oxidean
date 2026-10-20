@@ -20,6 +20,7 @@ mod admin;
 mod issues;
 pub mod openapi;
 mod orgs;
+mod packages;
 mod pulls;
 mod releases;
 mod repos;

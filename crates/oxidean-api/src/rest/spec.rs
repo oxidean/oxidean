@@ -14,7 +14,7 @@ use serde_json::{json, Map, Value};
 use crate::app::AppState;
 use oxidean_core::WIRE_VERSION;
 
-use super::{actions, admin, issues, orgs, pulls, releases, repos, statuses, users};
+use super::{actions, admin, issues, orgs, packages, pulls, releases, repos, statuses, users};
 
 /// `T` → component `$ref`; `SchemaGenerator::subschema_for::<T>` as a plain
 /// fn pointer so tables stay `const`-constructible. Defs accumulate in the
@@ -84,6 +84,7 @@ pub fn route_defs() -> &'static [&'static [RouteDef]] {
         pulls::ROUTES,
         releases::ROUTES,
         admin::ROUTES,
+        packages::ROUTES,
     ]
 }
 

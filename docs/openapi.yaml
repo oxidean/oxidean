@@ -7687,6 +7687,585 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /user/packages:
+    get:
+      tags:
+      - packages
+      summary: List packages for the authenticated user (packages.list)
+      operationId: packages/listPackagesForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: query
+        required: false
+        schema:
+          description: GitHub's `package_type` — `container` maps to our `oci` format.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: visibility
+        in: query
+        required: false
+        schema:
+          description: '`public` | `private` | `internal` (`internal` ≈ private here).'
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/packages:
+    get:
+      tags:
+      - packages
+      summary: List a user's packages (packages.list)
+      operationId: packages/listPackagesForUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: query
+        required: false
+        schema:
+          description: GitHub's `package_type` — `container` maps to our `oci` format.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: visibility
+        in: query
+        required: false
+        schema:
+          description: '`public` | `private` | `internal` (`internal` ≈ private here).'
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/packages:
+    get:
+      tags:
+      - packages
+      summary: List an org's packages (packages.list)
+      operationId: packages/listPackagesForOrg
+      security: []
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: query
+        required: false
+        schema:
+          description: GitHub's `package_type` — `container` maps to our `oci` format.
+          type:
+          - string
+          - 'null'
+          default: null
+      - name: visibility
+        in: query
+        required: false
+        schema:
+          description: '`public` | `private` | `internal` (`internal` ≈ private here).'
+          type:
+          - string
+          - 'null'
+          default: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/packages/{package_type}/{package_name}:
+    get:
+      tags:
+      - packages
+      summary: Get one of the caller's packages (packages.list, filtered)
+      operationId: packages/getPackageForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - packages
+      summary: Delete one of the caller's packages (packages.delete)
+      operationId: packages/deletePackageForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/packages/{package_type}/{package_name}:
+    get:
+      tags:
+      - packages
+      summary: Get one user package (packages.list, filtered)
+      operationId: packages/getPackageForUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/packages/{package_type}/{package_name}:
+    get:
+      tags:
+      - packages
+      summary: Get one org package (packages.list, filtered)
+      operationId: packages/getPackageForOrg
+      security: []
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - packages
+      summary: Delete an org package (packages.delete)
+      operationId: packages/deletePackageForOrg
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/packages/{package_type}/{package_name}/versions:
+    get:
+      tags:
+      - packages
+      summary: List versions of the caller's package (packages.list, filtered)
+      operationId: packages/getAllVersionsForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/packages/{package_type}/{package_name}/versions:
+    get:
+      tags:
+      - packages
+      summary: List versions of a user's package (packages.list, filtered)
+      operationId: packages/getAllVersionsForUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/packages/{package_type}/{package_name}/versions:
+    get:
+      tags:
+      - packages
+      summary: List versions of an org's package (packages.list, filtered)
+      operationId: packages/getAllVersionsForOrg
+      security: []
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/packages/{package_type}/{package_name}/versions/{version_id}:
+    get:
+      tags:
+      - packages
+      summary: Get one version of the caller's package (packages.list, filtered)
+      operationId: packages/getVersionForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - packages
+      summary: Delete one version of the caller's package (packages.deleteVersion)
+      operationId: packages/deleteVersionForAuthenticatedUser
+      parameters:
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/{username}/packages/{package_type}/{package_name}/versions/{version_id}:
+    get:
+      tags:
+      - packages
+      summary: Get one version of a user's package (packages.list, filtered)
+      operationId: packages/getVersionForUser
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orgs/{org}/packages/{package_type}/{package_name}/versions/{version_id}:
+    get:
+      tags:
+      - packages
+      summary: Get one version of an org's package (packages.list, filtered)
+      operationId: packages/getVersionForOrg
+      security: []
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - packages
+      summary: Delete one version of an org's package (packages.deleteVersion)
+      operationId: packages/deleteVersionForOrg
+      parameters:
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_type
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: package_name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: OK
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   schemas:
     Error:

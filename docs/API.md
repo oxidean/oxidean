@@ -182,7 +182,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `pat.list` | List active PATs for the calling user (no secrets) | Session or PAT |
 | `pat.revoke` | Soft-revoke a PAT by `id`; bearer callers limited to their own id | Session or owning PAT |
 | `pat.self` / `pat.policy` / `pat.catalog` | Token introspection, effective expiry policy, scope catalog | Session or PAT |
-| `packages.list` | List packages for an owner login or `repository_id` (ACL-filtered) | Session + verified |
+| `packages.list` | List packages for an owner login or `repository_id` (ACL-filtered) | Anonymous OK for public; session for private |
+| `packages.delete` | Delete a package (all versions); `confirm` must equal the package name | Session + owner Admin capability |
 | `packages.deleteVersion` | Delete a version; `confirm` must equal `{name}@{version}` | Session + owner Admin capability |
 | `packages.adminUsage` | Per-owner storage usage + format/package breakdown | Sys-admin |
 | `packages.adminSetQuota` | Set per-owner package quota override (`max_bytes`) | Sys-admin |
@@ -285,8 +286,16 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
 | `GET` | `/admin/actions/runners` | `admin.actions.listRunners` | Sys-admin session only |
 | `POST` | `/admin/actions/runners/registration-token` | `admin.actions.createRegistrationToken` | Sys-admin session only; 201 |
+| `GET` | `/user/packages` | `packages.list` | Session user's packages; `package_type`/`visibility` filters |
+| `GET` | `/users/{username}/packages` | `packages.list` | Anonymous OK (public packages only) |
+| `GET` | `/orgs/{org}/packages` | `packages.list` | Anonymous OK (public packages only) |
+| `GET`/`DELETE` | `/user/packages/{package_type}/{package_name}` | `packages.list` / `packages.delete` | GitHub shape; `container` ↔ stored `oci`; delete → 204 |
+| `GET` | `/users/{username}/packages/{package_type}/{package_name}` | `packages.list` | |
+| `GET`/`DELETE` | `/orgs/{org}/packages/{package_type}/{package_name}` | `packages.list` / `packages.delete` | Org-owner delete |
+| `GET` | `/{user,users/{u},orgs/{o}}/packages/{type}/{name}/versions[/{version_id}]` | `packages.list` | Version list + single-version detail (row `id` is the version id) |
+| `DELETE` | `/user/packages/{type}/{name}/versions/{version_id}` and `/orgs/{o}/…` | `packages.deleteVersion` | Owner-scope only; 204 |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 
@@ -536,7 +545,7 @@ Rules:
 | Classic `delete_repo` | `repo.softDelete` (not implied by `repo`) |
 | Classic `package:read` | `packages.list` |
 | Classic `package:write` | `packages.list` (implies `package:read`) |
-| Classic `package:delete` | `packages.deleteVersion` (not implied by `package:write`) |
+| Classic `package:delete` | `packages.delete` / `packages.deleteVersion` (not implied by `package:write`) |
 | Fine-grained `contents: read`/`write` | Contents-domain read/write procedures on covered repositories |
 | Fine-grained `perms` families | Their own domains on covered repositories (`issues`, `pull_requests`, `actions`, `commit_statuses`, `secrets`, `webhooks`, `administration`, `releases`, `metadata`, …) or on the token owner (account families) |
 | Fine-grained `packages: read`/`write` | `packages.list` when `repository_id` names a covered repository |

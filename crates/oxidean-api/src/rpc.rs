@@ -585,6 +585,7 @@ pub const PROCEDURES: &[&str] = &[
     "label.delete",
     "packages.list",
     "packages.deleteVersion",
+    "packages.delete",
     "packages.adminUsage",
     "packages.adminSetQuota",
     "pat.createClassic",
@@ -2575,6 +2576,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        "packages.delete" => match crate::packages::rpc::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "packages.adminUsage" => match crate::packages::rpc::admin_usage(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
