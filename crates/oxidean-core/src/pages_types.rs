@@ -152,4 +152,8 @@ pub struct PagesDeployCreateRequest {
     /// Artifact name to publish (default `github-pages`).
     #[serde(default)]
     pub artifact: Option<String>,
+    /// Artifact row id — wins over `artifact` when set. The GitHub-shaped
+    /// REST `pages/deployment` route translates `artifact_url` into this.
+    #[serde(default)]
+    pub artifact_id: Option<String>,
 }

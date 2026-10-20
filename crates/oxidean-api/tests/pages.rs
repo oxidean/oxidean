@@ -889,3 +889,183 @@ async fn pages_workflow_deploy_job_token_seam() {
     .await;
     assert_eq!(v["error"]["code"], "pages.conflict", "{v}");
 }
+
+/// GitHub-shaped Pages REST under `/api/v1/repos/{o}/{r}/pages` — site CRUD,
+/// builds list/get/latest/request, and the deploy seam's job-token gate.
+#[tokio::test]
+async fn pages_rest_github_surface() {
+    let t = test_app().await;
+    let (cookie, login_v) = signup_and_login(&t.app, "pgrest@ex.com", "pgrest").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&t.db, &user_id).await;
+    create_repo(&t.app, &cookie, "demo", "public").await;
+    seed_repo(
+        &t.repos_dir,
+        "pgrest",
+        "demo",
+        "main",
+        &[("index.html", "<h1>hi</h1>")],
+    )
+    .await;
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: Option<&str>,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder().method(method).uri(uri.to_string());
+        if let Some(c) = cookie {
+            b = b.header("cookie", c.to_string());
+        }
+        let req = match body {
+            Some(v) => b
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&v).unwrap()))
+                .unwrap(),
+            None => b.body(Body::empty()).unwrap(),
+        };
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null));
+        (status, v)
+    }
+
+    // Unconfigured → 404 (pages.not_found maps through status_for_error).
+    let (status, _) = rest(
+        &t.app,
+        "GET",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // POST /pages → 201 legacy site on the default branch; first build runs.
+    let (status, site) = rest(
+        &t.app,
+        "POST",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        Some(serde_json::json!({"source": {"branch": "main", "path": "/"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{site}");
+    assert_eq!(site["build_type"], "legacy");
+    assert_eq!(site["source"]["branch"], "main");
+    assert!(site["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/api/v1/repos/pgrest/demo/pages"));
+
+    // GET /pages — anonymous read of the public repo's site.
+    let (status, site) = rest(&t.app, "GET", "/api/v1/repos/pgrest/demo/pages", None, None).await;
+    assert_eq!(status, StatusCode::OK, "{site}");
+    assert_eq!(site["html_url"], "/pages/pgrest/demo/");
+
+    // Builds: legacy enable queued a build — list is a bare array; get +
+    // latest resolve the same row.
+    let (status, builds) = rest(
+        &t.app,
+        "GET",
+        "/api/v1/repos/pgrest/demo/pages/builds",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{builds}");
+    let builds = builds.as_array().expect("builds array");
+    assert_eq!(builds.len(), 1);
+    let bid = builds[0]["id"].as_str().unwrap().to_string();
+
+    let (status, one) = rest(
+        &t.app,
+        "GET",
+        &format!("/api/v1/repos/pgrest/demo/pages/builds/{bid}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{one}");
+    assert_eq!(one["id"], bid);
+
+    let (status, latest) = rest(
+        &t.app,
+        "GET",
+        "/api/v1/repos/pgrest/demo/pages/builds/latest",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{latest}");
+    assert_eq!(latest["id"], bid);
+
+    // POST /pages/builds queues a second legacy build → 201.
+    let (status, b2) = rest(
+        &t.app,
+        "POST",
+        "/api/v1/repos/pgrest/demo/pages/builds",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{b2}");
+    assert_eq!(b2["build_type"], "legacy");
+
+    // PUT /pages — cname + https_enforced pass through.
+    let (status, _) = rest(
+        &t.app,
+        "PUT",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        Some(serde_json::json!({"cname": "docs.example.com", "https_enforced": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, site) = rest(
+        &t.app,
+        "GET",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(site["cname"], "docs.example.com");
+    assert_eq!(site["https_enforced"], true);
+
+    // POST /pages/deployment with a session → job-token gate → 403.
+    let (status, v) = rest(
+        &t.app,
+        "POST",
+        "/api/v1/repos/pgrest/demo/pages/deployment",
+        Some(&cookie),
+        Some(serde_json::json!({"artifact": "github-pages"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+
+    // DELETE /pages → 204; subsequent GET 404s.
+    let (status, _) = rest(
+        &t.app,
+        "DELETE",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = rest(
+        &t.app,
+        "GET",
+        "/api/v1/repos/pgrest/demo/pages",
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

@@ -3552,6 +3552,9 @@ export type PagesDeployCreateRequest = {
   name: string;
   /** Artifact name to publish (default `github-pages`). */
   artifact?: string;
+  /** Artifact row id — wins over `artifact` when set; the REST
+      `pages/deployment` route translates `artifact_url` into this. */
+  artifact_id?: string;
 };
 
 export type MergeQueuePullEmbed = {

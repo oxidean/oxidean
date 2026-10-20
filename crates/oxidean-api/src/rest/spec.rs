@@ -15,7 +15,7 @@ use crate::app::AppState;
 use oxidean_core::WIRE_VERSION;
 
 use super::{
-    actions, admin, checks, issues, orgs, packages, pulls, releases, repos, statuses, users,
+    actions, admin, checks, issues, orgs, packages, pages, pulls, releases, repos, statuses, users,
 };
 
 /// `T` → component `$ref`; `SchemaGenerator::subschema_for::<T>` as a plain
@@ -88,6 +88,7 @@ pub fn route_defs() -> &'static [&'static [RouteDef]] {
         admin::ROUTES,
         packages::ROUTES,
         checks::ROUTES,
+        pages::ROUTES,
     ]
 }
 

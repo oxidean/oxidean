@@ -545,18 +545,40 @@ pub async fn deploys_create(
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("pages.forbidden", "run not found for token"))?;
-    let artifact_name = req
-        .artifact
+    let artifact_id = req
+        .artifact_id
         .as_deref()
         .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .unwrap_or("github-pages");
-    let artifact = ctx
-        .db
-        .find_action_artifact(&token_row.run_id, artifact_name)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| invalid("artifact not found for this run"))?;
+        .filter(|i| !i.is_empty());
+    let artifact = match artifact_id {
+        // GitHub's `artifact_url` arrives resolved to a row id by the REST
+        // edge — still pinned to this token's run before the job check below.
+        Some(id) => {
+            let a = ctx
+                .db
+                .find_action_artifact_by_id(id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| invalid("artifact not found for this run"))?;
+            if a.run_id != token_row.run_id {
+                return Err(invalid("artifact not found for this run"));
+            }
+            a
+        }
+        None => {
+            let artifact_name = req
+                .artifact
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .unwrap_or("github-pages");
+            ctx.db
+                .find_action_artifact(&token_row.run_id, artifact_name)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| invalid("artifact not found for this run"))?
+        }
+    };
     if artifact.repository_id != accessible.row.id
         || artifact.job_id.as_deref() != Some(token_row.job_id.as_str())
     {

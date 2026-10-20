@@ -304,6 +304,11 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/check-suites/{id}` | `check.suites.get` | |
 | `POST` | `/repos/{owner}/{repo}/check-suites/{id}/rerequest` | `check.suites.rerequest` | 201 |
 | `GET` | `/repos/{owner}/{repo}/commits/{ref}/check-suites` | `check.suites.list` | `{total_count, check_suites}` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pages` | `pages.get` / `pages.enable` | Enable: `{source:{branch,path}}` or `build_type`; 201 |
+| `PUT`/`DELETE` | `/repos/{owner}/{repo}/pages` | `pages.update` / `pages.disable` | Delete → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pages/builds` | `pages.builds.list` / `pages.builds.request` | Bare array; `status`/`per_page`; request → 201 (legacy only) |
+| `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
+| `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
 Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
