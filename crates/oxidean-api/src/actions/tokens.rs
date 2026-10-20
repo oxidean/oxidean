@@ -25,11 +25,16 @@ pub async fn mint_registration_token_for_scope(
     mint_token_with_purpose(db, scope_type, scope_id, "register").await
 }
 
-/// Mint a `repo-remove` credential — GitHub's `POST …/runners/remove-token`.
-/// Never registers a runner; `DELETE …/runners/{id}` accepts it for a
-/// repo-bound runner (`config.sh remove` flow).
-pub async fn mint_remove_token(db: &Database, repo_id: &str) -> Result<String, String> {
-    mint_token_with_purpose(db, "repo", Some(repo_id), "remove").await
+/// Mint a `purpose='remove'` credential — GitHub's `POST …/runners/remove-token`.
+/// `("repo", Some(repo_id))` / `("org", Some(org_id))` scope the delete reach.
+/// Never registers a runner; `DELETE …/runners/{id}` accepts it for a runner
+/// bound to the token's scope (`config.sh remove` flow).
+pub async fn mint_remove_token(
+    db: &Database,
+    scope_type: &str,
+    scope_id: Option<&str>,
+) -> Result<String, String> {
+    mint_token_with_purpose(db, scope_type, scope_id, "remove").await
 }
 
 async fn mint_token_with_purpose(

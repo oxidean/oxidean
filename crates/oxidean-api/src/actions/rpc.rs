@@ -306,7 +306,7 @@ async fn job_view_ctx<'a>(
     Ok(view)
 }
 
-fn runner_public(r: &ActionRunnerRow) -> ActionRunnerPublic {
+pub(crate) fn runner_public(r: &ActionRunnerRow) -> ActionRunnerPublic {
     let labels: Vec<String> = serde_json::from_str(&r.labels_json).unwrap_or_default();
     ActionRunnerPublic {
         id: r.id.clone(),
@@ -1808,9 +1808,11 @@ pub async fn list_runners(
     if !meets(accessible.capability, Capability::Read) {
         return Err(not_found());
     }
+    let owner_org =
+        (accessible.row.owner_type == "org").then_some(accessible.row.owner_id.as_str());
     let rows = ctx
         .db
-        .list_action_runners_for_repo(&accessible.row.id)
+        .list_action_runners_for_repo(&accessible.row.id, owner_org)
         .await
         .map_err(db_err)?;
     Ok(ActionListRunnersResponse {
@@ -1834,9 +1836,11 @@ pub async fn get_runner(
     if !meets(accessible.capability, Capability::Read) {
         return Err(not_found());
     }
+    let owner_org =
+        (accessible.row.owner_type == "org").then_some(accessible.row.owner_id.as_str());
     let runner = ctx
         .db
-        .list_action_runners_for_repo(&accessible.row.id)
+        .list_action_runners_for_repo(&accessible.row.id, owner_org)
         .await
         .map_err(db_err)?
         .into_iter()
@@ -1930,9 +1934,10 @@ pub async fn create_remove_token(
     if !meets(accessible.capability, Capability::Admin) {
         return Err(not_found());
     }
-    let token = crate::actions::tokens::mint_remove_token(&ctx.db, &accessible.row.id)
-        .await
-        .map_err(|e| AppError::new("repo.actions.token_failed", e))?;
+    let token =
+        crate::actions::tokens::mint_remove_token(&ctx.db, "repo", Some(&accessible.row.id))
+            .await
+            .map_err(|e| AppError::new("repo.actions.token_failed", e))?;
     Ok(ActionRegistrationTokenResponse {
         token,
         scope: "repo".into(),

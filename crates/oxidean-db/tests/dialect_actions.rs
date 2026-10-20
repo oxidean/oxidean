@@ -147,8 +147,9 @@ async fn migrate_reseats_pre_rebase_versions() {
             (80, "pages"),
             (81, "merge queue"),
             (82, "action artifacts state"),
+            (83, "runner remove tokens"),
         ],
-        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-82"
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-83"
     );
     // Repair is idempotent — a second migrate changes nothing.
     db.migrate().await.expect("idempotent migrate");
@@ -247,6 +248,8 @@ async fn dialect_actions_schema_presence() {
             "hash-token",
             r#"["ubuntu-latest"]"#,
             Some(&repo.id),
+            None,
+            None,
             false,
         )
         .await
@@ -430,9 +433,18 @@ async fn dialect_actions_claim_repo_scope() {
 
     // Runner rows exist so the claim's runner_id FK holds.
     for rid in ["runner-scoped", "runner-global"] {
-        db.insert_action_runner(&format!("{rid}-{tag}"), rid, "hash", "[]", None, false)
-            .await
-            .expect("runner");
+        db.insert_action_runner(
+            &format!("{rid}-{tag}"),
+            rid,
+            "hash",
+            "[]",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect("runner");
     }
     let scoped_runner = format!("runner-scoped-{tag}");
     let global_runner = format!("runner-global-{tag}");
@@ -443,6 +455,7 @@ async fn dialect_actions_claim_repo_scope() {
             &scoped_runner,
             std::slice::from_ref(&label),
             Some(&repo_a.id),
+            None,
         )
         .await
         .expect("claim")
@@ -455,6 +468,7 @@ async fn dialect_actions_claim_repo_scope() {
             &scoped_runner,
             std::slice::from_ref(&label),
             Some(&repo_a.id),
+            None,
         )
         .await
         .expect("scoped miss");
@@ -462,7 +476,7 @@ async fn dialect_actions_claim_repo_scope() {
 
     // The unscoped claim still reaches repo B's queued job.
     let claimed = db
-        .claim_queued_action_job_for_labels_scoped(&global_runner, &[label], None)
+        .claim_queued_action_job_for_labels_scoped(&global_runner, &[label], None, None)
         .await
         .expect("claim")
         .expect("global claim sees repo B");
@@ -553,6 +567,8 @@ async fn dialect_actions_claim_race() {
             &format!("hash-{w}-{tag}"),
             &labels_json,
             Some(&repo.id),
+            None,
+            None,
             false,
         )
         .await
@@ -646,6 +662,8 @@ async fn dialect_actions_concurrency_gate() {
         "hash-token",
         r#"["ubuntu-latest"]"#,
         Some(&repo.id),
+        None,
+        None,
         false,
     )
     .await

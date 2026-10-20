@@ -4101,6 +4101,10 @@ impl Database {
 
     // --- actions (Phase 19) ---
 
+    /// `owner_type`/`owner_id` mark non-repo ownership — `('org', org_id)`
+    /// for org-level runners (GitHub `POST /orgs/{org}/actions/runners/…`
+    /// registration); repo-bound runners set `repository_id` instead.
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_runner(
         &self,
         id: &str,
@@ -4108,6 +4112,8 @@ impl Database {
         token_hash: &str,
         labels_json: &str,
         repository_id: Option<&str>,
+        owner_type: Option<&str>,
+        owner_id: Option<&str>,
         ephemeral: bool,
     ) -> Result<actions::ActionRunnerRow, String> {
         actions::insert_runner(
@@ -4117,6 +4123,8 @@ impl Database {
             token_hash,
             labels_json,
             repository_id,
+            owner_type,
+            owner_id,
             ephemeral,
         )
         .await
@@ -4394,8 +4402,17 @@ impl Database {
     pub async fn list_action_runners_for_repo(
         &self,
         repository_id: &str,
+        owner_org: Option<&str>,
     ) -> Result<Vec<actions::ActionRunnerRow>, String> {
-        actions::list_runners_for_repo(self.require_pool()?, repository_id).await
+        actions::list_runners_for_repo(self.require_pool()?, repository_id, owner_org).await
+    }
+
+    /// Runners bound to an organization (`owner_type='org'`).
+    pub async fn list_action_runners_for_org(
+        &self,
+        org_id: &str,
+    ) -> Result<Vec<actions::ActionRunnerRow>, String> {
+        actions::list_runners_for_org(self.require_pool()?, org_id).await
     }
 
     /// Delete a runner row by id; false when absent.
@@ -5137,11 +5154,12 @@ impl Database {
         actions::consume_registration_token(self.require_pool()?, token_hash).await
     }
 
-    /// Consume a `repo-remove` runner token — returns the bound repository id.
+    /// Consume a `purpose='remove'` runner token — returns `(scope_type,
+    /// scope_id)` so the caller can bound the delete to a repo or org.
     pub async fn consume_action_runner_remove_token(
         &self,
         token_hash: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<(String, Option<String>)>, String> {
         actions::consume_remove_token(self.require_pool()?, token_hash).await
     }
 
@@ -5160,19 +5178,22 @@ impl Database {
         actions::claim_queued_job_for_labels(self.require_pool()?, runner_id, labels).await
     }
 
-    /// Claim with runner repo-scope — repo-bound runners only see their
-    /// repo's jobs; `None` keeps the global queue.
+    /// Runner scope isolation — `repo_scope` binds to one repository's queue;
+    /// `org_scope` binds to repositories owned by that org; `(None, None)`
+    /// keeps the global queue.
     pub async fn claim_queued_action_job_for_labels_scoped(
         &self,
         runner_id: &str,
         labels: &[String],
         repo_scope: Option<&str>,
+        org_scope: Option<&str>,
     ) -> Result<Option<actions::ActionJobRow>, String> {
         actions::claim_queued_job_for_labels_scoped(
             self.require_pool()?,
             runner_id,
             labels,
             repo_scope,
+            org_scope,
         )
         .await
     }

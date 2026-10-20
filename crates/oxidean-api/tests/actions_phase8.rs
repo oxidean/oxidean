@@ -95,6 +95,8 @@ async fn mk_runner(db: &Database, suffix: &str) -> String {
         &format!("th-{id}"),
         "[\"ubuntu-latest\"]",
         None,
+        None,
+        None,
         false,
     )
     .await

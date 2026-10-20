@@ -346,10 +346,14 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, body: B
         serde_json::to_string(&req.labels).unwrap_or_else(|_| "[]".into())
     };
     let id = Uuid::new_v4().to_string();
-    let repository_id = if scope.scope_type == "repo" {
-        scope.scope_id.as_deref()
-    } else {
-        None
+    let (repository_id, owner_type, owner_id) = match scope.scope_type.as_str() {
+        "repo" => (
+            scope.scope_id.as_deref(),
+            Some("repo"),
+            scope.scope_id.as_deref(),
+        ),
+        "org" => (None, Some("org"), scope.scope_id.as_deref()),
+        _ => (None, None, None),
     };
     if let Err(e) = state
         .db
@@ -359,6 +363,8 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, body: B
             &runner_hash,
             &labels,
             repository_id,
+            owner_type,
+            owner_id,
             req.ephemeral,
         )
         .await
@@ -376,9 +382,9 @@ pub async fn register(State(state): State<AppState>, headers: HeaderMap, body: B
             name: req.name.clone(),
             token_hash: String::new(),
             labels_json: labels.clone(),
-            owner_type: None,
-            owner_id: None,
-            repository_id: None,
+            owner_type: owner_type.map(str::to_string),
+            owner_id: scope.scope_id.clone(),
+            repository_id: repository_id.map(str::to_string),
             ephemeral: req.ephemeral,
             last_online: None,
             created_at: String::new(),
@@ -894,6 +900,11 @@ pub async fn fetch_task(
                 &runner.id,
                 &labels,
                 runner.repository_id.as_deref(),
+                if runner.owner_type.as_deref() == Some("org") {
+                    runner.owner_id.as_deref()
+                } else {
+                    None
+                },
             )
             .await
         {

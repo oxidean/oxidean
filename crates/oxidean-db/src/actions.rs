@@ -363,6 +363,7 @@ pub struct ActionSecretCipherRow {
     pub ciphertext: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_runner(
     pool: &DbPool,
     id: &str,
@@ -370,6 +371,8 @@ pub async fn insert_runner(
     token_hash: &str,
     labels_json: &str,
     repository_id: Option<&str>,
+    owner_type: Option<&str>,
+    owner_id: Option<&str>,
     ephemeral: bool,
 ) -> Result<ActionRunnerRow, String> {
     let eph_i = if ephemeral { 1i64 } else { 0 };
@@ -377,14 +380,16 @@ pub async fn insert_runner(
         DbPool::Postgres(p) => {
             sqlx::query(
                 r#"INSERT INTO action_runners
-                   (id, name, token_hash, labels_json, repository_id, ephemeral)
-                   VALUES ($1, $2, $3, $4, $5, $6)"#,
+                   (id, name, token_hash, labels_json, repository_id, owner_type, owner_id, ephemeral)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
             )
             .bind(id)
             .bind(name)
             .bind(token_hash)
             .bind(labels_json)
             .bind(repository_id)
+            .bind(owner_type)
+            .bind(owner_id)
             .bind(ephemeral)
             .execute(p)
             .await
@@ -393,14 +398,16 @@ pub async fn insert_runner(
         DbPool::MySql(p) => {
             sqlx::query(
                 r#"INSERT INTO action_runners
-                   (id, name, token_hash, labels_json, repository_id, ephemeral)
-                   VALUES (?, ?, ?, ?, ?, ?)"#,
+                   (id, name, token_hash, labels_json, repository_id, owner_type, owner_id, ephemeral)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
             )
             .bind(id)
             .bind(name)
             .bind(token_hash)
             .bind(labels_json)
             .bind(repository_id)
+            .bind(owner_type)
+            .bind(owner_id)
             .bind(eph_i as i8)
             .execute(p)
             .await
@@ -409,14 +416,16 @@ pub async fn insert_runner(
         DbPool::Sqlite(p) => {
             sqlx::query(
                 r#"INSERT INTO action_runners
-                   (id, name, token_hash, labels_json, repository_id, ephemeral)
-                   VALUES (?, ?, ?, ?, ?, ?)"#,
+                   (id, name, token_hash, labels_json, repository_id, owner_type, owner_id, ephemeral)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
             )
             .bind(id)
             .bind(name)
             .bind(token_hash)
             .bind(labels_json)
             .bind(repository_id)
+            .bind(owner_type)
+            .bind(owner_id)
             .bind(eph_i)
             .execute(p)
             .await
@@ -428,8 +437,8 @@ pub async fn insert_runner(
         name: name.into(),
         token_hash: token_hash.into(),
         labels_json: labels_json.into(),
-        owner_type: None,
-        owner_id: None,
+        owner_type: owner_type.map(str::to_string),
+        owner_id: owner_id.map(str::to_string),
         repository_id: repository_id.map(str::to_string),
         ephemeral,
         last_online: None,
@@ -1095,9 +1104,15 @@ pub async fn list_runners(pool: &DbPool) -> Result<Vec<ActionRunnerRow>, String>
                     name: r.get("name"),
                     token_hash: r.get("token_hash"),
                     labels_json: r.get("labels_json"),
-                    owner_type: r.try_get("owner_type").ok(),
-                    owner_id: r.try_get("owner_id").ok(),
-                    repository_id: r.try_get("repository_id").ok(),
+                    owner_type: r
+                        .try_get::<Option<String>, _>("owner_type")
+                        .unwrap_or_default(),
+                    owner_id: r
+                        .try_get::<Option<String>, _>("owner_id")
+                        .unwrap_or_default(),
+                    repository_id: r
+                        .try_get::<Option<String>, _>("repository_id")
+                        .unwrap_or_default(),
                     ephemeral: r.try_get::<bool, _>("ephemeral").unwrap_or(false),
                     last_online: r.try_get("last_online").ok(),
                     created_at: r.try_get("created_at").unwrap_or_default(),
@@ -1125,9 +1140,15 @@ pub async fn list_runners(pool: &DbPool) -> Result<Vec<ActionRunnerRow>, String>
                         name: r.get("name"),
                         token_hash: r.get("token_hash"),
                         labels_json: r.get("labels_json"),
-                        owner_type: r.try_get("owner_type").ok(),
-                        owner_id: r.try_get("owner_id").ok(),
-                        repository_id: r.try_get("repository_id").ok(),
+                        owner_type: r
+                            .try_get::<Option<String>, _>("owner_type")
+                            .unwrap_or_default(),
+                        owner_id: r
+                            .try_get::<Option<String>, _>("owner_id")
+                            .unwrap_or_default(),
+                        repository_id: r
+                            .try_get::<Option<String>, _>("repository_id")
+                            .unwrap_or_default(),
                         ephemeral: eph != 0,
                         last_online: r.try_get("last_online").ok(),
                         created_at: r.try_get("created_at").unwrap_or_default(),
@@ -1156,9 +1177,15 @@ pub async fn list_runners(pool: &DbPool) -> Result<Vec<ActionRunnerRow>, String>
                         name: r.get("name"),
                         token_hash: r.get("token_hash"),
                         labels_json: r.get("labels_json"),
-                        owner_type: r.try_get("owner_type").ok(),
-                        owner_id: r.try_get("owner_id").ok(),
-                        repository_id: r.try_get("repository_id").ok(),
+                        owner_type: r
+                            .try_get::<Option<String>, _>("owner_type")
+                            .unwrap_or_default(),
+                        owner_id: r
+                            .try_get::<Option<String>, _>("owner_id")
+                            .unwrap_or_default(),
+                        repository_id: r
+                            .try_get::<Option<String>, _>("repository_id")
+                            .unwrap_or_default(),
                         ephemeral: eph != 0,
                         last_online: r.try_get("last_online").ok(),
                         created_at: r.try_get("created_at").unwrap_or_default(),
@@ -1815,7 +1842,7 @@ pub async fn consume_registration_token(
         DbPool::Sqlite(p) => {
             let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1 \
-                 AND purpose = 'register' AND scope_type IN ('instance','repo') RETURNING scope_type, scope_id",
+                 AND purpose = 'register' AND scope_type IN ('instance','repo','org') RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1826,7 +1853,7 @@ pub async fn consume_registration_token(
         DbPool::Postgres(p) => {
             let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true \
-                 AND purpose = 'register' AND scope_type IN ('instance','repo') RETURNING scope_type, scope_id",
+                 AND purpose = 'register' AND scope_type IN ('instance','repo','org') RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1838,7 +1865,7 @@ pub async fn consume_registration_token(
             // No UPDATE…RETURNING — read the scope, then deactivate.
             let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "SELECT scope_type, scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1 \
-                 AND purpose = 'register' AND scope_type IN ('instance','repo')",
+                 AND purpose = 'register' AND scope_type IN ('instance','repo','org')",
             )
             .bind(token_hash)
             .fetch_optional(p)
@@ -1859,45 +1886,47 @@ pub async fn consume_registration_token(
     }
 }
 
-/// Consume a `repo-remove` token — GitHub `POST …/actions/runners/remove-token`
-/// credential. Returns the bound repository id; the token is one-shot.
+/// Consume a `purpose='remove'` token — GitHub's `remove-token` credential
+/// (`POST {repos|orgs}/…/actions/runners/remove-token`). Returns
+/// `(scope_type, scope_id)` — `repo` binds a repository id, `org` an org id;
+/// the token is one-shot.
 pub async fn consume_remove_token(
     pool: &DbPool,
     token_hash: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, Option<String>)>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let row: Option<(Option<String>,)> = sqlx::query_as(
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = 0 WHERE token_hash = ? AND active = 1 \
-                 AND scope_type = 'repo' AND purpose = 'remove' RETURNING scope_id",
+                 AND purpose = 'remove' RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(row.and_then(|r| r.0))
+            Ok(row)
         }
         DbPool::Postgres(p) => {
-            let row: Option<(Option<String>,)> = sqlx::query_as(
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
                 "UPDATE action_runner_tokens SET active = false WHERE token_hash = $1 AND active = true \
-                 AND scope_type = 'repo' AND purpose = 'remove' RETURNING scope_id",
+                 AND purpose = 'remove' RETURNING scope_type, scope_id",
             )
             .bind(token_hash)
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(row.and_then(|r| r.0))
+            Ok(row)
         }
         DbPool::MySql(p) => {
-            let row: Option<(Option<String>,)> = sqlx::query_as(
-                "SELECT scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1 \
-                 AND scope_type = 'repo' AND purpose = 'remove'",
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
+                "SELECT scope_type, scope_id FROM action_runner_tokens WHERE token_hash = ? AND active = 1 \
+                 AND purpose = 'remove'",
             )
             .bind(token_hash)
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            let Some((repo_id,)) = row else {
+            let Some((scope_type, scope_id)) = row else {
                 return Ok(None);
             };
             sqlx::query(
@@ -1907,7 +1936,7 @@ pub async fn consume_remove_token(
             .execute(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(repo_id)
+            Ok(Some((scope_type, scope_id)))
         }
     }
 }
@@ -1940,14 +1969,39 @@ pub async fn delete_runner(pool: &DbPool, runner_id: &str) -> Result<bool, Strin
 /// Runners bound to one repo (`repository_id = $repo`) plus instance-wide
 /// (`repository_id IS NULL`) — GitHub's repo runner list also shows the
 /// shared scopes that can serve the repo.
+/// Repo-visible runners: repo-bound + instance-shared + runners bound to the
+/// repo's owning org (`owner_org`). GitHub's repo list shows the same set —
+/// all scopes that may serve the repository's queue.
 pub async fn list_runners_for_repo(
     pool: &DbPool,
     repository_id: &str,
+    owner_org: Option<&str>,
 ) -> Result<Vec<ActionRunnerRow>, String> {
     Ok(list_runners(pool)
         .await?
         .into_iter()
-        .filter(|r| r.repository_id.as_deref() == Some(repository_id) || r.repository_id.is_none())
+        .filter(|r| {
+            r.repository_id.as_deref() == Some(repository_id)
+                || (r.repository_id.is_none()
+                    && match r.owner_type.as_deref() {
+                        Some("org") => r.owner_id.as_deref() == owner_org,
+                        Some(_) => false,
+                        None => true,
+                    })
+        })
+        .collect())
+}
+
+/// Org-bound runners (`owner_type='org'`, `owner_id=org`) — GitHub's
+/// `/orgs/{org}/actions/runners` list.
+pub async fn list_runners_for_org(
+    pool: &DbPool,
+    org_id: &str,
+) -> Result<Vec<ActionRunnerRow>, String> {
+    Ok(list_runners(pool)
+        .await?
+        .into_iter()
+        .filter(|r| r.owner_type.as_deref() == Some("org") && r.owner_id.as_deref() == Some(org_id))
         .collect())
 }
 
@@ -2118,18 +2172,20 @@ pub async fn claim_queued_job_for_labels(
     runner_id: &str,
     runner_labels: &[String],
 ) -> Result<Option<ActionJobRow>, String> {
-    claim_queued_job_for_labels_scoped(pool, runner_id, runner_labels, None).await
+    claim_queued_job_for_labels_scoped(pool, runner_id, runner_labels, None, None).await
 }
 
-/// `claim_queued_job_for_labels` plus runner repo-scope isolation — a
-/// repo-bound runner (`repository_id` set at registration) only claims jobs
-/// belonging to that repo; instance-wide runners pass `None` and keep the
-/// global queue.
+/// `claim_queued_job_for_labels` plus runner scope isolation — a repo-bound
+/// runner (`repository_id` set at registration) only claims jobs belonging to
+/// that repo; an org-bound runner (`owner_type='org'`) only claims jobs whose
+/// repo is owned by that org; instance-wide runners pass `(None, None)` and
+/// keep the global queue.
 pub async fn claim_queued_job_for_labels_scoped(
     pool: &DbPool,
     runner_id: &str,
     runner_labels: &[String],
     repo_scope: Option<&str>,
+    org_scope: Option<&str>,
 ) -> Result<Option<ActionJobRow>, String> {
     let bases: Vec<String> = runner_labels
         .iter()
@@ -2152,11 +2208,14 @@ pub async fn claim_queued_job_for_labels_scoped(
                            SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                            AND NOT (l.base = ANY($1::text[]))) \
                            AND ($2::text IS NULL OR rj.repository_id = $2) \
+                           AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM repositories rp \
+                               WHERE rp.id = rj.repository_id AND rp.owner_type = 'org' AND rp.owner_id = $3)) \
                            {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                          ORDER BY j.created_at, j.matrix_key LIMIT 1 FOR UPDATE OF j SKIP LOCKED"
                     )))
                     .bind(&bases)
                     .bind(repo_scope)
+                    .bind(org_scope)
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2235,12 +2294,16 @@ pub async fn claim_queued_job_for_labels_scoped(
                            AND l.base NOT IN (SELECT value FROM JSON_TABLE(?, '$[*]' \
                              COLUMNS (value VARCHAR(255) PATH '$')) AS lb)) \
                            AND (? IS NULL OR rj.repository_id = ?) \
+                           AND (? IS NULL OR EXISTS (SELECT 1 FROM repositories rp \
+                               WHERE rp.id = rj.repository_id AND rp.owner_type = 'org' AND rp.owner_id = ?)) \
                            {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                          ORDER BY j.created_at, j.matrix_key LIMIT 5",
                     )))
                     .bind(&bases_json)
                     .bind(repo_scope)
                     .bind(repo_scope)
+                    .bind(org_scope)
+                    .bind(org_scope)
                     .fetch_all(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2343,6 +2406,8 @@ pub async fn claim_queued_job_for_labels_scoped(
                      SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                      AND l.base NOT IN (SELECT value FROM json_each(?2))) \
                    AND (?4 IS NULL OR rj.repository_id = ?4) \
+                   AND (?5 IS NULL OR EXISTS (SELECT 1 FROM repositories rp \
+                       WHERE rp.id = rj.repository_id AND rp.owner_type = 'org' AND rp.owner_id = ?5)) \
                    {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                    ORDER BY j.created_at, j.matrix_key LIMIT 1) \
                  AND status = 'queued' AND approval_hold = 0 RETURNING {JOB_COLS_SQLITE}"
@@ -2351,6 +2416,7 @@ pub async fn claim_queued_job_for_labels_scoped(
             .bind(bases_json)
             .bind(&heartbeat)
             .bind(repo_scope)
+            .bind(org_scope)
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;

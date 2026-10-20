@@ -1665,7 +1665,7 @@ async fn rest_actions_secrets_variables_environments_surface() {
     db.upsert_action_org_secret("os-sel", &org.id, "ORG_SEL", "ct", "selected")
         .await
         .unwrap();
-    db.set_action_org_secret_repos("os-sel", &[org_repo.id.clone()])
+    db.set_action_org_secret_repos("os-sel", std::slice::from_ref(&org_repo.id))
         .await
         .unwrap();
     db.upsert_action_org_secret("os-selno", &org.id, "ORG_SELNO", "ct", "selected")
@@ -1677,7 +1677,7 @@ async fn rest_actions_secrets_variables_environments_surface() {
     db.upsert_action_org_variable("ov-sel", &org.id, "VAR_SEL", "silver", "selected")
         .await
         .unwrap();
-    db.set_action_org_variable_repos("ov-sel", &[org_repo.id.clone()])
+    db.set_action_org_variable_repos("ov-sel", std::slice::from_ref(&org_repo.id))
         .await
         .unwrap();
     db.upsert_action_org_variable("ov-selno", &org.id, "VAR_SELNO", "no", "selected")

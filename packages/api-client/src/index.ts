@@ -3666,6 +3666,15 @@ export type OrgActionsSecretsListResponse = {
   secrets: OrgSecretMetaPublic[];
 };
 
+export type OrgActionsRunnersRequest = {
+  slug: string;
+};
+
+export type OrgActionsRunnerRequest = {
+  slug: string;
+  runner_id: string;
+};
+
 export type OrgActionsSecretPutRequest = {
   slug: string;
   secret_name: string;
@@ -6352,6 +6361,34 @@ export function createClient(opts: CreateClientOptions) {
             rpcCall<{ ok: boolean }>(
               opts,
               "org.actions.variables.setRepos",
+              input,
+            ),
+        },
+        runners: {
+          list: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionListRunnersResponse>(
+              opts,
+              "org.actions.runners.list",
+              input,
+            ),
+          get: (input: OrgActionsRunnerRequest) =>
+            rpcCall<ActionRunnerGetResponse>(opts, "org.actions.runners.get", input),
+          delete: (input: OrgActionsRunnerRequest) =>
+            rpcCall<ActionRunnerDeleteResponse>(
+              opts,
+              "org.actions.runners.delete",
+              input,
+            ),
+          createRegistrationToken: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionRegistrationTokenResponse>(
+              opts,
+              "org.actions.runners.createRegistrationToken",
+              input,
+            ),
+          createRemoveToken: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionRegistrationTokenResponse>(
+              opts,
+              "org.actions.runners.createRemoveToken",
               input,
             ),
         },

@@ -541,6 +541,20 @@ pub struct ActionRepoRegistrationTokenRequest {
     pub name: String,
 }
 
+/// `org.actions.runners.list` / token procs — Admin+; `slug` is the org slug.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsRunnersRequest {
+    pub slug: String,
+}
+
+/// `org.actions.runners.get` / `delete` — Admin+; the runner must be bound to
+/// the org (`owner_type='org'`, `owner_id=org.id`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsRunnerRequest {
+    pub slug: String,
+    pub runner_id: String,
+}
+
 /// `repo.actions.listRunApprovals` — Read+; environment-protection review
 /// decisions recorded against a run's jobs (GitHub `GET
 /// /actions/runs/{run_id}/approvals`).

@@ -513,6 +513,12 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "org.actions.variables.put"
         | "org.actions.variables.delete"
         | "org.actions.variables.setRepos" => SecretsWrite,
+        // Org self-hosted runners — admin-gated inside; token-bearing procs
+        // stay SecretsWrite-family like the repo runner tokens (ActionsWrite).
+        "org.actions.runners.list" | "org.actions.runners.get" => ActionsRead,
+        "org.actions.runners.delete"
+        | "org.actions.runners.createRegistrationToken"
+        | "org.actions.runners.createRemoveToken" => ActionsWrite,
         "org.create"
         | "org.updateSettings"
         | "org.members.add"

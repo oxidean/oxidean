@@ -1340,6 +1340,8 @@ async fn artifacts_runner_and_unauthenticated_reads() {
         &oxidean_api::actions::tokens::hash_token("repo-scoped-secret"),
         "[]",
         Some("r-art"),
+        None,
+        None,
         false,
     )
     .await
@@ -1367,6 +1369,8 @@ async fn artifacts_runner_and_unauthenticated_reads() {
         &oxidean_api::actions::tokens::hash_token("foreign-secret"),
         "[]",
         Some("r-other"),
+        None,
+        None,
         false,
     )
     .await
@@ -2119,4 +2123,415 @@ async fn actions_runner_repo_rest_surface() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+/// Org-scoped runners (GitHub `/orgs/{org}/actions/runners`): an
+/// org-registration-token binds the runner to `owner_type='org'`; its claims
+/// reach every repository owned by that org and nothing else. Management
+/// routes sit behind org Admin+.
+#[tokio::test]
+async fn actions_org_runners_scope_and_isolation() {
+    let (app, db, _dir) = app_db().await;
+    let admin = db
+        .create_user(
+            "u-ora",
+            "ora@example.com",
+            "ora",
+            Some("h"),
+            "O",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let member = db
+        .create_user(
+            "u-orm",
+            "orm@example.com",
+            "orm",
+            Some("h"),
+            "M",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let other = db
+        .create_user(
+            "u-orx",
+            "orx@example.com",
+            "orx",
+            Some("h"),
+            "X",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let org = db
+        .insert_organization("o-rnr", "rnr-org", "Runner Org", "read")
+        .await
+        .unwrap();
+    db.insert_org_member(&org.id, &admin.id, "owner")
+        .await
+        .unwrap();
+    db.insert_org_member(&org.id, &member.id, "member")
+        .await
+        .unwrap();
+    let org_repo = db
+        .insert_repository("r-orga", &org.id, "org", "orga", "private", "", "main")
+        .await
+        .unwrap();
+    let user_repo = db
+        .insert_repository("r-userx", &other.id, "user", "userx", "private", "", "main")
+        .await
+        .unwrap();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    for uid in ["u-ora", "u-orm"] {
+        db.set_email_verified_at(uid, &now).await.unwrap();
+    }
+    let admin_pat = format!("oxidean_pat_{}", uuid::Uuid::new_v4().simple());
+    db.create_pat(
+        "pat-ora",
+        "u-ora",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(admin_pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    let member_pat = format!("oxidean_pat_{}", uuid::Uuid::new_v4().simple());
+    db.create_pat(
+        "pat-orm",
+        "u-orm",
+        "classic",
+        "test",
+        "oxidean_pat_",
+        &hex::encode(Sha256::digest(member_pat.as_bytes())),
+        Some(r#"["repo","workflow"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let base = "/api/v1/orgs/rnr-org/actions/runners";
+
+    // Non-admin member is denied the runner surface (403 — org.forbidden).
+    for (method, uri) in [
+        ("GET", base.to_string()),
+        ("POST", format!("{base}/registration-token")),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("authorization", format!("Bearer {member_pat}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} non-admin");
+    }
+
+    // Mint an org registration token, then register through the runner
+    // protocol — the row binds owner_type='org' + owner_id=org.id.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{base}/registration-token"))
+                .header("authorization", format!("Bearer {admin_pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let reg = serde_json::from_slice::<serde_json::Value>(
+        &res.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "org-runner",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reg_res.status(), StatusCode::OK);
+    let reg_v: serde_json::Value =
+        serde_json::from_slice(&reg_res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let runner_id = reg_v["runner_id"].as_str().unwrap().to_string();
+    let runner_token = reg_v["runner_token"].as_str().unwrap().to_string();
+    let row = db
+        .find_action_runner_by_id(&runner_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.owner_type.as_deref(), Some("org"));
+    assert_eq!(row.owner_id.as_deref(), Some("o-rnr"));
+    assert!(row.repository_id.is_none());
+
+    // Queue a job in the user repo (older) and the org repo — the org runner
+    // must skip the user repo's job and claim the org repo's.
+    let doc = parse_workflow_yaml(
+        b"name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n",
+    )
+    .unwrap();
+    for repo in [&user_repo, &org_repo] {
+        enqueue_run(
+            &db,
+            &repo.id,
+            ".github/workflows/ci.yml",
+            &doc,
+            "push",
+            "deadbeef",
+            "refs/heads/main",
+            Some(&other.id),
+            None,
+            None,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    let fetch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetch.status(), StatusCode::OK);
+    let v: serde_json::Value =
+        serde_json::from_slice(&fetch.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(v["repository_name"].as_str().unwrap(), "orga");
+    assert_eq!(v["repository_owner"].as_str().unwrap(), "rnr-org");
+    // Nothing else in the org's queue — a second fetch comes back empty.
+    let fetch2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from(r#"{"wait_ms":0}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v2: serde_json::Value =
+        serde_json::from_slice(&fetch2.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(v2["job_id"].is_null(), "org runner crossed into user repo");
+
+    // Admin list/get see the runner; the org's repo also sees it (GitHub
+    // surfaces org runners on repo runner lists).
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(base)
+                .header("authorization", format!("Bearer {admin_pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let list: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(list["total_count"], 1);
+    assert_eq!(list["runners"][0]["name"], "org-runner");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("{base}/{runner_id}"))
+                .header("authorization", format!("Bearer {admin_pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/repos/rnr-org/orga/actions/runners")
+                .header("authorization", format!("Bearer {admin_pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let repo_list: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(
+        repo_list["runners"]
+            .as_array()
+            .map(|a| a.iter().any(|r| r["id"] == runner_id))
+            .unwrap_or(false),
+        "org runner visible on the org repo's runner list: {repo_list}"
+    );
+
+    // An org remove-token authorizes runner self-removal on the org route —
+    // but cannot reach a repo-bound runner.
+    let repo_reg =
+        oxidean_api::actions::mint_registration_token_for_scope(&db, "repo", Some(&org_repo.id))
+            .await
+            .unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "repo-bound",
+                        "labels": ["self-hosted"],
+                        "token": repo_reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let repo_runner_id = serde_json::from_slice::<serde_json::Value>(
+        &res.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap()["runner_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mint_org_remove = |pat: &str| {
+        let app = app.clone();
+        let pat = pat.to_string();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("{base}/remove-token"))
+                        .header("authorization", format!("Bearer {pat}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::CREATED);
+            serde_json::from_slice::<serde_json::Value>(
+                &res.into_body().collect().await.unwrap().to_bytes(),
+            )
+            .unwrap()["token"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+    let rm_wrong = mint_org_remove(&admin_pat).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{base}/{repo_runner_id}"))
+                .header("authorization", format!("Bearer {rm_wrong}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "org remove-token cannot delete a repo-bound runner"
+    );
+    // Admin-session DELETE cannot remove the repo-bound runner through the
+    // org route either — each scope only manages its own runners.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{base}/{repo_runner_id}"))
+                .header("authorization", format!("Bearer {admin_pat}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    let rm_ok = mint_org_remove(&admin_pat).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{base}/{runner_id}"))
+                .header("authorization", format!("Bearer {rm_ok}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NO_CONTENT,
+        "org remove-token deletes an org-bound runner"
+    );
+    assert!(db
+        .find_action_runner_by_id(&runner_id)
+        .await
+        .unwrap()
+        .is_none());
 }

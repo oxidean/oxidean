@@ -2,6 +2,7 @@
 
 mod invites;
 pub(crate) mod members;
+pub(crate) mod runners;
 mod secrets;
 pub mod vars;
 
@@ -12,6 +13,11 @@ pub use invites::{
 pub use members::{
     add as members_add, list as members_list, remove as members_remove,
     update_role as members_update_role,
+};
+pub use runners::{
+    create_registration_token as runners_create_registration_token,
+    create_remove_token as runners_create_remove_token, delete as runners_delete,
+    get as runners_get, list as runners_list,
 };
 pub use secrets::{
     delete as secrets_delete, list as secrets_list, list_repos as secrets_list_repos,

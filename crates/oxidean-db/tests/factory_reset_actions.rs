@@ -52,6 +52,8 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         "tokhash",
         r#"["ubuntu-latest"]"#,
         Some(&repo.id),
+        None,
+        None,
         false,
     )
     .await
@@ -91,6 +93,8 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         "inst",
         "tok2",
         r#"["self-hosted"]"#,
+        None,
+        None,
         None,
         true,
     )

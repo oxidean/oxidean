@@ -180,6 +180,12 @@ struct OrgSecretRepoPath {
 }
 
 #[derive(Deserialize)]
+struct OrgRunnerPath {
+    org: String,
+    runner_id: String,
+}
+
+#[derive(Deserialize)]
 struct OrgVarRepoPath {
     org: String,
     variable_name: String,
@@ -1683,6 +1689,82 @@ pub const ROUTES: &[RouteDef] = &[
         body: None,
         response: None,
         mount: || delete(delete_runner_rest),
+    },
+    // --- self-hosted runners (org scope) ---
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/runners",
+        tags: &["actions"],
+        operation_id: "actions/listSelfHostedRunnersForOrg",
+        summary: "List self-hosted runners bound to the org (org.actions.runners.list)",
+        procedure: "org.actions.runners.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(runners_list_schema)),
+        mount: || get(list_org_runners),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/orgs/{org}/actions/runners/registration-token",
+        tags: &["actions"],
+        operation_id: "actions/createOrgRunnerRegistrationToken",
+        summary: "Mint an org-scoped registration token (org.actions.runners.createRegistrationToken)",
+        procedure: "org.actions.runners.createRegistrationToken",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(registration_token_schema)),
+        mount: || post(create_org_runner_registration_token),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/orgs/{org}/actions/runners/remove-token",
+        tags: &["actions"],
+        operation_id: "actions/createOrgRunnerRemoveToken",
+        summary: "Mint an org-scoped runner remove token (org.actions.runners.createRemoveToken)",
+        procedure: "org.actions.runners.createRemoveToken",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["slug"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(registration_token_schema)),
+        mount: || post(create_org_runner_remove_token),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/orgs/{org}/actions/runners/{runner_id}",
+        tags: &["actions"],
+        operation_id: "actions/getSelfHostedRunnerForOrg",
+        summary: "One org-bound runner, GitHub shape (org.actions.runners.get)",
+        procedure: "org.actions.runners.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["slug", "runner_id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(runner_schema)),
+        mount: || get(get_org_runner),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/orgs/{org}/actions/runners/{runner_id}",
+        tags: &["actions"],
+        operation_id: "actions/deleteSelfHostedRunnerFromOrg",
+        summary: "Remove an org-bound runner (org.actions.runners.delete)",
+        procedure: "org.actions.runners.delete",
+        ok: StatusCode::NO_CONTENT,
+        anonymous: false,
+        path_fields: &["slug", "runner_id"],
+        query: None,
+        body: None,
+        response: None,
+        mount: || delete(delete_org_runner),
     },
 ];
 
@@ -5663,9 +5745,12 @@ async fn list_run_approvals_rest(
     .await
 }
 
-/// `config.sh remove`-style auth: a one-shot `repo-remove` token authorizes
-/// deleting a runner bound to its repository — no user session needed.
-/// Returns `None` when the bearer isn't a valid remove token.
+/// `config.sh remove`-style auth: a one-shot `purpose='remove'` token
+/// authorizes deleting a runner bound to its scope — no user session needed.
+/// Repo tokens reach runners bound to `{owner}/{repo}`; org tokens reach
+/// runners bound to org `{owner}` (the path may carry either shape — the
+/// scope check, not the path, bounds reach). Returns `None` when the bearer
+/// isn't a valid remove token.
 async fn try_remove_token_delete(
     state: &AppState,
     headers: &HeaderMap,
@@ -5675,24 +5760,166 @@ async fn try_remove_token_delete(
 ) -> Option<Response> {
     let raw = crate::actions::runner_proto::bearer_token(headers)?;
     let hash = crate::actions::tokens::hash_token(&raw);
-    let repo_id = state
+    let (scope_type, scope_id) = state
         .db
         .consume_action_runner_remove_token(&hash)
         .await
         .ok()??;
-    let pair = crate::repo::lookup_repo_row_or_redirect(&state.db, owner, repo)
-        .await
-        .ok()?;
-    let (row, _owner_ref) = pair?;
-    if row.id != repo_id {
-        return Some((StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response());
-    }
     let runner = state.db.find_action_runner_by_id(runner_id).await.ok()??;
-    // A repo remove-token deletes only runners bound to that repo — never a
-    // shared instance runner.
-    if runner.repository_id.as_deref() != Some(row.id.as_str()) {
+    let bound = match scope_type.as_str() {
+        "repo" => {
+            let (row, _owner_ref) =
+                crate::repo::lookup_repo_row_or_redirect(&state.db, owner, repo)
+                    .await
+                    .ok()??;
+            scope_id.as_deref() == Some(row.id.as_str())
+                && runner.repository_id.as_deref() == Some(row.id.as_str())
+        }
+        "org" => {
+            let org = state.db.find_organization_by_slug(owner).await.ok()??;
+            scope_id.as_deref() == Some(org.id.as_str())
+                && runner.owner_type.as_deref() == Some("org")
+                && runner.owner_id.as_deref() == Some(org.id.as_str())
+        }
+        _ => false,
+    };
+    if !bound {
+        // A remove-token deletes only runners bound to its scope — never a
+        // shared instance runner or another scope's runner.
         return Some((StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response());
     }
     let _ = state.db.delete_action_runner(runner_id).await;
     Some(StatusCode::NO_CONTENT.into_response())
+}
+
+// --- self-hosted runners (org scope) ---
+
+/// Same GitHub runner shape as `gh_runner`, with the org-scoped `url`.
+fn gh_org_runner(origin: &str, org: &str, r: &Value, busy: bool) -> Value {
+    let mut v = gh_runner(origin, org, "", r, busy);
+    let id = r["id"].as_str().unwrap_or_default();
+    v["url"] = json!(format!("{origin}/api/v1/orgs/{org}/actions/runners/{id}"));
+    v
+}
+
+async fn gh_org_runner_full(state: &AppState, org: &str, r: &Value) -> Value {
+    let busy = state
+        .db
+        .action_runner_busy(r["id"].as_str().unwrap_or_default())
+        .await
+        .unwrap_or(false);
+    gh_org_runner(&crate::public_origin::resolve_public_origin(), org, r, busy)
+}
+
+/// GET /orgs/{org}/actions/runners — `{total_count, runners}`.
+async fn list_org_runners(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    let resp = dispatch(&mut ctx, "org.actions.runners.list", org_ref(&p.org)).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return (status_for_error(&error), Json(error)).into_response();
+        }
+    };
+    let mut runners = Vec::new();
+    for r in data["runners"].as_array().cloned().unwrap_or_default() {
+        runners.push(gh_org_runner_full(&state, &p.org, &r).await);
+    }
+    Json(json!({"total_count": runners.len(), "runners": runners})).into_response()
+}
+
+/// GET /orgs/{org}/actions/runners/{id}.
+async fn get_org_runner(
+    State(state): State<AppState>,
+    Path(p): Path<OrgRunnerPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    let resp = dispatch(
+        &mut ctx,
+        "org.actions.runners.get",
+        json!({"slug": p.org, "runner_id": p.runner_id}),
+    )
+    .await;
+    match resp {
+        RpcResponse::Ok { data, .. } => {
+            let r = gh_org_runner_full(&state, &p.org, &data["runner"]).await;
+            Json(r).into_response()
+        }
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// DELETE /orgs/{org}/actions/runners/{id} → 204. Accepts an org-scoped
+/// remove token as Bearer (`config.sh remove`) or an admin session.
+async fn delete_org_runner(
+    State(state): State<AppState>,
+    Path(p): Path<OrgRunnerPath>,
+    headers: HeaderMap,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => {
+            if let Some(res2) =
+                try_remove_token_delete(&state, &headers, &p.org, "", &p.runner_id).await
+            {
+                return res2;
+            }
+            return res;
+        }
+    };
+    match dispatch(
+        &mut ctx,
+        "org.actions.runners.delete",
+        json!({"slug": p.org, "runner_id": p.runner_id}),
+    )
+    .await
+    {
+        RpcResponse::Ok { .. } => StatusCode::NO_CONTENT.into_response(),
+        RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),
+    }
+}
+
+/// POST /orgs/{org}/actions/runners/registration-token → 201 `{token}`.
+async fn create_org_runner_registration_token(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "org.actions.runners.createRegistrationToken",
+        org_ref(&p.org),
+        StatusCode::CREATED,
+        move |data| json!({"token": data["token"], "expires_at": Value::Null}),
+    )
+    .await
+}
+
+/// POST /orgs/{org}/actions/runners/remove-token → 201 `{token}`.
+async fn create_org_runner_remove_token(
+    State(state): State<AppState>,
+    Path(p): Path<OrgPath>,
+    headers: HeaderMap,
+) -> Response {
+    call_map(
+        &state,
+        &headers,
+        "org.actions.runners.createRemoveToken",
+        org_ref(&p.org),
+        StatusCode::CREATED,
+        move |data| json!({"token": data["token"], "expires_at": Value::Null}),
+    )
+    .await
 }

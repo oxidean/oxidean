@@ -142,16 +142,31 @@ async fn register(
     let runner_hash = hash_token(&runner_token);
     let labels = serde_json::to_string(&req.labels).unwrap_or_else(|_| "[]".into());
     let id = Uuid::new_v4().to_string();
-    // Repo-scoped registration tokens bind the runner to the repo — its job
-    // claims then isolate to that repository's queue.
-    let repository_id = if scope.scope_type == "repo" {
-        scope.scope_id.as_deref()
-    } else {
-        None
+    // Scoped registration tokens bind the runner: `repo` → `repository_id`
+    // (claims isolate to that repo's queue), `org` → `owner_type='org'` +
+    // `owner_id` (claims isolate to repos owned by the org), `instance` keeps
+    // the global queue.
+    let (repository_id, owner_type, owner_id) = match scope.scope_type.as_str() {
+        "repo" => (
+            scope.scope_id.as_deref(),
+            Some("repo"),
+            scope.scope_id.as_deref(),
+        ),
+        "org" => (None, Some("org"), scope.scope_id.as_deref()),
+        _ => (None, None, None),
     };
     state
         .db
-        .insert_action_runner(&id, &req.name, &runner_hash, &labels, repository_id, false)
+        .insert_action_runner(
+            &id,
+            &req.name,
+            &runner_hash,
+            &labels,
+            repository_id,
+            owner_type,
+            owner_id,
+            false,
+        )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     // Touch prost types so codegen stays linked.
@@ -391,6 +406,11 @@ async fn fetch_task(
                 &runner.id,
                 &labels,
                 runner.repository_id.as_deref(),
+                if runner.owner_type.as_deref() == Some("org") {
+                    runner.owner_id.as_deref()
+                } else {
+                    None
+                },
             )
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

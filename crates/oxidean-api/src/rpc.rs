@@ -269,6 +269,11 @@ pub const PROCEDURES: &[&str] = &[
     "org.actions.variables.delete",
     "org.actions.variables.listRepos",
     "org.actions.variables.setRepos",
+    "org.actions.runners.list",
+    "org.actions.runners.get",
+    "org.actions.runners.delete",
+    "org.actions.runners.createRegistrationToken",
+    "org.actions.runners.createRemoveToken",
     "invites.accept",
     "invites.get",
     "repo.listMine",
@@ -1164,6 +1169,30 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "org.actions.runners.list" => match org::runners_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.runners.get" => match org::runners_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.runners.delete" => match org::runners_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.runners.createRegistrationToken" => {
+            match org::runners_create_registration_token(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "org.actions.runners.createRemoveToken" => {
+            match org::runners_create_remove_token(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "org.actions.variables.setRepos" => match org::vars::set_repos(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
