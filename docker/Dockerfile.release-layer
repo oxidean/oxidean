@@ -3,7 +3,7 @@
 # A `chore(release):` bump commit carries no code changes — only version
 # manifests, changelogs, and regenerated clients — so its `sha-<bump>` image
 # is the parent sha's image plus an updated /usr/local/share/oxidean/VERSION.
-# crates/oxidean-api/src/version.rs reads that file first, so the deployed
+# crates/oxidean-api-core/src/version.rs reads that file first, so the deployed
 # artifact self-reports the released version with a seconds-long layer instead
 # of a full cargo rebuild. Only the api consumes the file today (it is the
 # only binary that self-reports a serving version); other services retag their

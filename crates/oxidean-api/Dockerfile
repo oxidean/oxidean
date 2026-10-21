@@ -126,7 +126,7 @@ COPY --from=builder /usr/local/bin/oxidean-api /usr/local/bin/oxidean-api
 COPY --from=builder /usr/local/bin/oxidean-protection-hook /usr/local/bin/oxidean-protection-hook
 COPY --from=builder /usr/local/share/oxidean-cli /usr/local/share/oxidean-cli
 COPY crates/oxidean-api/docker-entrypoint.sh /usr/local/bin/oxidean-api-entrypoint.sh
-# Serving version (crates/oxidean-api/src/version.rs): the VERSION file wins
+# Serving version (crates/oxidean-api-core/src/version.rs): the VERSION file wins
 # over the binary's compile-time manifest version, so a chore(release) bump
 # commit can ship as a layer on the previous image instead of a rebuild
 # (see docker/Dockerfile.release-layer + images.yml). Empty → no file →

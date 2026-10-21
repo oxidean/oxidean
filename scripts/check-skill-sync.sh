@@ -11,13 +11,15 @@
 #    `ox <path> --help` or the `ox --help` GLOBAL FLAGS section.
 # 3. Proc registries — every proc-shaped literal in commands.rs's
 #    required_procedures + CLI_PROCS/MCP_PROCS audit lists must be a proc
-#    rpc.rs actually dispatches, and the MCP audit list must equal the
+#    the api crates actually dispatch, and the MCP audit list must equal the
 #    procs the MCP surface really routes (tool `procedure:` fields,
 #    build_rpc_input picks, resource dispatch — all captured as proc-shaped
-#    string literals intersected with the rpc.rs registry, so error codes
+#    string literals intersected with the api registry, so error codes
 #    like `mcp.internal` exclude themselves). The `vcs.*` tool descriptors
 #    live in oxidean-vcs's client/mcp.rs, so it is scanned alongside
-#    oxidean-api's mcp.rs.
+#    oxidean-api's mcp.rs. Post-split (#162) the registry is the union of
+#    every `oxidean-api-*` crate's `PROCEDURES` const plus the `"name" =>`
+#    arms in their dispatch sources (core + shell residual).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -25,7 +27,6 @@ cd "$ROOT"
 SKILL=crates/oxidean-cli/skill/SKILL.md
 MCP_SRCS=(crates/oxidean-api/src/mcp.rs crates/oxidean-vcs/src/client/mcp.rs)
 CMDS_SRC=crates/oxidean-cli/src/commands.rs
-RPC_SRC=crates/oxidean-api/src/rpc.rs
 OX=${OX_BIN:-target/debug/ox}
 if [ ! -x "$OX" ]; then
   cargo build -q -p oxidean-cli
@@ -42,8 +43,13 @@ trap 'rm -f "$TREE" "$GLOBAL_HELP" "$REGISTERED" "$MCP_ACTUAL" "$MCP_DECLARED" "
 "$OX" completion commands >"$TREE"
 "$OX" --help | sed -n '/GLOBAL FLAGS/,/^$/p' >"$GLOBAL_HELP"
 
-# Every procedure the RPC dispatcher serves — `"proc.name" =>` match arms.
-grep -oE '^\s+"[a-zA-Z_.]+" =>' "$RPC_SRC" | tr -d ' "=>' | sort -u >"$REGISTERED"
+# Every procedure the api dispatch serves — `"proc.name" =>` match arms in
+# any `oxidean-api*` crate source plus every `pub const PROCEDURES` entry.
+mapfile -t API_SRCS < <(find crates -type f -name '*.rs' -path 'crates/oxidean-api*/src/*' | sort)
+{
+  grep -hoE '^\s+"[a-zA-Z_.]+" =>' "${API_SRCS[@]}" || true
+  awk '/pub const PROCEDURES/,/^\];/' "${API_SRCS[@]}" | grep -oE '"[a-zA-Z_.]+"' || true
+} | tr -d ' "=>' | sort -u >"$REGISTERED"
 
 # Proc-shaped literals inside mcp.rs; membership in the registry filters
 # out error-code strings (`mcp.internal`, `repo.not_found`, …).

@@ -200,8 +200,8 @@ jobs:
         # Consumers run the exact artifacts this produces.
         env:
           CARGO_TARGET_DIR: /ci/target-dev
-          # Test binaries need no DWARF — the giant api units peak near
-          # 13 GB with debug=2; deps build under profile.dev so cooked
+          # Test binaries need no DWARF — the largest api units still peak a
+          # few GB lower without it; deps build under profile.dev so cooked
           # fingerprints are unaffected.
           CARGO_PROFILE_TEST_DEBUG: "0"
           CARGO_BUILD_JOBS: "3"
@@ -217,12 +217,11 @@ jobs:
           MON=$!
           trap 'kill $MON 2>/dev/null || true' EXIT
           cargo build --workspace --bins
-          # oxidean-api's libtest + rlib are each ~7-13 GB rustc units; two at
-          # once OOM the runner (telemetry: 2×7.6 GB → 97 MB avail → 137).
-          # api is a leaf crate — nothing else links it — so --exclude can't
-          # split the pair. Workspace-scoped --lib resolves the same dep
-          # graph as --all-targets, so this libtest caches straight into the
-          # archive; its rlib then builds alone (test bins queue behind it).
+          # Pre-build libtests serially before the archive: the biggest rustc
+          # units are now ~2-3 GB after the api domain split (issue #162), but
+          # this pass still doubles as a cache-warm — the libtest fingerprints
+          # resolve straight into `nextest archive` instead of competing with
+          # rlib codegen for RAM.
           cargo test --workspace --lib --features server --no-run
           mkdir -p target
           cargo nextest archive --workspace --features server \
@@ -497,13 +496,13 @@ jobs:
             done ) &
           MON=$!
           trap 'kill $MON 2>/dev/null || true' EXIT
-          # oxidean-api compiles twice per run — dev-profile rlib + test-profile
-          # libtest — at ~7.6 GB RSS each under instrumentation; concurrent
-          # they OOM the 16 GB runner. Build libtest alone first so the two
-          # giants never overlap, then let nextest reuse the cached units.
-          cargo llvm-cov --no-report --lib -p oxidean-api
-          cargo llvm-cov nextest --no-report -p oxidean-api
-          cargo llvm-cov nextest --no-report --workspace --exclude oxidean-api
+          # Pre-build all libtests before the nextest pass: after the api
+          # domain split (issue #162) the biggest instrumented units are
+          # ~3-4 GB (down from ~7.6 GB for the monolith), so this is a
+          # cache-warm ordering pass rather than an OOM avoidance — the
+          # libtest fingerprints resolve straight into the nextest build.
+          cargo llvm-cov --no-report --lib --workspace
+          cargo llvm-cov nextest --no-report --workspace
           cargo llvm-cov report --lcov --output-path var/coverage/rust-lcov.info
           cargo llvm-cov report --json --output-path var/coverage/rust-summary.json
           echo "==> rust coverage in var/coverage/rust-*.{info,json}"
@@ -647,6 +646,8 @@ jobs:
         run: make check-workflow-templates
       - name: check-workflow-templates-upstream
         run: bun scripts/sync-workflow-templates.mjs --check
+      - name: api-domain-graph
+        run: make api-domain-graph-check
 
   compose:
     name: compose

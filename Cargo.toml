@@ -3,6 +3,33 @@ resolver = "2"
 members = [
   "crates/oxidean-actions-expr",
   "crates/oxidean-api",
+  "crates/oxidean-api-actions",
+        "crates/oxidean-api-admin",
+        "crates/oxidean-api-auth",
+        "crates/oxidean-api-discussion",
+        "crates/oxidean-api-project",
+        "crates/oxidean-api-check",
+        "crates/oxidean-api-webhook",
+        "crates/oxidean-api-user",
+        "crates/oxidean-api-oauth",
+        "crates/oxidean-api-packages",
+        "crates/oxidean-api-mirror",
+        "crates/oxidean-api-pat",
+        "crates/oxidean-api-merge-queue",
+        "crates/oxidean-api-pages",
+        "crates/oxidean-api-release",
+        "crates/oxidean-api-keys",
+        "crates/oxidean-api-email",
+        "crates/oxidean-api-wiki",
+        "crates/oxidean-api-deployment",
+        "crates/oxidean-api-notification",
+        "crates/oxidean-api-vcs",
+  "crates/oxidean-api-core",
+  "crates/oxidean-api-issues",
+  "crates/oxidean-api-org",
+  "crates/oxidean-api-pulls",
+  "crates/oxidean-api-rest",
+  "crates/oxidean-api-repo",
   "crates/oxidean-cli",
   "crates/oxidean-core",
   "crates/oxidean-db",
@@ -13,9 +40,9 @@ members = [
 ]
 # Embedded project-template manifests served as assets — not workspace crates.
 exclude = [
-  "crates/oxidean-api/assets/stack-presets/rust",
-  "crates/oxidean-api/assets/stack-presets/tauri/src-tauri",
-  "crates/oxidean-api/assets/stack-presets/wasm",
+  "crates/oxidean-api-repo/assets/stack-presets/rust",
+  "crates/oxidean-api-repo/assets/stack-presets/tauri/src-tauri",
+  "crates/oxidean-api-repo/assets/stack-presets/wasm",
 ]
 
 [workspace.package]

@@ -13,7 +13,7 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::app::AppState;
-use crate::routes::action_downloads::{authorize_read, lookup_repo};
+use crate::rest::{authorize_read, lookup_repo};
 
 #[derive(serde::Deserialize)]
 pub struct BadgeQuery {

@@ -29,6 +29,7 @@ playwright-report
 # packages/api-client for the web image).
 tmp
 var
+**/var
 docs
 brand
 scripts

@@ -1,0 +1,74 @@
+[package]
+name = "oxidean-api-core"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "oxidean_api_core"
+path = "src/lib.rs"
+
+[dependencies]
+oxidean-core = { path = "../oxidean-core" }
+oxidean-db = { path = "../oxidean-db" }
+oxidean-git = { path = "../oxidean-git" }
+oxidean-actions-expr = { path = "../oxidean-actions-expr" }
+oxidean-vcs = { path = "../oxidean-vcs", features = ["server"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { version = "0.8", features = ["ws", "multipart"] }
+tracing = "0.1"
+futures-util = "0.3"
+async-trait = "0.1.92"
+thiserror = "2"
+lettre = { version = "0.11.23", features = ["tokio1", "tokio1-rustls", "smtp-transport", "builder", "hostname", "rustls-native-certs", "aws-lc-rs"], default-features = false }
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls",
+  "json",
+  "charset",
+  "http2",
+  "system-proxy",
+] }
+argon2 = "0.6"
+password-hash = { version = "0.6", features = ["alloc", "phc", "getrandom"] }
+sha2 = "0.11.0"
+aes-gcm = "0.11"
+getrandom = "0.4"
+rand = "0.10.2"
+uuid = { version = "1.26.0", features = ["v4"] }
+chrono = "0.4.45"
+cookie = "0.18.2"
+workos = "3.4"
+url = "2.5.8"
+openidconnect = { version = "4.0", features = ["reqwest"] }
+include_dir = "0.7.4"
+tempfile = "3"
+crypto_box = { version = "0.9.1", features = ["salsa20", "seal", "getrandom"] }
+flate2 = "1.1"
+tar = "0.4"
+russh = { version = "0.64", features = ["aws-lc-rs"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+hex = "0.4.3"
+aws-lc-rs = "1.18"
+serde_yaml = "0.9"
+prost = "0.14"
+prost-types = "0.14"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+sha1 = "0.11"
+hmac = "0.13"
+data-encoding = "2"
+webauthn-rs = "0.5.2"
+base64 = "0.23"
+
+[dev-dependencies]
+wiremock = "0.6.5"
+
+[build-dependencies]
+prost-build = "0.14"
+
+# cargo-machete can't see through codegen: prost types are used by the
+# prost-build-generated `pb` module (actions/runner_proto.rs) and prost-build
+# only runs from build.rs.
+[package.metadata.cargo-machete]
+ignored = ["prost-build"]

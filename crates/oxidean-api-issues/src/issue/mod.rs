@@ -1,0 +1,1506 @@
+//! `issue.*` RPC handlers — lifecycle, comments, history, labels/assignees,
+//! reactions, links. Shared enrichment/notify helpers live in
+//! `oxidean_api_core::issue` (issue #162).
+
+use oxidean_core::{
+    AddIssueLinkRequest, AppError, AssigneeCandidatesRequest, AssigneeCandidatesResponse,
+    CommentHistoryResponse, CommentRevisionPublic, CreateIssueCommentRequest, CreateIssueRequest,
+    DeleteIssueCommentResponse, DeleteIssueRequest, DeleteIssueResponse, IssueAssigneePublic,
+    IssueCommentPublic, IssueCommentRefRequest, IssueCommentsListResponse, IssueHistoryResponse,
+    IssueLinkKind, IssueLinkPublic, IssueLinksListResponse, IssueListRequest, IssueListResponse,
+    IssuePublic, IssueRefRequest, IssueRevisionPublic, IssueState, ReactionTarget,
+    RemoveIssueLinkRequest, RemoveIssueLinkResponse, SetIssueAssigneesRequest,
+    SetIssueLabelsRequest, ToggleReactionRequest, ToggleReactionResponse,
+    UpdateIssueCommentRequest, UpdateIssueRequest,
+};
+use oxidean_db::{IssueCommentRow, IssueRow};
+use uuid::Uuid;
+
+use oxidean_api_core::auth::gate::require_verified;
+use oxidean_api_core::issue::acl;
+use oxidean_api_core::issue::{
+    apply_milestone, db_err, issue_not_found, load_issue_in_repo, notify_actions_issue,
+    reaction_groups_to_public, to_public, to_public_many, viewer_id,
+};
+use oxidean_api_core::notify;
+use oxidean_api_core::repo::not_found;
+use oxidean_api_core::rpc::RpcCtx;
+use oxidean_api_core::webhook::dispatch;
+
+/// Title soft cap (~1k chars).
+/// Body soft cap (~64k chars).
+const TITLE_MAX_CHARS: usize = 1_024;
+/// Body soft cap (~64k chars).
+const BODY_MAX_CHARS: usize = 65_536;
+
+fn validate_title(title: &str) -> Result<&str, AppError> {
+    let t = title.trim();
+    if t.is_empty() {
+        return Err(AppError::new("rpc.bad_input", "title is required"));
+    }
+    if t.chars().count() > TITLE_MAX_CHARS {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            format!("title exceeds {TITLE_MAX_CHARS} characters"),
+        ));
+    }
+    Ok(t)
+}
+
+fn validate_body(body: Option<&str>) -> Result<String, AppError> {
+    let stored = body.unwrap_or("").to_string();
+    if stored.chars().count() > BODY_MAX_CHARS {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            format!("body exceeds {BODY_MAX_CHARS} characters"),
+        ));
+    }
+    Ok(stored)
+}
+
+pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: CreateIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.create input: {e}")))?;
+    let title = validate_title(&req.title)?.to_string();
+    let body = validate_body(req.body.as_deref())?;
+    // Read+ (public contributors) with GIT-20 archive gate — not Write+ ACL.
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+
+    let id = Uuid::new_v4().to_string();
+    let row = ctx
+        .db
+        .insert_issue(&id, &accessible.row.id, &user.id, &title, &body)
+        .await
+        .map_err(db_err)?;
+    // Notify on create: issue_opened to repo owner (when not the author) + mentions (D-01 / D-03).
+    let subject = notify::subject_for_issue(&row);
+    let mut opened_recipients: Vec<String> = Vec::new();
+    if accessible.row.owner_type == "user" && accessible.row.owner_id != user.id {
+        opened_recipients.push(accessible.row.owner_id.clone());
+    }
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(
+        &ctx.db,
+        &user.id,
+        opened_recipients,
+        "issue_opened",
+        &subject,
+        &watch,
+    )
+    .await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        mentions,
+        "issue_mention",
+        &subject,
+        &watch,
+    )
+    .await;
+    let payload = dispatch::issues_payload(
+        "opened",
+        row.number,
+        &row.title,
+        &row.body,
+        &row.state,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "opened",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
+    notify_actions_issue(ctx, &accessible, "opened", &row, &user).await;
+    // `milestone: <#N>` assigns at create — fires `milestoned` after `opened`
+    // (GitHub ordering: the open lands first).
+    if let Some(number) = req.milestone {
+        let milestone = ctx
+            .db
+            .find_milestone_by_repo_number(&accessible.row.id, number)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| AppError::new("milestone.not_found", "Milestone not found"))?;
+        apply_milestone(ctx, &accessible, &row, Some(&milestone), &user).await?;
+    }
+    to_public(
+        ctx,
+        &ctx.db
+            .find_issue_by_id(&row.id)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(issue_not_found)?,
+    )
+    .await
+}
+
+/// `issue.get` — Read+; soft `repo.not_found` for unauthorized private (D-ISS-20).
+pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.get input: {e}")))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    to_public(ctx, &row).await
+}
+
+/// `issue.list` — Read+; default state filter `open` (D-ISS-16..18).
+pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListResponse, AppError> {
+    let req: IssueListRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.list input: {e}")))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let state = req.state.as_deref().unwrap_or("open");
+    let offset = req.offset.unwrap_or(0);
+    let limit = req.limit.unwrap_or(25);
+
+    // Resolve author/assignee usernames → ids; unknown → empty page (not an error).
+    let author_id = resolve_username_filter(ctx, req.author.as_deref()).await?;
+    if req
+        .author
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty())
+        && author_id.is_none()
+    {
+        return Ok(IssueListResponse {
+            issues: vec![],
+            total: 0,
+        });
+    }
+    let assignee_id = resolve_username_filter(ctx, req.assignee.as_deref()).await?;
+    if req
+        .assignee
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty())
+        && assignee_id.is_none()
+    {
+        return Ok(IssueListResponse {
+            issues: vec![],
+            total: 0,
+        });
+    }
+    let label_id = req
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let q = req
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    // GitHub `milestone` filter — a milestone `#N`, `*` (has any), or
+    // `none` (no milestone). An unknown number yields an empty page, same
+    // as the author/assignee resolution above.
+    let milestone_row = match req.milestone.as_deref().map(str::trim) {
+        None | Some("") | Some("*") | Some("none") => None,
+        Some(n) => {
+            let number: i64 = n.parse().map_err(|_| {
+                AppError::new("rpc.bad_input", format!("invalid milestone filter: {n}"))
+            })?;
+            let row = ctx
+                .db
+                .find_milestone_by_repo_number(&accessible.row.id, number)
+                .await
+                .map_err(db_err)?;
+            if row.is_none() {
+                return Ok(IssueListResponse {
+                    issues: vec![],
+                    total: 0,
+                });
+            }
+            row
+        }
+    };
+    let milestone = match req.milestone.as_deref().map(str::trim) {
+        Some("*") => oxidean_db::MilestoneListFilter::Has,
+        Some("none") => oxidean_db::MilestoneListFilter::Unset,
+        Some(n) if !n.is_empty() => match &milestone_row {
+            Some(m) => oxidean_db::MilestoneListFilter::Id(m.id.as_str()),
+            None => oxidean_db::MilestoneListFilter::Any,
+        },
+        _ => oxidean_db::MilestoneListFilter::Any,
+    };
+
+    let filters = oxidean_db::IssueListFilters {
+        state,
+        author_id: author_id.as_deref(),
+        label_id: label_id.as_deref(),
+        assignee_id: assignee_id.as_deref(),
+        milestone,
+        q: q.as_deref(),
+        offset,
+        limit,
+    };
+    let (rows, total) = ctx
+        .db
+        .list_issues_for_repo(&accessible.row.id, filters)
+        .await
+        .map_err(db_err)?;
+    let issues = to_public_many(ctx, &rows).await?;
+    Ok(IssueListResponse { issues, total })
+}
+
+async fn resolve_username_filter(
+    ctx: &RpcCtx,
+    raw: Option<&str>,
+) -> Result<Option<String>, AppError> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let username = raw.strip_prefix('@').unwrap_or(raw);
+    let user = ctx
+        .db
+        .find_user_by_username(username)
+        .await
+        .map_err(db_err)?;
+    Ok(user.map(|u| u.id))
+}
+
+pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: UpdateIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.update input: {e}")))?;
+    if req.title.is_none() && req.body.is_none() && req.milestone.is_none() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "title, body, or milestone is required",
+        ));
+    }
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
+        return Err(not_found());
+    }
+
+    let new_title = match &req.title {
+        Some(t) => validate_title(t)?.to_string(),
+        None => row.title.clone(),
+    };
+    let new_body = match &req.body {
+        Some(b) => validate_body(Some(b.as_str()))?,
+        None => row.body.clone(),
+    };
+
+    // `milestone` applies independently of title/body — `Some(Some(#N))`
+    // assigns, `Some(None)` clears, absent leaves the link alone.
+    if let Some(milestone_req) = &req.milestone {
+        let milestone = match milestone_req {
+            Some(number) => Some(
+                ctx.db
+                    .find_milestone_by_repo_number(&accessible.row.id, *number)
+                    .await
+                    .map_err(db_err)?
+                    .ok_or_else(|| AppError::new("milestone.not_found", "Milestone not found"))?,
+            ),
+            None => None,
+        };
+        apply_milestone(ctx, &accessible, &row, milestone.as_ref(), &user).await?;
+    }
+
+    if new_title == row.title && new_body == row.body {
+        let row = if req.milestone.is_some() {
+            ctx.db
+                .find_issue_by_id(&row.id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(issue_not_found)?
+        } else {
+            row
+        };
+        return to_public(ctx, &row).await;
+    }
+
+    let rev_id = Uuid::new_v4().to_string();
+    ctx.db
+        .insert_issue_revision(&rev_id, &row.id, &user.id, &row.title, &row.body)
+        .await
+        .map_err(db_err)?;
+    let updated = ctx
+        .db
+        .update_issue_content(&row.id, &new_title, &new_body)
+        .await
+        .map_err(db_err)?;
+    let payload = dispatch::issues_payload(
+        "edited",
+        updated.number,
+        &updated.title,
+        &updated.body,
+        &updated.state,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "edited",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
+    notify_actions_issue(ctx, &accessible, "edited", &updated, &user).await;
+    to_public(ctx, &updated).await
+}
+
+/// `issue.close` — Author or Write+; open → closed (D-ISS-02 / D-ISS-20).
+pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.close input: {e}")))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
+        return Err(not_found());
+    }
+    if row.state == IssueState::Closed.as_str() {
+        return to_public(ctx, &row).await;
+    }
+    let updated = ctx
+        .db
+        .close_issue(&row.id, &user.id)
+        .await
+        .map_err(db_err)?;
+    let subject = notify::subject_for_issue(&updated);
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "issue_closed", &subject).await;
+    let payload = dispatch::issues_payload(
+        "closed",
+        updated.number,
+        &updated.title,
+        &updated.body,
+        &updated.state,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "closed",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
+    notify_actions_issue(ctx, &accessible, "closed", &updated, &user).await;
+    to_public(ctx, &updated).await
+}
+
+/// `issue.reopen` — Author or Write+; closed → open (D-ISS-02 / D-ISS-20).
+pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.reopen input: {e}")))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
+        return Err(not_found());
+    }
+    if row.state == IssueState::Open.as_str() {
+        return to_public(ctx, &row).await;
+    }
+    let updated = ctx.db.reopen_issue(&row.id).await.map_err(db_err)?;
+    let subject = notify::subject_for_issue(&updated);
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "issue_reopened", &subject).await;
+    let payload = dispatch::issues_payload(
+        "reopened",
+        updated.number,
+        &updated.title,
+        &updated.body,
+        &updated.state,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "reopened",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
+    notify_actions_issue(ctx, &accessible, "reopened", &updated, &user).await;
+    to_public(ctx, &updated).await
+}
+
+/// `issue.history` — Read+; prior title/body revisions oldest-first (D-ISS-04).
+pub async fn history(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueHistoryResponse, AppError> {
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.history input: {e}")))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let revs = ctx.db.list_issue_revisions(&row.id).await.map_err(db_err)?;
+    let editor_ids: Vec<String> = {
+        let mut v: Vec<String> = revs.iter().map(|r| r.editor_id.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let editors: std::collections::HashMap<String, String> = ctx
+        .db
+        .find_users_by_ids(&editor_ids)
+        .await
+        .map_err(db_err)?
+        .into_iter()
+        .map(|u| (u.id, u.username))
+        .collect();
+    let mut revisions = Vec::with_capacity(revs.len());
+    for rev in &revs {
+        let editor_username = editors.get(&rev.editor_id).cloned().unwrap_or_default();
+        revisions.push(IssueRevisionPublic {
+            id: rev.id.clone(),
+            issue_id: rev.issue_id.clone(),
+            editor_id: rev.editor_id.clone(),
+            editor_username,
+            title: rev.title.clone(),
+            body: rev.body.clone(),
+            created_at: rev.created_at.clone(),
+        });
+    }
+    Ok(IssueHistoryResponse { revisions })
+}
+
+/// `issue.delete` — Admin + confirmNumber; does not reclaim `#N` (D-ISS-02 / D-ISS-20).
+pub async fn delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<DeleteIssueResponse, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: DeleteIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.delete input: {e}")))?;
+    let accessible = acl::resolve_for_admin(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if req.confirm_number != row.number {
+        return Err(AppError::new(
+            "issue.confirm_mismatch",
+            "Type the issue number exactly to confirm deletion.",
+        ));
+    }
+    // Cascades comments/reactions/links/revisions via FK ON DELETE CASCADE.
+    ctx.db.delete_issue(&row.id).await.map_err(db_err)?;
+    Ok(DeleteIssueResponse { number: row.number })
+}
+
+fn comment_not_found() -> AppError {
+    AppError::new("issue.comment_not_found", "Comment not found")
+}
+
+struct CommentEnrichment {
+    usernames: std::collections::HashMap<String, String>,
+    reactions: std::collections::HashMap<String, Vec<oxidean_db::issues::ReactionGroupRow>>,
+}
+
+async fn load_comment_enrichment(
+    ctx: &RpcCtx,
+    rows: &[IssueCommentRow],
+) -> Result<CommentEnrichment, AppError> {
+    use std::collections::HashMap;
+    let comment_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let author_ids: Vec<String> = {
+        let mut v: Vec<String> = rows.iter().map(|r| r.author_id.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    if comment_ids.is_empty() {
+        return Ok(CommentEnrichment {
+            usernames: HashMap::new(),
+            reactions: HashMap::new(),
+        });
+    }
+    let (users, reaction_pairs) = tokio::try_join!(
+        ctx.db.find_users_by_ids(&author_ids),
+        ctx.db
+            .list_comment_reaction_groups_for_comments(&comment_ids, viewer_id(ctx)),
+    )
+    .map_err(db_err)?;
+    let mut reactions: HashMap<String, Vec<oxidean_db::issues::ReactionGroupRow>> = HashMap::new();
+    for (comment_id, g) in reaction_pairs {
+        reactions.entry(comment_id).or_default().push(g);
+    }
+    Ok(CommentEnrichment {
+        usernames: users.into_iter().map(|u| (u.id, u.username)).collect(),
+        reactions,
+    })
+}
+
+fn comment_row_to_public(
+    row: &IssueCommentRow,
+    enrichment: &CommentEnrichment,
+) -> IssueCommentPublic {
+    let reactions = reaction_groups_to_public(
+        enrichment
+            .reactions
+            .get(&row.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .to_vec(),
+    );
+    IssueCommentPublic {
+        id: row.id.clone(),
+        issue_id: row.issue_id.clone(),
+        author_id: row.author_id.clone(),
+        author_username: enrichment
+            .usernames
+            .get(&row.author_id)
+            .cloned()
+            .unwrap_or_default(),
+        body: row.body.clone(),
+        created_at: row.created_at.clone(),
+        updated_at: row.updated_at.clone(),
+        reactions,
+    }
+}
+
+async fn comment_to_public(
+    ctx: &RpcCtx,
+    row: &IssueCommentRow,
+) -> Result<IssueCommentPublic, AppError> {
+    let rows = std::slice::from_ref(row);
+    let enrichment = load_comment_enrichment(ctx, rows).await?;
+    Ok(comment_row_to_public(row, &enrichment))
+}
+
+async fn load_comment_in_issue(
+    ctx: &RpcCtx,
+    issue_id: &str,
+    comment_id: &str,
+) -> Result<IssueCommentRow, AppError> {
+    let row = ctx
+        .db
+        .find_issue_comment_by_id(comment_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(comment_not_found)?;
+    if row.issue_id != issue_id {
+        return Err(comment_not_found());
+    }
+    Ok(row)
+}
+
+pub async fn comments_list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueCommentsListResponse, AppError> {
+    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.comments.list input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let rows = ctx
+        .db
+        .list_issue_comments(&issue.id)
+        .await
+        .map_err(db_err)?;
+    let enrichment = load_comment_enrichment(ctx, &rows).await?;
+    let comments = rows
+        .iter()
+        .map(|row| comment_row_to_public(row, &enrichment))
+        .collect();
+    Ok(IssueCommentsListResponse { comments })
+}
+
+/// `issue.comments.create` — Read+ verified (ISS-02 / D-ISS-20).
+pub async fn comments_create(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueCommentPublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: CreateIssueCommentRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.comments.create input: {e}"),
+        )
+    })?;
+    let body = validate_body(Some(req.body.as_str()))?;
+    // Read+ commenters with GIT-20 archive gate.
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let id = Uuid::new_v4().to_string();
+    let row = ctx
+        .db
+        .insert_issue_comment(&id, &issue.id, &user.id, &body)
+        .await
+        .map_err(db_err)?;
+    let subject = notify::subject_for_issue(&issue);
+    let participants = notify::issue_participant_ids(&ctx.db, &issue.id, &issue.author_id).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(
+        &ctx.db,
+        &user.id,
+        participants.clone(),
+        "issue_comment",
+        &subject,
+        &watch,
+    )
+    .await;
+    let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
+    let mention_only: Vec<_> = mentions
+        .into_iter()
+        .filter(|m| !participant_set.contains(m))
+        .collect();
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        mention_only,
+        "issue_mention",
+        &subject,
+        &watch,
+    )
+    .await;
+    let payload = dispatch::issue_comment_payload(
+        "created",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "created",
+        payload.clone(),
+        &ctx.env_name,
+    )
+    .await;
+    if let Some(ev) = oxidean_api_core::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "created",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
+            .await;
+    }
+    comment_to_public(ctx, &row).await
+}
+
+/// `issue.comments.update` — author only; appends full revision (D-ISS-09 / D-ISS-12).
+pub async fn comments_update(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueCommentPublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: UpdateIssueCommentRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.comments.update input: {e}"),
+        )
+    })?;
+    let new_body = validate_body(Some(req.body.as_str()))?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let row = load_comment_in_issue(ctx, &issue.id, &req.comment_id).await?;
+    if !acl::can_edit_comment(&user.id, &row.author_id) {
+        return Err(not_found());
+    }
+    if new_body == row.body {
+        return comment_to_public(ctx, &row).await;
+    }
+    let rev_id = Uuid::new_v4().to_string();
+    ctx.db
+        .insert_comment_revision(&rev_id, &row.id, &user.id, &row.body)
+        .await
+        .map_err(db_err)?;
+    let updated = ctx
+        .db
+        .update_issue_comment_body(&row.id, &new_body)
+        .await
+        .map_err(db_err)?;
+    let payload = dispatch::issue_comment_payload(
+        "edited",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &updated.id,
+        &updated.body,
+        Some(row.body.as_str()),
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "edited",
+        payload.clone(),
+        &ctx.env_name,
+    )
+    .await;
+    if let Some(ev) = oxidean_api_core::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "edited",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
+            .await;
+    }
+    comment_to_public(ctx, &updated).await
+}
+
+/// `issue.comments.delete` — author or Write+ moderation (D-ISS-09 / T-11-10).
+pub async fn comments_delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<DeleteIssueCommentResponse, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: IssueCommentRefRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.comments.delete input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let row = load_comment_in_issue(ctx, &issue.id, &req.comment_id).await?;
+    if !acl::can_delete_comment(&user.id, &row.author_id, accessible.capability) {
+        return Err(not_found());
+    }
+    ctx.db.delete_issue_comment(&row.id).await.map_err(db_err)?;
+    let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => u.username,
+        Ok(None) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "issue_comment delete: author lookup failed");
+            String::new()
+        }
+    };
+    let payload = dispatch::issue_comment_payload(
+        "deleted",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &author_login,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "deleted",
+        payload.clone(),
+        &ctx.env_name,
+    )
+    .await;
+    if let Some(ev) = oxidean_api_core::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "deleted",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
+            .await;
+    }
+    Ok(DeleteIssueCommentResponse { ok: true })
+}
+
+/// `issue.comments.history` — Read+; prior body revisions oldest-first (D-ISS-12).
+pub async fn comments_history(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<CommentHistoryResponse, AppError> {
+    let req: IssueCommentRefRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.comments.history input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let row = load_comment_in_issue(ctx, &issue.id, &req.comment_id).await?;
+    let revs = ctx
+        .db
+        .list_comment_revisions(&row.id)
+        .await
+        .map_err(db_err)?;
+    let mut revisions = Vec::with_capacity(revs.len());
+    for rev in &revs {
+        let editor_username = match ctx.db.find_user_by_id(&rev.editor_id).await {
+            Ok(Some(u)) => u.username,
+            Ok(None) => String::new(),
+            Err(e) => return Err(db_err(e)),
+        };
+        revisions.push(CommentRevisionPublic {
+            id: rev.id.clone(),
+            comment_id: rev.comment_id.clone(),
+            editor_id: rev.editor_id.clone(),
+            editor_username,
+            body: rev.body.clone(),
+            created_at: rev.created_at.clone(),
+        });
+    }
+    Ok(CommentHistoryResponse { revisions })
+}
+
+/// `issue.labels.set` — Write+; replace label ids from effective repo set (D-ISS-07 / D-ISS-20).
+pub async fn labels_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: SetIssueLabelsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.labels.set input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+
+    let allowed = oxidean_api_core::label::effective_label_id_set(
+        ctx,
+        &accessible.row.id,
+        &accessible.row.owner_type,
+        &accessible.row.owner_id,
+    )
+    .await?;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_ids = Vec::new();
+    for id in &req.label_ids {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(AppError::new("rpc.bad_input", "label id must not be empty"));
+        }
+        if !allowed.contains(id) {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "label is not in the effective set for this repository",
+            ));
+        }
+        if seen.insert(id.to_string()) {
+            unique_ids.push(id.to_string());
+        }
+    }
+
+    let before: std::collections::HashMap<String, oxidean_db::LabelRow> = ctx
+        .db
+        .list_labels_for_issue(&issue.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| (l.id.clone(), l))
+        .collect();
+
+    ctx.db
+        .set_issue_labels(&issue.id, &unique_ids)
+        .await
+        .map_err(db_err)?;
+
+    // `on: issues` `labeled`/`unlabeled` — one event per label delta, with
+    // `payload.label` naming the added/removed label (GitHub semantics).
+    let unique_set: std::collections::HashSet<&str> =
+        unique_ids.iter().map(String::as_str).collect();
+    let mut deltas: Vec<(&str, oxidean_db::LabelRow)> = Vec::new();
+    for (id, label) in &before {
+        if !unique_set.contains(id.as_str()) {
+            deltas.push(("unlabeled", label.clone()));
+        }
+    }
+    for id in &unique_ids {
+        if !before.contains_key(id) {
+            if let Ok(Some(label)) = ctx.db.find_label_by_id(id).await {
+                deltas.push(("labeled", label));
+            }
+        }
+    }
+    for (action, label) in deltas {
+        notify_actions_label_delta(ctx, &accessible, action, &issue, &label, &user).await;
+    }
+
+    let refreshed = ctx
+        .db
+        .find_issue_by_id(&issue.id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(issue_not_found)?;
+    to_public(ctx, &refreshed).await
+}
+
+/// `issue.assignees.set` — Write+; each user_id must have Read+ (D-ISS-06 / D-ISS-08 / T-11-12).
+pub async fn assignees_set(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssuePublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: SetIssueAssigneesRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.assignees.set input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+
+    let owner_ref = oxidean_api_core::repo::owner_ref_for_repo(&ctx.db, &accessible.row)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "owner_ref_for_repo failed");
+            AppError::new("issue.internal", "issue operation failed")
+        })?
+        .ok_or_else(not_found)?;
+
+    let before: std::collections::HashSet<String> = ctx
+        .db
+        .list_issue_assignees(&issue.id)
+        .await
+        .map_err(db_err)?
+        .into_iter()
+        .map(|a| a.user_id)
+        .collect();
+
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_ids = Vec::new();
+    for id in &req.user_ids {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(AppError::new("rpc.bad_input", "user id must not be empty"));
+        }
+        if !seen.insert(id.to_string()) {
+            continue;
+        }
+        let Some(_u) = ctx.db.find_user_by_id(id).await.map_err(db_err)? else {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "assignee user was not found",
+            ));
+        };
+        let cap = oxidean_api_core::repo::effective_capability(
+            &ctx.db,
+            Some(id),
+            &accessible.row,
+            &owner_ref,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "effective_capability for assignee failed");
+            AppError::new("issue.internal", "issue operation failed")
+        })?;
+        if !oxidean_api_core::repo::meets(cap, oxidean_api_core::repo::Capability::Read) {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "assignee must have Read access on this repository",
+            ));
+        }
+        unique_ids.push(id.to_string());
+    }
+
+    ctx.db
+        .set_issue_assignees(&issue.id, &unique_ids)
+        .await
+        .map_err(db_err)?;
+
+    let after: std::collections::HashSet<String> = unique_ids.iter().cloned().collect();
+    let newly_assigned: Vec<_> = after.difference(&before).cloned().collect();
+    let newly_unassigned: Vec<_> = before.difference(&after).cloned().collect();
+    let subject = notify::subject_for_issue(&issue);
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        newly_assigned,
+        "issue_assigned",
+        &subject,
+        &watch,
+    )
+    .await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        newly_unassigned,
+        "issue_unassigned",
+        &subject,
+        &watch,
+    )
+    .await;
+
+    let refreshed = ctx
+        .db
+        .find_issue_by_id(&issue.id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(issue_not_found)?;
+    to_public(ctx, &refreshed).await
+}
+
+/// `issue.assigneeCandidates` — Write+; profiles with effective Read+ (D-ISS-08).
+pub async fn assignee_candidates(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AssigneeCandidatesResponse, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: AssigneeCandidatesRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.assigneeCandidates input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let owner_ref = oxidean_api_core::repo::owner_ref_for_repo(&ctx.db, &accessible.row)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "owner_ref_for_repo failed");
+            AppError::new("issue.internal", "issue operation failed")
+        })?
+        .ok_or_else(not_found)?;
+
+    let mut candidate_ids = std::collections::HashSet::new();
+    match &owner_ref {
+        oxidean_api_core::repo::OwnerRef::User { id, .. } => {
+            candidate_ids.insert(id.clone());
+        }
+        oxidean_api_core::repo::OwnerRef::Org { id, .. } => {
+            let members = ctx.db.list_org_members(id).await.map_err(db_err)?;
+            for m in members {
+                candidate_ids.insert(m.user_id);
+            }
+        }
+    }
+    let collabs = ctx
+        .db
+        .list_repo_collaborators(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    for c in collabs {
+        candidate_ids.insert(c.user_id);
+    }
+
+    let prefix = req
+        .prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_ascii_lowercase());
+
+    if let Some(ref p) = prefix {
+        if p.chars().count() >= 2 && !p.contains('@') {
+            let hits = ctx
+                .db
+                .list_users_by_username_prefix(p, 20)
+                .await
+                .map_err(db_err)?;
+            for hit in hits {
+                if let Some(u) = ctx
+                    .db
+                    .find_user_by_username(&hit.username)
+                    .await
+                    .map_err(db_err)?
+                {
+                    candidate_ids.insert(u.id);
+                }
+            }
+        }
+    }
+
+    let mut users = Vec::new();
+    for user_id in candidate_ids {
+        let cap = oxidean_api_core::repo::effective_capability(
+            &ctx.db,
+            Some(&user_id),
+            &accessible.row,
+            &owner_ref,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "effective_capability for candidate failed");
+            AppError::new("issue.internal", "issue operation failed")
+        })?;
+        if !oxidean_api_core::repo::meets(cap, oxidean_api_core::repo::Capability::Read) {
+            continue;
+        }
+        let Some(u) = ctx.db.find_user_by_id(&user_id).await.map_err(db_err)? else {
+            continue;
+        };
+        if let Some(ref p) = prefix {
+            if !u.username.to_ascii_lowercase().starts_with(p.as_str()) {
+                continue;
+            }
+        }
+        users.push(IssueAssigneePublic {
+            user_id: u.id,
+            username: u.username,
+            display_name: u.display_name,
+        });
+    }
+    users.sort_by(|a, b| {
+        a.username
+            .to_ascii_lowercase()
+            .cmp(&b.username.to_ascii_lowercase())
+    });
+    Ok(AssigneeCandidatesResponse { users })
+}
+
+/// `issue.reactions.toggle` — Read+ verified; the eight contents on issue|comment (D-ISS-11 / D-ISS-20).
+pub async fn reactions_toggle(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ToggleReactionResponse, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: ToggleReactionRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.reactions.toggle input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let content = req.content.as_str();
+
+    let reacted = match req.target {
+        ReactionTarget::Issue => ctx
+            .db
+            .toggle_issue_reaction(&issue.id, &user.id, content)
+            .await
+            .map_err(db_err)?,
+        ReactionTarget::Comment => {
+            let comment_id = req
+                .comment_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::new(
+                        "rpc.bad_input",
+                        "commentId is required when target is comment",
+                    )
+                })?;
+            let comment = load_comment_in_issue(ctx, &issue.id, comment_id).await?;
+            ctx.db
+                .toggle_comment_reaction(&comment.id, &user.id, content)
+                .await
+                .map_err(db_err)?
+        }
+    };
+
+    let reaction_rows = match req.target {
+        ReactionTarget::Issue => ctx
+            .db
+            .list_issue_reaction_groups(&issue.id, Some(&user.id))
+            .await
+            .map_err(db_err)?,
+        ReactionTarget::Comment => {
+            let comment_id = req.comment_id.as_deref().unwrap_or("").trim();
+            ctx.db
+                .list_comment_reaction_groups(comment_id, Some(&user.id))
+                .await
+                .map_err(db_err)?
+        }
+    };
+
+    Ok(ToggleReactionResponse {
+        reactions: reaction_groups_to_public(reaction_rows),
+        reacted,
+    })
+}
+
+fn link_row_to_public(row: oxidean_db::IssueLinkRow) -> Result<IssueLinkPublic, AppError> {
+    let kind = IssueLinkKind::parse(&row.kind).map_err(|e| {
+        tracing::error!(error = %e, "invalid issue link kind in db");
+        AppError::new("issue.internal", "issue operation failed")
+    })?;
+    Ok(IssueLinkPublic {
+        id: row.id,
+        kind,
+        target_repo_id: row.target_repo_id,
+        target_number: row.target_number,
+        target_opaque_id: row.target_opaque_id,
+        title: row.title,
+        created_at: row.created_at,
+    })
+}
+
+/// `issue.links.list` — Read+ on accessible issues (D-ISS-13 / D-ISS-20).
+pub async fn links_list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueLinksListResponse, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.links.list input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let rows = ctx.db.list_issue_links(&issue.id).await.map_err(db_err)?;
+    let mut links = Vec::with_capacity(rows.len());
+    for row in rows {
+        links.push(link_row_to_public(row)?);
+    }
+    Ok(IssueLinksListResponse { links })
+}
+
+/// `issue.links.add` — Write+; stub-capable rows (D-ISS-13 / D-ISS-14 / D-ISS-20).
+pub async fn links_add(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<IssueLinkPublic, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: AddIssueLinkRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.links.add input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+
+    let target_number = req
+        .target_number
+        .ok_or_else(|| AppError::new("rpc.bad_input", "targetNumber is required"))?;
+    if target_number < 1 {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "targetNumber must be a positive integer",
+        ));
+    }
+
+    let title = match req.title.as_deref() {
+        None => None,
+        Some(t) => {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                None
+            } else if trimmed.chars().count() > TITLE_MAX_CHARS {
+                return Err(AppError::new(
+                    "rpc.bad_input",
+                    format!("title exceeds {TITLE_MAX_CHARS} characters"),
+                ));
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+    };
+
+    let target_repo_id = match req.kind {
+        IssueLinkKind::Issue => Some(
+            req.target_repo_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(accessible.row.id.as_str())
+                .to_string(),
+        ),
+        IssueLinkKind::PrStub | IssueLinkKind::Pr => req
+            .target_repo_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+    };
+
+    // Optional resolve for issue links in the same repo — soft fill opaque id when found.
+    let target_opaque_id = if req.kind == IssueLinkKind::Issue {
+        if let Some(ref repo_id) = target_repo_id {
+            if repo_id == &accessible.row.id {
+                match ctx
+                    .db
+                    .find_issue_by_repo_number(repo_id, target_number)
+                    .await
+                    .map_err(db_err)?
+                {
+                    Some(target) => Some(target.id),
+                    None => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let id = Uuid::new_v4().to_string();
+    let row = ctx
+        .db
+        .insert_issue_link(
+            &id,
+            &issue.id,
+            req.kind.as_str(),
+            target_repo_id.as_deref(),
+            Some(target_number),
+            target_opaque_id.as_deref(),
+            title.as_deref(),
+            &user.id,
+        )
+        .await
+        .map_err(db_err)?;
+    link_row_to_public(row)
+}
+
+/// `issue.links.remove` — Write+; delete stub by opaque id (D-ISS-14 / D-ISS-20).
+pub async fn links_remove(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RemoveIssueLinkResponse, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: RemoveIssueLinkRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid issue.links.remove input: {e}"),
+        )
+    })?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    let link_id = req.link_id.trim();
+    if link_id.is_empty() {
+        return Err(AppError::new("rpc.bad_input", "linkId is required"));
+    }
+    let deleted = ctx
+        .db
+        .delete_issue_link(&issue.id, link_id)
+        .await
+        .map_err(db_err)?;
+    if !deleted {
+        return Err(AppError::new("issue.link_not_found", "Link not found"));
+    }
+    Ok(RemoveIssueLinkResponse { ok: true })
+}
+
+/// `on: issues` Actions trigger — soft-fail (the mutation already committed).
+/// `action` is the same activity name the webhook fan-out emitted.
+/// `pub(crate)` for the project-card convert path — GitHub creates a real
+/// issue when a note is converted, and `issues.opened` fires alongside
+/// `project_card.converted`.
+async fn notify_actions_label_delta(
+    ctx: &RpcCtx,
+    accessible: &oxidean_api_core::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    label: &oxidean_db::LabelRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = oxidean_api_core::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => oxidean_api_core::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = oxidean_api_core::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = oxidean_api_core::actions::payload::user_embed(&user.username);
+    let mut payload = oxidean_api_core::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    payload["label"] = serde_json::json!({
+        "id": label.id,
+        "name": label.name,
+        "color": label.color,
+        "description": label.description,
+    });
+    oxidean_api_core::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &oxidean_api_core::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            job_token_actor: oxidean_api_core::actions::events::rpc_caller_is_job_token(ctx),
+            actions_enabled_instance: oxidean_api_core::actions::env_actions_enabled(),
+        },
+    )
+    .await;
+}

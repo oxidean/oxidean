@@ -1,17 +1,12 @@
 //! SSH host key load/generate (Ed25519) under `OXIDEAN_SSH_HOST_KEY_DIR`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use russh::keys::{Algorithm, PrivateKey};
 
-const HOST_KEY_FILE: &str = "ssh_host_ed25519_key";
+pub use oxidean_api_core::ssh::host_keys::host_key_dir;
 
-/// Resolve host-key directory (`OXIDEAN_SSH_HOST_KEY_DIR`, default `var/ssh`).
-pub fn host_key_dir() -> PathBuf {
-    std::env::var("OXIDEAN_SSH_HOST_KEY_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("var/ssh"))
-}
+const HOST_KEY_FILE: &str = "ssh_host_ed25519_key";
 
 /// Load existing Ed25519 host key or generate + persist one.
 pub async fn load_or_generate(dir: &Path) -> Result<PrivateKey, String> {
