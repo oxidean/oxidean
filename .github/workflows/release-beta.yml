@@ -82,6 +82,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --channel beta
-          for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
-            git push origin "$t"
-          done
+          # One atomic push — per-tag loops race GitHub's ref backend and come
+          # back `remote: fatal error in commit_refs`, leaving a partially-cut
+          # release (run 39315353804 pushed 6/8 tags before the rejection).
+          NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
+          # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
+          scripts/push-tags.sh $NEW

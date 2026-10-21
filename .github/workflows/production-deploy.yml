@@ -229,7 +229,8 @@ jobs:
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --all
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
-          for t in $NEW; do git push origin "$t"; done
+          # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
+          scripts/push-tags.sh $NEW
           if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "wait_ox=true" >> "$GITHUB_OUTPUT"
           fi
@@ -254,7 +255,8 @@ jobs:
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --plan /tmp/stable-plan.json
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
-          for t in $NEW; do git push origin "$t"; done
+          # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
+          scripts/push-tags.sh $NEW
           if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "wait_ox=true" >> "$GITHUB_OUTPUT"
           fi
