@@ -330,20 +330,20 @@
   },
   "compat": {
     "automation/greetings": {
-      "status": "unsupported-runtime",
+      "status": "partial",
       "missing_features": [],
-      "unsupported_actions": [
-        "actions/first-interaction@v1 (calls the GitHub API, which Oxidean does not emulate)"
-      ],
-      "warnings": []
+      "unsupported_actions": [],
+      "warnings": [
+        "actions/first-interaction@v1 (calls the GitHub REST API, which Oxidean emulates partially)"
+      ]
     },
     "automation/label": {
-      "status": "unsupported-runtime",
+      "status": "partial",
       "missing_features": [],
-      "unsupported_actions": [
-        "actions/labeler@v4 (calls the GitHub API, which Oxidean does not emulate)"
-      ],
-      "warnings": []
+      "unsupported_actions": [],
+      "warnings": [
+        "actions/labeler@v4 (calls the GitHub REST API, which Oxidean emulates partially)"
+      ]
     },
     "automation/manual": {
       "status": "runnable",
@@ -352,18 +352,18 @@
       "warnings": []
     },
     "automation/stale": {
-      "status": "unsupported-runtime",
+      "status": "partial",
       "missing_features": [],
-      "unsupported_actions": [
-        "actions/stale@v5 (calls the GitHub API, which Oxidean does not emulate)"
-      ],
-      "warnings": []
+      "unsupported_actions": [],
+      "warnings": [
+        "actions/stale@v5 (calls the GitHub REST API, which Oxidean emulates partially)"
+      ]
     },
     "automation/summary": {
       "status": "unsupported-runtime",
       "missing_features": [],
       "unsupported_actions": [
-        "actions/ai-inference@v1 (calls the GitHub API, which Oxidean does not emulate)"
+        "actions/ai-inference@v1 (calls a GitHub API surface Oxidean does not emulate)"
       ],
       "warnings": []
     },
@@ -902,12 +902,12 @@
       ]
     },
     "deployments/openshift": {
-      "status": "unsupported-runtime",
+      "status": "partial",
       "missing_features": [],
-      "unsupported_actions": [
-        "actions/github-script@v6 (calls the GitHub API, which Oxidean does not emulate)"
-      ],
-      "warnings": []
+      "unsupported_actions": [],
+      "warnings": [
+        "actions/github-script@v6 (calls the GitHub REST API, which Oxidean emulates partially)"
+      ]
     },
     "deployments/tencent": {
       "status": "runnable",

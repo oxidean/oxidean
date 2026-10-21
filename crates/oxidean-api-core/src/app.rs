@@ -60,6 +60,10 @@ pub struct AppState {
     pub actions_artifact_retention_days: u32,
     /// Instance Actions gate (`OXIDEAN_ACTIONS_ENABLED`, default true) — D-ACT-06.
     pub actions_enabled: bool,
+    /// GitHub-shape compatibility on `/api/v1` (`OXIDEAN_ACTIONS_REST_SHIM`,
+    /// default true — the REST surface exists for GitHub compat; issue #160).
+    /// Off → responses keep the plain Oxidean DTO/envelope wire shape.
+    pub rest_shim_enabled: bool,
     /// Env default for the MCP endpoint (`OXIDEAN_MCP_ENABLED`, default true) —
     /// AGT-03. `instance_mcp_settings.enabled` (admin override) wins when set.
     pub mcp_enabled: bool,
@@ -102,6 +106,16 @@ fn mcp_env_truthy(raw: &str) -> bool {
 /// read once into [`AppState::mcp_enabled`]; the admin override wins when set.
 pub fn env_mcp_enabled() -> bool {
     std::env::var("OXIDEAN_MCP_ENABLED")
+        .map(|v| mcp_env_truthy(&v))
+        .unwrap_or(true)
+}
+
+/// Env default for the `/api/v1` GitHub-shape compatibility layer
+/// (`OXIDEAN_ACTIONS_REST_SHIM`, default true) — read once into
+/// [`AppState::rest_shim_enabled`] and consulted at `rest::router()` build
+/// time for the meta-route mount.
+pub fn env_rest_shim_enabled() -> bool {
+    std::env::var("OXIDEAN_ACTIONS_REST_SHIM")
         .map(|v| mcp_env_truthy(&v))
         .unwrap_or(true)
 }
@@ -187,6 +201,7 @@ impl AppState {
             })
             .unwrap_or(true);
         let mcp_enabled = env_mcp_enabled();
+        let rest_shim_enabled = env_rest_shim_enabled();
         let search_timeout_ms = std::env::var("OXIDEAN_SEARCH_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -220,6 +235,7 @@ impl AppState {
             actions_artifact_max_bytes,
             actions_artifact_retention_days,
             actions_enabled,
+            rest_shim_enabled,
             mcp_enabled,
             git,
             sessions: SessionService::new(env_name.clone()),
@@ -296,6 +312,12 @@ impl AppState {
 
     pub fn with_actions_enabled(mut self, enabled: bool) -> Self {
         self.actions_enabled = enabled;
+        self
+    }
+
+    /// Test hook — simulates `OXIDEAN_ACTIONS_REST_SHIM=false` without process env.
+    pub fn with_rest_shim_enabled(mut self, enabled: bool) -> Self {
+        self.rest_shim_enabled = enabled;
         self
     }
 

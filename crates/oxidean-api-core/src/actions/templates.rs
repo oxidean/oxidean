@@ -344,9 +344,14 @@ fn icon_url(icon_name: Option<&str>) -> Option<String> {
 /// Why a `uses:` ref needs a caveat despite a working action runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionCaveat {
-    /// Calls the GitHub REST/GraphQL API — Oxidean has no compatibility
-    /// layer, so the action fails at runtime.
+    /// Calls a GitHub API surface with no Oxidean backing (Models,
+    /// dependency submission/review, code scanning, GraphQL) — the action
+    /// fails at runtime.
     GithubApi,
+    /// Calls the GitHub REST API — `/api/v1` emulates it partially behind
+    /// `OXIDEAN_ACTIONS_REST_SHIM` (issue #160), so the action may work
+    /// where coverage exists and fail where it does not.
+    GithubApiPartial,
     /// GitHub Pages hosting — no equivalent exists.
     Pages,
     /// `actions/attest*` artifact attestations — no equivalent exists.
@@ -361,7 +366,10 @@ impl ActionCaveat {
     /// Short reason shown next to the action in catalog listings.
     fn reason(self) -> &'static str {
         match self {
-            ActionCaveat::GithubApi => "calls the GitHub API, which Oxidean does not emulate",
+            ActionCaveat::GithubApi => "calls a GitHub API surface Oxidean does not emulate",
+            ActionCaveat::GithubApiPartial => {
+                "calls the GitHub REST API, which Oxidean emulates partially"
+            }
             ActionCaveat::Pages => "GitHub Pages is not available on Oxidean",
             ActionCaveat::Attestations => "artifact attestations are not available on Oxidean",
             ActionCaveat::Docker => "requires a Docker-capable runner",
@@ -382,12 +390,14 @@ fn caveat_is_hard(c: ActionCaveat) -> bool {
 /// (`actions/cache` covers `actions/cache/save`). Ref is ignored — the
 /// caveat is about what the action does, not its version.
 static KNOWN_ACTION_CAVEATS: &[(&str, ActionCaveat)] = &[
-    // GitHub REST/GraphQL API — labels, comments, dependency submission,
-    // code scanning, scripting, models inference.
-    ("actions/stale", ActionCaveat::GithubApi),
-    ("actions/labeler", ActionCaveat::GithubApi),
-    ("actions/first-interaction", ActionCaveat::GithubApi),
-    ("actions/github-script", ActionCaveat::GithubApi),
+    // GitHub REST API — labels/comments/issues/pulls scripts ride the
+    // `/api/v1` compat layer (partial coverage; soft caveat).
+    ("actions/stale", ActionCaveat::GithubApiPartial),
+    ("actions/labeler", ActionCaveat::GithubApiPartial),
+    ("actions/first-interaction", ActionCaveat::GithubApiPartial),
+    ("actions/github-script", ActionCaveat::GithubApiPartial),
+    // GitHub APIs with no Oxidean backing — Models inference, dependency
+    // submission/review, code scanning (hard caveats).
     ("actions/ai-inference", ActionCaveat::GithubApi),
     ("actions/dependency-review-action", ActionCaveat::GithubApi),
     (

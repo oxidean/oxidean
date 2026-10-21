@@ -3,10 +3,12 @@
 use std::path::{Path, PathBuf};
 
 use axum::body::Bytes;
-use axum::extract::{Multipart, Path as AxumPath, State};
+use axum::extract::Request;
+use axum::extract::{FromRequest, Multipart, Path as AxumPath, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::resolve_session_user_id;
@@ -45,12 +47,25 @@ fn pat_err_response(e: &oxidean_core::AppError) -> Response {
     err_response(status, &e.code, &e.message)
 }
 
-/// `POST /api/repos/{owner}/{repo}/releases/{release_id}/assets` — multipart field `asset`.
+/// GitHub release-asset upload contract — `POST {upload_url}?name={n}` with a
+/// raw request body (issue #160). `label` is accepted for parity and ignored
+/// (the asset row has no label column).
+#[derive(Deserialize)]
+pub struct AssetUploadQuery {
+    pub name: Option<String>,
+    #[allow(dead_code)]
+    pub label: Option<String>,
+}
+
+/// `POST /api/repos/{owner}/{repo}/releases/{release_id}/assets` — either the
+/// web client's `multipart/form-data` field `asset`, or a GitHub-contract raw
+/// body when `?name=` is present (same URL `upload_url` advertises).
 pub async fn upload_asset(
     State(state): State<AppState>,
     AxumPath((owner, repo, release_id)): AxumPath<(String, String, String)>,
     headers: HeaderMap,
-    mut multipart: Multipart,
+    Query(upload): Query<AssetUploadQuery>,
+    req: Request,
 ) -> Response {
     let Some((user_id, pat)) = resolve_session_user_id(&state, &headers).await else {
         return err_response(
@@ -160,14 +175,32 @@ pub async fn upload_asset(
         }
     };
 
-    let mut file_bytes: Option<Bytes> = None;
-    let mut content_type = "application/octet-stream".to_string();
-    let mut filename = "asset".to_string();
-
-    loop {
-        let field = match multipart.next_field().await {
-            Ok(Some(f)) => f,
-            Ok(None) => break,
+    let (file_bytes, content_type, filename) = if let Some(name) = &upload.name {
+        // GitHub contract: raw body, `?name=` is the filename (issue #160).
+        let bytes = match axum::body::to_bytes(req.into_body(), state.release_asset_max_bytes).await
+        {
+            Ok(b) => b,
+            Err(_) => {
+                return err_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "release.asset_too_large",
+                    &format!(
+                        "asset must be at most {} bytes",
+                        state.release_asset_max_bytes
+                    ),
+                );
+            }
+        };
+        let ct = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        (bytes, ct, sanitize_filename(name))
+    } else {
+        // Web client: `multipart/form-data`, field `asset`/`file`.
+        let mut multipart = match Multipart::from_request(req, &state).await {
+            Ok(m) => m,
             Err(e) => {
                 return err_response(
                     StatusCode::BAD_REQUEST,
@@ -176,46 +209,64 @@ pub async fn upload_asset(
                 );
             }
         };
-        let name = field.name().unwrap_or("").to_string();
-        if name != "asset" && name != "file" {
-            continue;
-        }
-        if let Some(fname) = field.file_name() {
-            filename = sanitize_filename(fname);
-        }
-        if let Some(ct) = field.content_type() {
-            content_type = ct.to_string();
-        }
-        let data = match field.bytes().await {
-            Ok(b) => b,
-            Err(e) => {
+        let mut file_bytes: Option<Bytes> = None;
+        let mut content_type = "application/octet-stream".to_string();
+        let mut filename = "asset".to_string();
+        loop {
+            let field = match multipart.next_field().await {
+                Ok(Some(f)) => f,
+                Ok(None) => break,
+                Err(e) => {
+                    return err_response(
+                        StatusCode::BAD_REQUEST,
+                        "release.asset_multipart",
+                        &format!("invalid multipart: {e}"),
+                    );
+                }
+            };
+            let name = field.name().unwrap_or("").to_string();
+            if name != "asset" && name != "file" {
+                continue;
+            }
+            if let Some(fname) = field.file_name() {
+                filename = sanitize_filename(fname);
+            }
+            if let Some(ct) = field.content_type() {
+                content_type = ct.to_string();
+            }
+            let data = match field.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return err_response(
+                        StatusCode::BAD_REQUEST,
+                        "release.asset_read_failed",
+                        &format!("failed to read upload: {e}"),
+                    );
+                }
+            };
+            if data.len() > state.release_asset_max_bytes {
                 return err_response(
-                    StatusCode::BAD_REQUEST,
-                    "release.asset_read_failed",
-                    &format!("failed to read upload: {e}"),
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "release.asset_too_large",
+                    &format!(
+                        "asset must be at most {} bytes",
+                        state.release_asset_max_bytes
+                    ),
                 );
             }
-        };
-        if data.len() > state.release_asset_max_bytes {
-            return err_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "release.asset_too_large",
-                &format!(
-                    "asset must be at most {} bytes",
-                    state.release_asset_max_bytes
-                ),
-            );
+            file_bytes = Some(data);
         }
-        file_bytes = Some(data);
-    }
-
-    let Some(bytes) = file_bytes else {
-        return err_response(
-            StatusCode::BAD_REQUEST,
-            "release.asset_missing",
-            "multipart field 'asset' is required",
-        );
+        let Some(bytes) = file_bytes else {
+            return err_response(
+                StatusCode::BAD_REQUEST,
+                "release.asset_missing",
+                "multipart field 'asset' is required",
+            );
+        };
+        (bytes, content_type, filename)
     };
+    let raw_github_mode = upload.name.is_some();
+    let bytes = file_bytes;
 
     if let Err(e) = tokio::fs::create_dir_all(&state.release_assets_dir).await {
         tracing::error!(error = %e, "create release assets dir");
@@ -302,6 +353,39 @@ pub async fn upload_asset(
             }
         }
     };
+
+    if raw_github_mode {
+        // GitHub contract: 201 + the asset object, not the `{ok,asset}` wrap.
+        let origin = oxidean_api_core::public_origin::resolve_public_origin();
+        let origin = if origin.is_empty() {
+            headers
+                .get(header::HOST)
+                .and_then(|v| v.to_str().ok())
+                .map(|h| format!("http://{h}"))
+                .unwrap_or_default()
+        } else {
+            origin.trim_end_matches('/').to_string()
+        };
+        return (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "id": asset_id,
+                "node_id": format!("RA_{asset_id}"),
+                "url": format!("{origin}/api/releases/assets/{asset_id}"),
+                "browser_download_url": format!("{origin}/api/releases/assets/{asset_id}"),
+                "name": row.filename,
+                "label": null,
+                "state": "uploaded",
+                "content_type": row.content_type,
+                "size": row.byte_size,
+                "download_count": 0,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+                "uploader": null,
+            })),
+        )
+            .into_response();
+    }
 
     (
         StatusCode::OK,

@@ -10,7 +10,7 @@ Every job step runs with an `OXIDEAN_*` environment, each variable paired with a
 |--------------|--------------|-------|
 | `OXIDEAN_ACTIONS` | `GITHUB_ACTIONS` | `"true"` |
 | `OXIDEAN_ACTOR` / `OXIDEAN_ACTOR_ID` | `GITHUB_ACTOR` / `GITHUB_ACTOR_ID` | User who triggered the run |
-| `OXIDEAN_API_URL` | `GITHUB_API_URL` | `<server>/api` — point API clients here |
+| `OXIDEAN_API_URL` | `GITHUB_API_URL` | `<server>/api/v1` — the GitHub-shaped REST root Octokit / `gh` / third-party actions resolve `{api_url}/repos/…` against |
 | `OXIDEAN_SERVER_URL` | `GITHUB_SERVER_URL` | Instance origin |
 | `OXIDEAN_BASE_REF` | `GITHUB_BASE_REF` | PR base ref; empty unless `pull_request` |
 | `OXIDEAN_HEAD_REF` | `GITHUB_HEAD_REF` | Short source branch on `pull_request`; empty otherwise |
@@ -73,3 +73,17 @@ A per-job `oxidean_job_…` bearer token minted when the runner claims the job:
 - **Git over HTTP(S) + LFS** — works as a Basic-auth password (`git clone https://…/owner/repo.git` with `oauth2:<token>`, or any username). `contents: read` can fetch; `contents: write` can push (subject to the capability cap above). LFS batch/download/upload accept the same credential.
 - **Pushes authenticated with `OXIDEAN_TOKEN` do not trigger new workflow runs** — GitHub parity; this prevents job → push → run recursion. Webhooks, statuses, and mirror sync still fire.
 - The bundled runner's `actions/checkout` clone authenticates with `OXIDEAN_TOKEN` when the task carries one, falling back to the runner-configured `OXIDEAN_RUNNER_GIT_TOKEN`.
+
+## GitHub REST compatibility (`GITHUB_API_URL`)
+
+`GITHUB_API_URL` points at `/api/v1`, whose surface already mirrors GitHub's route layout (~370 routes translating into RPC procedures). `OXIDEAN_ACTIONS_REST_SHIM` (default on) switches responses to GitHub-exact wire shapes so Octokit/`@actions/github`/third-party actions deserialize them — issue #160:
+
+- List endpoints unwrap `{items,total}` into bare arrays and emit `Link` rel=`next`/`last` pagination; `per_page`/`page` translate into the RPC `limit`/`offset` (cap 100).
+- Payloads carry GitHub keys — `html_url`, `url`, `node_id`, `user.login` objects, `labels[]` objects, pull `head`/`base`, `permissions`, release `upload_url`/`browser_download_url`. Fields with no Oxidean analogue return GitHub-shaped placeholders rather than dropping keys.
+- Errors render `{message, documentation_url, errors[]}`; `X-RateLimit-*` (static advisory window, not enforced quota) and `ETag`/`If-None-Match` ride every response.
+- Meta routes `GET /api/v1/{/,rate_limit,zen}` mount under the flag; `GET /repos/{o}/{r}/{zip,tar}ball[/{ref}]` 302s onto the existing source-archive plumbing; `GET …/issues/{n}/timeline` serves revision snapshots as `edited` events (partial coverage — Oxidean records title/body snapshots, not GitHub's labelled-event feed).
+- Release-asset upload follows GitHub's contract at the emitted `upload_url`: `POST ?name={file}` with a raw body → `201` + the GitHub-shaped asset object (the same route still accepts the web client's multipart upload).
+- `GET /api/v1/_compat/stats` (sys-admin) reports observed-vs-covered route counts; requests no route covers answer a GitHub-style 404 and count as uncovered — the report is how coverage gaps get measured.
+- Job tokens (`Authorization: Bearer oxidean_job_…`) resolve as repo-pinned identities, so Octokit calls from a step enforce the workflow's `permissions:` scopes exactly like the RPC edge.
+
+`OXIDEAN_ACTIONS_REST_SHIM=false` restores the plain Oxidean DTO wire shapes and unmounts the compat meta routes (the `/api/v1` route table itself is unaffected). GraphQL is not emulated — `GITHUB_GRAPHQL_URL` remains a stable-shape value only.
