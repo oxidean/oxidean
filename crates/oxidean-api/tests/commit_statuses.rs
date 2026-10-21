@@ -75,6 +75,9 @@ async fn commit_statuses_context_workflow_name_slash_job_id() {
     assert_eq!(job_status_to_commit_state("success"), "success");
     assert_eq!(job_status_to_commit_state("failure"), "failure");
     assert_eq!(job_status_to_commit_state("cancelled"), "error");
+    // `if:`-skipped legs are neutral conclusions — they pass required checks.
+    assert_eq!(job_status_to_commit_state("skipped"), "success");
+    assert_eq!(job_status_to_commit_state("neutral"), "success");
 
     let (db, _dir, uid, repo_id) = seed_db().await;
     let doc = parse_workflow_yaml(
@@ -98,6 +101,9 @@ jobs:
         "abc1234deadbeef",
         "refs/heads/main",
         Some(&uid),
+        None,
+        None,
+        false,
         None,
     )
     .await
@@ -136,6 +142,9 @@ jobs:
         "feedface0123456",
         "refs/heads/main",
         Some(&uid),
+        None,
+        None,
+        false,
         None,
     )
     .await
@@ -183,6 +192,9 @@ jobs:
         "bada55c0ffee123",
         "refs/heads/main",
         None,
+        None,
+        None,
+        false,
         None,
     )
     .await

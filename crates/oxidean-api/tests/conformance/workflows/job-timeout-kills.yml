@@ -1,0 +1,17 @@
+name: job-timeout-kills
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 0.1
+    steps:
+      - run: sleep 30
+      - run: echo unreachable
+      # Timeout cleanup: GitHub drains `if: always()`/`cancelled()` steps
+      # after a cancel — a cleanup step must still run.
+      - run: echo "cleanup-ran"
+        if: always()
+      - run: echo "cancel-gated-ran"
+        if: cancelled()
+      - run: echo "failure-gated-skipped"
+        if: failure()

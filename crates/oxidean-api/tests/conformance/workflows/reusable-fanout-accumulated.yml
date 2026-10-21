@@ -1,0 +1,8 @@
+name: reusable-fanout-accumulated
+on: push
+jobs:
+  call-a:
+    uses: ./.github/workflows/many.yml
+  call-b:
+    needs: call-a
+    uses: ./.github/workflows/many.yml

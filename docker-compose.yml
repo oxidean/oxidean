@@ -139,6 +139,18 @@ services:
       - traefik.http.routers.api-packages.entrypoints=web
       - traefik.http.routers.api-packages.priority=110
       - traefik.http.routers.api-packages.service=api
+      # Workflow status badges: /{owner}/{repo}/actions/workflows/{file}/badge.svg
+      # → API before the SPA catch-all (GitHub-shaped README badge URLs).
+      - traefik.http.routers.api-badge.rule=Host(`localhost`) && PathRegexp(`^/[^/]+/[^/]+/actions/workflows/[^/]+/badge\.svg$`)
+      - traefik.http.routers.api-badge.entrypoints=web
+      - traefik.http.routers.api-badge.priority=110
+      - traefik.http.routers.api-badge.service=api
+      # Pages sites: /pages/{owner}/{repo}/{*path} → API before the SPA
+      # catch-all (reserved `pages` owner name keeps the prefix free).
+      - traefik.http.routers.api-pages.rule=Host(`localhost`) && PathPrefix(`/pages`)
+      - traefik.http.routers.api-pages.entrypoints=web
+      - traefik.http.routers.api-pages.priority=110
+      - traefik.http.routers.api-pages.service=api
       # RFC 8414/9728 OAuth discovery docs ride the api router (narrow
       # `/.well-known/oauth` prefix — ACME challenges stay on the web tier).
       - traefik.http.routers.api.rule=Host(`localhost`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/.well-known/oauth`) || Path(`/health`))

@@ -471,3 +471,107 @@ async fn repo_transfer_cascade_issues_lfs_by_repo_id() {
         assert_eq!(got["data"]["number"], n);
     }
 }
+
+/// GitHub REST surface — PATCH `{name}` renames (`repo.rename`), and
+/// `POST /repos/{o}/{r}/transfer` {new_owner, new_name?} → 202 + repo.
+#[tokio::test]
+async fn rest_patch_rename_and_transfer() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_rename.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, v) = signup_and_login(&app, "tr@ex.com", "trown").await;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(v["data"]["id"].as_str().unwrap(), &now)
+        .await
+        .expect("verify");
+    let (_other, ov) = signup_and_login(&app, "tr2@ex.com", "trnew").await;
+    db.set_email_verified_at(ov["data"]["id"].as_str().unwrap(), &now)
+        .await
+        .expect("verify");
+
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"movable","visibility":"public","description":"d0"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+
+    // PATCH with a new name → rename; description rides along.
+    let (s, v) = rest(
+        &app,
+        "PATCH",
+        "/api/v1/repos/trown/movable",
+        &cookie,
+        Some(r#"{"name":"moved","description":"d1"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // Old name resolves through the rename redirect (GitHub-faithful: old
+    // URLs follow to the new name); new path serves the repo directly.
+    let (s, v) = rest(&app, "GET", "/api/v1/repos/trown/movable", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["name"], "moved");
+    let (s, v) = rest(&app, "GET", "/api/v1/repos/trown/moved", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["description"], "d1");
+
+    // Transfer to the second user.
+    let (s, v) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/trown/moved/transfer",
+        &cookie,
+        Some(r#"{"new_owner":"trnew"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+
+    let (s, v) = rest(&app, "GET", "/api/v1/repos/trnew/moved", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // Transfer to a bogus owner → 422.
+    let (s, _) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/trnew/moved/transfer",
+        &cookie,
+        Some(r#"{"new_owner":"ghost"}"#.into()),
+    )
+    .await;
+    // trown no longer owns it — 4xx either way; assert not 2xx.
+    assert!(s.is_client_error(), "{s}");
+}
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}

@@ -563,6 +563,20 @@ export type ForkRepoRequest = {
   into_name?: string | null;
 };
 
+export type RepoMigrateRequest = {
+  clone_addr: string;
+  auth_username?: string | null;
+  auth_token?: string | null;
+  auth_password?: string | null;
+  repo_name?: string;
+  repo_owner?: string | null;
+  mirror?: boolean | null;
+  private?: boolean | null;
+  description?: string | null;
+  wiki?: boolean | null;
+  service?: string | null;
+};
+
 export type RepoTemplateOption = {
   id: string;
   label: string;
@@ -608,6 +622,9 @@ export type RepoPublic = {
   viewer_watch_level?: WatchLevel | null;
   issues_enabled?: boolean;
   pulls_enabled?: boolean;
+  wiki_enabled?: boolean;
+  projects_enabled?: boolean;
+  discussions_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -1911,6 +1928,8 @@ export type BranchProtectionRulePublic = {
   lock_branch: boolean;
   /** GIT-22: pushes introducing unsigned commits are denied by the update hook. */
   require_signed_commits: boolean;
+  /** PRs merge only via the merge queue — direct `pull.merge` is rejected. */
+  required_merge_queue: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1937,6 +1956,8 @@ export type BranchProtectionRuleInput = {
   lock_branch?: boolean;
   /** GIT-22: deny pushes introducing commits without a verified signature. */
   require_signed_commits?: boolean;
+  /** Require the merge queue for PRs targeting matching branches. */
+  required_merge_queue?: boolean;
 };
 
 export type BranchProtectionUpdateRequest = BranchProtectionRuleInput & {
@@ -2077,6 +2098,18 @@ export type ActionRunPublic = {
   created_at?: string;
   updated_at?: string;
   finished_at?: string;
+  attempt?: number;
+  /** `fork_approval` when the run is held for maintainer approval. */
+  waiting_reason?: string;
+  /** The caller may release a fork-approval hold (Write+). */
+  can_approve?: boolean;
+};
+
+export type ActionDeploymentReviewPublic = {
+  reviewer: string;
+  state: string;
+  comment?: string;
+  created_at?: string;
 };
 
 export type ActionJobPublic = {
@@ -2086,8 +2119,18 @@ export type ActionJobPublic = {
   name: string;
   status: string;
   runs_on: string[];
+  needs?: string[];
+  matrix?: Record<string, unknown>;
+  environment?: string;
+  attempt?: number;
+  /** `fork_approval` | `environment_review` | `environment_wait_timer` | `needs`. */
+  waiting_reason?: string;
+  /** Caller is a required reviewer (or Admin override) for the held deployment. */
+  can_review?: boolean;
+  reviews?: ActionDeploymentReviewPublic[];
   started_at?: string;
   finished_at?: string;
+  summary?: string;
 };
 
 export type ActionRunsListRequest = {
@@ -2121,18 +2164,54 @@ export type ActionRunGetResponse = {
   jobs: ActionJobPublic[];
 };
 
+export type ActionJobGetRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+};
+
+export type ActionJobGetResponse = {
+  job: ActionJobPublic;
+};
+
 export type ActionJobLogRequest = {
   owner: string;
   name: string;
   run_id: string;
   job_id: string;
   offset?: number;
+  wait_ms?: number;
 };
 
 export type ActionJobLogResponse = {
   content: string;
   next_offset: number;
   size: number;
+  done?: boolean;
+};
+
+/** One `::error|warning|notice::` workflow-command annotation. */
+export type ActionAnnotationPublic = {
+  annotation_level: string;
+  message: string;
+  path?: string;
+  start_line?: number;
+  end_line?: number;
+  start_column?: number;
+  end_column?: number;
+  title?: string;
+  created_at?: string;
+};
+
+export type ActionJobAnnotationsRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+  job_id?: string;
+};
+
+export type ActionJobAnnotationsResponse = {
+  annotations: ActionAnnotationPublic[];
 };
 
 export type ActionWorkflowsListRequest = {
@@ -2141,10 +2220,21 @@ export type ActionWorkflowsListRequest = {
   git_ref?: string;
 };
 
+export type ActionDispatchInputPublic = {
+  name: string;
+  /** `string` | `choice` | `boolean` | `number` | `environment`. */
+  type: string;
+  required?: boolean;
+  description?: string;
+  default?: unknown;
+  options?: string[];
+};
+
 export type ActionWorkflowPublic = {
   path: string;
   name: string;
   supports_dispatch: boolean;
+  inputs?: ActionDispatchInputPublic[];
 };
 
 export type ActionWorkflowFileError = {
@@ -2163,11 +2253,22 @@ export type ActionDispatchRequest = {
   name: string;
   workflow_id: string;
   git_ref: string;
+  /** `on.workflow_dispatch.inputs` values — validated against declared types. */
+  inputs?: Record<string, unknown>;
 };
 
 export type ActionDispatchResponse = {
   ok: boolean;
   run_id?: string;
+};
+
+export type ActionDispatchRepositoryRequest = {
+  owner: string;
+  name: string;
+  /** Activity type (`on.repository_dispatch.types:` filters match it). */
+  event_type: string;
+  /** Arbitrary JSON echoed verbatim as `github.event.client_payload`. */
+  client_payload?: Record<string, unknown>;
 };
 
 export type ActionRunMutationRequest = {
@@ -2176,6 +2277,7 @@ export type ActionRunMutationRequest = {
   run_id: string;
   job_id?: string;
   failed_only?: boolean;
+  debug?: boolean;
 };
 
 export type ActionRunMutationResponse = {
@@ -2184,7 +2286,14 @@ export type ActionRunMutationResponse = {
 
 export type ActionSecretMetaPublic = {
   name: string;
+  created_at: string;
   updated_at: string;
+};
+
+export type ActionSecretKeyPublic = {
+  key_id: string;
+  /** base64 X25519 public key for libsodium `crypto_box_seal`. */
+  key: string;
 };
 
 export type ActionSecretsListRequest = {
@@ -2209,6 +2318,100 @@ export type ActionSecretDeleteRequest = {
   secret_name: string;
 };
 
+export type ActionVariablePublic = {
+  name: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActionVariablesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionVariablesListResponse = {
+  variables: ActionVariablePublic[];
+};
+
+export type ActionVariablesPutRequest = {
+  owner: string;
+  name: string;
+  variable_name: string;
+  value: string;
+};
+
+export type ActionVariablesDeleteRequest = {
+  owner: string;
+  name: string;
+  variable_name: string;
+};
+
+export type RepoActionsEnvironmentVariablesListRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentVariablePutRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  variable_name: string;
+  value: string;
+};
+
+export type RepoActionsEnvironmentVariableDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  variable_name: string;
+};
+
+export type OrgVariablePublic = {
+  name: string;
+  value: string;
+  visibility: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrgActionsVariablesListRequest = {
+  slug: string;
+};
+
+export type OrgActionsVariablesListResponse = {
+  variables: OrgVariablePublic[];
+};
+
+export type OrgActionsVariablePutRequest = {
+  slug: string;
+  variable_name: string;
+  value: string;
+  visibility?: string;
+  repository_ids?: string[];
+};
+
+export type OrgActionsVariableDeleteRequest = {
+  slug: string;
+  variable_name: string;
+};
+
+export type OrgActionsVariableSetReposRequest = {
+  slug: string;
+  variable_name: string;
+  repository_ids: string[];
+};
+
+export type OrgActionsVariableReposRequest = {
+  slug: string;
+  variable_name: string;
+};
+
+export type OrgActionsVariableReposResponse = {
+  repository_ids: string[];
+};
+
 export type ActionEnabledRequest = {
   owner: string;
   name: string;
@@ -2224,10 +2427,42 @@ export type ActionSetEnabledRequest = {
   enabled: boolean;
 };
 
+export type RepoActionsPullRequestTargetRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsSetPullRequestTargetRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type RepoActionsPullRequestTargetResponse = {
+  enabled: boolean;
+};
+
+export type RepoActionsForkPrApprovalRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsSetForkPrApprovalRequest = {
+  owner: string;
+  name: string;
+  /** `never` (default), `first-time`, or `always`. */
+  policy: string;
+};
+
+export type RepoActionsForkPrApprovalResponse = {
+  policy: string;
+};
+
 export type ActionRunnerPublic = {
   id: string;
   name: string;
   labels: string[];
+  repository_id?: string;
   ephemeral: boolean;
   last_online?: string | null;
   created_at: string;
@@ -2235,6 +2470,1266 @@ export type ActionRunnerPublic = {
 
 export type ActionListRunnersResponse = {
   runners: ActionRunnerPublic[];
+};
+
+export type ActionRepoRunnersListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionRunnerRequest = {
+  owner: string;
+  name: string;
+  runner_id: string;
+};
+
+export type ActionRunnerGetResponse = {
+  runner: ActionRunnerPublic;
+};
+
+export type ActionRunnerDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionRepoRegistrationTokenRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionRunApprovalsRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+};
+
+export type ActionRunApprovalPublic = {
+  job_id: string;
+  environment: string;
+  reviewer_username: string;
+  /** `approved` | `rejected`. */
+  state: string;
+  comment?: string;
+  created_at: string;
+};
+
+export type ActionRunApprovalsResponse = {
+  approvals: ActionRunApprovalPublic[];
+};
+
+export type ActionJobApproveRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+};
+
+export type ActionJobApproveResponse = {
+  job: ActionJobPublic;
+};
+
+export type ActionDeploymentReviewRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+  /** `approved` | `rejected`. */
+  state: string;
+  comment?: string;
+};
+
+export type ActionDeploymentReviewResponse = {
+  job: ActionJobPublic;
+};
+
+export type ActionArtifactPublic = {
+  id: string;
+  run_id: string;
+  job_id?: string;
+  name: string;
+  size_bytes: number;
+  digest_sha256: string;
+  expires_at?: string;
+  created_at?: string;
+};
+
+export type ActionArtifactsListRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+};
+
+export type ActionArtifactsListResponse = {
+  artifacts: ActionArtifactPublic[];
+};
+
+export type ActionRepoArtifactsListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionArtifactGetRequest = {
+  owner: string;
+  name: string;
+  artifact_id: string;
+};
+
+export type ActionArtifactGetResponse = {
+  artifact: ActionArtifactPublic;
+};
+
+export type ActionArtifactDeleteRequest = {
+  owner: string;
+  name: string;
+  artifact_id: string;
+};
+
+export type ActionArtifactDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionCachePublic = {
+  id: string;
+  key: string;
+  version: string;
+  /** Branch scope the entry was saved under. */
+  scope: string;
+  size_bytes: number;
+  created_at?: string;
+  last_accessed_at?: string;
+};
+
+export type ActionCachesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionCachesListResponse = {
+  caches: ActionCachePublic[];
+  /** Sum of committed `size_bytes` — the GitHub `cache/usage` answer. */
+  total_size_bytes: number;
+};
+
+export type ActionCacheDeleteRequest = {
+  owner: string;
+  name: string;
+  cache_id: string;
+};
+
+export type ActionCacheDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionEnvironmentProtection = {
+  wait_timer_minutes?: number;
+  /** Required reviewers — user ids on read; ids or usernames on write. */
+  required_reviewers?: string[];
+  /** Resolved reviewer usernames (read-side display). */
+  required_reviewer_usernames?: string[];
+  /** Block the run's triggering actor from reviewing (GitHub parity). */
+  prevent_self_review?: boolean;
+  /** Branch allowlist for deployments. */
+  deployment_branches?: string[];
+};
+
+export type ActionEnvironmentPublic = {
+  name: string;
+  protection: ActionEnvironmentProtection;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RepoActionsEnvironmentsListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsEnvironmentsListResponse = {
+  environments: ActionEnvironmentPublic[];
+};
+
+export type RepoActionsEnvironmentGetRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentResponse = {
+  environment: ActionEnvironmentPublic;
+};
+
+export type RepoActionsEnvironmentUpsertRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  protection: ActionEnvironmentProtection;
+};
+
+export type RepoActionsEnvironmentDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentDeleteResponse = {
+  deleted: boolean;
+};
+
+export type RepoActionsEnvironmentSecretsListRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentSecretPutRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  secret_name: string;
+  value: string;
+};
+
+export type RepoActionsEnvironmentSecretDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  secret_name: string;
+};
+
+export type ActionDeploymentPublic = {
+  id: string;
+  environment: string;
+  /** Present for environment-job deployments; null for API-created ones. */
+  run_id?: string | null;
+  job_id?: string | null;
+  sha: string;
+  /** GitHub `deployment.ref`. */
+  ref: string;
+  url?: string | null;
+  task: string;
+  description: string;
+  payload?: unknown;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  transient_environment: boolean;
+  production_environment: boolean;
+  /** Latest deployment-status state (null until the first lands). */
+  state?: string | null;
+  job_status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActionDeploymentsListRequest = {
+  owner: string;
+  name: string;
+  /** Run-scoped listing; omit for repo-level history. */
+  run_id?: string;
+  /** Narrow a repo-level listing to one environment. */
+  environment?: string;
+  limit?: number;
+};
+
+export type ActionDeploymentsListResponse = {
+  deployments: ActionDeploymentPublic[];
+};
+
+export type DeploymentListRequest = {
+  owner: string;
+  name: string;
+  sha?: string;
+  ref?: string;
+  task?: string;
+  environment?: string;
+  limit?: number;
+};
+
+export type DeploymentListResponse = {
+  deployments: ActionDeploymentPublic[];
+};
+
+export type DeploymentRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type DeploymentCreateRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref: string;
+  /** Task identifier (GitHub default `deploy`). */
+  task?: string;
+  /** Merge the default branch into the ref first (GitHub default true). */
+  auto_merge?: boolean;
+  /** Contexts that must be `success`; `[]` skips (GitHub: omitted = all). */
+  required_contexts?: string[];
+  payload?: unknown;
+  /** Environment name (GitHub default `production`). */
+  environment?: string;
+  description?: string;
+  transient_environment?: boolean;
+  production_environment?: boolean;
+};
+
+export type DeploymentStatusPublic = {
+  id: string;
+  deployment_id: string;
+  state: string;
+  description: string;
+  environment?: string | null;
+  environment_url?: string | null;
+  target_url?: string | null;
+  log_url?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  created_at: string;
+};
+
+export type DeploymentStatusCreateRequest = {
+  owner: string;
+  name: string;
+  deployment_id: string;
+  /** error|failure|inactive|in_progress|pending|queued|success|waiting */
+  state: string;
+  description?: string;
+  environment?: string;
+  environment_url?: string;
+  log_url?: string;
+  /** Deprecated GitHub alias for `log_url`. */
+  target_url?: string;
+  /** `success` marks prior env deployments inactive (GitHub default true). */
+  auto_inactive?: boolean;
+};
+
+export type DeploymentStatusListRequest = {
+  owner: string;
+  name: string;
+  deployment_id: string;
+  limit?: number;
+};
+
+export type DeploymentStatusListResponse = {
+  statuses: DeploymentStatusPublic[];
+};
+
+export type DeploymentDeleteResponse = {
+  ok: boolean;
+};
+
+export type CheckSuitePublic = {
+  id: string;
+  head_sha: string;
+  head_branch?: string | null;
+  /** `github-actions` for Actions-run suites, `api` for API-created ones. */
+  app: string;
+  /** Bound Actions run for workflow-projected suites. */
+  run_id?: string | null;
+  /** `queued` | `in_progress` | `completed`. */
+  status: string;
+  conclusion?: string | null;
+  url?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  /** GitHub `latest_check_runs_count`. */
+  check_runs_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CheckRunAnnotationInput = {
+  path: string;
+  start_line: number;
+  end_line: number;
+  start_column?: number;
+  end_column?: number;
+  /** `notice` | `warning` | `failure`. */
+  annotation_level: string;
+  message: string;
+  title?: string;
+  raw_details?: string;
+};
+
+export type CheckRunOutput = {
+  title?: string;
+  summary?: string;
+  text?: string;
+  /** Inline annotations on create/update (GitHub caps at 50 per call). */
+  annotations?: CheckRunAnnotationInput[];
+  /** Response-only — count of stored annotations. */
+  annotations_count?: number;
+};
+
+export type CheckRunPublic = {
+  id: string;
+  name: string;
+  head_sha: string;
+  /** `queued` | `in_progress` | `completed` | `waiting` | `pending` | `requested`. */
+  status: string;
+  conclusion?: string | null;
+  details_url?: string | null;
+  external_id?: string | null;
+  check_suite_id: string;
+  /** Owning suite's `app` label. */
+  app: string;
+  /** Backing Actions job/run for workflow-projected runs. */
+  job_id?: string | null;
+  run_id?: string | null;
+  output: CheckRunOutput;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CheckRunAnnotationPublic = {
+  id: string;
+  check_run_id: string;
+  path: string;
+  blob_href?: string | null;
+  start_line: number;
+  end_line: number;
+  start_column?: number | null;
+  end_column?: number | null;
+  annotation_level: string;
+  message: string;
+  title?: string | null;
+  raw_details?: string | null;
+  created_at: string;
+};
+
+export type CheckSuiteListRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref?: string;
+  head_sha?: string;
+  limit?: number;
+};
+
+export type CheckSuiteListResponse = {
+  suites: CheckSuitePublic[];
+};
+
+export type CheckSuiteRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type CheckSuiteCreateRequest = {
+  owner: string;
+  name: string;
+  head_sha: string;
+};
+
+export type CheckRunListForSuiteRequest = {
+  owner: string;
+  name: string;
+  suite_id: string;
+  check_name?: string;
+  status?: string;
+  limit?: number;
+};
+
+export type CheckRunListForRefRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref: string;
+  check_name?: string;
+  status?: string;
+  conclusion?: string;
+  limit?: number;
+};
+
+export type CheckRunListResponse = {
+  check_runs: CheckRunPublic[];
+};
+
+export type CheckRunRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type CheckRunCreateRequest = {
+  owner: string;
+  name: string;
+  /** GitHub `check_run.name` — required. */
+  check_name: string;
+  head_sha: string;
+  details_url?: string;
+  external_id?: string;
+  /** Defaults to `queued`. */
+  status?: string;
+  conclusion?: string;
+  started_at?: string;
+  completed_at?: string;
+  output?: CheckRunOutput;
+};
+
+export type CheckRunUpdateRequest = {
+  owner: string;
+  name: string;
+  id: string;
+  check_name?: string;
+  /** `null` clears the stored value. */
+  details_url?: string | null;
+  external_id?: string | null;
+  status?: string;
+  conclusion?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  output?: CheckRunOutput;
+};
+
+export type CheckRunAnnotationsListRequest = {
+  owner: string;
+  name: string;
+  check_run_id: string;
+};
+
+export type CheckRunAnnotationsListResponse = {
+  annotations: CheckRunAnnotationPublic[];
+};
+
+export type WikiPagePublic = {
+  /** Page title without extension — `My-Page` for `My-Page.md`. */
+  page_name: string;
+  /** Web-UI link for the page. */
+  html_url: string;
+  /** GitHub reserved layout pages (`_Sidebar`/`_Footer`/`_Header`). */
+  reserved: boolean;
+  /** Commit sha that last touched the page (empty on unborn wikis). */
+  sha: string;
+  updated_at?: string | null;
+  /** Raw Markdown body — set by `wiki.pages.get`, absent on lists. */
+  content?: string | null;
+};
+
+export type WikiRevisionPublic = {
+  sha: string;
+  /** First line of the commit message. */
+  message: string;
+  author_name: string;
+  /** Forge username when the author email maps to an account. */
+  author_username?: string | null;
+  timestamp: string;
+};
+
+export type WikiPagesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type WikiPagesListResponse = {
+  pages: WikiPagePublic[];
+};
+
+export type WikiPageGetRequest = {
+  owner: string;
+  name: string;
+  /** Page name without `.md` — `Home`, `My-Page`, `_Sidebar`. */
+  page: string;
+};
+
+export type WikiPageCreateRequest = {
+  owner: string;
+  name: string;
+  /** Page title — spaces are converted to dashes, GitHub-style. */
+  title: string;
+  content: string;
+  /** Commit message; defaults to `Created {title} (markdown)`. */
+  message?: string;
+};
+
+export type WikiPageUpdateRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  content: string;
+  message?: string;
+};
+
+export type WikiPageDeleteRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  message?: string;
+};
+
+export type WikiPageWriteResponse = {
+  page: WikiPagePublic;
+};
+
+export type WikiPageDeleteResponse = {
+  ok: boolean;
+};
+
+export type WikiRevisionsListRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  limit?: number;
+};
+
+export type WikiRevisionsListResponse = {
+  revisions: WikiRevisionPublic[];
+};
+
+export type ProjectPublic = {
+  id: string;
+  repo_id: string;
+  /** Per-repo sequential `#N` (same scheme as milestones/issues). */
+  number: number;
+  /** GitHub `name` — the board title. */
+  title: string;
+  /** GitHub `body` — the board description. */
+  body: string;
+  state: string;
+  creator_id?: string;
+  creator_username?: string;
+  /** `/{owner}/{repo}/projects/{number}` web route. */
+  html_url: string;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectColumnPublic = {
+  id: string;
+  project_id: string;
+  name: string;
+  /** Contiguous 0-based position inside the board. */
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectCardPublic = {
+  id: string;
+  column_id: string;
+  /** Note text — `undefined` once the card is a linked entity. */
+  note?: string;
+  /** `issue` | `pull_request` — the linked entity kind. */
+  content_type?: string;
+  /** Linked entity row id. */
+  content_id?: string;
+  /** Linked entity `#N` — enrichment for the UI. */
+  content_number?: number;
+  /** Linked entity title — enrichment for the UI. */
+  content_title?: string;
+  /** Linked entity state — enrichment for the UI. */
+  content_state?: string;
+  /** `/{owner}/{repo}/{issues|pulls}/{number}` web route for linked cards. */
+  content_url?: string;
+  /** Contiguous 0-based position inside the column. */
+  position: number;
+  archived: boolean;
+  creator_id?: string;
+  creator_username?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectsListRequest = {
+  owner: string;
+  name: string;
+  /** `open` (default) | `closed` | `all`. */
+  state?: string;
+};
+
+export type ProjectsListResponse = {
+  projects: ProjectPublic[];
+};
+
+export type ProjectRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N`. */
+  project: number;
+};
+
+export type ProjectCreateRequest = {
+  owner: string;
+  name: string;
+  /** Board title (GitHub `name`). */
+  title: string;
+  body?: string;
+};
+
+export type ProjectUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  title?: string;
+  body?: string;
+  /** `open` | `closed` — transitions fire `closed`/`reopened`. */
+  state?: string;
+};
+
+export type ProjectDeleteResponse = {
+  ok: boolean;
+};
+
+export type ProjectColumnsListRequest = {
+  owner: string;
+  name: string;
+  project: number;
+};
+
+export type ProjectColumnsListResponse = {
+  columns: ProjectColumnPublic[];
+};
+
+export type ProjectColumnCreateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  /** Column display name (GitHub `name`). */
+  column_name: string;
+};
+
+export type ProjectColumnRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N` — scopes the column to the board. */
+  project: number;
+  /** Column id. */
+  column: string;
+};
+
+export type ProjectColumnUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  column: string;
+  column_name: string;
+};
+
+export type ProjectColumnMoveRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  column: string;
+  /** New 0-based position inside the board (clamped). */
+  position: number;
+};
+
+export type ProjectDeleteSimpleResponse = {
+  ok: boolean;
+};
+
+export type ProjectCardsListRequest = {
+  owner: string;
+  name: string;
+  /** Column id the cards belong to. */
+  column: string;
+  /** Include archived cards (GitHub hides them by default). */
+  archived?: boolean;
+};
+
+export type ProjectCardsListResponse = {
+  cards: ProjectCardPublic[];
+};
+
+export type ProjectCardCreateRequest = {
+  owner: string;
+  name: string;
+  /** Column id the card lands in (appended last). */
+  column: string;
+  /** Note text — a note card when `content_type`/`content_id` are absent. */
+  note?: string;
+  /** `issue` | `pull_request` — link an existing entity instead. */
+  content_type?: string;
+  content_id?: string;
+};
+
+export type ProjectCardRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N` — scopes the card to the board. */
+  project: number;
+  /** Card id. */
+  card: string;
+};
+
+export type ProjectCardUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  card: string;
+  note?: string;
+  archived?: boolean;
+};
+
+export type ProjectCardMoveRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  card: string;
+  /** Destination column (omit = same column reorder). */
+  column?: string;
+  /** New 0-based position inside the destination column (clamped). */
+  position: number;
+};
+
+export type DiscussionCategoryPublic = {
+  id: string;
+  repo_id: string;
+  name: string;
+  slug: string;
+  emoji: string;
+  description: string;
+  is_answerable: boolean;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionPublic = {
+  id: string;
+  repo_id: string;
+  /** The shared issue-sequence `#N`. */
+  number: number;
+  title: string;
+  body: string;
+  category?: DiscussionCategoryPublic | null;
+  author_id?: string | null;
+  author_username?: string | null;
+  answer_comment_id?: string | null;
+  answered_at?: string | null;
+  answered_by?: string | null;
+  answered_by_username?: string | null;
+  locked: boolean;
+  pinned: boolean;
+  label_ids: string[];
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionCommentPublic = {
+  id: string;
+  discussion_id: string;
+  parent_id?: string | null;
+  author_id?: string | null;
+  author_username?: string | null;
+  body: string;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionRepoRequest = {
+  owner: string;
+  name: string;
+};
+
+export type DiscussionRefRequest = {
+  owner: string;
+  name: string;
+  /** The discussion's shared issue-sequence `#N`. */
+  discussion: number;
+};
+
+export type DiscussionsListRequest = {
+  owner: string;
+  name: string;
+  /** Category id or slug (absent = all categories). */
+  category?: string;
+  /** `true` = answered only, `false` = unanswered only. */
+  answered?: boolean;
+};
+
+export type DiscussionsListResponse = {
+  discussions: DiscussionPublic[];
+};
+
+export type DiscussionCreateRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  body?: string;
+  /** Category id (from `discussions.categories.list`). */
+  category?: string;
+  label_ids?: string[];
+};
+
+export type DiscussionUpdateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  title?: string;
+  body?: string;
+  /** `null` clears the category; a value switches it. */
+  category?: string | null;
+};
+
+export type DiscussionDeleteResponse = {
+  ok: boolean;
+};
+
+export type DiscussionPinRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  pinned: boolean;
+};
+
+export type DiscussionLockRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  locked: boolean;
+};
+
+export type DiscussionTransferRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  target_owner: string;
+  target_name: string;
+};
+
+export type DiscussionLabelsSetRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  label_ids: string[];
+};
+
+export type DiscussionAnswerSetRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  /** Comment id to mark as the answer. */
+  comment: string;
+};
+
+export type DiscussionCategoriesListResponse = {
+  categories: DiscussionCategoryPublic[];
+};
+
+export type DiscussionCategoryCreateRequest = {
+  owner: string;
+  name: string;
+  /** Display name (the request field is `category_name` in Rust — see rpc_gen). */
+  category_name: string;
+  emoji?: string;
+  description?: string;
+  is_answerable?: boolean;
+};
+
+export type DiscussionCategoryRefRequest = {
+  owner: string;
+  name: string;
+  /** Category id. */
+  category: string;
+};
+
+export type DiscussionCategoryUpdateRequest = {
+  owner: string;
+  name: string;
+  category: string;
+  category_name?: string;
+  emoji?: string;
+  description?: string;
+  is_answerable?: boolean;
+};
+
+export type DiscussionCommentsListRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+};
+
+export type DiscussionCommentsListResponse = {
+  comments: DiscussionCommentPublic[];
+};
+
+export type DiscussionCommentCreateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  body: string;
+  /** Parent comment id — replies thread one level deep. */
+  parent?: string;
+};
+
+export type DiscussionCommentRefRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  comment: string;
+};
+
+export type DiscussionCommentUpdateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  comment: string;
+  body: string;
+};
+
+export type PagesSourcePublic = {
+  branch: string;
+  /** `/` (repo root) or `/docs` — GitHub's only legacy subtrees. */
+  path: string;
+};
+
+export type RepoPagesPublic = {
+  repo_id: string;
+  /** `legacy` | `workflow`. */
+  build_type: string;
+  source: PagesSourcePublic;
+  /** `built` | `building` | `errored` — the newest build's state. */
+  status?: string;
+  cname: string;
+  custom_404: boolean;
+  https_enforced: boolean;
+  /** `/pages/{owner}/{repo}/` — the served site root. */
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PagesBuildPublic = {
+  id: string;
+  repo_id: string;
+  /** `building` | `built` | `errored`. */
+  status: string;
+  /** `legacy` | `workflow`. */
+  build_type: string;
+  commit: string;
+  branch: string;
+  path: string;
+  url: string;
+  error_message?: string;
+  duration_ms: number;
+  pusher_id?: string;
+  pusher_username?: string;
+  run_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PagesRepoRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoPagesEnableRequest = {
+  owner: string;
+  name: string;
+  /** `legacy` (default) | `workflow`. */
+  build_type?: string;
+  source?: PagesSourcePublic;
+};
+
+export type RepoPagesUpdateRequest = {
+  owner: string;
+  name: string;
+  build_type?: string;
+  source?: PagesSourcePublic;
+  cname?: string;
+  https_enforced?: boolean;
+};
+
+export type RepoPagesDeleteResponse = {
+  ok: boolean;
+};
+
+export type PagesBuildsListRequest = {
+  owner: string;
+  name: string;
+  /** `built` | `errored` | `building` filter. */
+  status?: string;
+  /** Page size cap (server clamps to 100, default 30 like GitHub). */
+  limit?: number;
+};
+
+export type PagesBuildsListResponse = {
+  builds: PagesBuildPublic[];
+};
+
+export type PagesBuildGetRequest = {
+  owner: string;
+  name: string;
+  /** Build id, or `"latest"` for the newest build of any status. */
+  build: string;
+};
+
+export type PagesDeployCreateRequest = {
+  owner: string;
+  name: string;
+  /** Artifact name to publish (default `github-pages`). */
+  artifact?: string;
+  /** Artifact row id — wins over `artifact` when set; the REST
+      `pages/deployment` route translates `artifact_url` into this. */
+  artifact_id?: string;
+};
+
+export type MergeQueuePullEmbed = {
+  number: number;
+  title: string;
+  state: string;
+  head_ref: string;
+  head_sha: string;
+  base_ref: string;
+};
+
+export type MergeQueueEntryPublic = {
+  id: string;
+  repo_id: string;
+  /** PR repo-visible number (queue entries always resolve by number). */
+  pull_number: number;
+  /** Bare branch name the train targets (`main`, not `refs/heads/main`). */
+  base_ref: string;
+  /** 1-based enqueue order within the train. */
+  position: number;
+  /** `queued` | `merged` | `dequeued`. */
+  state: string;
+  /** The `checking` group the entry currently rides. */
+  group_id?: string;
+  enqueued_by?: string;
+  enqueued_by_username?: string;
+  /** `manual` | `failed_checks` | `merge_conflict` | `head_changed` |
+      `base_changed` | `closed` (`""` while queued/merged). */
+  dequeue_reason: string;
+  pull?: MergeQueuePullEmbed;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MergeGroupPublic = {
+  id: string;
+  repo_id: string;
+  base_ref: string;
+  base_sha: string;
+  head_ref: string;
+  head_sha: string;
+  /** `checking` | `merged` | `destroyed`. */
+  state: string;
+  /** Pull numbers the group carries, in merge order. */
+  pull_numbers: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type MergeQueueListRequest = {
+  owner: string;
+  name: string;
+  /** Filter to one train (bare branch name); empty lists every train. */
+  base_ref?: string;
+  /** `queued` (default) | `merged` | `dequeued` | `all`. */
+  state?: string;
+};
+
+export type MergeQueueListResponse = {
+  entries: MergeQueueEntryPublic[];
+};
+
+export type MergeQueueGetRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueGetResponse = {
+  entry?: MergeQueueEntryPublic;
+  /** The `checking` group the entry rides (absent when not queued). */
+  group?: MergeGroupPublic;
+  /** Whether the base branch's protection requires the queue. */
+  required: boolean;
+};
+
+export type MergeQueueEnqueueRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueEnqueueResponse = {
+  entry: MergeQueueEntryPublic;
+  group?: MergeGroupPublic;
+};
+
+export type MergeQueueDequeueRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type MergeQueueDequeueResponse = {
+  entry: MergeQueueEntryPublic;
+};
+
+export type MergeQueueGroupsRequest = {
+  owner: string;
+  name: string;
+  base_ref?: string;
+  limit?: number;
+};
+
+export type MergeQueueGroupsResponse = {
+  groups: MergeGroupPublic[];
+};
+
+export type OrgSecretMetaPublic = {
+  name: string;
+  /** `all` | `private` | `selected`. */
+  visibility: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrgActionsSecretsListRequest = {
+  slug: string;
+};
+
+export type OrgActionsSecretsListResponse = {
+  secrets: OrgSecretMetaPublic[];
+};
+
+export type OrgActionsRunnersRequest = {
+  slug: string;
+};
+
+export type OrgActionsRunnerRequest = {
+  slug: string;
+  runner_id: string;
+};
+
+export type OrgActionsSecretPutRequest = {
+  slug: string;
+  secret_name: string;
+  value: string;
+  /** `all` (default) | `private` | `selected`. */
+  visibility?: string;
+  /** Selected-repo ids — replaces the set when visibility is `selected`. */
+  repository_ids?: string[];
+};
+
+export type OrgActionsSecretDeleteRequest = {
+  slug: string;
+  secret_name: string;
+};
+
+export type OrgActionsSecretSetReposRequest = {
+  slug: string;
+  secret_name: string;
+  repository_ids: string[];
+};
+
+export type OrgActionsSecretReposRequest = {
+  slug: string;
+  secret_name: string;
+};
+
+export type OrgActionsSecretReposResponse = {
+  repository_ids: string[];
 };
 
 export type WorkflowTemplateProvenance = "builtin" | "instance" | "org";
@@ -2589,6 +4084,9 @@ export type FgPerms = {
   variables?: FgPermLevel;
   environments?: FgPermLevel;
   deployments?: FgPermLevel;
+  checks?: FgPermLevel;
+  repository_projects?: FgPermLevel;
+  discussions?: FgPermLevel;
   webhooks?: FgPermLevel;
   administration?: FgPermLevel;
   metadata?: FgPermLevel;
@@ -2626,6 +4124,7 @@ export type PackagesListRequest = {
 };
 
 export type PackageVersionPublic = {
+  id?: string;
   version: string;
   digest?: string | null;
   created_at: string;
@@ -2639,6 +4138,9 @@ export type PackagePublic = {
   format: string;
   visibility: string;
   repository_id?: string | null;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
   versions: PackageVersionPublic[];
 };
 
@@ -2653,6 +4155,15 @@ export type PackagesDeleteVersionRequest = {
 };
 
 export type PackagesDeleteVersionResponse = {
+  ok: boolean;
+};
+
+export type PackagesDeleteRequest = {
+  package_id: string;
+  confirm: string;
+};
+
+export type PackagesDeleteResponse = {
   ok: boolean;
 };
 
@@ -3400,6 +4911,23 @@ export type ToggleReactionResponse = {
   reacted: boolean;
 };
 
+export type MilestonePublic = {
+  id: string;
+  repo_id: string;
+  number: number;
+  title: string;
+  description: string;
+  state: string;
+  due_on?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  open_issues?: number;
+  closed_issues?: number;
+};
+
 export type IssuePublic = {
   id: string;
   repo_id: string;
@@ -3416,6 +4944,7 @@ export type IssuePublic = {
   labels?: LabelPublic[];
   assignees?: IssueAssigneePublic[];
   reactions?: ReactionGroupPublic[];
+  milestone?: MilestonePublic | null;
   comment_count?: number;
 };
 
@@ -3424,6 +4953,7 @@ export type CreateIssueRequest = {
   name: string;
   title: string;
   body?: string | null;
+  milestone?: number | null;
 };
 
 export type IssueRefRequest = {
@@ -3439,6 +4969,7 @@ export type IssueListRequest = {
   author?: string | null;
   label?: string | null;
   assignee?: string | null;
+  milestone?: string | null;
   q?: string | null;
   offset?: number | null;
   limit?: number | null;
@@ -3455,6 +4986,52 @@ export type UpdateIssueRequest = {
   number: number;
   title?: string | null;
   body?: string | null;
+  milestone?: number | null;
+};
+
+export type MilestoneListRequest = {
+  owner: string;
+  name: string;
+  state?: string | null;
+};
+
+export type MilestoneListResponse = {
+  milestones: MilestonePublic[];
+};
+
+export type MilestoneRefRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type CreateMilestoneRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  description?: string | null;
+  due_on?: string | null;
+};
+
+export type UpdateMilestoneRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  title?: string | null;
+  description?: string | null;
+  due_on?: string | null;
+  state?: string | null;
+};
+
+export type DeleteMilestoneResponse = {
+  ok: boolean;
+};
+
+export type SetIssueMilestoneRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  milestone?: number | null;
 };
 
 export type DeleteIssueRequest = {
@@ -3614,6 +5191,9 @@ export type WebhookDeliveryPublic = {
   http_status?: number | null;
   error_message?: string | null;
   attempt_count?: number;
+  payload?: string | null;
+  duration_ms?: number | null;
+  response_snippet?: string | null;
 };
 
 export type WebhookDeliveriesListRequest = {
@@ -4238,6 +5818,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoCreateDefaults>(opts, "repo.createDefaults", {}),
       create: (input: CreateRepoRequest) => rpcCall<RepoPublic>(opts, "repo.create", input),
       fork: (input: ForkRepoRequest) => rpcCall<RepoPublic>(opts, "repo.fork", input),
+      migrate: (input: RepoMigrateRequest) =>
+        rpcCall<RepoPublic>(opts, "repo.migrate", input),
       star: (input: RepoStarRequest) => rpcCall<RepoPublic>(opts, "repo.star", input),
       unstar: (input: RepoStarRequest) => rpcCall<RepoPublic>(opts, "repo.unstar", input),
       watch: (input: RepoWatchRequest) => rpcCall<RepoPublic>(opts, "repo.watch", input),
@@ -4438,23 +6020,253 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRunsListResponse>(opts, "repo.actions.listRuns", input),
         getRun: (input: ActionRunGetRequest) =>
           rpcCall<ActionRunGetResponse>(opts, "repo.actions.getRun", input),
+        getJob: (input: ActionJobGetRequest) =>
+          rpcCall<ActionJobGetResponse>(opts, "repo.actions.getJob", input),
         getJobLog: (input: ActionJobLogRequest) =>
           rpcCall<ActionJobLogResponse>(opts, "repo.actions.getJobLog", input),
+        jobAnnotations: (input: ActionJobAnnotationsRequest) =>
+          rpcCall<ActionJobAnnotationsResponse>(
+            opts,
+            "repo.actions.jobAnnotations",
+            input,
+          ),
         listWorkflows: (input: ActionWorkflowsListRequest) =>
           rpcCall<ActionWorkflowsListResponse>(opts, "repo.actions.listWorkflows", input),
         dispatchWorkflow: (input: ActionDispatchRequest) =>
           rpcCall<ActionDispatchResponse>(opts, "repo.actions.dispatchWorkflow", input),
+        dispatchRepository: (input: ActionDispatchRepositoryRequest) =>
+          rpcCall<ActionDispatchResponse>(
+            opts,
+            "repo.actions.dispatchRepository",
+            input,
+          ),
+        setWorkflowEnabled: (input: ActionSetWorkflowEnabledRequest) =>
+          rpcCall<{ ok: boolean; path: string; enabled: boolean }>(
+            opts,
+            "repo.actions.setWorkflowEnabled",
+            input,
+          ),
         rerunRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.rerunRun", input),
         cancelRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.cancelRun", input),
+        deleteRun: (input: ActionRunMutationRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.actions.deleteRun", input),
+        deleteRunLogs: (input: ActionRunMutationRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.actions.deleteRunLogs", input),
+        approveRun: (input: ActionRunMutationRequest) =>
+          rpcCall<ActionRunMutationResponse>(opts, "repo.actions.approveRun", input),
+        getPullRequestTarget: (input: RepoActionsPullRequestTargetRequest) =>
+          rpcCall<RepoActionsPullRequestTargetResponse>(
+            opts,
+            "repo.actions.getPullRequestTarget",
+            input,
+          ),
+        setPullRequestTarget: (input: RepoActionsSetPullRequestTargetRequest) =>
+          rpcCall<RepoActionsPullRequestTargetResponse>(
+            opts,
+            "repo.actions.setPullRequestTarget",
+            input,
+          ),
+        getForkPrApproval: (input: RepoActionsForkPrApprovalRequest) =>
+          rpcCall<RepoActionsForkPrApprovalResponse>(
+            opts,
+            "repo.actions.getForkPrApproval",
+            input,
+          ),
+        setForkPrApproval: (input: RepoActionsSetForkPrApprovalRequest) =>
+          rpcCall<RepoActionsForkPrApprovalResponse>(
+            opts,
+            "repo.actions.setForkPrApproval",
+            input,
+          ),
+        getDefaultPermissions: (input: RepoActionsDefaultPermissionsRequest) =>
+          rpcCall<RepoActionsDefaultPermissionsResponse>(
+            opts,
+            "repo.actions.getDefaultPermissions",
+            input,
+          ),
+        setDefaultPermissions: (input: RepoActionsSetDefaultPermissionsRequest) =>
+          rpcCall<RepoActionsDefaultPermissionsResponse>(
+            opts,
+            "repo.actions.setDefaultPermissions",
+            input,
+          ),
+        environments: {
+          list: (input: RepoActionsEnvironmentsListRequest) =>
+            rpcCall<RepoActionsEnvironmentsListResponse>(
+              opts,
+              "repo.actions.environments.list",
+              input,
+            ),
+          get: (input: RepoActionsEnvironmentGetRequest) =>
+            rpcCall<RepoActionsEnvironmentResponse>(
+              opts,
+              "repo.actions.environments.get",
+              input,
+            ),
+          upsert: (input: RepoActionsEnvironmentUpsertRequest) =>
+            rpcCall<RepoActionsEnvironmentResponse>(
+              opts,
+              "repo.actions.environments.upsert",
+              input,
+            ),
+          delete: (input: RepoActionsEnvironmentDeleteRequest) =>
+            rpcCall<RepoActionsEnvironmentDeleteResponse>(
+              opts,
+              "repo.actions.environments.delete",
+              input,
+            ),
+          secretsList: (input: RepoActionsEnvironmentSecretsListRequest) =>
+            rpcCall<ActionSecretsListResponse>(
+              opts,
+              "repo.actions.environments.secretsList",
+              input,
+            ),
+          secretsPublicKey: (input: RepoActionsEnvironmentSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(
+              opts,
+              "repo.actions.environments.secretsPublicKey",
+              input,
+            ),
+          secretsPut: (input: RepoActionsEnvironmentSecretPutRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.secretsPut",
+              input,
+            ),
+          secretsDelete: (input: RepoActionsEnvironmentSecretDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.secretsDelete",
+              input,
+            ),
+          variablesList: (input: RepoActionsEnvironmentVariablesListRequest) =>
+            rpcCall<ActionVariablesListResponse>(
+              opts,
+              "repo.actions.environments.variablesList",
+              input,
+            ),
+          variablesPut: (input: RepoActionsEnvironmentVariablePutRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.variablesPut",
+              input,
+            ),
+          variablesDelete: (input: RepoActionsEnvironmentVariableDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.variablesDelete",
+              input,
+            ),
+        },
+        listDeployments: (input: ActionDeploymentsListRequest) =>
+          rpcCall<ActionDeploymentsListResponse>(
+            opts,
+            "repo.actions.listDeployments",
+            input,
+          ),
+        approveJob: (input: ActionJobApproveRequest) =>
+          rpcCall<ActionJobApproveResponse>(opts, "repo.actions.approveJob", input),
+        reviewDeployment: (input: ActionDeploymentReviewRequest) =>
+          rpcCall<ActionDeploymentReviewResponse>(
+            opts,
+            "repo.actions.reviewDeployment",
+            input,
+          ),
+        listArtifacts: (input: ActionArtifactsListRequest) =>
+          rpcCall<ActionArtifactsListResponse>(
+            opts,
+            "repo.actions.listArtifacts",
+            input,
+          ),
+        listAllArtifacts: (input: ActionRepoArtifactsListRequest) =>
+          rpcCall<ActionArtifactsListResponse>(
+            opts,
+            "repo.actions.listAllArtifacts",
+            input,
+          ),
+        getArtifact: (input: ActionArtifactGetRequest) =>
+          rpcCall<ActionArtifactGetResponse>(opts, "repo.actions.getArtifact", input),
+        deleteArtifact: (input: ActionArtifactDeleteRequest) =>
+          rpcCall<ActionArtifactDeleteResponse>(
+            opts,
+            "repo.actions.deleteArtifact",
+            input,
+          ),
+        listCaches: (input: ActionCachesListRequest) =>
+          rpcCall<ActionCachesListResponse>(
+            opts,
+            "repo.actions.listCaches",
+            input,
+          ),
+        deleteCache: (input: ActionCacheDeleteRequest) =>
+          rpcCall<ActionCacheDeleteResponse>(
+            opts,
+            "repo.actions.deleteCache",
+            input,
+          ),
+        listRunners: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<ActionListRunnersResponse>(opts, "repo.actions.listRunners", input),
+        getRunner: (input: ActionRunnerRequest) =>
+          rpcCall<ActionRunnerGetResponse>(opts, "repo.actions.getRunner", input),
+        deleteRunner: (input: ActionRunnerRequest) =>
+          rpcCall<ActionRunnerDeleteResponse>(
+            opts,
+            "repo.actions.deleteRunner",
+            input,
+          ),
+        createRegistrationToken: (input: ActionRepoRegistrationTokenRequest) =>
+          rpcCall<ActionRegistrationTokenResponse>(
+            opts,
+            "repo.actions.createRegistrationToken",
+            input,
+          ),
+        createRemoveToken: (input: ActionRepoRegistrationTokenRequest) =>
+          rpcCall<ActionRegistrationTokenResponse>(
+            opts,
+            "repo.actions.createRemoveToken",
+            input,
+          ),
+        listRunApprovals: (input: ActionRunApprovalsRequest) =>
+          rpcCall<ActionRunApprovalsResponse>(
+            opts,
+            "repo.actions.listRunApprovals",
+            input,
+          ),
+        organizationSecrets: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<OrgActionsSecretsListResponse>(
+            opts,
+            "repo.actions.organizationSecrets",
+            input,
+          ),
+        organizationVariables: (input: ActionRepoRunnersListRequest) =>
+          rpcCall<OrgActionsVariablesListResponse>(
+            opts,
+            "repo.actions.organizationVariables",
+            input,
+          ),
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),
+          publicKey: (input: ActionSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(opts, "repo.actions.secrets.publicKey", input),
           put: (input: ActionSecretPutRequest) =>
             rpcCall<{ ok: boolean }>(opts, "repo.actions.secrets.put", input),
           delete: (input: ActionSecretDeleteRequest) =>
             rpcCall<{ ok: boolean }>(opts, "repo.actions.secrets.delete", input),
+        },
+        variables: {
+          list: (input: ActionVariablesListRequest) =>
+            rpcCall<ActionVariablesListResponse>(
+              opts,
+              "repo.actions.variables.list",
+              input,
+            ),
+          put: (input: ActionVariablesPutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "repo.actions.variables.put", input),
+          delete: (input: ActionVariablesDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "repo.actions.variables.delete", input),
         },
         getEnabled: (input: ActionEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
@@ -4495,6 +6307,24 @@ export function createClient(opts: CreateClientOptions) {
         setEnabled: (input: RepoUnitSetEnabledRequest) =>
           rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.setEnabled", input),
       },
+      wiki: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.wiki.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.wiki.setEnabled", input),
+      },
+      projects: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.projects.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.projects.setEnabled", input),
+      },
+      discussions: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.discussions.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.discussions.setEnabled", input),
+      },
     },
     org: {
       create: (input: CreateOrgRequest) => rpcCall<OrgPublic>(opts, "org.create", input),
@@ -4523,6 +6353,90 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<{ ok: boolean }>(opts, "org.invites.revoke", input),
         accept: (input: OrgInvitesAcceptRequest) =>
           rpcCall<OrgInvitesAcceptResponse>(opts, "org.invites.accept", input),
+      },
+      actions: {
+        secrets: {
+          list: (input: OrgActionsSecretsListRequest) =>
+            rpcCall<OrgActionsSecretsListResponse>(
+              opts,
+              "org.actions.secrets.list",
+              input,
+            ),
+          publicKey: (input: OrgActionsSecretsListRequest) =>
+            rpcCall<ActionSecretKeyPublic>(
+              opts,
+              "org.actions.secrets.publicKey",
+              input,
+            ),
+          put: (input: OrgActionsSecretPutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.secrets.put", input),
+          delete: (input: OrgActionsSecretDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.secrets.delete", input),
+          listRepos: (input: OrgActionsSecretReposRequest) =>
+            rpcCall<OrgActionsSecretReposResponse>(
+              opts,
+              "org.actions.secrets.listRepos",
+              input,
+            ),
+          setRepos: (input: OrgActionsSecretSetReposRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "org.actions.secrets.setRepos",
+              input,
+            ),
+        },
+        variables: {
+          list: (input: OrgActionsVariablesListRequest) =>
+            rpcCall<OrgActionsVariablesListResponse>(
+              opts,
+              "org.actions.variables.list",
+              input,
+            ),
+          put: (input: OrgActionsVariablePutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.variables.put", input),
+          delete: (input: OrgActionsVariableDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.variables.delete", input),
+          listRepos: (input: OrgActionsVariableReposRequest) =>
+            rpcCall<OrgActionsVariableReposResponse>(
+              opts,
+              "org.actions.variables.listRepos",
+              input,
+            ),
+          setRepos: (input: OrgActionsVariableSetReposRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "org.actions.variables.setRepos",
+              input,
+            ),
+        },
+        runners: {
+          list: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionListRunnersResponse>(
+              opts,
+              "org.actions.runners.list",
+              input,
+            ),
+          get: (input: OrgActionsRunnerRequest) =>
+            rpcCall<ActionRunnerGetResponse>(opts, "org.actions.runners.get", input),
+          delete: (input: OrgActionsRunnerRequest) =>
+            rpcCall<ActionRunnerDeleteResponse>(
+              opts,
+              "org.actions.runners.delete",
+              input,
+            ),
+          createRegistrationToken: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionRegistrationTokenResponse>(
+              opts,
+              "org.actions.runners.createRegistrationToken",
+              input,
+            ),
+          createRemoveToken: (input: OrgActionsRunnersRequest) =>
+            rpcCall<ActionRegistrationTokenResponse>(
+              opts,
+              "org.actions.runners.createRemoveToken",
+              input,
+            ),
+        },
       },
     },
     invites: {
@@ -4581,6 +6495,205 @@ export function createClient(opts: CreateClientOptions) {
         remove: (input: RemoveIssueLinkRequest) =>
           rpcCall<RemoveIssueLinkResponse>(opts, "issue.links.remove", input),
       },
+      milestone: {
+        set: (input: SetIssueMilestoneRequest) =>
+          rpcCall<IssuePublic>(opts, "issue.milestone.set", input),
+      },
+    },
+    milestone: {
+      list: (input: MilestoneListRequest) =>
+        rpcCall<MilestoneListResponse>(opts, "milestone.list", input),
+      get: (input: MilestoneRefRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.get", input),
+      create: (input: CreateMilestoneRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.create", input),
+      update: (input: UpdateMilestoneRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.update", input),
+      delete: (input: MilestoneRefRequest) =>
+        rpcCall<DeleteMilestoneResponse>(opts, "milestone.delete", input),
+    },
+    deployment: {
+      list: (input: DeploymentListRequest) =>
+        rpcCall<DeploymentListResponse>(opts, "deployment.list", input),
+      get: (input: DeploymentRefRequest) =>
+        rpcCall<ActionDeploymentPublic>(opts, "deployment.get", input),
+      create: (input: DeploymentCreateRequest) =>
+        rpcCall<ActionDeploymentPublic>(opts, "deployment.create", input),
+      delete: (input: DeploymentRefRequest) =>
+        rpcCall<DeploymentDeleteResponse>(opts, "deployment.delete", input),
+      status: {
+        list: (input: DeploymentStatusListRequest) =>
+          rpcCall<DeploymentStatusListResponse>(opts, "deployment.status.list", input),
+        create: (input: DeploymentStatusCreateRequest) =>
+          rpcCall<DeploymentStatusPublic>(opts, "deployment.status.create", input),
+      },
+    },
+    check: {
+      suites: {
+        list: (input: CheckSuiteListRequest) =>
+          rpcCall<CheckSuiteListResponse>(opts, "check.suites.list", input),
+        get: (input: CheckSuiteRefRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.get", input),
+        create: (input: CheckSuiteCreateRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.create", input),
+        rerequest: (input: CheckSuiteRefRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.rerequest", input),
+      },
+      runs: {
+        listForSuite: (input: CheckRunListForSuiteRequest) =>
+          rpcCall<CheckRunListResponse>(opts, "check.runs.listForSuite", input),
+        listForRef: (input: CheckRunListForRefRequest) =>
+          rpcCall<CheckRunListResponse>(opts, "check.runs.listForRef", input),
+        get: (input: CheckRunRefRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.get", input),
+        create: (input: CheckRunCreateRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.create", input),
+        update: (input: CheckRunUpdateRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.update", input),
+        rerequest: (input: CheckRunRefRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.rerequest", input),
+      },
+      annotations: {
+        list: (input: CheckRunAnnotationsListRequest) =>
+          rpcCall<CheckRunAnnotationsListResponse>(opts, "check.annotations.list", input),
+      },
+    },
+    wiki: {
+      pages: {
+        list: (input: WikiPagesListRequest) =>
+          rpcCall<WikiPagesListResponse>(opts, "wiki.pages.list", input),
+        get: (input: WikiPageGetRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.get", input),
+        create: (input: WikiPageCreateRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.create", input),
+        update: (input: WikiPageUpdateRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.update", input),
+        delete: (input: WikiPageDeleteRequest) =>
+          rpcCall<WikiPageDeleteResponse>(opts, "wiki.pages.delete", input),
+      },
+      revisions: {
+        list: (input: WikiRevisionsListRequest) =>
+          rpcCall<WikiRevisionsListResponse>(opts, "wiki.revisions.list", input),
+      },
+    },
+    projects: {
+      list: (input: ProjectsListRequest) =>
+        rpcCall<ProjectsListResponse>(opts, "projects.list", input),
+      get: (input: ProjectRefRequest) => rpcCall<ProjectPublic>(opts, "projects.get", input),
+      create: (input: ProjectCreateRequest) =>
+        rpcCall<ProjectPublic>(opts, "projects.create", input),
+      update: (input: ProjectUpdateRequest) =>
+        rpcCall<ProjectPublic>(opts, "projects.update", input),
+      delete: (input: ProjectRefRequest) =>
+        rpcCall<ProjectDeleteResponse>(opts, "projects.delete", input),
+      columns: {
+        list: (input: ProjectColumnsListRequest) =>
+          rpcCall<ProjectColumnsListResponse>(opts, "projects.columns.list", input),
+        create: (input: ProjectColumnCreateRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.create", input),
+        update: (input: ProjectColumnUpdateRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.update", input),
+        move: (input: ProjectColumnMoveRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.move", input),
+        delete: (input: ProjectColumnRefRequest) =>
+          rpcCall<ProjectDeleteSimpleResponse>(opts, "projects.columns.delete", input),
+      },
+      cards: {
+        list: (input: ProjectCardsListRequest) =>
+          rpcCall<ProjectCardsListResponse>(opts, "projects.cards.list", input),
+        create: (input: ProjectCardCreateRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.create", input),
+        update: (input: ProjectCardUpdateRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.update", input),
+        move: (input: ProjectCardMoveRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.move", input),
+        convert: (input: ProjectCardRefRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.convert", input),
+        delete: (input: ProjectCardRefRequest) =>
+          rpcCall<ProjectDeleteSimpleResponse>(opts, "projects.cards.delete", input),
+      },
+    },
+    discussions: {
+      list: (input: DiscussionsListRequest) =>
+        rpcCall<DiscussionsListResponse>(opts, "discussions.list", input),
+      get: (input: DiscussionRefRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.get", input),
+      create: (input: DiscussionCreateRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.create", input),
+      update: (input: DiscussionUpdateRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.update", input),
+      delete: (input: DiscussionRefRequest) =>
+        rpcCall<DiscussionDeleteResponse>(opts, "discussions.delete", input),
+      pin: (input: DiscussionPinRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.pin", input),
+      lock: (input: DiscussionLockRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.lock", input),
+      transfer: (input: DiscussionTransferRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.transfer", input),
+      labels: {
+        set: (input: DiscussionLabelsSetRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.labels.set", input),
+      },
+      answer: {
+        set: (input: DiscussionAnswerSetRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.answer.set", input),
+        clear: (input: DiscussionRefRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.answer.clear", input),
+      },
+      categories: {
+        list: (input: DiscussionRepoRequest) =>
+          rpcCall<DiscussionCategoriesListResponse>(opts, "discussions.categories.list", input),
+        create: (input: DiscussionCategoryCreateRequest) =>
+          rpcCall<DiscussionCategoryPublic>(opts, "discussions.categories.create", input),
+        update: (input: DiscussionCategoryUpdateRequest) =>
+          rpcCall<DiscussionCategoryPublic>(opts, "discussions.categories.update", input),
+        delete: (input: DiscussionCategoryRefRequest) =>
+          rpcCall<DiscussionDeleteResponse>(opts, "discussions.categories.delete", input),
+      },
+      comments: {
+        list: (input: DiscussionCommentsListRequest) =>
+          rpcCall<DiscussionCommentsListResponse>(opts, "discussions.comments.list", input),
+        create: (input: DiscussionCommentCreateRequest) =>
+          rpcCall<DiscussionCommentPublic>(opts, "discussions.comments.create", input),
+        update: (input: DiscussionCommentUpdateRequest) =>
+          rpcCall<DiscussionCommentPublic>(opts, "discussions.comments.update", input),
+        delete: (input: DiscussionCommentRefRequest) =>
+          rpcCall<DiscussionDeleteResponse>(opts, "discussions.comments.delete", input),
+      },
+    },
+    pages: {
+      get: (input: PagesRepoRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.get", input),
+      enable: (input: RepoPagesEnableRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.enable", input),
+      update: (input: RepoPagesUpdateRequest) =>
+        rpcCall<RepoPagesPublic>(opts, "pages.update", input),
+      disable: (input: PagesRepoRequest) =>
+        rpcCall<RepoPagesDeleteResponse>(opts, "pages.disable", input),
+      builds: {
+        list: (input: PagesBuildsListRequest) =>
+          rpcCall<PagesBuildsListResponse>(opts, "pages.builds.list", input),
+        get: (input: PagesBuildGetRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.builds.get", input),
+        request: (input: PagesRepoRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.builds.request", input),
+      },
+      deploys: {
+        create: (input: PagesDeployCreateRequest) =>
+          rpcCall<PagesBuildPublic>(opts, "pages.deploys.create", input),
+      },
+    },
+    mergeQueue: {
+      list: (input: MergeQueueListRequest) =>
+        rpcCall<MergeQueueListResponse>(opts, "merge_queue.list", input),
+      get: (input: MergeQueueGetRequest) =>
+        rpcCall<MergeQueueGetResponse>(opts, "merge_queue.get", input),
+      groups: (input: MergeQueueGroupsRequest) =>
+        rpcCall<MergeQueueGroupsResponse>(opts, "merge_queue.groups", input),
+      enqueue: (input: MergeQueueEnqueueRequest) =>
+        rpcCall<MergeQueueEnqueueResponse>(opts, "merge_queue.enqueue", input),
+      dequeue: (input: MergeQueueDequeueRequest) =>
+        rpcCall<MergeQueueDequeueResponse>(opts, "merge_queue.dequeue", input),
     },
     pull: {
       create: (input: CreatePullRequest) =>
@@ -4728,6 +6841,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PackagesListResponse>(opts, "packages.list", input),
       deleteVersion: (input: PackagesDeleteVersionRequest) =>
         rpcCall<PackagesDeleteVersionResponse>(opts, "packages.deleteVersion", input),
+      delete: (input: PackagesDeleteRequest) =>
+        rpcCall<PackagesDeleteResponse>(opts, "packages.delete", input),
       adminUsage: (input: PackagesAdminUsageRequest) =>
         rpcCall<PackagesAdminUsageResponse>(opts, "packages.adminUsage", input),
       adminSetQuota: (input: PackagesAdminSetQuotaRequest) =>
@@ -5614,6 +7729,20 @@ export function actionsGetRunQueryOptions(
   };
 }
 
+export function actionsGetJobQueryOptions(
+  client: OxideanClient,
+  input: ActionJobGetRequest,
+) {
+  return {
+    queryKey: ["repo", "actions", "getJob", input.owner, input.name, input.job_id] as const,
+    queryFn: async () => {
+      const res = await client.repo.actions.getJob(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function actionsGetJobLogQueryOptions(
   client: OxideanClient,
   input: ActionJobLogRequest,
@@ -5668,6 +7797,17 @@ export function actionsDispatchWorkflowMutationOptions(client: OxideanClient) {
   };
 }
 
+export function actionsDispatchRepositoryMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "dispatchRepository"] as const,
+    mutationFn: async (input: ActionDispatchRepositoryRequest) => {
+      const res = await client.repo.actions.dispatchRepository(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function actionsRerunRunMutationOptions(client: OxideanClient) {
   return {
     mutationKey: ["repo", "actions", "rerunRun"] as const,
@@ -5690,11 +7830,55 @@ export function actionsCancelRunMutationOptions(client: OxideanClient) {
   };
 }
 
+export function actionsDeleteRunMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "deleteRun"] as const,
+    mutationFn: async (input: ActionRunMutationRequest) => {
+      const res = await client.repo.actions.deleteRun(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsDeleteRunLogsMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "deleteRunLogs"] as const,
+    mutationFn: async (input: ActionRunMutationRequest) => {
+      const res = await client.repo.actions.deleteRunLogs(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsSetWorkflowEnabledMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "setWorkflowEnabled"] as const,
+    mutationFn: async (input: ActionSetWorkflowEnabledRequest) => {
+      const res = await client.repo.actions.setWorkflowEnabled(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function packagesDeleteVersionMutationOptions(client: OxideanClient) {
   return {
     mutationKey: ["packages", "deleteVersion"] as const,
     mutationFn: async (input: PackagesDeleteVersionRequest) => {
       const res = await client.packages.deleteVersion(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function packagesDeleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["packages", "delete"] as const,
+    mutationFn: async (input: PackagesDeleteRequest) => {
+      const res = await client.packages.delete(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

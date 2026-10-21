@@ -25,8 +25,8 @@ use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
 use crate::routes::{
-    auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, release_assets, repo_raw,
-    template_packs,
+    action_badge, action_downloads, auth_callbacks, avatar, cli_dist, feeds, git_lfs,
+    git_smart_http, pages_serve, release_assets, repo_raw, template_packs,
 };
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
@@ -53,6 +53,22 @@ pub struct AppState {
     pub packages_dir: PathBuf,
     /// Actions job log store (`OXIDEAN_ACTIONS_LOG_DIR`, default `var/actions-logs`) — D-ACT-13.
     pub actions_log_dir: PathBuf,
+    /// Actions artifact blob store (`OXIDEAN_ACTIONS_ARTIFACTS_DIR`,
+    /// default `var/actions-artifacts`) — upload/download-artifact payloads.
+    pub actions_artifacts_dir: PathBuf,
+    /// Actions cache blob store (`OXIDEAN_ACTIONS_CACHE_DIR`, default
+    /// `var/actions-cache`) — `actions/cache` service payloads.
+    pub actions_cache_dir: PathBuf,
+    /// Per-repo cache ceiling (`OXIDEAN_ACTIONS_CACHE_MAX_BYTES`, default
+    /// 10 GiB) — LRU eviction past this point.
+    pub actions_cache_max_bytes: u64,
+    /// Pages materialized site trees (`OXIDEAN_PAGES_DIR`, default
+    /// `var/pages`) — `pages.*` builds publish here, `pages_serve` reads.
+    pub pages_dir: PathBuf,
+    /// Max bytes for a single artifact upload (default 2 GiB).
+    pub actions_artifact_max_bytes: u64,
+    /// Days an artifact is retained (default 90 — GitHub's own default).
+    pub actions_artifact_retention_days: u32,
     /// Instance Actions gate (`OXIDEAN_ACTIONS_ENABLED`, default true) — D-ACT-06.
     pub actions_enabled: bool,
     /// Env default for the MCP endpoint (`OXIDEAN_MCP_ENABLED`, default true) —
@@ -144,16 +160,17 @@ impl AppState {
                 .unwrap_or_else(|_| PathBuf::from("/"))
                 .join(packages_dir)
         };
-        let actions_log_dir = std::env::var("OXIDEAN_ACTIONS_LOG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("var/actions-logs"));
-        let actions_log_dir = if actions_log_dir.is_absolute() {
-            actions_log_dir
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("/"))
-                .join(actions_log_dir)
-        };
+        let actions_log_dir = crate::actions::logs::resolve_log_dir();
+        let actions_artifacts_dir = crate::actions::artifacts::resolve_artifact_dir();
+        let actions_artifact_max_bytes = std::env::var("OXIDEAN_ACTIONS_ARTIFACT_MAX_BYTES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2 * 1024 * 1024 * 1024u64);
+        let actions_artifact_retention_days =
+            std::env::var("OXIDEAN_ACTIONS_ARTIFACT_RETENTION_DAYS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(90u32);
         let actions_enabled = std::env::var("OXIDEAN_ACTIONS_ENABLED")
             .map(|v| {
                 let t = v.trim().to_ascii_lowercase();
@@ -187,6 +204,12 @@ impl AppState {
             repo_redirect_retention_days,
             packages_dir,
             actions_log_dir,
+            actions_artifacts_dir,
+            actions_cache_dir: crate::actions::cache::resolve_cache_dir(),
+            actions_cache_max_bytes: crate::actions::cache::default_cache_max_bytes(),
+            pages_dir: crate::pages::resolve_pages_dir(),
+            actions_artifact_max_bytes,
+            actions_artifact_retention_days,
             actions_enabled,
             mcp_enabled,
             git,
@@ -241,6 +264,26 @@ impl AppState {
         self
     }
 
+    pub fn with_actions_artifacts_dir(mut self, dir: PathBuf) -> Self {
+        self.actions_artifacts_dir = dir;
+        self
+    }
+
+    pub fn with_actions_cache_dir(mut self, dir: PathBuf) -> Self {
+        self.actions_cache_dir = dir;
+        self
+    }
+
+    pub fn with_actions_cache_max_bytes(mut self, max: u64) -> Self {
+        self.actions_cache_max_bytes = max;
+        self
+    }
+
+    pub fn with_pages_dir(mut self, dir: PathBuf) -> Self {
+        self.pages_dir = dir;
+        self
+    }
+
     pub fn with_actions_enabled(mut self, enabled: bool) -> Self {
         self.actions_enabled = enabled;
         self
@@ -287,6 +330,18 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             post(crate::mcp::handle_post).get(crate::mcp::handle_get),
         )
         .nest("/api/actions", crate::actions::runner_proto::router())
+        // actions/cache@v4 Twirp surface — `CacheServiceClientJSON` joins
+        // `new URL("/twirp/<svc>/<m>", ACTIONS_RESULTS_URL)`, so the service
+        // lives at the origin root regardless of the env var's path. Bearer
+        // is the same per-job runtime token as the v1 surface.
+        .nest(
+            "/twirp",
+            crate::actions::cache_v2::twirp_router()
+                .merge(crate::actions::artifacts_v2::twirp_router()),
+        )
+        // OIDC issuer for `id-token: write` jobs — the request token itself
+        // is the credential, so these paths carry no session middleware.
+        .nest("/api/actions/oidc", crate::actions::oidc::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
             "/api/auth/workos/callback",
@@ -338,6 +393,24 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/releases/assets/{asset_id}",
             get(release_assets::download_asset),
         )
+        // Browser-facing Actions downloads — session/PAT-authed, unlike the
+        // runner-token /api/actions/* surface.
+        .route(
+            "/api/repos/{owner}/{repo}/actions/artifacts/{artifact_id}",
+            get(action_downloads::download_artifact),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+            get(action_downloads::download_job_log),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs/stream",
+            get(action_downloads::stream_job_log),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+            get(action_downloads::download_run_logs),
+        )
         .route(
             "/api/admin/templates",
             post(template_packs::upload_pack).layer(DefaultBodyLimit::max(
@@ -369,6 +442,24 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/users/{username}/activity.atom",
             get(feeds::user_activity_feed),
         )
+        // GitHub-shaped workflow status badge — /{owner}/{repo}/actions/
+        // workflows/{file}/badge.svg (web tier proxies this path here); also
+        // mounted under /api/repos for direct API consumers.
+        .route(
+            "/{owner}/{repo}/actions/workflows/{workflow}/badge.svg",
+            get(action_badge::workflow_badge),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/workflows/{workflow}/badge.svg",
+            get(action_badge::workflow_badge),
+        )
+        // Pages sites — /pages/{owner}/{repo}/{*path} serves the materialized
+        // tree (edge routes the reserved `/pages` prefix here; the web tier
+        // proxies it too). Same-origin user HTML is sandboxed via CSP inside
+        // the handler.
+        .route("/pages/{owner}/{repo}", get(pages_serve::redirect_root))
+        .route("/pages/{owner}/{repo}/", get(pages_serve::serve_index))
+        .route("/pages/{owner}/{repo}/{*path}", get(pages_serve::serve))
         // Smart HTTP — D-18/D-22: only on /{owner}/{repo}.git (segment includes .git suffix)
         .route(
             "/{owner}/{repo_git}/info/refs",
@@ -630,6 +721,9 @@ pub(crate) fn build_rpc_ctx_with_session(
         release_assets_dir: state.release_assets_dir.clone(),
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
+        actions_artifacts_dir: state.actions_artifacts_dir.clone(),
+        actions_cache_dir: state.actions_cache_dir.clone(),
+        pages_dir: state.pages_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
@@ -668,11 +762,68 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
+/// `Authorization: Basic <b64 user:token>` → the token when its password
+/// slot carries a PAT / job token (same pairs git Smart HTTP accepts —
+/// raw account passwords are never honored). Lets Gitea-style Basic
+/// clients authenticate the whole REST/RPC edge, e.g. `tea` CLI.
+fn basic_pat_from_headers(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let encoded = raw
+        .strip_prefix("Basic ")
+        .or_else(|| raw.strip_prefix("basic "))?;
+    let decoded = String::from_utf8(base64_decode(encoded.trim())?).ok()?;
+    let (_user, pass) = decoded.split_once(':')?;
+    let pass = pass.trim();
+    (pass.starts_with(oxidean_core::CLASSIC_PAT_PREFIX)
+        || pass.starts_with(oxidean_core::FINE_GRAINED_PAT_PREFIX)
+        || pass.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX))
+    .then(|| pass.to_string())
+}
+
+/// Small base64 decoder (same shape as `git_smart_http`/`lfs::auth` — no
+/// new crate dep for one header).
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    let bytes: Vec<u8> = input
+        .bytes()
+        .filter(|&b| !b.is_ascii_whitespace())
+        .collect();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: i32 = 0;
+    for &b in &bytes {
+        if b == b'=' {
+            break;
+        }
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32;
+        buf = (buf << 6) | val;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 pub(crate) fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     if let Some(token) = session_token_from_headers(headers) {
         return RpcCredential::Cookie(token);
     }
     if let Some(token) = bearer_token_from_headers(headers) {
+        return RpcCredential::Bearer(token);
+    }
+    if let Some(token) = basic_pat_from_headers(headers) {
         return RpcCredential::Bearer(token);
     }
     RpcCredential::Anonymous
@@ -743,6 +894,9 @@ pub(crate) async fn build_rpc_ctx(
         release_assets_dir: state.release_assets_dir.clone(),
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
+        actions_artifacts_dir: state.actions_artifacts_dir.clone(),
+        actions_cache_dir: state.actions_cache_dir.clone(),
+        pages_dir: state.pages_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,

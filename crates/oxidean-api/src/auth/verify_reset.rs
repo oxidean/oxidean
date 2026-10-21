@@ -763,6 +763,9 @@ mod tests {
             release_assets_dir: PathBuf::from("/tmp/oxidean-test-release-assets"),
             template_packs_dir: PathBuf::from("/tmp/oxidean-test-template-packs"),
             actions_log_dir: PathBuf::from("/tmp/oxidean-test-actions-logs"),
+            actions_artifacts_dir: PathBuf::from("/tmp/oxidean-test-actions-artifacts"),
+            actions_cache_dir: PathBuf::from("/tmp/oxidean-test-actions-cache"),
+            pages_dir: PathBuf::from("/tmp/oxidean-test-pages"),
             git: Arc::new(oxidean_git::CliGitBackend::new()),
             env_name: "development".into(),
             session: Some(ResolvedSession {

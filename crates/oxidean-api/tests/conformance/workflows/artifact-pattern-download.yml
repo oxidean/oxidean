@@ -1,0 +1,24 @@
+name: artifact-pattern-download
+on: [push]
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir -p a b && echo "from-a" > a/f.txt && echo "from-b" > b/f.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-a
+          path: a/**
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-b
+          path: b/**
+      - uses: actions/upload-artifact@v4
+        with:
+          name: other
+          path: a/**
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: web-*
+          path: dl
+      - run: cat dl/web-a/f.txt && cat dl/web-b/f.txt && test ! -d dl/other

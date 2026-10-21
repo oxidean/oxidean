@@ -5,17 +5,18 @@ use oxidean_git::assert_git_version;
 use tracing_subscriber::EnvFilter;
 
 fn main() {
-    // Deep RPC dispatch chains (~25 nested coroutine polls) overflow tokio's
-    // 2 MiB worker default in debug builds — seen on vcs.changeset_create.
-    tokio::runtime::Builder::new_multi_thread()
+    // The RPC dispatch graph compiles to very large async futures; in debug
+    // builds a single poll can exceed tokio's default 2 MiB worker stack.
+    // 16 MiB stacks are virtual — only touched pages are committed.
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_stack_size(8 << 20)
+        .thread_stack_size(16 * 1024 * 1024)
         .build()
-        .expect("tokio runtime")
-        .block_on(run());
+        .expect("tokio runtime");
+    rt.block_on(serve());
 }
 
-async fn run() {
+async fn serve() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();

@@ -4,7 +4,12 @@ import { matchPath } from "@/lib/route-params";
 import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
-import type { IssueListResponse, LabelPublic, RepoPublic } from "@oxidean/api-client";
+import type {
+  IssueListResponse,
+  LabelPublic,
+  MilestonePublic,
+  RepoPublic,
+} from "@oxidean/api-client";
 import { useState } from "octane";
 import {
   ISSUE_LIST_PAGE_SIZE,
@@ -16,7 +21,12 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
 
-import { fetchIssueList, fetchLabelListForRepo, fetchRepoGet } from "@/lib/ssr-repo";
+import {
+  fetchIssueList,
+  fetchLabelListForRepo,
+  fetchMilestoneList,
+  fetchRepoGet,
+} from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
 export type IssuesLoaderData =
@@ -29,6 +39,7 @@ export type IssuesLoaderData =
       repo: RepoPublic;
       list: IssueListResponse;
       labels: LabelPublic[];
+      milestones: MilestonePublic[];
       state: IssueListStateFilter;
     };
 
@@ -53,7 +64,7 @@ async function loadIssuesPage(
     return { kind: "disabled", repo: got.data };
   }
 
-  const [listRes, labelsRes] = await Promise.all([
+  const [listRes, labelsRes, milestonesRes] = await Promise.all([
     fetchIssueList({
       owner,
       name: repoName,
@@ -62,6 +73,7 @@ async function loadIssuesPage(
       limit: ISSUE_LIST_PAGE_SIZE,
     }),
     fetchLabelListForRepo({ owner, name: repoName }),
+    fetchMilestoneList({ owner, name: repoName }),
   ]);
 
   if (!listRes.ok) {
@@ -77,12 +89,14 @@ async function loadIssuesPage(
   }
 
   const labels = labelsRes.ok ? labelsRes.data.labels : [];
+  const milestones = milestonesRes.ok ? milestonesRes.data.milestones : [];
 
   return {
     kind: "ready",
     repo: got.data,
     list: listRes.data,
     labels,
+    milestones,
     state,
   };
 }
@@ -122,6 +136,7 @@ function emptyFilters(state: IssueListStateFilter = "open"): IssueListFilters {
     author: "",
     label: "",
     assignee: "",
+    milestone: "",
     q: "",
     offset: 0,
     limit: ISSUE_LIST_PAGE_SIZE,
@@ -142,7 +157,12 @@ function IssuesListPageContent() @{
   const routeLoader = useQuery(repoIssuesIndexQueryOptions(params, searchStr)).data;
   const account = useChromeAccountState();
 
-  const [filters, setFilters] = useState<IssueListFilters>(() => emptyFilters("open"));
+  const [filters, setFilters] = useState<IssueListFilters>(() => {
+    const initial = emptyFilters("open");
+    const milestone = new URLSearchParams(searchStr.replace(/^\?/, "")).get("milestone");
+    if (milestone) initial.milestone = milestone;
+    return initial;
+  });
 
   const repoQ = useQuery({
     queryKey: ["repo", "get", owner, repoName] as const,
@@ -181,12 +201,28 @@ function IssuesListPageContent() @{
     initialData: routeLoader?.kind === "ready" ? routeLoader.labels : undefined,
   });
 
+  const milestonesQ = useQuery({
+    queryKey: ["milestone", "list", owner, repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.milestone.list({
+        owner,
+        name: repoName,
+        state: "all",
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.milestones;
+    },
+    enabled: !!owner && !!repoName && !unitDisabled,
+    initialData: routeLoader?.kind === "ready" ? routeLoader.milestones : undefined,
+  });
+
   const ssrListMatches =
     routeLoader?.kind === "ready" &&
     filters.state === "open" &&
     !filters.author &&
     !filters.label &&
     !filters.assignee &&
+    !filters.milestone &&
     !filters.q &&
     filters.offset === 0;
 
@@ -200,6 +236,7 @@ function IssuesListPageContent() @{
       filters.author,
       filters.label,
       filters.assignee,
+      filters.milestone,
       filters.q,
       filters.offset,
       filters.limit,
@@ -212,6 +249,7 @@ function IssuesListPageContent() @{
         author: filters.author || null,
         label: filters.label || null,
         assignee: filters.assignee || null,
+        milestone: filters.milestone || null,
         q: filters.q || null,
         offset: filters.offset,
         limit: filters.limit,
@@ -231,17 +269,26 @@ function IssuesListPageContent() @{
   const list = listQ.data ?? (ssrListMatches ? routeLoader.list : undefined);
   const labels =
     labelsQ.data ?? (routeLoader?.kind === "ready" ? routeLoader.labels : undefined) ?? [];
+  const milestones =
+    milestonesQ.data ?? (routeLoader?.kind === "ready" ? routeLoader.milestones : undefined) ?? [];
   const notFound =
     layout?.status === "not_found" ||
     routeLoader?.kind === "not_found" ||
     (repoQ.isError && String(repoQ.error?.message ?? "").includes("not found"));
 
-  const applyFilters = (draft: { author: string; label: string; assignee: string; q: string }) => {
+  const applyFilters = (draft: {
+    author: string;
+    label: string;
+    assignee: string;
+    milestone: string;
+    q: string;
+  }) => {
     setFilters((prev) => ({
       ...prev,
       author: draft.author,
       label: draft.label,
       assignee: draft.assignee,
+      milestone: draft.milestone,
       q: draft.q,
       offset: 0,
     }));
@@ -286,6 +333,7 @@ function IssuesListPageContent() @{
         total={list?.total ?? 0}
         filters={filters}
         labels={labels}
+        milestones={milestones}
         onStateChange={setState}
         onApplyFilters={applyFilters}
         onPrevPage={prevPage}

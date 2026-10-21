@@ -237,6 +237,7 @@ impl Handler for SshHandler {
                 repo_id,
                 owner_slug,
                 repo_name,
+                is_wiki,
                 is_push,
                 capability,
                 actor_user_id,
@@ -343,79 +344,154 @@ impl Handler for SshHandler {
                     };
                     if code == 0 && is_push {
                         if let Ok(Some(user)) = db.find_user_by_id(&user_id).await {
-                            // GIT-25: refresh cached size_bytes for UI/admin surfaces.
-                            if let Err(e) =
-                                crate::git::quota::refresh_repo_size_bytes(&db, &repo_id, &bare)
-                                    .await
-                            {
-                                tracing::warn!(error = %e, "refresh repo size_bytes failed");
-                            }
                             let after_refs = git.list_refs(&bare).await.unwrap_or_default();
                             let updates = ref_updates_from_lists(&before_refs, &after_refs);
-                            crate::repo::record_ref_updates(
-                                &db,
-                                &repo_id,
-                                &user.id,
-                                &updates,
-                                Some(git.clone()),
-                                Some(bare.as_path()),
-                            )
-                            .await;
-                            crate::webhook::dispatch::notify_push(
-                                &db,
-                                &repo_id,
-                                &owner_slug,
-                                &repo_name,
-                                &user.username,
-                                &user.id,
-                                &updates,
-                                &env_name,
-                            )
-                            .await;
-                            // API-04: create/delete refs fan out beside `push`.
-                            crate::webhook::dispatch::notify_ref_events(
-                                &db,
-                                &repo_id,
-                                &owner_slug,
-                                &repo_name,
-                                &user.username,
-                                &user.id,
-                                &updates,
-                                &env_name,
-                            )
-                            .await;
-                            crate::pull::synchronize_after_push(
-                                &db,
-                                &repos_dir,
-                                &repo_id,
-                                &owner_slug,
-                                &repo_name,
-                                &user.username,
-                                &user.id,
-                                &updates,
-                                &env_name,
-                            )
-                            .await;
-                            let actions_enabled = crate::actions::env_actions_enabled();
-                            let git_mirror = git.clone();
-                            crate::actions::notify_push_actions(
-                                &db,
-                                git,
-                                &repos_dir,
-                                &repo_id,
-                                &owner_slug,
-                                &repo_name,
-                                Some(&user.id),
-                                &updates,
-                                actions_enabled,
-                            )
-                            .await;
-                            crate::mirror::notify_mirror_after_local_mutation(
-                                db.clone(),
-                                git_mirror,
-                                repos_dir.clone(),
-                                repo_id.clone(),
-                            );
+                            if is_wiki {
+                                // Wiki pushes emit `gollum`, never `push` —
+                                // workflows still read from the main bare.
+                                let row = db.find_repository_by_id(&repo_id).await.ok().flatten();
+                                let main_bare =
+                                    repos_dir.join(&owner_slug).join(format!("{repo_name}.git"));
+                                let default_branch = row
+                                    .map(|r| r.default_branch)
+                                    .unwrap_or_else(|| "main".to_string());
+                                crate::webhook::dispatch::notify_wiki_push(
+                                    &db,
+                                    git.as_ref(),
+                                    &main_bare,
+                                    &bare,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &repo_name,
+                                    &default_branch,
+                                    &user.username,
+                                    &user.id,
+                                    &updates,
+                                    &env_name,
+                                    // SSH transport can't mint job tokens.
+                                    false,
+                                    crate::actions::env_actions_enabled(),
+                                )
+                                .await;
+                            } else {
+                                // GIT-25: refresh cached size_bytes for UI/admin surfaces.
+                                if let Err(e) =
+                                    crate::git::quota::refresh_repo_size_bytes(&db, &repo_id, &bare)
+                                        .await
+                                {
+                                    tracing::warn!(error = %e, "refresh repo size_bytes failed");
+                                }
+                                crate::repo::record_ref_updates(
+                                    &db,
+                                    &repo_id,
+                                    &user.id,
+                                    &updates,
+                                    Some(git.clone()),
+                                    Some(bare.as_path()),
+                                )
+                                .await;
+                                crate::webhook::dispatch::notify_push(
+                                    &db,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &repo_name,
+                                    &user.username,
+                                    &user.id,
+                                    &updates,
+                                    &env_name,
+                                )
+                                .await;
+                                // API-04: create/delete refs fan out beside `push`.
+                                crate::webhook::dispatch::notify_ref_events(
+                                    &db,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &repo_name,
+                                    &user.username,
+                                    &user.id,
+                                    &updates,
+                                    &env_name,
+                                    git.as_ref(),
+                                    bare.as_path(),
+                                    false,
+                                )
+                                .await;
+                                crate::pull::synchronize_after_push(
+                                    &db,
+                                    &repos_dir,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &repo_name,
+                                    &user.username,
+                                    &user.id,
+                                    &updates,
+                                    &env_name,
+                                    // SSH auth is deploy/user keys — job tokens
+                                    // can't authenticate this transport.
+                                    false,
+                                )
+                                .await;
+                                // GitHub Pages parity: pushes to the
+                                // configured legacy source branch rebuild
+                                // the site + emit `page_build`.
+                                let actions_enabled = crate::actions::env_actions_enabled();
+                                crate::pages::rebuild_after_push(
+                                    &db,
+                                    git.as_ref(),
+                                    &repos_dir,
+                                    &crate::pages::resolve_pages_dir(),
+                                    &env_name,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &user.id,
+                                    &updates,
+                                    false,
+                                    actions_enabled,
+                                )
+                                .await;
+                                // Merge queue: a base-branch move
+                                // invalidates the checking group on that
+                                // train (SSH auth is never a job token).
+                                let mq_deps = crate::merge_queue::MqDeps {
+                                    db: db.clone(),
+                                    git: git.clone(),
+                                    repos_dir: repos_dir.clone(),
+                                    pages_dir: crate::pages::resolve_pages_dir(),
+                                    env_name: env_name.clone(),
+                                    job_token_actor: false,
+                                    actions_enabled,
+                                };
+                                for (_before, after, refname) in &updates {
+                                    if after.chars().all(|c| c == '0') {
+                                        continue;
+                                    }
+                                    if let Some(branch) = refname.strip_prefix("refs/heads/") {
+                                        crate::merge_queue::after_base_pushed(
+                                            &mq_deps, &repo_id, branch,
+                                        )
+                                        .await;
+                                    }
+                                }
+                                let git_mirror = git.clone();
+                                crate::actions::notify_push_actions(
+                                    &db,
+                                    git,
+                                    &repos_dir,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &repo_name,
+                                    Some(&user.id),
+                                    &updates,
+                                    actions_enabled,
+                                )
+                                .await;
+                                crate::mirror::notify_mirror_after_local_mutation(
+                                    db.clone(),
+                                    git_mirror,
+                                    repos_dir.clone(),
+                                    repo_id.clone(),
+                                );
+                            }
                         }
                     }
                     let _ = handle.exit_status_request(channel, code as u32).await;

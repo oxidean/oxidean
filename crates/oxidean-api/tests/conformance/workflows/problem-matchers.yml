@@ -1,0 +1,13 @@
+name: problem-matchers
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout
+      - run: |
+          echo "::add-matcher::matcher.json"
+          echo "badFile.js: line 50, col 11, Error - 'myVar' is defined but never used. (no-unused-vars)"
+          echo "unmatched line"
+          echo "::remove-matcher owner=eslint-compact::"
+          echo "badFile.js: line 60, col 2, Error - 'other' still. (no-other)"

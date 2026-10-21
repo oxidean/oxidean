@@ -1,0 +1,14 @@
+name: services-job
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          # High port — a real postgres may already own 5432 on a dev host.
+          - 15432:5432
+    steps:
+      - run: echo with service
+      - run: echo "svc_port=${{ job.services.postgres.ports['5432'] }} net=${{ job.services.postgres.network }} cid_nonempty=${{ job.services.postgres.id != '' }}"

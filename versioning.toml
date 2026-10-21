@@ -47,6 +47,16 @@ scopes = ["git"]
 depends_on = []
 
 [[component]]
+id = "oxidean-actions-expr"
+kind = "crate"
+manifest_path = "crates/oxidean-actions-expr/Cargo.toml"
+tag_prefix = "oxidean-actions-expr-v"
+changelog_path = "crates/oxidean-actions-expr/CHANGELOG.md"
+globs = ["crates/oxidean-actions-expr/**"]
+scopes = ["actions-expr", "expr"]
+depends_on = []
+
+[[component]]
 id = "oxidean-api"
 kind = "crate"
 manifest_path = "crates/oxidean-api/Cargo.toml"
@@ -54,7 +64,7 @@ tag_prefix = "oxidean-api-v"
 changelog_path = "crates/oxidean-api/CHANGELOG.md"
 globs = ["crates/oxidean-api/**"]
 scopes = ["api"]
-depends_on = ["oxidean-core", "oxidean-db", "oxidean-git", "wire"]
+depends_on = ["oxidean-core", "oxidean-db", "oxidean-git", "oxidean-actions-expr", "wire"]
 
 [[component]]
 id = "oxidean-runner"

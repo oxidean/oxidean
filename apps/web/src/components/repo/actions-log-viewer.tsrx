@@ -51,6 +51,12 @@ function lineKindClass(kind: LogLine["kind"]): string {
       return "bg-amber-500/10 text-amber-700 dark:text-amber-400";
     case "notice":
       return "text-muted-foreground";
+    // `::debug::` lines — GitHub renders them dimmed.
+    case "debug":
+      return "text-muted-foreground/70";
+    // `##[group]` headers — bold section title (contents stay unfolded).
+    case "group":
+      return "font-semibold";
     default:
       return "";
   }
@@ -105,6 +111,8 @@ export function ActionsLogViewer(props: {
   jobStatus: string;
   /** Filename base for the raw download. */
   downloadName?: string;
+  /** Server-side download URL for the complete stored log (gzip-safe). */
+  downloadHref?: string;
 }) @{
   const [query, setQuery] = useState("");
   const [rawMode, setRawMode] = useState(false);
@@ -130,6 +138,10 @@ export function ActionsLogViewer(props: {
   }
 
   function downloadLog() {
+    if (props.downloadHref) {
+      window.location.href = props.downloadHref;
+      return;
+    }
     const url = URL.createObjectURL(new Blob([props.log], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
@@ -193,7 +205,10 @@ export function ActionsLogViewer(props: {
           @for (const step of parsed.steps; key step.startLine) {
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                step.status === "skipped" && "text-muted-foreground",
+              )}
               onClick={() => jumpToStep(step.startLine)}
             >
               {stepIcon(step.status)}
@@ -223,34 +238,55 @@ export function ActionsLogViewer(props: {
                 <LogLineRow line={line} />;
               }
               @for (const step of parsed.steps; key step.startLine) {
-                <div id={`actions-log-step-${step.startLine}` as string}>
-                  <button
-                    type="button"
-                    data-testid={`actions-log-step-${step.startLine}`}
-                    aria-expanded={!closed[step.startLine]}
-                    className="flex w-full items-center gap-2 px-2 py-1 text-left font-semibold outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    onClick={() => toggleStep(step.startLine)}
+                @if (step.status === "skipped") {
+                  <div
+                    id={`actions-log-step-${step.startLine}` as string}
+                    className="flex w-full items-center gap-2 px-2 py-1 text-muted-foreground"
                   >
-                    @if (closed[step.startLine]) {
-                      <ChevronRight aria-hidden size={14} className="shrink-0" />;
-                    } @else {
-                      <ChevronDown aria-hidden size={14} className="shrink-0" />;
-                    }
-                    {stepIcon(step.status)}
-                    <span className="min-w-0 truncate">{step.name as string}</span>
-                  </button>
-                  @if (!closed[step.startLine]) {
-                    <div>
-                      @for (const line of step.lines; key line.n) {
-                        <LogLineRow line={line} />;
-                      } @empty {
-                        <p className="px-3 py-1 font-sans text-[12px] text-muted-foreground">
-                          (no output)
-                        </p>;
+                    <MinusCircle aria-hidden size={14} className="shrink-0" />
+                    <span className="min-w-0 truncate font-semibold">
+                      {step.name as string}
+                    </span>
+                    <span className="shrink-0 font-sans text-[11px]">skipped</span>
+                  </div>;
+                } @else {
+                  <div id={`actions-log-step-${step.startLine}` as string}>
+                    <button
+                      type="button"
+                      data-testid={`actions-log-step-${step.startLine}`}
+                      aria-expanded={!closed[step.startLine]}
+                      className="flex w-full items-center gap-2 px-2 py-1 text-left font-semibold outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      onClick={() => toggleStep(step.startLine)}
+                    >
+                      @if (closed[step.startLine]) {
+                        <ChevronRight
+                          aria-hidden
+                          size={14}
+                          className="shrink-0"
+                        />;
+                      } @else {
+                        <ChevronDown
+                          aria-hidden
+                          size={14}
+                          className="shrink-0"
+                        />;
                       }
-                    </div>;
-                  }
-                </div>;
+                      {stepIcon(step.status)}
+                      <span className="min-w-0 truncate">{step.name as string}</span>
+                    </button>
+                    @if (!closed[step.startLine]) {
+                      <div>
+                        @for (const line of step.lines; key line.n) {
+                          <LogLineRow line={line} />;
+                        } @empty {
+                          <p className="px-3 py-1 font-sans text-[12px] text-muted-foreground">
+                            (no output)
+                          </p>;
+                        }
+                      </div>;
+                    }
+                  </div>;
+                }
               }
               @for (const line of parsed.epilogue; key line.n) {
                 <LogLineRow line={line} />;

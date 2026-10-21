@@ -245,7 +245,8 @@ async fn create_pull(app: &axum::Router, cookie: &str, owner: &str, repo: &str) 
 // --- tests -------------------------------------------------------------------
 
 /// `refs/pull/{N}/head` is advertised by upload-pack and resolves to the PR
-/// head commit; `/merge` is absent until the PR merges (documented delta).
+/// head commit; `/merge` carries the test-merge commit while the PR is open
+/// (GitHub parity: the ref exists and points at base+head merged).
 #[tokio::test]
 async fn api06_pull_head_ref_advertised_and_fetchable_smart_http() {
     let dir = tempfile::tempdir().unwrap();
@@ -266,8 +267,8 @@ async fn api06_pull_head_ref_advertised_and_fetchable_smart_http() {
         "advertisement must include refs/pull/{n}/head — {adv}"
     );
     assert!(
-        !adv.contains(&format!("refs/pull/{n}/merge")),
-        "no stored merge commit yet — /merge must be omitted"
+        adv.contains(&format!("refs/pull/{n}/merge")),
+        "open PR must advertise the test-merge ref — {adv}"
     );
 
     // The synthesized ref resolves to the PR head commit on disk.
@@ -280,6 +281,25 @@ async fn api06_pull_head_ref_advertised_and_fetchable_smart_http() {
         .expect("rev-parse");
     assert!(out.status.success(), "rev-parse pull head: {out:?}");
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), head_sha);
+
+    // The test-merge ref resolves to a real merge commit: base tip + head.
+    let out = StdCommand::new("git")
+        .args(["-C"])
+        .arg(&bare)
+        .args(["cat-file", "-p", &format!("refs/pull/{n}/merge")])
+        .output()
+        .expect("cat-file merge");
+    assert!(out.status.success(), "cat-file pull merge: {out:?}");
+    let commit = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        commit.matches("\nparent ").count() + commit.starts_with("parent ") as usize,
+        2,
+        "test-merge commit must have two parents — {commit}"
+    );
+    assert!(
+        commit.contains(&format!("parent {head_sha}")),
+        "test-merge must parent the PR head — {commit}"
+    );
 
     // And the object is fetchable: upload-pack answers `want <head_sha>` with a pack.
     let want = format!("want {head_sha}\n");
@@ -305,8 +325,8 @@ async fn api06_pull_head_ref_advertised_and_fetchable_smart_http() {
     );
 }
 
-/// `refs/pull/{N}/merge` appears once the PR merges and points at the recorded
-/// merge commit.
+/// `refs/pull/{N}/merge` carries the test-merge commit while the PR is open
+/// and is repointed at the recorded merge commit once the PR merges.
 #[tokio::test]
 async fn api06_pull_merge_ref_appears_after_merge() {
     let dir = tempfile::tempdir().unwrap();
@@ -322,8 +342,8 @@ async fn api06_pull_merge_ref_appears_after_merge() {
 
     let adv = upload_pack_advertisement(&app, "mgown", "core").await;
     assert!(
-        !String::from_utf8_lossy(&adv).contains(&format!("refs/pull/{n}/merge")),
-        "merge ref must be absent before merge"
+        String::from_utf8_lossy(&adv).contains(&format!("refs/pull/{n}/merge")),
+        "open PR must advertise the test-merge ref"
     );
 
     let merge = rpc_json(

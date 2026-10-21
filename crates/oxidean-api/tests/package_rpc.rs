@@ -315,3 +315,209 @@ async fn package_rpc_admin_usage_forbidden_for_normal_user() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+/// GitHub-shaped packages REST: `/user/packages`, `/users/{u}/packages`,
+/// `/orgs/{o}/packages` — list/get/versions/delete, `container`→`oci`
+/// package_type mapping, ACL-aware anonymous reads.
+#[tokio::test]
+async fn package_rest_github_surface() {
+    let (app, db, cookie, uid, _dir) = setup().await;
+
+    // Seed: one generic package (2 versions) + one oci package.
+    let pkg_id = seed_package(&db, &uid, "tool", "1.0.0").await;
+    let vid2 = Uuid::new_v4().to_string();
+    db.insert_package_version(&vid2, &pkg_id, "2.0.0", None, "{}", Some(&uid))
+        .await
+        .unwrap();
+    let oci_id = Uuid::new_v4().to_string();
+    db.insert_package(&oci_id, "user", &uid, "img", "oci", "public", None, "")
+        .await
+        .unwrap();
+    let ovid = Uuid::new_v4().to_string();
+    db.insert_package_version(&ovid, &oci_id, "sha256:abc", None, "{}", Some(&uid))
+        .await
+        .unwrap();
+
+    // Org package for the /orgs scope.
+    let org = db
+        .insert_organization("o-pkgr", "pkgr", "Pkg Org", "read")
+        .await
+        .unwrap();
+    let opkg = Uuid::new_v4().to_string();
+    db.insert_package(&opkg, "org", &org.id, "lib", "generic", "public", None, "")
+        .await
+        .unwrap();
+    let opv = Uuid::new_v4().to_string();
+    db.insert_package_version(&opv, &opkg, "0.1.0", None, "{}", Some(&uid))
+        .await
+        .unwrap();
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder().method(method).uri(uri.to_string());
+        if let Some(c) = cookie {
+            b = b.header("cookie", c.to_string());
+        }
+        let res = app
+            .clone()
+            .oneshot(b.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null));
+        (status, v)
+    }
+
+    // GET /user/packages — session user; GitHub shape, oci → container.
+    let (status, v) = rest(&app, "GET", "/api/v1/user/packages", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let arr = v.as_array().expect("array");
+    assert_eq!(arr.len(), 2, "{v}");
+    let img = arr.iter().find(|p| p["name"] == "img").expect("img");
+    assert_eq!(img["package_type"], "container");
+    assert_eq!(img["version_count"], 1);
+    assert_eq!(img["visibility"], "public");
+    assert_eq!(img["owner"]["login"], "rpcown");
+    let tool = arr.iter().find(|p| p["name"] == "tool").expect("tool");
+    assert_eq!(tool["package_type"], "generic");
+    assert_eq!(tool["version_count"], 2);
+    assert!(tool["created_at"].as_str().unwrap().len() > 8);
+
+    // package_type + visibility filters.
+    let (status, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/packages?package_type=container",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v.as_array().unwrap().len(), 1, "{v}");
+
+    // Anonymous /users/{u}/packages sees the public packages.
+    let (status, v) = rest(&app, "GET", "/api/v1/users/rpcown/packages", None).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 2, "{v}");
+
+    // GET single + versions + version detail (version_id = row id).
+    let (status, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/packages/generic/tool",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["version_count"], 2);
+
+    let (status, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/packages/generic/tool/versions",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let versions = v.as_array().unwrap();
+    assert_eq!(versions.len(), 2);
+    let v2 = versions.iter().find(|x| x["name"] == "2.0.0").unwrap();
+    let v2_id = v2["id"].as_str().unwrap().to_string();
+
+    let (status, v) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/user/packages/generic/tool/versions/{v2_id}"),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["name"], "2.0.0");
+
+    // Org scope reads.
+    let (status, v) = rest(&app, "GET", "/api/v1/orgs/pkgr/packages", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v.as_array().unwrap().iter().any(|p| p["name"] == "lib"));
+
+    // Missing package → 404.
+    let (status, _) = rest(&app, "GET", "/api/v1/user/packages/npm/nope", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // DELETE a version by id → 204; the package remains (one version left).
+    let (status, _) = rest(
+        &app,
+        "DELETE",
+        &format!("/api/v1/user/packages/generic/tool/versions/{v2_id}"),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let remaining = db.list_package_versions(&pkg_id).await.unwrap();
+    assert_eq!(remaining.len(), 1);
+
+    // DELETE the package → 204; row gone.
+    let (status, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/user/packages/generic/tool",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(db.find_package_by_id(&pkg_id).await.unwrap().is_none());
+
+    // Org-scope delete: rpcown isn't a member of `pkgr` → 403; grant org
+    // owner and the same call succeeds.
+    let (status, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/orgs/pkgr/packages/generic/lib",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "non-member org delete");
+    db.insert_org_member(&org.id, &uid, "owner").await.unwrap();
+    let (status, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/orgs/pkgr/packages/generic/lib",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "org owner delete");
+    assert!(db.find_package_by_id(&opkg).await.unwrap().is_none());
+
+    // A private package stays invisible to anonymous /users reads.
+    let priv_id = Uuid::new_v4().to_string();
+    db.insert_package(
+        &priv_id, "user", &uid, "hidden", "generic", "private", None, "",
+    )
+    .await
+    .unwrap();
+    let pvv = Uuid::new_v4().to_string();
+    db.insert_package_version(&pvv, &priv_id, "9.9.9", None, "{}", Some(&uid))
+        .await
+        .unwrap();
+    let (status, v) = rest(&app, "GET", "/api/v1/users/rpcown/packages", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!v.as_array().unwrap().iter().any(|p| p["name"] == "hidden"));
+
+    // Unauthenticated /user/packages → 401.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/user/packages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}

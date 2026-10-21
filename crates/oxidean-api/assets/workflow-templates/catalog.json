@@ -327,5 +327,863 @@
         "Dockerfile"
       ]
     }
+  },
+  "compat": {
+    "automation/greetings": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/first-interaction@v1 (calls the GitHub API, which Oxidean does not emulate)"
+      ],
+      "warnings": []
+    },
+    "automation/label": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/labeler@v4 (calls the GitHub API, which Oxidean does not emulate)"
+      ],
+      "warnings": []
+    },
+    "automation/manual": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "automation/stale": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/stale@v5 (calls the GitHub API, which Oxidean does not emulate)"
+      ],
+      "warnings": []
+    },
+    "automation/summary": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/ai-inference@v1 (calls the GitHub API, which Oxidean does not emulate)"
+      ],
+      "warnings": []
+    },
+    "ci/ada": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/android": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/ant": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/blank": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/c-cpp": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/clojure": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/cmake-multi-platform": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/cmake-single-platform": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/crystal": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.container (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/d": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/dart": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/datadog-synthetics": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/deno": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/django": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/docker-image": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/docker-publish": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 (requires a Docker-capable runner)",
+        "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d (requires a Docker-capable runner)",
+        "docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 (requires a Docker-capable runner)",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/dotnet": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/dotnet-desktop": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)",
+        "microsoft/setup-msbuild@v2 (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/elixir": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/erlang": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.container (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/gem-push": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/generator-generic-ossf-slsa3-publish": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0 (artifact attestations are not available on Oxidean)"
+      ],
+      "warnings": []
+    },
+    "ci/go": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/go-ossf-slsa3-publish": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0 (artifact attestations are not available on Oxidean)"
+      ],
+      "warnings": []
+    },
+    "ci/gradle": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/gradle-publish": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/haskell": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/ios": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/jekyll-docker": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/laravel": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/makefile": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/maven": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/maven-publish": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/msbuild": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)",
+        "microsoft/setup-msbuild@v1.0.2 (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/node.js": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/npm-publish": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/npm-publish-github-packages": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/objective-c-xcode": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/php": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/pylint": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/python-app": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/python-package": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/python-package-conda": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/python-publish": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "pypa/gh-action-pypi-publish@release/v1 (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/r": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/ruby": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/rubyonrails": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.services (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/rust": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/scala": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/super-linter": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "github/super-linter@v4 (requires a Docker-capable runner)"
+      ]
+    },
+    "ci/swift": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "ci/symfony": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/webpack": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/alibabacloud": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/aws": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-container-webapp": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 (requires a Docker-capable runner)",
+        "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d (requires a Docker-capable runner)",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 (requires a Docker-capable runner)"
+      ]
+    },
+    "deployments/azure-functions-app-container": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "azure/docker-login@v1 (requires a Docker-capable runner)"
+      ]
+    },
+    "deployments/azure-functions-app-dotnet": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "deployments/azure-functions-app-java": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "deployments/azure-functions-app-java-gradle": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "deployments/azure-functions-app-nodejs": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "deployments/azure-functions-app-powershell": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "jobs.<id>.runs-on (requires a Windows/macOS external runner)"
+      ]
+    },
+    "deployments/azure-functions-app-python": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-kubernetes-service": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-kubernetes-service-helm": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-kubernetes-service-kompose": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-kubernetes-service-kustomize": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-staticwebapp": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-dotnet-core": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-java-jar": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-java-jar-gradle": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-node": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-php": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/azure-webapps-python": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/google": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 (requires a Docker-capable runner)"
+      ]
+    },
+    "deployments/google-cloudrun-docker": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 (requires a Docker-capable runner)"
+      ]
+    },
+    "deployments/google-cloudrun-source": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/ibm": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/octopusdeploy": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4 (requires a Docker-capable runner)",
+        "docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1 (requires a Docker-capable runner)",
+        "docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7 (requires a Docker-capable runner)",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 (requires a Docker-capable runner)"
+      ]
+    },
+    "deployments/openshift": {
+      "status": "unsupported-runtime",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/github-script@v6 (calls the GitHub API, which Oxidean does not emulate)"
+      ],
+      "warnings": []
+    },
+    "deployments/tencent": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "deployments/terraform": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    }
+  },
+  "render": {
+    "ci/go": [
+      {
+        "find": "actions/setup-go@v4",
+        "replace": "actions/setup-go@v5",
+        "note": "v4 runs node16 (EOL); v5 is node20 and honors go.mod toolchain directives"
+      },
+      {
+        "find": "go-version: '1.20'",
+        "replace": "go-version-file: 'go.mod'",
+        "note": "resolve the Go toolchain from the repository's own go.mod instead of a stale pin"
+      }
+    ],
+    "ci/django": [
+      {
+        "find": "actions/setup-python@v3",
+        "replace": "actions/setup-python@v6",
+        "note": "v3 predates current Python releases and runs an EOL node runtime"
+      },
+      {
+        "find": "python-version: [3.7, 3.8, 3.9]",
+        "replace": "python-version: [3.10, 3.11, 3.12]",
+        "note": "Django>=5.x requires Python >=3.10; every vendored leg failed"
+      }
+    ],
+    "ci/python-package": [
+      {
+        "find": "actions/setup-python@v3",
+        "replace": "actions/setup-python@v6"
+      },
+      {
+        "find": "python-version: [\"3.9\", \"3.10\", \"3.11\"]",
+        "replace": "python-version: [\"3.10\", \"3.11\", \"3.12\", \"3.13\"]"
+      }
+    ],
+    "ci/pylint": [
+      {
+        "find": "actions/setup-python@v3",
+        "replace": "actions/setup-python@v6"
+      },
+      {
+        "find": "python-version: [\"3.8\", \"3.9\", \"3.10\"]",
+        "replace": "python-version: [\"3.10\", \"3.12\", \"3.13\"]"
+      }
+    ],
+    "ci/ruby": [
+      {
+        "find": "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf # v1.146.0",
+        "replace": "ruby/setup-ruby@v1",
+        "note": "the pinned SHA predates Ruby >=3.1 — it cannot resolve versions the Gemfile declares"
+      },
+      {
+        "find": "ruby-version: ['2.6', '2.7', '3.0']",
+        "replace": "ruby-version: ['3.2', '3.3', '3.4']"
+      }
+    ],
+    "ci/gem-push": [
+      {
+        "find": "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf # v1.146.0",
+        "replace": "ruby/setup-ruby@v1"
+      },
+      {
+        "find": "ruby-version: 2.6.x",
+        "replace": "ruby-version: '3.4'"
+      }
+    ],
+    "ci/rubyonrails": [
+      {
+        "find": "ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410 # v1.179.1",
+        "replace": "ruby/setup-ruby@v1",
+        "note": "reads .ruby-version / .tool-versions / mise.toml — presets seed .ruby-version"
+      }
+    ],
+    "ci/laravel": [
+      {
+        "find": "shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e",
+        "replace": "shivammathur/setup-php@v2"
+      },
+      {
+        "find": "php-version: '8.0'",
+        "replace": "php-version: '8.2'",
+        "note": "preset composer.json requires php >=8.2"
+      }
+    ],
+    "ci/symfony": [
+      {
+        "find": "shivammathur/setup-php@2cb9b829437ee246e9b3cac53555a39208ca6d28",
+        "replace": "shivammathur/setup-php@v2"
+      },
+      {
+        "find": "php-version: '8.0'",
+        "replace": "php-version: '8.2'"
+      }
+    ],
+    "ci/php": [
+      {
+        "find": "    - uses: actions/checkout@v4\n\n    - name: Validate composer.json and composer.lock",
+        "replace": "    - uses: actions/checkout@v4\n    - name: Set up PHP\n      uses: shivammathur/setup-php@v2\n      with:\n        tools: composer\n\n    - name: Validate composer.json and composer.lock",
+        "note": "no setup-php step existed — bare `composer` was assumed on PATH"
+      }
+    ],
+    "ci/maven-publish": [
+      {
+        "find": "- name: Set up JDK 11",
+        "replace": "- name: Set up JDK 17"
+      },
+      {
+        "find": "java-version: '11'",
+        "replace": "java-version: '17'",
+        "note": "presets target release 17"
+      }
+    ],
+    "ci/ant": [
+      {
+        "find": "- name: Set up JDK 11",
+        "replace": "- name: Set up JDK 17"
+      },
+      {
+        "find": "java-version: '11'",
+        "replace": "java-version: '17'",
+        "note": "presets target release 17"
+      }
+    ],
+    "ci/android": [
+      {
+        "find": "- name: set up JDK 11",
+        "replace": "- name: set up JDK 17"
+      },
+      {
+        "find": "java-version: '11'",
+        "replace": "java-version: '17'",
+        "note": "presets target release 17"
+      }
+    ],
+    "ci/scala": [
+      {
+        "find": "- name: Set up JDK 11",
+        "replace": "- name: Set up JDK 17"
+      },
+      {
+        "find": "java-version: '11'",
+        "replace": "java-version: '17'",
+        "note": "presets target release 17"
+      },
+      {
+        "find": "      # Optional: This step uploads information to the GitHub dependency graph and unblocking Dependabot alerts for the repository\n    - name: Upload dependency graph\n      uses: scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91\n",
+        "replace": "",
+        "note": "drop the GitHub dependency-submission step — no GitHub API on Oxidean"
+      }
+    ],
+    "ci/deno": [
+      {
+        "find": "denoland/setup-deno@61fe2df320078202e33d7d5ad347e7dcfa0e8f31  # v1.1.2",
+        "replace": "denoland/setup-deno@v2"
+      },
+      {
+        "find": "deno-version: v1.x",
+        "replace": "deno-version: v2.x"
+      }
+    ],
+    "ci/go-ossf-slsa3-publish": [
+      {
+        "find": "builder_go_slsa3.yml@v1.4.0",
+        "replace": "builder_go_slsa3.yml@v2.1.0"
+      },
+      {
+        "find": "go-version: 1.17",
+        "replace": "go-version: ${go_version}",
+        "note": "resolved from the repository's go.mod at render time"
+      }
+    ],
+    "ci/maven": [
+      {
+        "find": "\n    # Optional: Uploads the full dependency graph to GitHub to improve the quality of Dependabot alerts this repository can receive\n    - name: Update dependency graph\n      uses: advanced-security/maven-dependency-submission-action@571e99aab1055c2e71a1e2309b9691de18d6b7d6\n",
+        "replace": "",
+        "note": "drop the GitHub dependency-submission step — no GitHub API on Oxidean"
+      }
+    ],
+    "ci/gradle": [
+      {
+        "find": "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0",
+        "replace": "gradle/actions/setup-gradle@v4"
+      },
+      {
+        "find": "\n  dependency-submission:\n\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n\n    steps:\n    - uses: actions/checkout@v4\n    - name: Set up JDK 17\n      uses: actions/setup-java@v4\n      with:\n        java-version: '17'\n        distribution: 'temurin'\n\n    # Generates and submits a dependency graph, enabling Dependabot Alerts for all project dependencies.\n    # See: https://github.com/gradle/actions/blob/main/dependency-submission/README.md\n    - name: Generate and submit dependency graph\n      uses: gradle/actions/dependency-submission@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0\n",
+        "replace": "",
+        "note": "drop the GitHub dependency-submission job — no GitHub API on Oxidean"
+      }
+    ],
+    "ci/node.js": [
+      {
+        "find": "node-version: [18.x, 20.x, 22.x]",
+        "replace": "node-version: [20.x, 22.x, 24.x]",
+        "note": "Node 18 is end-of-life"
+      }
+    ],
+    "ci/webpack": [
+      {
+        "find": "node-version: [18.x, 20.x, 22.x]",
+        "replace": "node-version: [20.x, 22.x, 24.x]",
+        "note": "Node 18 is end-of-life"
+      }
+    ],
+    "ci/npm-publish": [
+      {
+        "find": "node-version: 20",
+        "replace": "node-version: 22"
+      }
+    ],
+    "ci/npm-publish-github-packages": [
+      {
+        "find": "node-version: 20",
+        "replace": "node-version: 22"
+      }
+    ],
+    "ci/python-app": [
+      {
+        "find": "actions/setup-python@v3",
+        "replace": "actions/setup-python@v6"
+      },
+      {
+        "find": "python-version: \"3.10\"",
+        "replace": "python-version: \"3.12\""
+      }
+    ],
+    "ci/python-package-conda": [
+      {
+        "find": "actions/setup-python@v3",
+        "replace": "actions/setup-python@v6"
+      },
+      {
+        "find": "python-version: '3.10'",
+        "replace": "python-version: '3.12'"
+      }
+    ],
+    "ci/dart": [
+      {
+        "find": "dart-lang/setup-dart@9a04e6d73cca37bd455e0608d7e5092f881fd603",
+        "replace": "dart-lang/setup-dart@v1"
+      }
+    ],
+    "ci/elixir": [
+      {
+        "find": "erlef/setup-beam@61e01a43a562a89bfc54c7f9a378ff67b03e4a21 # v1.16.0",
+        "replace": "erlef/setup-beam@v1"
+      }
+    ],
+    "ci/r": [
+      {
+        "find": "r-lib/actions/setup-r@f57f1301a053485946083d7a45022b278929a78a",
+        "replace": "r-lib/actions/setup-r@v2"
+      },
+      {
+        "find": "r-version: ['3.6.3', '4.1.1']",
+        "replace": "r-version: ['4.3', '4.4']"
+      }
+    ],
+    "ci/generator-generic-ossf-slsa3-publish": [
+      {
+        "find": "generator_generic_slsa3.yml@v1.4.0",
+        "replace": "generator_generic_slsa3.yml@v2.1.0"
+      }
+    ]
   }
 }

@@ -1,5 +1,17 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=proto/runner.proto");
+    let protos = [
+        "proto/runner.proto",
+        "proto/runner/v1/messages.proto",
+        "proto/runner/v1/services.proto",
+        "proto/ping/v1/messages.proto",
+        "proto/ping/v1/services.proto",
+    ];
+    for p in protos {
+        println!("cargo:rerun-if-changed={p}");
+    }
+    // google/protobuf/{struct,timestamp}.proto are vendored under proto/ so
+    // imports resolve under any protoc — Debian's protobuf-compiler does not
+    // ship the well-known types (those live in libprotobuf-dev).
     // Prefer PATH / PROTOC; fall back to user-local protoc cache (no sudo required).
     if std::env::var_os("PROTOC").is_none() {
         let home = std::env::var("HOME").unwrap_or_default();
@@ -11,6 +23,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    prost_build::compile_protos(&["proto/runner.proto"], &["proto/"])?;
+    prost_build::compile_protos(&protos, &["proto/"])?;
     Ok(())
 }

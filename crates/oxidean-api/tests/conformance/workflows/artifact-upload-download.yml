@@ -1,0 +1,21 @@
+name: artifact-upload-download
+on: [push]
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir -p out && echo "hello-artifact" > out/msg.txt && echo "b" > out/b.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: out/**
+
+  down:
+    needs: [up]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: dl
+      - run: cat dl/msg.txt && cat dl/b.txt

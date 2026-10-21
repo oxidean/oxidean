@@ -263,69 +263,27 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     {
         let eff = effective_for_branch(&ctx.db, &accessible.row.id, &row.base_ref).await?;
         if eff.matched {
-            let reviews = ctx.db.list_pull_reviews(&row.id).await.map_err(db_err)?;
-            // Latest-per-user review state (D-PR-07); dismiss_stale excludes Approves on older SHAs.
-            let mut latest: std::collections::BTreeMap<String, &oxidean_db::PullReviewRow> =
-                std::collections::BTreeMap::new();
-            for r in &reviews {
-                match latest.get(&r.author_id) {
-                    Some(prev) if prev.submitted_at >= r.submitted_at => {}
-                    _ => {
-                        latest.insert(r.author_id.clone(), r);
-                    }
-                }
+            // GitHub's "Require merge queue" ruleset — direct merges are
+            // never permitted; `merge_queue.enqueue` routes the PR through
+            // group verification instead.
+            if eff.required_merge_queue {
+                return Err(AppError::new(
+                    "pull.merge_queue_required",
+                    "merge queue is required for the base branch — add this pull request to the merge queue instead",
+                ));
             }
-            let mut approving_reviewer_ids = Vec::new();
-            for r in latest.values() {
-                if r.state != "approved" {
-                    continue;
-                }
-                if eff.dismiss_stale_reviews
-                    && r.commit_sha.as_deref() != Some(row.head_sha.as_str())
-                {
-                    continue;
-                }
-                approving_reviewer_ids.push(r.author_id.clone());
-            }
-            let comments = ctx.db.list_pull_comments(&row.id).await.map_err(db_err)?;
-            let unresolved = comments
-                .iter()
-                .filter(|c| c.path.is_some() && !c.resolved)
-                .count() as i32;
-            let statuses = ctx
-                .db
-                .list_commit_statuses(&accessible.row.id, &row.head_sha)
-                .await
-                .map_err(db_err)?;
-            let mut status_by_context = std::collections::BTreeMap::new();
-            for s in statuses {
-                status_by_context.insert(s.context, s.state);
-            }
-            let path_for_anc = bare_repo_path(
-                &ctx.repos_dir,
-                &accessible.owner_username,
-                &accessible.row.name,
-            )?;
-            let head_up_to_date = git_is_ancestor(&path_for_anc, &row.base_sha, &row.head_sha)
-                .await
-                .unwrap_or(true);
-            let merge_input = MergeEvalInput {
-                approving_review_count: approving_reviewer_ids.len() as i32,
-                unresolved_review_threads: unresolved,
-                last_head_pusher_id: None,
-                approving_reviewer_ids,
-                head_sha: row.head_sha.clone(),
-                base_sha: row.base_sha.clone(),
-                head_up_to_date,
-                merge_method: Some(match req.method {
+            evaluate_merge_gate(
+                ctx,
+                &accessible,
+                &eff,
+                &row,
+                Some(match req.method {
                     MergeMethod::Merge => "merge".into(),
                     MergeMethod::Squash => "squash".into(),
                     MergeMethod::Rebase => "rebase".into(),
                 }),
-                is_draft: row.draft,
-                status_by_context,
-            };
-            evaluate_merge(&eff, accessible.capability, &merge_input)?;
+            )
+            .await?;
         }
     }
 
@@ -334,35 +292,8 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         &accessible.owner_username,
         &accessible.row.name,
     )?;
-    if row.head_repo_id != row.repo_id {
-        let head_repo = ctx
-            .db
-            .find_repository_by_id(&row.head_repo_id)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(|| AppError::new("pull.internal", "head repo missing"))?;
-        let head_owner = match head_repo.owner_type.as_str() {
-            "org" => ctx
-                .db
-                .find_organization_by_id(&head_repo.owner_id)
-                .await
-                .map_err(db_err)?
-                .map(|o| o.slug)
-                .unwrap_or_default(),
-            _ => ctx
-                .db
-                .find_user_by_id(&head_repo.owner_id)
-                .await
-                .map_err(db_err)?
-                .map(|u| u.username)
-                .unwrap_or_default(),
-        };
-        let head_path = bare_repo_path(&ctx.repos_dir, &head_owner, &head_repo.name)?;
-        ctx.git
-            .fetch_ref_from(&path, &head_path, &row.head_sha)
-            .await
-            .map_err(|e| AppError::new("pull.merge_failed", format!("fetch head failed: {e}")))?;
-    }
+    super::ensure_head_objects_in_base(&ctx.db, ctx.git.as_ref(), &ctx.repos_dir, &path, &row)
+        .await?;
 
     let message = req
         .commit_title
@@ -414,8 +345,8 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
 
     // API-06: refs/pull/{N}/merge resolves to the recorded merge commit — the
     // merge object was pushed into the base repo by the worktree merge above.
-    // (`/head` keeps tracking pull.head_sha; GitHub's /merge is a test-merge
-    // which we do not compute, so it exists only after a real merge.)
+    // (`/head` keeps tracking pull.head_sha; while the PR was open /merge held
+    // the actions test-merge commit — the real merge repoints it here.)
     super::refs::sync_merge_ref(
         ctx.git.as_ref(),
         &ctx.repos_dir,
@@ -513,6 +444,54 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         true,
     )
     .await;
+    // `on: pull_request types: [closed]` — merged reads true in the
+    // payload (GitHub fires this on merge, same as the webhook).
+    let (head_owner, head_name) = if updated.head_repo_id == updated.repo_id {
+        (
+            accessible.owner_username.clone(),
+            accessible.row.name.clone(),
+        )
+    } else if let Ok(Some(head_repo)) = ctx.db.find_repository_by_id(&updated.head_repo_id).await {
+        let owner = match head_repo.owner_type.as_str() {
+            "org" => ctx
+                .db
+                .find_organization_by_id(&head_repo.owner_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|o| o.slug)
+                .unwrap_or_default(),
+            _ => ctx
+                .db
+                .find_user_by_id(&head_repo.owner_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.username)
+                .unwrap_or_default(),
+        };
+        (owner, head_repo.name)
+    } else {
+        (
+            accessible.owner_username.clone(),
+            accessible.row.name.clone(),
+        )
+    };
+    super::notify_actions_for_pull(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &updated,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &head_owner,
+        &head_name,
+        Some(&user.id),
+        crate::actions::events::rpc_caller_is_job_token(ctx),
+        crate::actions::PullRequestAction::Closed,
+        true,
+    )
+    .await;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
     notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_merged", &subject).await;
@@ -574,4 +553,105 @@ pub async fn merge_settings_update(
         allow_squash_merge: allow_squash,
         allow_rebase_merge: allow_rebase,
     })
+}
+
+/// The branch-protection merge gate shared by `pull.merge` and
+/// `merge_queue.enqueue` — GitHub only admits PRs to the queue (or the merge
+/// button) once every *other* protection is green: approvals, stale-review
+/// dismissal, unresolved threads, required status contexts (commit statuses
+/// + check runs), up-to-date-head requirements, draft state.
+///
+/// `merge_method` reports GitHub's eval shape — `None` from the queue path
+/// (the queue decides the method; the allowed-methods check is skipped).
+pub(crate) async fn evaluate_merge_gate(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    eff: &crate::protection::EffectiveProtection,
+    row: &oxidean_db::PullRow,
+    merge_method: Option<String>,
+) -> Result<(), AppError> {
+    let reviews = ctx.db.list_pull_reviews(&row.id).await.map_err(db_err)?;
+    // Latest-per-user review state (D-PR-07); dismiss_stale excludes Approves on older SHAs.
+    let mut latest: std::collections::BTreeMap<String, &oxidean_db::PullReviewRow> =
+        std::collections::BTreeMap::new();
+    for r in &reviews {
+        match latest.get(&r.author_id) {
+            Some(prev) if prev.submitted_at >= r.submitted_at => {}
+            _ => {
+                latest.insert(r.author_id.clone(), r);
+            }
+        }
+    }
+    let mut approving_reviewer_ids = Vec::new();
+    for r in latest.values() {
+        if r.state != "approved" {
+            continue;
+        }
+        if eff.dismiss_stale_reviews && r.commit_sha.as_deref() != Some(row.head_sha.as_str()) {
+            continue;
+        }
+        approving_reviewer_ids.push(r.author_id.clone());
+    }
+    let comments = ctx.db.list_pull_comments(&row.id).await.map_err(db_err)?;
+    let unresolved = comments
+        .iter()
+        .filter(|c| c.path.is_some() && !c.resolved)
+        .count() as i32;
+    let statuses = ctx
+        .db
+        .list_commit_statuses(&accessible.row.id, &row.head_sha)
+        .await
+        .map_err(db_err)?;
+    let mut status_by_context = std::collections::BTreeMap::new();
+    for s in statuses {
+        status_by_context.insert(s.context, s.state);
+    }
+    // Check runs satisfy required contexts by name (GitHub treats a
+    // required check as met when a check run — not just a commit
+    // status — reports the name). Completed runs map their
+    // conclusion onto the status vocabulary; mid-flight reads as
+    // `pending`. Check runs win over same-named commit statuses —
+    // they're the newer context writer.
+    if let Ok(check_runs) = ctx
+        .db
+        .list_check_runs_for_sha(&accessible.row.id, &row.head_sha, None, None, None, 500)
+        .await
+    {
+        let mut latest_by_name: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for r in &check_runs {
+            // Rows come newest-first; first write per name wins.
+            latest_by_name.entry(r.name.clone()).or_insert_with(|| {
+                if r.status == "completed" {
+                    r.conclusion.clone().unwrap_or_else(|| "failure".into())
+                } else {
+                    "pending".into()
+                }
+            });
+        }
+        for (name, state) in latest_by_name {
+            status_by_context.insert(name, state);
+        }
+    }
+    let path_for_anc = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
+    let head_up_to_date = git_is_ancestor(&path_for_anc, &row.base_sha, &row.head_sha)
+        .await
+        .unwrap_or(true);
+    let merge_input = MergeEvalInput {
+        approving_review_count: approving_reviewer_ids.len() as i32,
+        unresolved_review_threads: unresolved,
+        last_head_pusher_id: None,
+        approving_reviewer_ids,
+        head_sha: row.head_sha.clone(),
+        base_sha: row.base_sha.clone(),
+        head_up_to_date,
+        merge_method,
+        is_draft: row.draft,
+        status_by_context,
+    };
+    evaluate_merge(eff, accessible.capability, &merge_input)
 }

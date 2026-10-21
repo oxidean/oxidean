@@ -3,7 +3,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use schemars::SchemaGenerator;
 use serde::Deserialize;
@@ -18,7 +18,8 @@ use oxidean_core::{
     CreatePullCommentRequest, CreatePullRequest, DeletePullCommentResponse, MergePullRequest,
     MergePullResponse, PullCommentPublic, PullCommentsListResponse, PullCommitsResponse,
     PullFilesResponse, PullListRequest, PullListResponse, PullPublic, PullReviewPublic,
-    PullReviewsListResponse, RpcResponse, SubmitPullReviewRequest, UpdatePullCommentRequest,
+    PullReviewsListResponse, RpcResponse, SubmitPullReviewRequest, UpdatePullBranchResponse,
+    UpdatePullCommentRequest,
 };
 
 /// `PATCH /pulls/{number}` body — fields go to `pull.update`; `state` fans
@@ -272,6 +273,90 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<PullReviewPublic>,
         )),
         mount: || post(submit_pull_review),
+    },
+    // ---- requested reviewers / dismissals / update-branch (GitHub REST) ----
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}/requested_reviewers",
+        tags: &["pulls"],
+        operation_id: "pulls/listRequestedReviewers",
+        summary: "List requested reviewers (`pull.reviewRequests.list`)",
+        procedure: "pull.reviewRequests.list",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(requested_reviewers_schema)),
+        mount: || get(list_requested_reviewers),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls/{number}/requested_reviewers",
+        tags: &["pulls"],
+        operation_id: "pulls/requestReviewers",
+        summary: "Request reviewers (`pull.reviewRequests.add` per login)",
+        procedure: "pull.reviewRequests.add",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Json(reviewers_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullPublic>,
+        )),
+        mount: || post(request_reviewers),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/pulls/{number}/requested_reviewers",
+        tags: &["pulls"],
+        operation_id: "pulls/deleteReviewers",
+        summary: "Remove requested reviewers (`pull.reviewRequests.remove` per login)",
+        procedure: "pull.reviewRequests.remove",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Json(reviewers_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullPublic>,
+        )),
+        mount: || delete(delete_requested_reviewers),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/dismissals",
+        tags: &["pulls"],
+        operation_id: "pulls/dismissReview",
+        summary: "Dismiss a review (`pull.reviews.dismiss`) — body `message` → `reason`",
+        procedure: "pull.reviews.dismiss",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number", "review_id"],
+        query: None,
+        body: Some(BodySpec::Json(dismissal_body_schema)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullReviewPublic>,
+        )),
+        mount: || post(dismiss_pull_review),
+    },
+    RouteDef {
+        method: "PUT",
+        path: "/repos/{owner}/{repo}/pulls/{number}/update-branch",
+        tags: &["pulls"],
+        operation_id: "pulls/updateBranch",
+        summary: "Update the PR branch from base (`pull.updateBranch`)",
+        procedure: "pull.updateBranch",
+        ok: StatusCode::ACCEPTED,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<UpdatePullBranchResponse>,
+        )),
+        mount: || put(update_pull_branch),
     },
 ];
 
@@ -557,6 +642,213 @@ async fn submit_pull_review(
         "pull.reviews.submit",
         input,
         StatusCode::CREATED,
+    )
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Requested reviewers / review dismissals / update-branch (GitHub REST)
+// ---------------------------------------------------------------------------
+
+/// Path params for the review-dismissal route.
+#[derive(Deserialize)]
+pub struct PullReviewPath {
+    owner: String,
+    repo: String,
+    number: i64,
+    review_id: String,
+}
+
+fn requested_reviewers_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "users": {"type": "array", "items": {"type": "object"}},
+            "teams": {"type": "array", "items": {"type": "object"}},
+        },
+    })
+}
+
+fn reviewers_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["reviewers"],
+        "properties": {
+            "reviewers": {"type": "array", "items": {"type": "string"}},
+            "team_reviewers": {"type": "array", "items": {"type": "string"}},
+        },
+    })
+}
+
+fn dismissal_body_schema(_gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "message": {"type": "string"},
+        },
+    })
+}
+
+/// `{usernames: [...]}` → GitHub's `{users: [{login}], teams: []}`.
+fn gh_requested_reviewers(d: &Value) -> Value {
+    let users: Vec<Value> = d["usernames"]
+        .as_array()
+        .map(|us| us.iter().map(|u| json!({"login": u})).collect())
+        .unwrap_or_default();
+    json!({"users": users, "teams": []})
+}
+
+async fn list_requested_reviewers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match dispatch(&mut ctx, "pull.reviewRequests.list", p.ref_input()).await {
+        RpcResponse::Ok { data, .. } => {
+            (StatusCode::OK, Json(gh_requested_reviewers(&data))).into_response()
+        }
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+/// Requested `reviewers: [logins]` from the GitHub body (teams unsupported —
+/// the domain has no teams yet; an empty/absent array is fine).
+fn requested_reviewer_logins(body: &Value) -> Result<Vec<String>, Box<Response>> {
+    match body["reviewers"].as_array().map(|a| {
+        a.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    }) {
+        Some(r) => Ok(r),
+        None => Err(Box::new(
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "message": "Validation Failed",
+                    "errors": ["`reviewers` must be an array of logins"],
+                })),
+            )
+                .into_response(),
+        )),
+    }
+}
+
+/// Fan the GitHub `reviewers[]` list over the per-username RPC, then answer
+/// the updated pull (GitHub's response shape).
+async fn mutate_reviewers(
+    state: &AppState,
+    headers: &HeaderMap,
+    p: &RepoNumberPath,
+    proc: &'static str,
+    logins: &[String],
+    ok: StatusCode,
+) -> Response {
+    let mut ctx = match ctx_for(state, headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    for login in logins {
+        let input = merge_fields(p.ref_input(), json!({"username": login}));
+        match dispatch(&mut ctx, proc, input).await {
+            RpcResponse::Ok { .. } => {}
+            RpcResponse::Err { error, .. } => {
+                return (super::status_for_error(&error), Json(error)).into_response()
+            }
+        }
+    }
+    match dispatch(&mut ctx, "pull.get", p.ref_input()).await {
+        RpcResponse::Ok { data, .. } => (ok, Json(data)).into_response(),
+        RpcResponse::Err { error, .. } => {
+            (super::status_for_error(&error), Json(error)).into_response()
+        }
+    }
+}
+
+async fn request_reviewers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let logins = match requested_reviewer_logins(&body) {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    mutate_reviewers(
+        &state,
+        &headers,
+        &p,
+        "pull.reviewRequests.add",
+        &logins,
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+async fn delete_requested_reviewers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let logins = match requested_reviewer_logins(&body) {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    mutate_reviewers(
+        &state,
+        &headers,
+        &p,
+        "pull.reviewRequests.remove",
+        &logins,
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// GitHub's dismissal body uses `message`; the RPC field is `reason`.
+async fn dismiss_pull_review(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<PullReviewPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut input = merge_fields(
+        json!({"owner": p.owner, "name": p.repo, "number": p.number, "review_id": p.review_id}),
+        body,
+    );
+    if let Some(m) = input.get("message").and_then(Value::as_str) {
+        input["reason"] = json!(m);
+        input.as_object_mut().map(|o| o.remove("message"));
+    }
+    call(
+        &state,
+        &headers,
+        "pull.reviews.dismiss",
+        input,
+        StatusCode::OK,
+    )
+    .await
+}
+
+async fn update_pull_branch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "pull.updateBranch",
+        p.ref_input(),
+        StatusCode::ACCEPTED,
     )
     .await
 }

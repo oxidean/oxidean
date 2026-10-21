@@ -1,0 +1,9 @@
+name: concurrency-pending
+on: [push]
+concurrency:
+  group: ci-pending-${{ github.ref }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo pending-winner

@@ -48,8 +48,10 @@ railway_auth_header() {
   die "no Railway credential: set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account/workspace token), or run railway login"
 }
 
-# GraphQL: prints response JSON to stdout. Fails on HTTP/transport errors or
-# GraphQL errors.
+# GraphQL: prints response JSON to stdout. Returns non-zero on HTTP/transport
+# errors or GraphQL errors — never exit, so guarded call sites
+# (`if railway_gql …`, `|| true`, `$(…)`) actually get to decide; under set -e
+# an unguarded call still aborts the script with the same diagnostics.
 railway_gql() {
   local query="$1"
   local variables_json
@@ -59,7 +61,7 @@ railway_gql() {
     variables_json='{}'
   fi
   local auth_line payload
-  auth_line="$(railway_auth_header)"
+  auth_line="$(railway_auth_header)" || return 1
   payload="$(jq -n --arg q "$query" --argjson v "$variables_json" '{query: $q, variables: $v}')"
   local raw
   raw="$(
@@ -67,10 +69,11 @@ railway_gql() {
       -H "Content-Type: application/json" \
       --config <(printf '%s' "$auth_line") \
       -d @-
-  )" || die "Railway GraphQL request failed"
+  )" || { echo "error: Railway GraphQL request failed" >&2; return 1; }
   if echo "$raw" | jq -e '.errors? | select(length > 0)' >/dev/null 2>&1; then
     echo "$raw" | jq '.' >&2
-    die "Railway GraphQL returned errors"
+    echo "error: Railway GraphQL returned errors" >&2
+    return 1
   fi
   printf '%s' "$raw"
 }

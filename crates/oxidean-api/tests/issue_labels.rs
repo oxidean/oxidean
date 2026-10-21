@@ -515,3 +515,320 @@ async fn issue_labels_write_assign_on_issue() {
     );
     assert_eq!(hidden_denied["error"]["code"], "rpc.bad_input");
 }
+
+/// REST helper — GitHub-shaped `/api/v1` call with optional session cookie.
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+    body: Option<&str>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or("").to_owned())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, v)
+}
+
+/// GitHub Issues REST surface: milestone CRUD, label CRUD by name, issue
+/// label ops (add/set/remove/clear), and issue assignees (add/remove).
+#[tokio::test]
+async fn issue_rest_github_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("issue_rest_surface.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "rest@ex.com", "rstusr").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    let repo = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(repo["ok"], true, "{repo}");
+    let issue = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"issue.create","input":{"owner":"rstusr","name":"core","title":"first"}}"#,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    let base = "/api/v1/repos/rstusr/core";
+
+    // ---- milestones -------------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/milestones"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/milestones"),
+        Some(&cookie),
+        Some(r#"{"title":"v1","description":"first cut","due_on":"2030-01-31"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["number"], 1);
+    assert_eq!(v["title"], "v1");
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/milestones/1"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["title"], "v1");
+
+    let (s, v) = rest(
+        &app,
+        "PATCH",
+        &format!("{base}/milestones/1"),
+        Some(&cookie),
+        Some(r#"{"state":"closed"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["state"], "closed");
+
+    // closed milestone filtered out of the default open list
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/milestones"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/milestones?state=all"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    // ---- label CRUD -------------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/labels"),
+        Some(&cookie),
+        Some(r#"{"name":"bug","color":"d73a4a","description":"broken"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name"], "bug");
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/labels/bug"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["color"], "d73a4a");
+
+    let (s, v) = rest(
+        &app,
+        "PATCH",
+        &format!("{base}/labels/bug"),
+        Some(&cookie),
+        Some(r#"{"new_name":"defect","color":"b60205"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["name"], "defect");
+    assert_eq!(v["color"], "b60205");
+
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/labels/bug"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- issue labels ------------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/issues/1/labels"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/issues/1/labels"),
+        Some(&cookie),
+        Some(r#"{"labels":["defect"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["name"], "defect");
+
+    // unknown label name → 422
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/issues/1/labels"),
+        Some(&cookie),
+        Some(r#"{"labels":["nope"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+
+    // delete one by name → empty set
+    let (s, v) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/issues/1/labels/defect"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // label not on the issue → 404
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/issues/1/labels/defect"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // PUT replaces the whole set, DELETE-all empties it
+    let (s, v) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/issues/1/labels"),
+        Some(&cookie),
+        Some(r#"{"labels":["defect"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    let (s, v) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/issues/1/labels"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // ---- assignees ----------------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/issues/1/assignees"),
+        Some(&cookie),
+        Some(r#"{"assignees":["rstusr"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["assignees"][0]["username"], "rstusr");
+
+    // unknown login → 422
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/issues/1/assignees"),
+        Some(&cookie),
+        Some(r#"{"assignees":["ghost"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+
+    let (s, v) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/issues/1/assignees"),
+        Some(&cookie),
+        Some(r#"{"assignees":["rstusr"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["assignees"].as_array().unwrap().len(), 0);
+
+    // ---- deletes ------------------------------------------------------------
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/milestones/1"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/labels/defect"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    // anonymous cannot mutate
+    let (s, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/labels"),
+        None,
+        Some(r#"{"name":"x","color":"fff"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}

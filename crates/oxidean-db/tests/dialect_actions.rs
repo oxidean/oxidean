@@ -5,10 +5,17 @@ use std::path::PathBuf;
 use oxidean_core::Role;
 use oxidean_db::Database;
 
+/// Runtime `CARGO_MANIFEST_DIR` — nextest sets it under `--workspace-remap`
+/// where the build-time `env!` still points at the (absent) image path.
+fn manifest_dir() -> PathBuf {
+    match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    }
+}
+
 fn migrations_dir(dialect: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("migrations")
-        .join(dialect)
+    manifest_dir().join("migrations").join(dialect)
 }
 
 fn find_actions_migration(dialect: &str) -> Option<(PathBuf, String)> {
@@ -56,6 +63,99 @@ fn assert_actions_sql(dialect: &str, sql: &str) {
     );
 }
 
+/// Pre-rebase repair: a database that applied this branch's block at
+/// versions 53-78 (before main's VCS trio landed at 53-55) must re-seat
+/// those rows to 56-81 on the next migrate, then apply the VCS schema.
+#[tokio::test]
+async fn migrate_reseats_pre_rebase_versions() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("reseat.db").display());
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
+    db.migrate().await.expect("fresh migrate");
+
+    // Rewind into the pre-rebase shape: bookkeeping rows at 53-78 with the
+    // same checksums (file contents never changed), and no VCS state.
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("raw pool");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE description LIKE 'vcs %'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE _sqlx_migrations SET version = version - 3 WHERE version >= 56")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for t in [
+        "vcs_repo_surface_flags",
+        "vcs_object_links",
+        "vcs_file_changes",
+        "vcs_refs",
+        "vcs_derived_index",
+        "vcs_import_links",
+        "vcs_changesets",
+        "vcs_objects",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE IF EXISTS {t}")))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+
+    // The repair re-seats and the VCS trio applies — no validation error.
+    db.migrate().await.expect("migrate after rewind");
+
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("raw pool");
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT version, description FROM _sqlx_migrations WHERE version >= 53 ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|(v, d)| (*v, d.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (53, "vcs schema"),
+            (54, "vcs key collation"),
+            (55, "vcs derived index nullable covering"),
+            (56, "action job payloads"),
+            (57, "action artifacts"),
+            (58, "gitea task claims"),
+            (59, "actions pr trigger policy"),
+            (60, "actions permissions env oidc"),
+            (61, "actions stability"),
+            (62, "actions perf"),
+            (63, "oidc rsa keys"),
+            (64, "action deployment reviews"),
+            (65, "action cache"),
+            (67, "action reusable calls"),
+            (68, "action job coe"),
+            (69, "action variables"),
+            (70, "action job debug"),
+            (71, "action workflow state"),
+            (72, "action job strategy"),
+            (73, "action annotations"),
+            (74, "milestones"),
+            (75, "deployments public"),
+            (76, "checks"),
+            (77, "wiki"),
+            (78, "projects"),
+            (79, "discussions"),
+            (80, "pages"),
+            (81, "merge queue"),
+            (82, "action artifacts state"),
+            (83, "runner remove tokens"),
+            (84, "action artifacts mime type"),
+        ],
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84"
+    );
+    // Repair is idempotent — a second migrate changes nothing.
+    db.migrate().await.expect("idempotent migrate");
+}
+
 #[tokio::test]
 async fn dialect_actions_schema_presence() {
     for dialect in ["sqlite", "postgres", "mysql"] {
@@ -72,17 +172,47 @@ async fn dialect_actions_schema_presence() {
     }
 
     // commit_statuses lives in 0017 (Phase 13) — assert still present for D-ACT-15.
-    let bp = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("migrations/sqlite/0017_branch_protection.sql");
+    let bp = manifest_dir().join("migrations/sqlite/0017_branch_protection.sql");
     let bp_sql = std::fs::read_to_string(&bp).expect("0017_branch_protection.sql");
     assert!(
         bp_sql.contains("commit_statuses"),
         "commit_statuses must exist for Actions→Phase 13 integration (D-ACT-15)"
     );
 
+    // 0056: durable payloads + normalized labels + attempt metadata in every dialect.
+    for dialect in ["sqlite", "postgres", "mysql"] {
+        let p = migrations_dir(dialect).join("0056_action_job_payloads.sql");
+        let sql = std::fs::read_to_string(&p)
+            .unwrap_or_else(|_| panic!("{dialect}: missing {}", p.display()));
+        for needle in [
+            "action_payloads",
+            "action_job_labels",
+            "payload_sha",
+            "needs_json",
+            "matrix_json",
+            "matrix_key",
+            "outputs_json",
+            "attempt",
+            "timeout_at",
+            "concurrency_group",
+            "event_payload_json",
+            "concurrency_cancel_pending",
+        ] {
+            assert!(
+                sql.contains(needle),
+                "{dialect}: 0053 must define/mention {needle}"
+            );
+        }
+    }
+
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("actions.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    // The scratch DB is always sqlite even when the outer run probes
+    // postgres/mysql via OXIDEAN_DB_DIALECT — connect with the explicit
+    // dialect so the env guard does not reject the scheme mismatch.
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
     db.migrate().await.expect("migrate");
 
     let owner = db
@@ -119,6 +249,8 @@ async fn dialect_actions_schema_presence() {
             "hash-token",
             r#"["ubuntu-latest"]"#,
             Some(&repo.id),
+            None,
+            None,
             false,
         )
         .await
@@ -137,13 +269,20 @@ async fn dialect_actions_schema_presence() {
             "CI",
             Some(&owner.id),
             None,
+            None,
         )
         .await
         .expect("run");
     assert_eq!(run.status, "queued");
 
     let job = db
-        .insert_action_job("job-1", &run.id, "build", "build", r#"["ubuntu-latest"]"#)
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-1",
+            &run.id,
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
         .await
         .expect("job");
     assert_eq!(job.job_key, "build");
@@ -157,6 +296,546 @@ async fn dialect_actions_schema_presence() {
         .expect("list secrets");
     assert_eq!(names.len(), 1);
     assert_eq!(names[0].name, "TOKEN");
+
+    // 0053: durable payloads + normalized claim labels + attempt counters.
+    db.insert_action_payload(
+        "sha1",
+        &repo.id,
+        ".github/workflows/ci.yml",
+        "abc123",
+        r#"{"version":1,"steps":[{"run":"echo hi"}],"contents_permission":"read"}"#,
+    )
+    .await
+    .expect("payload");
+    let mut insert =
+        oxidean_db::JobInsert::basic("job-2", &run.id, "test", "test", r#"["ubuntu-latest"]"#);
+    insert.payload_sha = Some("sha1".into());
+    db.insert_action_job(insert).await.expect("job2");
+    // Oldest queued label-matching job claims first.
+    let claimed = db
+        .claim_queued_action_job_for_labels("runner-1", &["ubuntu-latest".to_string()])
+        .await
+        .expect("claim")
+        .expect("matching job claimable");
+    assert_eq!(claimed.id, "job-1");
+    let claimed = db
+        .claim_queued_action_job_for_labels("runner-1", &["ubuntu-latest".to_string()])
+        .await
+        .expect("claim")
+        .expect("second job claimable");
+    assert_eq!(claimed.id, "job-2");
+    assert_eq!(claimed.payload_sha.as_deref(), Some("sha1"));
+    assert_eq!(claimed.attempt, 1);
+    // Label mismatch is refused by the SQL claim predicate, not a Rust scan.
+    let miss = db
+        .claim_queued_action_job_for_labels("runner-1", &["windows-latest".to_string()])
+        .await
+        .expect("claim miss");
+    assert!(miss.is_none());
+    let payload = db.find_action_payload("sha1").await.expect("find").unwrap();
+    assert!(payload.payload_json.contains("echo hi"));
+}
+
+/// Repo-scoped claim isolation: a runner bound to repo A never claims repo
+/// B's queued jobs; an unscoped (`None`) claim still sees the global queue.
+#[tokio::test]
+async fn dialect_actions_claim_repo_scope() {
+    let (db, _tmp) = match std::env::var("DATABASE_URL") {
+        Ok(url) => (Database::connect(&url).await.expect("connect"), None),
+        Err(_) => {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let db = Database::connect(&format!(
+                "sqlite:{}",
+                dir.path().join("claim-scope.db").display()
+            ))
+            .await
+            .expect("connect");
+            (db, Some(dir))
+        }
+    };
+    db.migrate().await.expect("migrate");
+
+    let tag = format!(
+        "{:x}-{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let label = format!("scoped-{tag}");
+
+    let owner = db
+        .create_user(
+            &format!("u-scope-{tag}"),
+            &format!("scope-{tag}@example.com"),
+            &format!("scope-{tag}"),
+            Some("hash"),
+            "Scope",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("owner");
+    let repo_a = db
+        .insert_repository(
+            &format!("r-sca-{tag}"),
+            &owner.id,
+            "user",
+            "sca",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo a");
+    let repo_b = db
+        .insert_repository(
+            &format!("r-scb-{tag}"),
+            &owner.id,
+            "user",
+            "scb",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo b");
+    for (repo, run_id) in [
+        (&repo_a, format!("run-sca-{tag}")),
+        (&repo_b, format!("run-scb-{tag}")),
+    ] {
+        db.insert_action_run(
+            &run_id,
+            &repo.id,
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            &format!("sha-{tag}"),
+            "refs/heads/main",
+            "CI",
+            Some(&owner.id),
+            None,
+            None,
+        )
+        .await
+        .expect("run");
+        db.insert_action_job(oxidean_db::JobInsert::basic(
+            &format!("job-{}", &run_id[4..]),
+            &run_id,
+            "build",
+            "build",
+            &format!(r#"["{label}"]"#),
+        ))
+        .await
+        .expect("job");
+    }
+
+    // Runner rows exist so the claim's runner_id FK holds.
+    for rid in ["runner-scoped", "runner-global"] {
+        db.insert_action_runner(
+            &format!("{rid}-{tag}"),
+            rid,
+            "hash",
+            "[]",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect("runner");
+    }
+    let scoped_runner = format!("runner-scoped-{tag}");
+    let global_runner = format!("runner-global-{tag}");
+
+    // Repo-A scope claims repo A's job only.
+    let claimed = db
+        .claim_queued_action_job_for_labels_scoped(
+            &scoped_runner,
+            std::slice::from_ref(&label),
+            Some(&repo_a.id),
+            None,
+        )
+        .await
+        .expect("claim")
+        .expect("repo A job claimable");
+    assert_eq!(claimed.run_id, format!("run-sca-{tag}"));
+
+    // Repo B's job is invisible to the repo-A scope.
+    let miss = db
+        .claim_queued_action_job_for_labels_scoped(
+            &scoped_runner,
+            std::slice::from_ref(&label),
+            Some(&repo_a.id),
+            None,
+        )
+        .await
+        .expect("scoped miss");
+    assert!(miss.is_none(), "repo-scoped claim crossed repositories");
+
+    // The unscoped claim still reaches repo B's queued job.
+    let claimed = db
+        .claim_queued_action_job_for_labels_scoped(&global_runner, &[label], None, None)
+        .await
+        .expect("claim")
+        .expect("global claim sees repo B");
+    assert_eq!(claimed.run_id, format!("run-scb-{tag}"));
+}
+
+/// 0053 claim atomicity: N jobs × M concurrent claimers — every job is
+/// claimed exactly once (no double-claim) and no runner returns a phantom.
+/// Runs against DATABASE_URL under `make db-matrix` (Postgres/MySQL legs);
+/// falls back to a tempdir SQLite so the tree-local suite exercises it too.
+#[tokio::test]
+async fn dialect_actions_claim_race() {
+    let (db, _tmp) = match std::env::var("DATABASE_URL") {
+        Ok(url) => (Database::connect(&url).await.expect("connect"), None),
+        Err(_) => {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let db = Database::connect(&format!(
+                "sqlite:{}",
+                dir.path().join("claim-race.db").display()
+            ))
+            .await
+            .expect("connect");
+            (db, Some(dir))
+        }
+    };
+    db.migrate().await.expect("migrate");
+
+    // Shared CI databases persist across runs: tag every id and use a
+    // run-unique claim label so leftover/concurrent jobs can never match.
+    let tag = format!(
+        "{:x}-{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let label = format!("ubuntu-latest-{tag}");
+    let labels_json = format!(r#"["{label}"]"#);
+
+    let owner = db
+        .create_user(
+            &format!("u-race-{tag}"),
+            &format!("race-{tag}@example.com"),
+            &format!("race-{tag}"),
+            Some("hash"),
+            "Race",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("owner");
+    let repo = db
+        .insert_repository(
+            &format!("r-race-{tag}"),
+            &owner.id,
+            "user",
+            "race",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo");
+    let run = db
+        .insert_action_run(
+            &format!("run-race-{tag}"),
+            &repo.id,
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            &format!("sha-{tag}"),
+            "refs/heads/main",
+            "CI",
+            Some(&owner.id),
+            None,
+            None,
+        )
+        .await
+        .expect("run");
+
+    // Claiming runners must exist — action_jobs.runner_id is a real FK.
+    for w in 0..4 {
+        db.insert_action_runner(
+            &format!("runner-{w}-{tag}"),
+            &format!("r{w}"),
+            &format!("hash-{w}-{tag}"),
+            &labels_json,
+            Some(&repo.id),
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect("runner");
+    }
+
+    const JOBS: usize = 16;
+    for i in 0..JOBS {
+        db.insert_action_job(oxidean_db::JobInsert::basic(
+            &format!("job-race-{i}-{tag}"),
+            &run.id,
+            &format!("build-{i}"),
+            "build",
+            &labels_json,
+        ))
+        .await
+        .expect("job");
+    }
+
+    let claims = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let mut handles = Vec::new();
+    for w in 0..4 {
+        let db = db.clone();
+        let claims = claims.clone();
+        let runner_id = format!("runner-{w}-{tag}");
+        let labels = vec![label.clone()];
+        handles.push(tokio::spawn(async move {
+            while let Some(job) = db
+                .claim_queued_action_job_for_labels(&runner_id, &labels)
+                .await
+                .expect("claim")
+            {
+                claims.lock().unwrap().push(job.id);
+            }
+        }));
+    }
+    for h in handles {
+        h.await.expect("claimer panicked");
+    }
+    let mut claimed = claims.lock().unwrap().clone();
+    claimed.sort();
+    claimed.dedup();
+    claimed.retain(|id| id.starts_with("job-race-"));
+    assert_eq!(
+        claimed.len(),
+        JOBS,
+        "every job claimed exactly once, no double-claims"
+    );
+}
+
+#[tokio::test]
+async fn dialect_actions_concurrency_gate() {
+    // GitHub concurrency-group semantics at claim time: a job-level group
+    // blocks while another same-group job runs (any run); a workflow-level
+    // group blocks while another same-group run is in progress; pending
+    // supersede cancels the older queued run even without cip.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("actions-conc.db").display());
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
+    db.migrate().await.expect("migrate");
+    let owner = db
+        .create_user(
+            "u-conc",
+            "conc@example.com",
+            "concuser",
+            Some("hash"),
+            "Conc",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("user");
+    let repo = db
+        .insert_repository(
+            "r-conc",
+            &owner.id,
+            "user",
+            "conc-repo",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo");
+    db.insert_action_runner(
+        "runner-1",
+        "conc-runner",
+        "hash-token",
+        r#"["ubuntu-latest"]"#,
+        Some(&repo.id),
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("runner");
+    let labels = vec!["ubuntu-latest".to_string()];
+    let labels_json = r#"["ubuntu-latest"]"#;
+    let mk_run = |id: &str| {
+        let (db, repo_id, owner_id) = (db.clone(), repo.id.clone(), owner.id.clone());
+        let id = id.to_string();
+        async move {
+            db.insert_action_run(
+                &id,
+                &repo_id,
+                ".github/workflows/ci.yml",
+                "CI",
+                "push",
+                "abc123",
+                "refs/heads/main",
+                "CI",
+                Some(&owner_id),
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let mk_job = |id: &str, run: &str, group: Option<&str>| {
+        let db = db.clone();
+        let (id, run) = (id.to_string(), run.to_string());
+        let group = group.map(|g| g.to_string());
+        async move {
+            let mut ins = oxidean_db::JobInsert::basic(&id, &run, &id, "build", labels_json);
+            ins.concurrency_group = group;
+            db.insert_action_job(ins).await
+        }
+    };
+
+    // --- job-level group: serializes across runs -------------------------
+    let ra = mk_run("run-a").await.expect("run-a");
+    let rb = mk_run("run-b").await.expect("run-b");
+    mk_job("job-a", &ra.id, Some("jg")).await.expect("job-a");
+    mk_job("job-b", &rb.id, Some("jg")).await.expect("job-b");
+    let first = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-a claims");
+    assert_eq!(first.id, "job-a");
+    assert!(
+        db.claim_queued_action_job_for_labels("runner-1", &labels)
+            .await
+            .expect("claim")
+            .is_none(),
+        "same-group job must not claim while another runs"
+    );
+    db.update_action_job_status("job-a", "success")
+        .await
+        .expect("finish job-a");
+    db.recompute_action_run_status(&ra.id)
+        .await
+        .expect("rollup a");
+    let second = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-b claims after occupancy released");
+    assert_eq!(second.id, "job-b");
+    db.update_action_job_status("job-b", "success")
+        .await
+        .expect("finish job-b");
+    db.recompute_action_run_status(&rb.id)
+        .await
+        .expect("rollup b");
+
+    // --- workflow-level group: run occupancy, same-run jobs parallel -----
+    let rc = mk_run("run-c").await.expect("run-c");
+    let rd = mk_run("run-d").await.expect("run-d");
+    db.set_action_run_concurrency(&rc.id, "wg")
+        .await
+        .expect("run-c group");
+    db.set_action_run_concurrency(&rd.id, "wg")
+        .await
+        .expect("run-d group");
+    mk_job("job-c1", &rc.id, None).await.expect("job-c1");
+    mk_job("job-c2", &rc.id, None).await.expect("job-c2");
+    mk_job("job-d", &rd.id, None).await.expect("job-d");
+    let c1 = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-c1 claims");
+    assert_eq!(c1.id, "job-c1");
+    db.recompute_action_run_status(&rc.id)
+        .await
+        .expect("rollup c");
+    // Same-run sibling is not blocked by its own run's group.
+    let c2 = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-c2 claims — same run");
+    assert_eq!(c2.id, "job-c2");
+    // Other run in the group is blocked.
+    assert!(
+        db.claim_queued_action_job_for_labels("runner-1", &labels)
+            .await
+            .expect("claim")
+            .is_none(),
+        "run-d's job must wait while run-c occupies the group"
+    );
+    db.update_action_job_status("job-c1", "success")
+        .await
+        .expect("finish c1");
+    db.update_action_job_status("job-c2", "success")
+        .await
+        .expect("finish c2");
+    db.recompute_action_run_status(&rc.id)
+        .await
+        .expect("rollup c");
+    let d = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-d claims after run-c finished");
+    assert_eq!(d.id, "job-d");
+    db.update_action_job_status("job-d", "success")
+        .await
+        .expect("finish d");
+    db.recompute_action_run_status(&rd.id)
+        .await
+        .expect("rollup d");
+
+    // --- pending supersede: newest queued wins, no cip needed ------------
+    let re = mk_run("run-e").await.expect("run-e");
+    let rf = mk_run("run-f").await.expect("run-f");
+    db.set_action_run_concurrency(&re.id, "pg")
+        .await
+        .expect("run-e group");
+    db.set_action_run_concurrency(&rf.id, "pg")
+        .await
+        .expect("run-f group");
+    mk_job("job-e", &re.id, None).await.expect("job-e");
+    mk_job("job-f", &rf.id, None).await.expect("job-f");
+    let superseded = db
+        .cancel_pending_concurrency_runs(&repo.id, "pg", &rf.id)
+        .await
+        .expect("pending supersede");
+    assert_eq!(superseded, vec![re.id.clone()]);
+    assert_eq!(
+        db.find_action_run_by_id(&re.id)
+            .await
+            .expect("find")
+            .unwrap()
+            .status,
+        "cancelled"
+    );
+    assert_eq!(
+        db.find_action_run_by_id(&rf.id)
+            .await
+            .expect("find")
+            .unwrap()
+            .status,
+        "queued"
+    );
+    // The surviving pending run claims normally.
+    let f = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-f claims");
+    assert_eq!(f.id, "job-f");
 }
 
 #[tokio::test]

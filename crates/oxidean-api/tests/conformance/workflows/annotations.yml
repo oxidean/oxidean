@@ -1,0 +1,10 @@
+name: annotations
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error file=src/main.rs,line=3,col=1,endLine=4,endColumn=9,title=Lint::boom"
+          echo "::warning file=src/lib.rs,line=7::careful"
+          echo "::notice::fyi"

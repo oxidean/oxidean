@@ -52,6 +52,7 @@ export function BranchProtectionPanel(props: {
   const [linearHistory, setLinearHistory] = useState(false);
   const [lockBranch, setLockBranch] = useState(false);
   const [requireSigned, setRequireSigned] = useState(false);
+  const [requireQueue, setRequireQueue] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -72,6 +73,7 @@ export function BranchProtectionPanel(props: {
     setLinearHistory(false);
     setLockBranch(false);
     setRequireSigned(false);
+    setRequireQueue(false);
   }
 
   function loadRuleForEdit(rule: BranchProtectionRulePublic) {
@@ -90,6 +92,7 @@ export function BranchProtectionPanel(props: {
     setLinearHistory(rule.required_linear_history);
     setLockBranch(rule.lock_branch);
     setRequireSigned(rule.require_signed_commits);
+    setRequireQueue(rule.required_merge_queue);
     setError("");
   }
 
@@ -119,6 +122,7 @@ export function BranchProtectionPanel(props: {
       required_linear_history: linearHistory,
       lock_branch: lockBranch,
       require_signed_commits: requireSigned,
+      required_merge_queue: requireQueue,
     };
     try {
       const res = editingId
@@ -264,6 +268,11 @@ export function BranchProtectionPanel(props: {
                             rule.require_signed_commits
                           ) {
                             <> Signed commits required.</>;
+                          }
+                          @if (
+                            rule.required_merge_queue
+                          ) {
+                            <> Merge queue required.</>;
                           }
                         </p>
                       </li>;
@@ -433,6 +442,16 @@ export function BranchProtectionPanel(props: {
                         }
                       />
                       Require signed commits
+                    </label>
+                    <label className="flex items-center gap-2 text-[14px]">
+                      <input
+                        type="checkbox"
+                        checked={requireQueue}
+                        onChange={(e) =>
+                          setRequireQueue((e.target as HTMLInputElement).checked)
+                        }
+                      />
+                      Require merge queue
                     </label>
                   </div>
                   @if (error) {

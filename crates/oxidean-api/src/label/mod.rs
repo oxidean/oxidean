@@ -265,6 +265,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
                 )
                 .await
                 .map_err(db_err)?;
+            notify_actions_label(ctx, &accessible, "created", &row).await;
             Ok(to_public(&row, false))
         }
     }
@@ -329,6 +330,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
         row.description.clone()
     };
 
+    let mut repo_accessible = None;
     if let Some(org_id) = row.org_id.as_deref() {
         let org = require_org_admin(ctx, &req.owner).await?;
         if org.id != org_id {
@@ -347,6 +349,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
         if row.repo_id.as_deref() != Some(accessible.row.id.as_str()) {
             return Err(not_found());
         }
+        repo_accessible = Some(accessible);
     }
 
     let updated = ctx
@@ -354,6 +357,9 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
         .update_label(&row.id, &name, &color, &description)
         .await
         .map_err(db_err)?;
+    if let Some(accessible) = &repo_accessible {
+        notify_actions_label(ctx, accessible, "edited", &updated).await;
+    }
     let hidden = req.hidden.unwrap_or(false);
     Ok(to_public(&updated, hidden))
 }
@@ -369,6 +375,7 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("label.not_found", "label not found"))?;
 
+    let mut repo_accessible = None;
     if let Some(org_id) = row.org_id.as_deref() {
         let org = require_org_admin(ctx, &req.owner).await?;
         if org.id != org_id {
@@ -387,8 +394,54 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         if row.repo_id.as_deref() != Some(accessible.row.id.as_str()) {
             return Err(not_found());
         }
+        repo_accessible = Some(accessible);
     }
 
     ctx.db.delete_label(&row.id).await.map_err(db_err)?;
+    if let Some(accessible) = &repo_accessible {
+        notify_actions_label(ctx, accessible, "deleted", &row).await;
+    }
     Ok(serde_json::json!({ "ok": true }))
+}
+
+/// `on: label` Actions trigger — repo-scoped labels only (org labels have no
+/// per-repo GitHub analogue). Soft-fail: the mutation already committed.
+async fn notify_actions_label(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &LabelRow,
+) {
+    let Ok(user) = require_verified(ctx).await else {
+        return;
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let payload = serde_json::json!({
+        "action": action,
+        "label": {
+            "id": row.id,
+            "name": row.name,
+            "color": row.color,
+            "description": row.description,
+        },
+        "repository": repository,
+        "sender": crate::actions::payload::user_embed(&user.username),
+    });
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "label",
+        action,
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
 }

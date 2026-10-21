@@ -1,0 +1,8 @@
+name: timeout-minutes-step
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 30
+        timeout-minutes: 0.02

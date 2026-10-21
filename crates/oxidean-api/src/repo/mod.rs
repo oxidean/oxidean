@@ -71,7 +71,11 @@ pub use tag_protection::{
     create as tag_protection_create, delete as tag_protection_delete, list as tag_protection_list,
     update as tag_protection_update,
 };
-pub use units::{issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled};
+pub use units::{
+    discussions_get_enabled, discussions_set_enabled, issues_get_enabled, issues_set_enabled,
+    projects_get_enabled, projects_set_enabled, pulls_get_enabled, pulls_set_enabled,
+    require_unit_enabled, wiki_get_enabled, wiki_set_enabled, RepoUnit,
+};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
 /// 1 MiB keeps preview responses cheap without clipping most source files.
@@ -90,12 +94,14 @@ use oxidean_core::{
     RepoLfsEnabledResponse, RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest,
     RepoLfsListObjectsResponse, RepoLfsObjectEntry, RepoLfsSetEnabledRequest,
     RepoLfsStatusResponse, RepoLfsUsageResponse, RepoListByOwnerRequest, RepoListMineResponse,
-    RepoPublic, RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest,
-    RepoSetQuotaRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption,
-    RepoTreeEntry, RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
-    TemplateProvenance,
+    RepoMigrateRequest, RepoPublic, RepoQuotaPublic, RepoRefEntry, RepoRefsResponse,
+    RepoSetArchivedRequest, RepoSetQuotaRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse,
+    RepoTemplateOption, RepoTreeEntry, RepoTreeRequest, RepoTreeResponse,
+    RepoUpdateVisibilityRequest, RepoVisibility, TemplateProvenance,
 };
 use uuid::Uuid;
+
+use oxidean_git::{RemoteAuthKind, RemoteCredentials};
 
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
@@ -366,6 +372,9 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         // on single-repo responses (COL-13).
         issues_enabled: true,
         pulls_enabled: true,
+        wiki_enabled: true,
+        projects_enabled: true,
+        discussions_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }
@@ -470,6 +479,9 @@ pub async fn enrich_social(
         .map_err(db_err)?;
     public.issues_enabled = unit_flags.issues_enabled;
     public.pulls_enabled = unit_flags.pulls_enabled;
+    public.wiki_enabled = unit_flags.wiki_enabled;
+    public.projects_enabled = unit_flags.projects_enabled;
+    public.discussions_enabled = unit_flags.discussions_enabled;
     Ok(public)
 }
 
@@ -504,10 +516,25 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
             &accessible.row.id,
             "star",
             "created",
-            payload,
+            payload.clone(),
             &ctx.env_name,
         )
         .await;
+        // GitHub's `watch` Actions event fires only on star — `started` is
+        // its sole activity type (unstar triggers nothing).
+        if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+            ctx,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &accessible.row.default_branch,
+            "watch",
+            "started",
+            payload,
+            Some(user.id.clone()),
+        ) {
+            crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+        }
     }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
@@ -805,6 +832,9 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 viewer_watch_level: None,
                 issues_enabled: true,
                 pulls_enabled: true,
+                wiki_enabled: true,
+                projects_enabled: true,
+                discussions_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -1635,10 +1665,23 @@ pub async fn branch_create(
         &accessible.row.id,
         "create",
         "",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "create",
+        "created",
+        payload,
+        Some(actor_id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1792,10 +1835,23 @@ pub async fn branch_delete(
         &accessible.row.id,
         "delete",
         "",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "delete",
+        "deleted",
+        payload,
+        Some(actor_id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1820,6 +1876,8 @@ pub async fn update_visibility(
         )
     })?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let was_public = accessible.row.visibility == "public";
+    let actor_id = require_verified(ctx).await?.id;
     let row = ctx
         .db
         .update_repository_visibility(&accessible.row.id, map_visibility(req.visibility))
@@ -1829,6 +1887,35 @@ pub async fn update_visibility(
     // drop notification rows for users who just lost access.
     if is_private_visibility(&row.visibility) {
         crate::notify::sweep_repo_access(&ctx.db, &row.id).await;
+    }
+    // `on: public` — the repo went public (any non-public → public).
+    if !was_public && row.visibility == "public" {
+        let repository = crate::actions::payload::repository_embed(
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.default_branch,
+        );
+        let sender = match ctx.db.find_user_by_id(&actor_id).await {
+            Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+            _ => serde_json::json!({}),
+        };
+        let payload = serde_json::json!({
+            "repository": repository,
+            "sender": sender,
+        });
+        if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+            ctx,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &accessible.row.default_branch,
+            "public",
+            "",
+            payload,
+            Some(actor_id),
+        ) {
+            crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+        }
     }
     Ok(to_public(&AccessibleRepo {
         row,
@@ -2457,9 +2544,226 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         viewer_watch_level: None,
         issues_enabled: true,
         pulls_enabled: true,
+        wiki_enabled: true,
+        projects_enabled: true,
+        discussions_enabled: true,
         fork_network_id: None,
         forked_from: None,
     })
+}
+
+/// `repo.migrate` — Gitea `POST /repos/migrate`: create a repository whose git
+/// content is cloned from a remote URL. `mirror: true` additionally registers
+/// the remote as an ongoing two-way mirror; `wiki: true` best-effort clones
+/// the `<repo>.wiki` sidecar. Only `service: "git"` is supported — forge-object
+/// migration (issues / PRs / releases) is out of scope.
+pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: RepoMigrateRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.migrate input: {e}")))?;
+
+    match req
+        .service
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        None | Some("git") => {}
+        Some(other) => {
+            return Err(AppError::new(
+                "repo.migrate.unsupported",
+                format!("service '{other}' is not supported; only git clones are"),
+            ));
+        }
+    }
+
+    let clone_addr = oxidean_git::validate_remote_url(req.clone_addr.trim())
+        .map_err(|e| AppError::new("repo.migrate.invalid_url", e.to_string()))?
+        .to_string();
+    let lower = clone_addr.to_ascii_lowercase();
+    if !lower.starts_with("https://") && !lower.starts_with("http://") {
+        return Err(AppError::new(
+            "repo.migrate.unsupported",
+            "ssh:// and git@ remotes are not supported for migration; use an https:// clone URL",
+        ));
+    }
+
+    let name = {
+        let n = req.repo_name.trim();
+        if n.is_empty() {
+            clone_addr
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(".git")
+                .to_string()
+        } else {
+            n.to_string()
+        }
+    };
+    validate_repo_name(&name).map_err(|msg| AppError::new("repo.invalid_name", msg))?;
+
+    let credentials = RemoteCredentials {
+        kind: RemoteAuthKind::HttpsToken,
+        username: req
+            .auth_username
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .or_else(|| Some("git".to_string())),
+        secret: req
+            .auth_token
+            .clone()
+            .or(req.auth_password.clone())
+            .unwrap_or_default(),
+        known_hosts: None,
+    };
+
+    let mut repo = create(
+        ctx,
+        serde_json::json!({
+            "name": name,
+            "owner": req.repo_owner,
+            "description": req.description,
+            "visibility": if req.private.unwrap_or(false) { "private" } else { "public" },
+        }),
+    )
+    .await?;
+
+    let bare = bare_repo_path(&ctx.repos_dir, &repo.owner_username, &repo.name)?;
+    let remote_refs = match ctx.git.ls_remote_url(&clone_addr, &credentials).await {
+        Ok(r) => r,
+        Err(e) => {
+            compensate_failed_create(ctx, &repo.id, &bare).await;
+            return Err(AppError::new(
+                "repo.migrate.unreachable",
+                format!("cannot read remote refs: {e}"),
+            ));
+        }
+    };
+    if let Err(e) = ctx
+        .git
+        .fetch_from_url(&bare, &clone_addr, &credentials)
+        .await
+    {
+        compensate_failed_create(ctx, &repo.id, &bare).await;
+        return Err(AppError::new(
+            "repo.migrate.clone_failed",
+            format!("git fetch failed: {e}"),
+        ));
+    }
+    // Publish remote heads/tags verbatim — ls-remote names are already
+    // fully-qualified `refs/heads/*` / `refs/tags/*`.
+    for r in &remote_refs {
+        if let Err(e) = ctx.git.update_ref(&bare, &r.name, &r.oid).await {
+            compensate_failed_create(ctx, &repo.id, &bare).await;
+            return Err(AppError::new(
+                "repo.migrate.clone_failed",
+                format!("publish {} failed: {e}", r.name),
+            ));
+        }
+    }
+
+    // Re-point the default branch when the remote lacks the one chosen at
+    // create time (prefer `master`, else the first remote head).
+    let mut heads: Vec<&str> = remote_refs
+        .iter()
+        .filter_map(|r| r.name.strip_prefix("refs/heads/"))
+        .collect();
+    heads.sort_unstable();
+    if !heads.is_empty() && !heads.contains(&repo.default_branch.as_str()) {
+        let pick = if heads.contains(&"master") {
+            "master"
+        } else {
+            heads[0]
+        };
+        ctx.git
+            .set_head_branch(&bare, pick)
+            .await
+            .map_err(|e| AppError::new("repo.migrate.head", e.to_string()))?;
+        repo.default_branch = ctx
+            .db
+            .update_repository_default_branch(&repo.id, pick)
+            .await
+            .map_err(db_err)?
+            .default_branch;
+    }
+
+    if let Err(e) = crate::git::quota::refresh_repo_size_bytes(&ctx.db, &repo.id, &bare).await {
+        tracing::warn!(error = %e, "post-migrate size refresh failed");
+    }
+
+    if req.mirror.unwrap_or(false) {
+        // A configured mirror needs outbound credentials on this instance
+        // (anonymous pull mirrors are not supported — mirror secret_required).
+        crate::mirror::upsert(
+            ctx,
+            serde_json::json!({
+                "owner": repo.owner_username,
+                "name": repo.name,
+                "remote_url": clone_addr,
+                "auth_kind": "https_token",
+                "username": credentials.username,
+                "secret": credentials.secret,
+                "enabled": true,
+                "sync_mode": "merge",
+            }),
+        )
+        .await?;
+        let _ = crate::mirror::sync_now(
+            ctx,
+            serde_json::json!({"owner": repo.owner_username, "name": repo.name}),
+        )
+        .await;
+    }
+
+    if req.wiki.unwrap_or(false) {
+        migrate_wiki(ctx, &repo, &clone_addr, &credentials).await;
+    }
+
+    Ok(repo)
+}
+
+/// Best-effort wiki sidecar clone: `<clone_addr minus .git>.wiki.git` →
+/// `{repos_dir}/{owner}/{name}.wiki.git`. Silent no-op when the remote has no
+/// wiki repository.
+async fn migrate_wiki(
+    ctx: &RpcCtx,
+    repo: &RepoPublic,
+    clone_addr: &str,
+    credentials: &RemoteCredentials,
+) {
+    let wiki_addr = format!(
+        "{}.wiki.git",
+        clone_addr.trim_end_matches('/').trim_end_matches(".git")
+    );
+    let Ok(refs) = ctx.git.ls_remote_url(&wiki_addr, credentials).await else {
+        return;
+    };
+    if refs.is_empty() {
+        return;
+    }
+    let Ok(wiki_path) = bare_repo_path(
+        &ctx.repos_dir,
+        &repo.owner_username,
+        &format!("{}.wiki", repo.name),
+    ) else {
+        return;
+    };
+    if !wiki_path.exists() && ctx.git.init_bare(&wiki_path, "master").await.is_err() {
+        return;
+    }
+    if ctx
+        .git
+        .fetch_from_url(&wiki_path, &wiki_addr, credentials)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    for r in &refs {
+        let _ = ctx.git.update_ref(&wiki_path, &r.name, &r.oid).await;
+    }
 }
 
 /// `repo.fork` — Read+ on **public** source; bare copy + fork network (D-SOC-12…18, extends Phase 12).
@@ -2583,10 +2887,25 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         &source.row.id,
         "fork",
         "created",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    // `on: fork` runs belong to the *source* repo (GitHub parity — forks of
+    // private repos don't leak workflow execution into the fork).
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &source.owner_username,
+        &source.row.name,
+        &source.row.id,
+        &source.row.default_branch,
+        "fork",
+        "created",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
 
     let accessible = AccessibleRepo {
         row,

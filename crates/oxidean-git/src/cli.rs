@@ -9,9 +9,9 @@ use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
     CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
     FileChange, FilesCommit, FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit,
-    GrepResult, NameStatusKind, NameStatusRow, RawCommit, RemoteAuthKind, RemoteCredentials,
-    RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry, ARCHIVE_TIMEOUT,
-    BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    GrepResult, NameStatusKind, NameStatusRow, PushEventCommit, RawCommit, RemoteAuthKind,
+    RemoteCredentials, RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry,
+    ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.
@@ -521,6 +521,12 @@ impl RemoteAuthFiles {
     fn prepare(credentials: &RemoteCredentials) -> Result<Self, GitError> {
         let dir = tempfile::tempdir().map_err(GitError::Io)?;
         let mut env = Vec::new();
+        // An empty HTTPS secret means anonymous access — injecting a
+        // `Basic <user>:` header makes strict servers 401 instead of serving
+        // the public repo, so skip auth materialization entirely.
+        if credentials.kind == RemoteAuthKind::HttpsToken && credentials.secret.is_empty() {
+            return Ok(Self { _dir: dir, env });
+        }
         match credentials.kind {
             RemoteAuthKind::HttpsToken => {
                 let user = credentials.username.as_deref().unwrap_or("git").trim();
@@ -2611,6 +2617,76 @@ impl GitBackend for CliGitBackend {
         merge_via_worktree(repo, base_ref, head_sha, message, MergeMode::MergeCommit).await
     }
 
+    async fn test_merge_commit(
+        &self,
+        repo: &Path,
+        base_sha: &str,
+        head_sha: &str,
+        message: &str,
+    ) -> Result<String, GitError> {
+        let base_sha = validate_treeish(base_sha)?;
+        let head_sha = validate_treeish(head_sha)?;
+        if message.contains('\0') {
+            return Err(GitError::InvalidArg("commit message contains NUL".into()));
+        }
+        let repo_abs = absolute_path(repo)?;
+        let repo_s = repo_abs.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 repo path: {}", repo_abs.display()))
+        })?;
+
+        // Plumbing-only merge: `merge-tree --write-tree` computes the merged
+        // tree directly in the object store — no checkout, no ref motion.
+        // Exit 1 = conflicts (CONFLICT records on stdout); other failures
+        // propagate as-is.
+        let tree = match run_git_stdout(&[
+            "-C",
+            repo_s,
+            "merge-tree",
+            "--write-tree",
+            base_sha,
+            head_sha,
+        ])
+        .await
+        {
+            Ok(out) => String::from_utf8_lossy(&out)
+                .lines()
+                .next()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .ok_or_else(|| GitError::Process("merge-tree produced no tree oid".into()))?,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.to_lowercase().contains("conflict") {
+                    return Err(GitError::Process(format!("merge conflict: {msg}")));
+                }
+                return Err(e);
+            }
+        };
+
+        // Two parents (base, head) mark this as a merge commit; committer is
+        // the forge identity — the run pins this sha as `github.sha`.
+        let out = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "commit-tree",
+            &tree,
+            "-p",
+            base_sha,
+            "-p",
+            head_sha,
+            "-m",
+            message,
+        ])
+        .await?;
+        let sha = String::from_utf8_lossy(&out).trim().to_string();
+        if sha.chars().any(|c| !c.is_ascii_hexdigit()) || sha.len() != 40 {
+            return Err(GitError::Process(format!(
+                "commit-tree returned non-sha output: {sha}"
+            )));
+        }
+        Ok(sha)
+    }
+
     async fn squash_merge(
         &self,
         repo: &Path,
@@ -2986,6 +3062,121 @@ impl GitBackend for CliGitBackend {
         for j in joins {
             if let Ok(Some((name, commit))) = j.await {
                 out.insert(name, commit);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn push_event_commits(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+        limit: u32,
+    ) -> Result<Vec<PushEventCommit>, GitError> {
+        let new = validate_treeish(new)?;
+        let repo_s = repo_str(repo)?;
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{new}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(Vec::new());
+        }
+        // Records are NUL-delimited header fields; `--name-status` rows follow
+        // each header as `X\tpath` lines (`R100\told\tnew` for renames).
+        // core.quotePath=false keeps non-ASCII names literal.
+        let old = old.trim();
+        let new_oid = String::from_utf8_lossy(&rev.stdout).trim().to_string();
+        let max = format!("--max-count={}", limit.clamp(1, 2048));
+        let mut args = vec![
+            "-C",
+            repo_s,
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "--format=%x00%H%x00%an%x00%ae%x00%aI%x00%s%x00",
+            "--name-status",
+            &max,
+            new,
+        ];
+        let other_tips = if old.is_empty() || old.bytes().all(|b| b == b'0') {
+            // Created/force-ref pushes have no `old` baseline — the new
+            // commits are those not reachable from the repo's OTHER refs.
+            // `--not --all` would also exclude the just-updated ref itself
+            // (it already points at `new` when post-receive runs), always
+            // yielding an empty list — enumerate ref tips and exclude every
+            // tip other than `new`'s.
+            self.list_refs(repo)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.oid != new_oid)
+                .map(|r| r.oid)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if old.is_empty() || old.bytes().all(|b| b == b'0') {
+            if !other_tips.is_empty() {
+                args.push("--not");
+                args.extend(other_tips.iter().map(|o| o.as_str()));
+            }
+        } else {
+            args.push("--not");
+            args.push(validate_treeish(old)?);
+        }
+        let stdout = run_git_stdout(&args).await?;
+        let text = String::from_utf8_lossy(&stdout);
+        let mut out: Vec<PushEventCommit> = Vec::new();
+        for line in text.split('\n') {
+            if let Some(rec) = line.strip_prefix('\0') {
+                let f: Vec<&str> = rec.split('\0').collect();
+                if f.len() < 5 {
+                    continue;
+                }
+                out.push(PushEventCommit {
+                    sha: f[0].to_string(),
+                    author_name: f[1].to_string(),
+                    author_email: f[2].to_string(),
+                    authored_at: f[3].to_string(),
+                    subject: f[4].to_string(),
+                    added: Vec::new(),
+                    removed: Vec::new(),
+                    modified: Vec::new(),
+                });
+                continue;
+            }
+            let Some(cur) = out.last_mut() else { continue };
+            let Some((status, rest)) = line.split_once('\t') else {
+                continue;
+            };
+            match status {
+                "A" => cur.added.push(rest.to_string()),
+                "D" => cur.removed.push(rest.to_string()),
+                "M" | "T" => cur.modified.push(rest.to_string()),
+                "C" => {
+                    if let Some((_, newp)) = rest.split_once('\t') {
+                        cur.added.push(newp.to_string());
+                    }
+                }
+                s if s.starts_with('R') => {
+                    if let Some((oldp, newp)) = rest.split_once('\t') {
+                        cur.removed.push(oldp.to_string());
+                        cur.added.push(newp.to_string());
+                    }
+                }
+                _ => {}
             }
         }
         Ok(out)
@@ -3591,6 +3782,24 @@ impl GitBackend for CliGitBackend {
         }
         let repo_s = repo_str(repo)?;
         run_git(&["-C", repo_s, "update-ref", refname, sha]).await
+    }
+
+    async fn set_head_branch(&self, repo: &Path, branch: &str) -> Result<(), GitError> {
+        let branch = validate_treeish(branch)?;
+        if branch.starts_with("refs/") || branch.contains(':') || branch.is_empty() {
+            return Err(GitError::InvalidArg(format!(
+                "set_head_branch wants a short branch name: {branch}"
+            )));
+        }
+        let repo_s = repo_str(repo)?;
+        run_git(&[
+            "-C",
+            repo_s,
+            "symbolic-ref",
+            "HEAD",
+            &format!("refs/heads/{branch}"),
+        ])
+        .await
     }
 
     // ------------------------------------------------------------------
@@ -4823,6 +5032,119 @@ mod tests {
         .trim()
         .to_string();
         assert_eq!(tip, sha);
+    }
+
+    #[tokio::test]
+    async fn test_merge_commit_leaves_base_unmoved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("pr.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat").await;
+        let bare_s = bare.to_str().unwrap();
+        let base = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let head = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/feature"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let sha = git
+            .test_merge_commit(&bare, &base, &head, "Merge feature into main")
+            .await
+            .expect("test_merge_commit");
+        assert_eq!(sha.len(), 40);
+        // Base branch unmoved — the merge exists only as an object.
+        let tip = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        assert_eq!(tip, base);
+        // Two parents: (base, head).
+        let parents_ref = format!("{sha}^@");
+        let parents_raw = run_git_stdout(&["-C", bare_s, "rev-parse", &parents_ref])
+            .await
+            .unwrap();
+        let parents: Vec<String> = String::from_utf8_lossy(&parents_raw)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .collect();
+        assert_eq!(parents, vec![base.clone(), head.clone()]);
+        // Merged tree carries both files.
+        let files_raw = run_git_stdout(&["-C", bare_s, "ls-tree", "--name-only", &sha])
+            .await
+            .unwrap();
+        let files = String::from_utf8_lossy(&files_raw);
+        assert!(files.contains("a.txt") && files.contains("b.txt"));
+        // Publishable via update_ref — `refs/pull/N/merge` seam (API-06).
+        git.update_ref(&bare, "refs/pull/1/merge", &sha)
+            .await
+            .unwrap();
+        let resolved = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/pull/1/merge"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        assert_eq!(resolved, sha);
+    }
+
+    #[tokio::test]
+    async fn test_merge_commit_conflict_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("pr-conflict.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "a.txt", b"feat\n", "feat").await;
+        // Diverge main so the same file conflicts.
+        push_branch_with_file(&bare, "main", "main", "a.txt", b"main2\n", "diverge").await;
+        let bare_s = bare.to_str().unwrap();
+        let base = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let head = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/feature"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let err = git
+            .test_merge_commit(&bare, &base, &head, "Merge feature into main")
+            .await
+            .expect_err("conflicting merge must error");
+        assert!(err.to_string().contains("conflict"));
     }
 
     #[tokio::test]
@@ -6540,5 +6862,92 @@ mod tests {
             .expect("missing ref");
         assert!(missing.times.is_empty());
         assert!(!missing.truncated);
+    }
+
+    #[tokio::test]
+    async fn push_event_commits_zero_old_lists_commits_not_on_other_refs() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let tip1 = git.rev_parse(&bare, "main").await.unwrap();
+
+        // Second commit on main: one modified, one added, one removed file.
+        let tip2 = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "second",
+                &[
+                    FileChange::Upsert {
+                        path: "README.md".into(),
+                        content: b"hi v2\n".to_vec(),
+                    },
+                    FileChange::Upsert {
+                        path: "b.txt".into(),
+                        content: b"b\n".to_vec(),
+                    },
+                    FileChange::Delete {
+                        path: "docs/a.md".into(),
+                    },
+                ],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap()
+            .sha;
+
+        // Zero-old on a ref create must NOT collapse to empty via
+        // `--not --all` (which also excludes the just-updated ref itself):
+        // it is the full history of `new` minus other refs' tips.
+        let zero = "0".repeat(40);
+        let all = git
+            .push_event_commits(&bare, &zero, &tip2, 2048)
+            .await
+            .expect("zero-old");
+        assert_eq!(all.len(), 2, "{all:?}");
+        assert_eq!(all[0].sha, tip2);
+        assert_eq!(all[0].modified, vec!["README.md".to_string()]);
+        assert_eq!(all[0].added, vec!["b.txt".to_string()]);
+        assert_eq!(all[0].removed, vec!["docs/a.md".to_string()]);
+        assert_eq!(all[1].sha, tip1);
+
+        // A real old baseline still lists only the pushed range.
+        let range = git
+            .push_event_commits(&bare, &tip1, &tip2, 2048)
+            .await
+            .expect("old..new");
+        assert_eq!(range.len(), 1);
+        assert_eq!(range[0].sha, tip2);
+
+        // Created branch off tip1 with a unique commit: zero-old excludes
+        // commits reachable from main but keeps the branch's own.
+        let feat = git
+            .commit_files(
+                &bare,
+                "feat",
+                &tip1,
+                "feat work",
+                &[FileChange::Upsert {
+                    path: "feat.txt".into(),
+                    content: b"f\n".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap()
+            .sha;
+        let on_feat = git
+            .push_event_commits(&bare, &zero, &feat, 2048)
+            .await
+            .expect("feat create");
+        assert_eq!(on_feat.len(), 1, "{on_feat:?}");
+        assert_eq!(on_feat[0].sha, feat);
+        assert_eq!(on_feat[0].added, vec!["feat.txt".to_string()]);
     }
 }

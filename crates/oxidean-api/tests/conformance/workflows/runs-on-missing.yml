@@ -1,0 +1,6 @@
+name: runs-on-missing
+on: [push]
+jobs:
+  build:
+    steps:
+      - run: echo no runs-on

@@ -1,0 +1,12 @@
+name: uses-local-composite
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: hello
+        uses: ./.github/actions/hello
+        with:
+          who: world
+      - run: echo "saw=${{ steps.hello.outputs.greeting }}"

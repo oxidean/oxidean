@@ -297,6 +297,103 @@ pub async fn notify_push(
 // workflow_run / registry_package.
 // ---------------------------------------------------------------------------
 
+/// Wiki pushes emit `gollum`, never `push` (GitHub semantics — wiki refs are
+/// a separate event surface). One gollum event per push batches every
+/// changed root-level `*.md` page; `created` wins when a page is added and
+/// modified inside the same push. Workflows still resolve against the main
+/// bare — `on: gollum` dispatches through the shared LifecycleEvent fan-out
+/// with job-token suppression (GitHub recursion rule).
+#[allow(clippy::too_many_arguments)]
+pub async fn notify_wiki_push(
+    db: &Database,
+    git: &dyn oxidean_git::GitBackend,
+    main_bare: &std::path::Path,
+    wiki_bare: &std::path::Path,
+    repository_id: &str,
+    owner: &str,
+    repo_name: &str,
+    default_branch: &str,
+    pusher_login: &str,
+    pusher_id: &str,
+    updates: &[(String, String, String)],
+    env_name: &str,
+    job_token_actor: bool,
+    actions_enabled: bool,
+) {
+    use crate::actions::payload::GollumPage;
+    use std::collections::HashMap;
+
+    let mut order: Vec<String> = Vec::new();
+    let mut pages: HashMap<String, GollumPage> = HashMap::new();
+    for (old, new, _refname) in updates {
+        if is_zero_oid(new) {
+            continue;
+        }
+        // Newest-first history for the push range — the first sighting of a
+        // page carries the sha that last touched it.
+        let commits = git
+            .push_event_commits(wiki_bare, old, new, 2048)
+            .await
+            .unwrap_or_default();
+        for commit in &commits {
+            for path in commit.added.iter().chain(commit.modified.iter()) {
+                let Some(page) = path.strip_suffix(".md") else {
+                    continue;
+                };
+                if page.is_empty() || page.contains('/') {
+                    continue;
+                }
+                let action = if commit.added.contains(path) {
+                    "created"
+                } else {
+                    "edited"
+                };
+                match pages.get_mut(page) {
+                    Some(existing) => {
+                        if action == "created" {
+                            existing.action = "created".to_string();
+                        }
+                    }
+                    None => {
+                        order.push(page.to_string());
+                        pages.insert(
+                            page.to_string(),
+                            GollumPage {
+                                page_name: page.to_string(),
+                                action: action.to_string(),
+                                sha: commit.sha.clone(),
+                                html_url: format!("/{owner}/{repo_name}/wiki/{page}"),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if pages.is_empty() {
+        return;
+    }
+    let ordered: Vec<GollumPage> = order.iter().filter_map(|p| pages.remove(p)).collect();
+
+    let repository = repository_block(repository_id, repo_name, owner);
+    let sender = json!({ "login": pusher_login });
+    let payload = crate::actions::payload::gollum_payload(&ordered, &repository, &sender);
+    emit(db, repository_id, "gollum", "", payload.clone(), env_name).await;
+
+    let event = crate::actions::events::LifecycleEvent {
+        bare_repo: main_bare.to_path_buf(),
+        repository_id: repository_id.to_string(),
+        default_branch: default_branch.to_string(),
+        event_name: "gollum",
+        action: String::new(),
+        payload,
+        actor_id: Some(pusher_id.to_string()),
+        job_token_actor,
+        actions_enabled_instance: actions_enabled,
+    };
+    crate::actions::events::notify_lifecycle_actions(db, git, &event).await;
+}
+
 /// Shared `repository` block for repo-scoped payloads (GitHub shape).
 fn repository_block(repo_id: &str, repo_name: &str, owner: &str) -> serde_json::Value {
     json!({
@@ -464,6 +561,47 @@ pub fn release_payload(
     })
 }
 
+/// GitHub-compatible `pull_request_review` payload — Actions `on:
+/// pull_request_review` sees `submitted`/`dismissed` (edited reviews are
+/// resubmitted in our model).
+#[expect(clippy::too_many_arguments)]
+pub fn pull_request_review_payload(
+    action: &str,
+    review_id: &str,
+    review_state: &str,
+    review_body: &str,
+    review_commit_sha: Option<&str>,
+    pull_number: i64,
+    pull_title: &str,
+    pull_state: &str,
+    reviewer_login: &str,
+    reviewer_id: &str,
+    owner: &str,
+    repo_name: &str,
+    repo_id: &str,
+    sender_login: &str,
+    sender_id: &str,
+) -> serde_json::Value {
+    json!({
+        "action": action,
+        "review": {
+            "id": review_id,
+            "state": review_state,
+            "body": review_body,
+            "commit_id": review_commit_sha,
+            "user": { "login": reviewer_login, "id": reviewer_id },
+        },
+        "pull_request": {
+            "number": pull_number,
+            "title": pull_title,
+            "state": pull_state,
+            "html_url": format!("/{owner}/{repo_name}/pulls/{pull_number}"),
+        },
+        "repository": repository_block(repo_id, repo_name, owner),
+        "sender": { "login": sender_login, "id": sender_id },
+    })
+}
+
 /// GitHub-compatible `workflow_run` payload. Internal terminal statuses
 /// (`success` / `failure` / `cancelled`) map to `status: "completed"` with the
 /// internal value as `conclusion`; `queued` / `in_progress` pass through.
@@ -543,9 +681,11 @@ pub fn registry_package_payload(
 }
 
 /// After a successful receive-pack: emit `create` / `delete` for branch and
-/// tag refs (API-04). Updates where both sides are non-zero are `push`
-/// territory; refs outside `refs/heads/` / `refs/tags/` are not reported
-/// (matches GitHub's `create`/`delete` scope).
+/// tag refs (API-04), and fire the matching `on: create`/`on: delete`
+/// Actions triggers (`git` + `bare` resolve the default-branch workflows).
+/// Updates where both sides are non-zero are `push` territory; refs outside
+/// `refs/heads/` / `refs/tags/` are not reported (matches GitHub's
+/// `create`/`delete` scope).
 #[expect(clippy::too_many_arguments)]
 pub async fn notify_ref_events(
     db: &Database,
@@ -556,6 +696,12 @@ pub async fn notify_ref_events(
     pusher_id: &str,
     updates: &[(String, String, String)],
     env_name: &str,
+    git: &dyn oxidean_git::GitBackend,
+    bare: &std::path::Path,
+    // Pushes authenticated by an Actions job token suppress `on: create`/
+    // `on: delete` workflow dispatch (GITHUB_TOKEN never re-triggers runs);
+    // the webhook deliveries still fire.
+    suppress_actions: bool,
 ) {
     // (default_branch, description) — resolved lazily, only when a
     // create/delete update is actually present.
@@ -596,7 +742,38 @@ pub async fn notify_ref_events(
             pusher_login,
             pusher_id,
         );
-        emit(db, repository_id, event, "", payload, env_name).await;
+        emit(db, repository_id, event, "", payload.clone(), env_name).await;
+        if suppress_actions {
+            continue;
+        }
+        // `on: create`/`on: delete` — the webhook event name is the trigger
+        // name; GitHub's activity types are `created`/`deleted`.
+        crate::actions::events::notify_lifecycle_actions(
+            db,
+            git,
+            &crate::actions::events::LifecycleEvent {
+                bare_repo: bare.to_path_buf(),
+                repository_id: repository_id.to_string(),
+                default_branch: default_branch.clone(),
+                event_name: if event == "create" {
+                    "create"
+                } else {
+                    "delete"
+                },
+                action: if event == "create" {
+                    "created".to_string()
+                } else {
+                    "deleted".to_string()
+                },
+                payload,
+                actor_id: Some(pusher_id.to_string()),
+                // `suppress_actions` above already skips job-token pushes —
+                // this literal is unreachable then; explicit for clarity.
+                job_token_actor: false,
+                actions_enabled_instance: crate::actions::env_actions_enabled(),
+            },
+        )
+        .await;
     }
 }
 
@@ -639,9 +816,505 @@ pub async fn notify_workflow_run(db: &Database, run_id: &str, action: &str, env_
     .await;
 }
 
+/// GitHub-compatible `workflow_job` payload — `queued`/`waiting` at
+/// scheduling, `in_progress` at runner claim, `completed` on a terminal
+/// conclusion (internal status carries through as `conclusion`).
+pub fn workflow_job_payload(
+    action: &str,
+    job: &oxidean_db::actions::ActionJobRow,
+    run: &oxidean_db::actions::ActionRunRow,
+    owner: &str,
+    repo_name: &str,
+    sender_login: &str,
+    sender_id: &str,
+) -> serde_json::Value {
+    let conclusion = if action == "completed" {
+        json!(job.status)
+    } else {
+        serde_json::Value::Null
+    };
+    let labels: serde_json::Value =
+        serde_json::from_str(&job.runs_on_json).unwrap_or_else(|_| json!([]));
+    json!({
+        "action": action,
+        "workflow_job": {
+            "id": job.id,
+            "run_id": job.run_id,
+            "run_attempt": job.attempt,
+            "name": job.name,
+            "status": action,
+            "conclusion": conclusion,
+            "workflow_name": run.workflow_name,
+            "head_sha": run.head_sha,
+            "head_branch": run.head_ref.strip_prefix("refs/heads/").unwrap_or(&run.head_ref),
+            "labels": labels,
+            "runner_id": job.runner_id,
+            "started_at": job.started_at,
+            "completed_at": job.finished_at,
+            "html_url": format!("/{owner}/{repo_name}/actions/{}", run.id),
+        },
+        "repository": repository_block(&run.repository_id, repo_name, owner),
+        "sender": { "login": sender_login, "id": sender_id },
+    })
+}
+
+/// Emit `workflow_job` for a job row by id (API-04 counterpart of
+/// `notify_workflow_run`). Best-effort: missing rows skip the fan-out.
+pub async fn notify_workflow_job(db: &Database, job_id: &str, action: &str) {
+    let Some(job) = db.find_action_job_by_id(job_id).await.ok().flatten() else {
+        return;
+    };
+    let Some(run) = db.find_action_run_by_id(&job.run_id).await.ok().flatten() else {
+        return;
+    };
+    let Some((repo, owner)) = repo_context(db, &run.repository_id).await else {
+        return;
+    };
+    let sender = sender_login(db, run.triggered_by.as_deref()).await;
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let payload = workflow_job_payload(
+        action,
+        &job,
+        &run,
+        &owner,
+        &repo.name,
+        &sender,
+        run.triggered_by.as_deref().unwrap_or(""),
+    );
+    emit(
+        db,
+        &run.repository_id,
+        "workflow_job",
+        action,
+        payload,
+        &env_name,
+    )
+    .await;
+    // Every workflow_job transition mirrors onto the Checks projection —
+    // GitHub shows one check run per job. Webhooks only: Actions' own
+    // checks never re-trigger `on: check_run/check_suite` workflows.
+    project_check_run_for_job(db, &job, &run, action).await;
+}
+
+/// Map an internal job conclusion onto GitHub's `check_run.conclusion`
+/// vocabulary (`None` while the job is mid-flight).
+fn job_check_conclusion(status: &str) -> Option<&'static str> {
+    match status {
+        "success" => Some("success"),
+        "failure" => Some("failure"),
+        "cancelled" => Some("cancelled"),
+        "skipped" => Some("skipped"),
+        "timed_out" => Some("timed_out"),
+        "neutral" => Some("neutral"),
+        "action_required" => Some("action_required"),
+        "startup_failure" => Some("startup_failure"),
+        "stale" => Some("stale"),
+        _ => Some("failure"),
+    }
+}
+
+/// Map a `workflow_job` action onto `check_run.status`.
+fn workflow_action_check_status(action: &str) -> &'static str {
+    match action {
+        "completed" => "completed",
+        "in_progress" => "in_progress",
+        "waiting" => "waiting",
+        _ => "queued",
+    }
+}
+
+/// Find-or-create the run's `github-actions` check suite and the job's
+/// check run, then apply the transition. Emits `check_run` (`created` /
+/// `completed`) and `check_suite` (`requested` / `completed`) webhooks on
+/// the transitions GitHub emits them on. Best-effort — projection failures
+/// warn, never fail the job transition.
+async fn project_check_run_for_job(
+    db: &Database,
+    job: &oxidean_db::actions::ActionJobRow,
+    run: &oxidean_db::actions::ActionRunRow,
+    action: &str,
+) {
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let check_status = workflow_action_check_status(action);
+    let conclusion = if action == "completed" {
+        job_check_conclusion(&job.status)
+    } else {
+        None
+    };
+
+    // Suite — one per Actions run, `github-actions` app label.
+    let suite = match db.find_check_suite_for_run(&run.id).await.ok().flatten() {
+        Some(s) => s,
+        None => {
+            let head_branch = run.head_ref.strip_prefix("refs/heads/").map(str::to_string);
+            let suite_id = Uuid::new_v4().to_string();
+            match db
+                .insert_check_suite(&oxidean_db::checks::NewCheckSuite {
+                    id: &suite_id,
+                    repository_id: &run.repository_id,
+                    head_sha: &run.head_sha,
+                    head_branch: head_branch.as_deref(),
+                    app: "github-actions",
+                    run_id: Some(&run.id),
+                    status: "queued",
+                    conclusion: None,
+                    url: None,
+                    creator_id: run.triggered_by.as_deref(),
+                })
+                .await
+            {
+                Ok(s) => {
+                    emit_check_suite_webhook(db, &s, "requested", &env_name).await;
+                    s
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, run_id = %run.id, "check suite insert failed");
+                    return;
+                }
+            }
+        }
+    };
+
+    // Check run — one per job. First projection emits `created`.
+    let existing = db.find_check_run_by_job(&job.id).await.ok().flatten();
+    let row = match existing {
+        Some(r) => r,
+        None => {
+            let run_row_id = Uuid::new_v4().to_string();
+            match db
+                .insert_check_run(&oxidean_db::checks::NewCheckRun {
+                    id: &run_row_id,
+                    repository_id: &run.repository_id,
+                    check_suite_id: &suite.id,
+                    name: &job.name,
+                    head_sha: &run.head_sha,
+                    status: check_status,
+                    conclusion,
+                    details_url: None,
+                    external_id: None,
+                    output_title: None,
+                    output_summary: None,
+                    output_text: None,
+                    job_id: Some(&job.id),
+                    run_id: Some(&run.id),
+                    creator_id: run.triggered_by.as_deref(),
+                    started_at: job.started_at.as_deref(),
+                    completed_at: job.finished_at.as_deref(),
+                })
+                .await
+            {
+                Ok(r) => {
+                    emit_check_run_webhook(db, &r, "created", &env_name).await;
+                    // Legs born terminal (skipped/failed-at-emit) land
+                    // `completed` on insert — GitHub emits both events.
+                    if action == "completed" {
+                        emit_check_run_webhook(db, &r, "completed", &env_name).await;
+                    }
+                    r
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, job_id = %job.id, "check run insert failed");
+                    return;
+                }
+            }
+        }
+    };
+
+    // Apply the transition when the stored state diverged — a terminal
+    // landing emits `check_run.completed`.
+    let transitioned = row.status != check_status || row.conclusion.as_deref() != conclusion;
+    let mut stored = row;
+    if transitioned {
+        let was_completed = stored.status == "completed";
+        match db
+            .update_check_run(
+                &stored.id,
+                &oxidean_db::checks::CheckRunPatch {
+                    status: Some(check_status),
+                    conclusion: Some(conclusion),
+                    started_at: Some(job.started_at.as_deref()),
+                    completed_at: Some(job.finished_at.as_deref()),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(r) => stored = r,
+            Err(e) => {
+                tracing::warn!(error = %e, check_run_id = %stored.id, "check run update failed");
+            }
+        }
+        if action == "completed" && !was_completed {
+            emit_check_run_webhook(db, &stored, "completed", &env_name).await;
+        }
+    }
+
+    // Roll the suite up from its runs; a fresh `completed` rollup emits the
+    // `check_suite.completed` webhook.
+    let was_suite_completed = suite.status == "completed";
+    match db.recompute_check_suite(&suite.id).await {
+        Ok((status, _)) if status == "completed" && !was_suite_completed => {
+            if let Ok(Some(s)) = db.find_check_suite(&suite.id).await {
+                emit_check_suite_webhook(db, &s, "completed", &env_name).await;
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, suite_id = %suite.id, "check suite rollup failed");
+        }
+        _ => {}
+    }
+}
+
+/// Emit `check_run` for one row — resolves repo, creator, suite app label,
+/// and the stored-annotation count for `output.annotations_count`.
+pub(crate) async fn emit_check_run_webhook(
+    db: &Database,
+    run: &oxidean_db::CheckRunRow,
+    action: &str,
+    env_name: &str,
+) {
+    let Some((repo, owner)) = repo_context(db, &run.repository_id).await else {
+        return;
+    };
+    let suite_app = db
+        .find_check_suite(&run.check_suite_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|s| s.app)
+        .unwrap_or_else(|| "api".into());
+    let annotations_count = crate::check::annotation_count(db, run).await;
+    let creator_login = sender_login(db, run.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": creator_login,
+        "id": run.creator_id.as_deref().unwrap_or(""),
+    });
+    let payload = crate::actions::payload::check_run_payload(
+        action,
+        run,
+        &suite_app,
+        &creator_login,
+        annotations_count,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        &run.repository_id,
+        "check_run",
+        action,
+        payload,
+        env_name,
+    )
+    .await;
+}
+
+/// Emit `check_suite` for one row (`requested` / `rerequested` /
+/// `completed` actions).
+pub(crate) async fn emit_check_suite_webhook(
+    db: &Database,
+    suite: &oxidean_db::CheckSuiteRow,
+    action: &str,
+    env_name: &str,
+) {
+    let Some((repo, owner)) = repo_context(db, &suite.repository_id).await else {
+        return;
+    };
+    let creator_login = sender_login(db, suite.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": creator_login,
+        "id": suite.creator_id.as_deref().unwrap_or(""),
+    });
+    let payload = crate::actions::payload::check_suite_payload(
+        action,
+        suite,
+        &creator_login,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        &suite.repository_id,
+        "check_suite",
+        action,
+        payload,
+        env_name,
+    )
+    .await;
+}
+
+/// Map a job lifecycle status onto GitHub's deployment-status vocabulary.
+fn job_status_deployment_state(status: &str) -> &'static str {
+    match status {
+        "in_progress" => "in_progress",
+        "success" => "success",
+        "failure" => "failure",
+        "cancelled" => "error",
+        "waiting" | "waiting_approval" => "waiting",
+        "skipped" => "inactive",
+        _ => "queued",
+    }
+}
+
+/// Emit the `deployment` webhook for one deployment row (`action: created`).
+pub(crate) async fn emit_deployment_webhook(
+    db: &Database,
+    deployment: &oxidean_db::ActionDeploymentRow,
+    repository_id: &str,
+    env_name: &str,
+) {
+    let Some((repo, owner)) = repo_context(db, repository_id).await else {
+        return;
+    };
+    let creator_login = sender_login(db, deployment.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": creator_login,
+        "id": deployment.creator_id.as_deref().unwrap_or(""),
+    });
+    let payload = crate::actions::payload::deployment_payload(
+        deployment,
+        &creator_login,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        repository_id,
+        "deployment",
+        "created",
+        payload,
+        env_name,
+    )
+    .await;
+}
+
+/// Insert one `deployment_status` row and emit the `deployment_status`
+/// webhook. Returns the stored row; `None` on insert failure (warned).
+pub(crate) async fn record_deployment_status_webhook(
+    db: &Database,
+    deployment: &oxidean_db::ActionDeploymentRow,
+    status: &oxidean_db::deployments::NewDeploymentStatus<'_>,
+    repository_id: &str,
+    env_name: &str,
+) -> Option<oxidean_db::ActionDeploymentStatusRow> {
+    let row = match db.insert_action_deployment_status(status).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, deployment_id = %status.deployment_id, "deployment status insert failed");
+            return None;
+        }
+    };
+    let Some((repo, owner)) = repo_context(db, repository_id).await else {
+        return Some(row);
+    };
+    let status_creator_login = sender_login(db, status.creator_id).await;
+    let deployment_creator_login = sender_login(db, deployment.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": status_creator_login,
+        "id": status.creator_id.unwrap_or(""),
+    });
+    let payload = crate::actions::payload::deployment_status_payload(
+        &row,
+        deployment,
+        &status_creator_login,
+        &deployment_creator_login,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        repository_id,
+        "deployment_status",
+        "created",
+        payload,
+        env_name,
+    )
+    .await;
+    Some(row)
+}
+
+/// Job-bound deployment at insert: `deployment` (created) webhook + the
+/// initial `deployment_status` mirroring the job's status. Job-token work —
+/// GitHub's non-recursion rule keeps these out of Actions triggers, so only
+/// webhooks fire.
+pub async fn notify_deployment_created(db: &Database, deployment_id: &str) {
+    let Some(deployment) = db
+        .find_action_deployment_by_id(deployment_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    emit_deployment_webhook(db, &deployment, &deployment.repository_id, &env_name).await;
+    let status_id = Uuid::new_v4().to_string();
+    record_deployment_status_webhook(
+        db,
+        &deployment,
+        &oxidean_db::deployments::NewDeploymentStatus {
+            id: &status_id,
+            deployment_id,
+            state: job_status_deployment_state(&deployment.job_status),
+            description: "",
+            environment: None,
+            environment_url: None,
+            target_url: None,
+            log_url: None,
+            creator_id: deployment.creator_id.as_deref(),
+        },
+        &deployment.repository_id,
+        &env_name,
+    )
+    .await;
+}
+
+/// Mirror a `workflow_job` transition onto the job's deployment record —
+/// inserts the mapped `deployment_status` + emits the webhook. No-op for
+/// jobs with no environment deployment. Reads the durable job status so
+/// `completed` carries the real conclusion.
+pub async fn notify_deployment_job_status(db: &Database, job_id: &str) {
+    let Some(deployment) = db
+        .find_action_deployment_by_job_id(job_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let Some(job) = db.find_action_job_by_id(job_id).await.ok().flatten() else {
+        return;
+    };
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let status_id = Uuid::new_v4().to_string();
+    record_deployment_status_webhook(
+        db,
+        &deployment,
+        &oxidean_db::deployments::NewDeploymentStatus {
+            id: &status_id,
+            deployment_id: &deployment.id,
+            state: job_status_deployment_state(&job.status),
+            description: "",
+            environment: None,
+            environment_url: None,
+            target_url: None,
+            log_url: None,
+            creator_id: deployment.creator_id.as_deref(),
+        },
+        &deployment.repository_id,
+        &env_name,
+    )
+    .await;
+}
+
 /// Emit `registry_package` when a version is published on a package linked to
-/// a repository (API-04). Unlinked packages have no webhook scope — nothing
-/// is emitted for them.
+/// a repository (API-04), and fire `on: registry_package` Actions triggers.
+/// Unlinked packages have no webhook scope — nothing is emitted for them.
+#[allow(clippy::too_many_arguments)]
 pub async fn notify_package_publish(
     db: &Database,
     package: &oxidean_db::PackageRow,
@@ -649,6 +1322,8 @@ pub async fn notify_package_publish(
     action: &str,
     sender_id: &str,
     env_name: &str,
+    git: &dyn oxidean_git::GitBackend,
+    repos_dir: &std::path::Path,
 ) {
     let Some(repo_id) = package.repository_id.as_deref() else {
         return;
@@ -668,5 +1343,33 @@ pub async fn notify_package_publish(
         &login,
         sender_id,
     );
-    emit(db, repo_id, "registry_package", action, payload, env_name).await;
+    emit(
+        db,
+        repo_id,
+        "registry_package",
+        action,
+        payload.clone(),
+        env_name,
+    )
+    .await;
+    if let Ok(bare) = crate::git::bare_repo_path(repos_dir, &owner, &repo.name) {
+        crate::actions::events::notify_lifecycle_actions(
+            db,
+            git,
+            &crate::actions::events::LifecycleEvent {
+                bare_repo: bare,
+                repository_id: repo_id.to_string(),
+                default_branch: repo.default_branch.clone(),
+                event_name: "registry_package",
+                action: action.to_string(),
+                payload,
+                actor_id: Some(sender_id.to_string()),
+                // Registry auth rejects job tokens — publish always carries a
+                // human/OAuth identity.
+                job_token_actor: false,
+                actions_enabled_instance: crate::actions::env_actions_enabled(),
+            },
+        )
+        .await;
+    }
 }

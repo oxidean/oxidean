@@ -39,6 +39,9 @@ pub struct EffectiveProtection {
     pub lock_branch: bool,
     /// GIT-22: every commit newly introduced by a push must verify as signed.
     pub require_signed_commits: bool,
+    /// GitHub ruleset "Require merge queue" — `pulls.merge` rejects direct
+    /// merges; PRs route through `merge_queue.*` group verification.
+    pub required_merge_queue: bool,
 }
 
 /// Inputs for merge evaluation beyond push.
@@ -176,6 +179,9 @@ pub fn union_rules(rules: &[BranchProtectionRuleRow], branch: &str) -> Effective
         }
         if rule.require_signed_commits {
             eff.require_signed_commits = true;
+        }
+        if rule.required_merge_queue {
+            eff.required_merge_queue = true;
         }
     }
     if !any {
@@ -784,11 +790,16 @@ pub async fn check_ref_update(
 ) -> Result<(), AppError> {
     // API-06: refs/pull/* is a synthesized read-only namespace written by the
     // forge itself (git update-ref, hook-free). No push — regardless of
-    // capability or protection rules — may create/update/delete it.
-    if git_ref.starts_with("refs/pull/") {
+    // capability or protection rules — may create/update/delete it. Same for
+    // refs/actions/* — the per-run sha-pin namespace the Actions engine owns
+    // (a pushed pin could resurrect forged commits for runner checkout).
+    if git_ref.starts_with("refs/pull/")
+        || git_ref.starts_with("refs/actions/")
+        || git_ref.starts_with("refs/heads/gh-readonly-queue/")
+    {
         return Err(AppError::new(
             "repo.pull_refs_read_only",
-            "pushes to refs/pull/* are denied: pull refs are synthesized read-only",
+            "pushes to refs/pull/*, refs/actions/*, and refs/heads/gh-readonly-queue/* are denied: system refs are read-only",
         ));
     }
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
@@ -1115,6 +1126,7 @@ mod tests {
             required_linear_history: false,
             lock_branch: false,
             require_signed_commits: false,
+            required_merge_queue: false,
             created_at: String::new(),
             updated_at: String::new(),
         };

@@ -601,6 +601,35 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
 
+  // --- wiki / projects / discussions ---
+  {
+    route: "$owner.$repo.wiki.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.wiki.$.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.projects.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.projects.$.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.discussions.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.discussions.$.integration.test.ts",
+      },
+    ],
+  },
+
   // --- issues ---
   {
     route: "$owner.$repo.issues.index.tsrx",
@@ -637,6 +666,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.issues.labels.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.issues.milestones.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.issues.milestones.integration.test.ts",
       },
     ],
   },
@@ -708,6 +746,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
   {
     route: "$owner.settings.labels.tsrx",
     coverage: [{ kind: "stack-browser", test: FORGE_SSH_ORGS }],
+  },
+  {
+    route: "$owner.settings.actions.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.settings.integration.test.ts",
+      },
+    ],
   },
 
   // --- explore / notifications / global search (Phases 17 / 21) ---

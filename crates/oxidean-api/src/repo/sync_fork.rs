@@ -358,6 +358,7 @@ async fn sync_fork_pr_heads(
             &user.username,
             &user.id,
             &ctx.env_name,
+            crate::actions::events::rpc_caller_is_job_token(ctx),
         )
         .await
         {

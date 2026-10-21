@@ -458,3 +458,136 @@ async fn unit_set_enabled_requires_admin() {
     .await;
     assert_eq!(ge["data"]["enabled"], true, "flag untouched — {ge}");
 }
+
+async fn rest_all(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        b = b.header("cookie", cookie);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub PATCH `/repos/{o}/{r}` folded fields: `archived`, `private`,
+/// and `has_*` unit toggles route through the sibling procs.
+#[tokio::test]
+async fn rest_patch_repo_archived_visibility_units() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("patch_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, login_v) = signup_and_login(&app, "pown@ex.com", "pown").await;
+    verify_user(&db, login_v["data"]["id"].as_str().expect("id")).await;
+    create_repo(&app, &owner_cookie, "patchme").await;
+
+    // PATCH: has_issues off + archived + description in one request
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"description":"d","archived":true,"has_issues":false}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["archived"], true, "{v}");
+    assert_eq!(v["description"], "d", "{v}");
+
+    let issues = rpc_json(
+        &app,
+        &owner_cookie,
+        &get_enabled_body("issues", "pown", "patchme"),
+    )
+    .await;
+    assert_eq!(issues["data"]["enabled"], false, "{issues}");
+
+    // private: true → visibility flip
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"private":true}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["visibility"], "private", "{v}");
+
+    // unarchive + re-enable issues
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"archived":false,"has_issues":true}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["archived"], false, "{v}");
+    let issues = rpc_json(
+        &app,
+        &owner_cookie,
+        &get_enabled_body("issues", "pown", "patchme"),
+    )
+    .await;
+    assert_eq!(issues["data"]["enabled"], true, "{issues}");
+
+    // has_pull_requests off → pulls unit rejects
+    let (s, _) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"has_pull_requests":false}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let pulls = rpc_json(
+        &app,
+        &owner_cookie,
+        &get_enabled_body("pulls", "pown", "patchme"),
+    )
+    .await;
+    assert_eq!(pulls["data"]["enabled"], false, "{pulls}");
+
+    // allow_squash_merge off → mergeSettings.update
+    let (s, _) = rest_all(
+        &app,
+        "PATCH",
+        "/api/v1/repos/pown/patchme",
+        &owner_cookie,
+        Some(r#"{"allow_squash_merge":false}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let ms = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.mergeSettings.get","input":{"owner":"pown","name":"patchme"}}"#,
+    )
+    .await;
+    assert_eq!(ms["data"]["allow_squash_merge"], false, "{ms}");
+    assert_eq!(ms["data"]["allow_merge_commit"], true, "{ms}");
+}

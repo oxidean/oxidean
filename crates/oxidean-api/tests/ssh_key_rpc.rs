@@ -311,3 +311,177 @@ async fn ssh_key_add_26th_key_max_25() {
     assert_eq!(v["ok"], false, "{v}");
     assert_eq!(v["error"]["code"], "sshKey.limit_exceeded");
 }
+
+/// GitHub REST surface for account keys — `/user/keys` (sshKey.*) and
+/// `/user/gpg_keys` (gpgKey.*) with GitHub's `{key}`/`{armored_public_key}`
+/// bodies and `{id, title, verified}` / `{id, name, key_id, emails}` rows.
+#[tokio::test]
+async fn rest_ssh_and_gpg_keys() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("rest_keys.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "rk@ex.com", "rkuser").await;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(login_v["data"]["id"].as_str().unwrap(), &now)
+        .await
+        .expect("verify");
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: &str,
+        body: Option<String>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie);
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        let res = app
+            .clone()
+            .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    // ---- SSH keys -------------------------------------------------------------
+    let (s, v) = rest(&app, "GET", "/api/v1/user/keys", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        "/api/v1/user/keys",
+        &cookie,
+        Some(format!(r#"{{"title":"laptop","key":"{ED25519_A}"}}"#)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["title"], "laptop");
+    assert_eq!(v["key"], ED25519_A);
+    assert_eq!(v["verified"], true);
+    let kid = v["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest(&app, "GET", "/api/v1/user/keys", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/user/keys/{kid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = rest(&app, "GET", "/api/v1/user/keys/nope", &cookie, None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("/api/v1/user/keys/{kid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest(&app, "GET", "/api/v1/user/keys", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // ---- GPG keys --------------------------------------------------------------
+    // Generate a real armored key via gpg (test env has it per gpg_key_rpc.rs).
+    let gpg_dir = dir.path().join("gnupg-rest");
+    std::fs::create_dir_all(&gpg_dir).unwrap();
+    let status = std::process::Command::new("gpg")
+        .args([
+            "--batch",
+            "--homedir",
+            gpg_dir.to_str().unwrap(),
+            "--pinentry-mode",
+            "loopback",
+            "--passphrase",
+            "",
+            "--quick-gen-key",
+            "rest@ex.com",
+            "ed25519",
+            "sign",
+            "0",
+        ])
+        .status()
+        .expect("gpg");
+    assert!(status.success(), "gpg --quick-gen-key failed");
+    let out = std::process::Command::new("gpg")
+        .args([
+            "--batch",
+            "--homedir",
+            gpg_dir.to_str().unwrap(),
+            "--armor",
+            "--export",
+            "rest@ex.com",
+        ])
+        .output()
+        .expect("gpg export");
+    assert!(out.status.success());
+    let armored = String::from_utf8(out.stdout).unwrap();
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        "/api/v1/user/gpg_keys",
+        &cookie,
+        Some(
+            serde_json::to_string(&serde_json::json!({
+                "name": "restkey",
+                "armored_public_key": armored,
+            }))
+            .unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name"], "restkey");
+    assert_eq!(v["can_sign"], true);
+    let gid = v["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/user/gpg_keys/{gid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = rest(&app, "GET", "/api/v1/user/gpg_keys/nope", &cookie, None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("/api/v1/user/gpg_keys/{gid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest(&app, "GET", "/api/v1/user/gpg_keys", &cookie, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+}

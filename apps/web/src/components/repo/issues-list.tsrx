@@ -1,7 +1,7 @@
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { CircleCheck, CircleDot, MessageSquare, SlidersHorizontal } from "@octanejs/lucide";
-import type { IssuePublic, LabelPublic, RepoPublic } from "@oxidean/api-client";
+import type { IssuePublic, LabelPublic, MilestonePublic, RepoPublic } from "@oxidean/api-client";
 import { MemberLookup } from "@/components/org/member-lookup";
 import { LabelChip } from "@/components/repo/label-chip";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ export type IssueListFilters = {
   author: string;
   label: string;
   assignee: string;
+  milestone: string;
   q: string;
   offset: number;
   limit: number;
@@ -36,6 +37,7 @@ type IssueFilterDraft = {
   author: string;
   label: string;
   assignee: string;
+  milestone: string;
   q: string;
 };
 
@@ -49,6 +51,7 @@ type IssuesListProps = {
   total: number;
   filters: IssueListFilters;
   labels: LabelPublic[];
+  milestones: MilestonePublic[];
   onStateChange: (next: IssueListStateFilter) => void;
   onApplyFilters: (draft: IssueFilterDraft) => void;
   onPrevPage: () => void;
@@ -67,6 +70,7 @@ export function IssuesList({
   total,
   filters,
   labels,
+  milestones,
   onStateChange,
   onApplyFilters,
   onPrevPage,
@@ -91,15 +95,20 @@ export function IssuesList({
   // Filters collapse behind a disclosure on mobile — the 4-field row is ~200px
   // of vertical space that buries the list. Desktop keeps the always-open row.
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount = [filters.author, filters.label, filters.assignee, filters.q].filter(
-    (v) => v.trim() !== "",
-  ).length;
+  const activeFilterCount = [
+    filters.author,
+    filters.label,
+    filters.assignee,
+    filters.milestone,
+    filters.q,
+  ].filter((v) => v.trim() !== "").length;
 
   const filterForm = useForm({
     defaultValues: {
       author: filters.author,
       label: filters.label,
       assignee: filters.assignee,
+      milestone: filters.milestone,
       q: filters.q,
     },
     onSubmit: ({ value }) => {
@@ -107,6 +116,7 @@ export function IssuesList({
         author: value.author.trim(),
         label: value.label.trim(),
         assignee: value.assignee.trim(),
+        milestone: value.milestone.trim(),
         q: value.q.trim(),
       });
     },
@@ -144,6 +154,12 @@ export function IssuesList({
         </button>
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        <AppLink
+          href={`${base}/issues/milestones` as string}
+          className="text-sm font-medium text-primary no-underline hover:underline"
+        >
+          Milestones
+        </AppLink>
         @if (canAdmin) {
           <AppLink
             href={`${base}/issues/labels` as string}
@@ -218,6 +234,27 @@ export function IssuesList({
               <option value="">Any label</option>
               @for (const lab of labels; key lab.id) {
                 <option value={lab.id as string}>{lab.name as string}</option>;
+              }
+            </select>
+          </label>
+        )}
+      </filterForm.Field>
+      <filterForm.Field name="milestone">
+        {(field) => (
+          <label className={repoListFilterLabelClass() as string}>
+            Milestone
+            <select
+              name="milestone"
+              aria-label="Milestone"
+              value={field.state.value as string}
+              className={repoListFilterFieldClass() as string}
+              onChange={(e) => field.handleChange((e.target as HTMLSelectElement).value)}
+            >
+              <option value="">Any milestone</option>
+              <option value="none">No milestone</option>
+              <option value="*">With milestone</option>
+              @for (const m of milestones; key m.id) {
+                <option value={String(m.number) as string}>{m.title as string}</option>;
               }
             </select>
           </label>
@@ -333,6 +370,11 @@ export function IssuesList({
                     }
                   </p>
                 </div>
+                @if (issue.milestone) {
+                  <span className="mt-0.5 flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+                    {issue.milestone.title as string}
+                  </span>;
+                }
                 @if ((issue.comment_count ?? 0) > 0) {
                   <AppLink
                     href={`${base}/issues/${issue.number}` as string}

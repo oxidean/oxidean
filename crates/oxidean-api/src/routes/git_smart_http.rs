@@ -365,10 +365,17 @@ struct ResolvedRepo {
     /// Disk path segments for CGI (current owner/name after redirect).
     disk_owner: String,
     disk_name: String,
+    /// The request targeted `{name}.wiki.git` — the base repo's wiki bare.
+    is_wiki: bool,
 }
 
 #[allow(clippy::result_large_err)]
-async fn resolve_repo(state: &AppState, owner: &str, name: &str) -> Result<ResolvedRepo, Response> {
+async fn resolve_repo(
+    state: &AppState,
+    owner: &str,
+    name: &str,
+    is_wiki: bool,
+) -> Result<ResolvedRepo, Response> {
     let pair = match lookup_repo_row_or_redirect(&state.db, owner, name).await {
         Ok(Some(p)) => p,
         Ok(None) => return Err(unauthorized_basic()),
@@ -379,12 +386,17 @@ async fn resolve_repo(state: &AppState, owner: &str, name: &str) -> Result<Resol
     };
     let (row, owner_ref) = pair;
     let disk_owner = owner_ref.slug().to_string();
-    let disk_name = row.name.clone();
+    let disk_name = if is_wiki {
+        format!("{}.wiki", row.name)
+    } else {
+        row.name.clone()
+    };
     Ok(ResolvedRepo {
         row,
         owner: owner_ref,
         disk_owner,
         disk_name,
+        is_wiki,
     })
 }
 
@@ -515,8 +527,16 @@ async fn authorize_and_cgi(
     let Some(repo_name) = strip_git_suffix(repo_git) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // GitHub wikis clone as `{name}.wiki.git` — resolve the request against
+    // the base repository and point the CGI at the `.wiki` bare.
+    let (base_name, is_wiki) = crate::git::split_wiki_name(repo_name);
 
-    if bare_repo_path(&state.repos_dir, owner, repo_name).is_err() {
+    let disk_check = if is_wiki {
+        format!("{base_name}.wiki")
+    } else {
+        base_name.to_string()
+    };
+    if bare_repo_path(&state.repos_dir, owner, &disk_check).is_err() {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -531,7 +551,7 @@ async fn authorize_and_cgi(
         Err(r) => return r,
     };
 
-    let resolved = match resolve_repo(state, owner, repo_name).await {
+    let resolved = match resolve_repo(state, owner, base_name, is_wiki).await {
         Ok(r) => r,
         Err(r) => return r,
     };
@@ -595,6 +615,26 @@ async fn authorize_and_cgi(
             Err(r) => return r,
         }
         touch_last_used(state, auth, headers).await;
+    }
+
+    // Wiki requests authorize against the base repo (done above), then need
+    // the unit flag + an existing wiki bare — GitHub 404s both cases.
+    if is_wiki {
+        match state.db.get_repo_unit_flags(&resolved.row.id).await {
+            Ok(flags) if flags.wiki_enabled => {}
+            Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+            Err(e) => {
+                tracing::error!(error = %e, "wiki unit flag lookup failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+        let wiki_bare = state
+            .repos_dir
+            .join(&resolved.disk_owner)
+            .join(format!("{}.git", resolved.disk_name));
+        if !wiki_bare.is_dir() {
+            return StatusCode::NOT_FOUND.into_response();
+        }
     }
 
     // API-06: refs/pull/* is a synthesized read-only namespace. Reject pushes
@@ -684,9 +724,42 @@ async fn authorize_and_cgi(
                         let updates_wh = updates.clone();
                         let updates_pull = updates.clone();
                         let updates_act = updates.clone();
+                        let updates_pages = updates.clone();
                         let git_act = state.git.clone();
+                        let git_ref = state.git.clone();
+                        let git_pages = state.git.clone();
+                        let pages_dir = state.pages_dir.clone();
+                        let suppress_actions = auth.is_job_token;
+                        let is_wiki_push = resolved.is_wiki;
+                        let base_name = resolved.row.name.clone();
+                        let default_branch = resolved.row.default_branch.clone();
+                        let actions_enabled = state.actions_enabled;
                         tokio::spawn(async move {
                             let bare = repos_dir.join(&owner_slug).join(format!("{repo_name}.git"));
+                            if is_wiki_push {
+                                // Wiki pushes emit `gollum`, never `push` —
+                                // workflows still read from the main bare.
+                                let main_bare =
+                                    repos_dir.join(&owner_slug).join(format!("{base_name}.git"));
+                                crate::webhook::dispatch::notify_wiki_push(
+                                    &db,
+                                    git_act.as_ref(),
+                                    &main_bare,
+                                    &bare,
+                                    &repo_id,
+                                    &owner_slug,
+                                    &base_name,
+                                    &default_branch,
+                                    &login,
+                                    &uid,
+                                    &updates_wh,
+                                    &env_name,
+                                    suppress_actions,
+                                    actions_enabled,
+                                )
+                                .await;
+                                return;
+                            }
                             // GIT-25: refresh cached size_bytes for UI/admin surfaces.
                             if let Err(e) =
                                 crate::git::quota::refresh_repo_size_bytes(&db, &repo_id, &bare)
@@ -724,6 +797,9 @@ async fn authorize_and_cgi(
                                 &uid,
                                 &updates_wh,
                                 &env_name,
+                                git_ref.as_ref(),
+                                bare.as_path(),
+                                suppress_actions,
                             )
                             .await;
                             crate::pull::synchronize_after_push(
@@ -736,14 +812,55 @@ async fn authorize_and_cgi(
                                 &uid,
                                 &updates_pull,
                                 &env_name,
+                                suppress_actions,
                             )
                             .await;
+                            // GitHub Pages parity: pushes to the configured
+                            // legacy source branch rebuild the site + emit
+                            // `page_build`.
+                            crate::pages::rebuild_after_push(
+                                &db,
+                                git_pages.as_ref(),
+                                &repos_dir,
+                                &pages_dir,
+                                &env_name,
+                                &repo_id,
+                                &owner_slug,
+                                &uid,
+                                &updates_pages,
+                                suppress_actions,
+                                actions_enabled,
+                            )
+                            .await;
+                            // Merge queue: a base-branch move invalidates
+                            // the checking group on that train.
+                            let mq_deps = crate::merge_queue::MqDeps {
+                                db: db.clone(),
+                                git: git_pages.clone(),
+                                repos_dir: repos_dir.clone(),
+                                pages_dir: pages_dir.clone(),
+                                env_name: env_name.clone(),
+                                job_token_actor: suppress_actions,
+                                actions_enabled,
+                            };
+                            for (_before, after, refname) in &updates_pages {
+                                if after.chars().all(|c| c == '0') {
+                                    continue;
+                                }
+                                if let Some(branch) = refname.strip_prefix("refs/heads/") {
+                                    crate::merge_queue::after_base_pushed(
+                                        &mq_deps, &repo_id, branch,
+                                    )
+                                    .await;
+                                }
+                            }
                         });
                         // GITHUB_TOKEN parity: pushes authenticated with an
                         // Actions job token must not trigger new workflow runs
-                        // (prevents job → push → run recursion). Webhooks and
-                        // other side effects above are unchanged.
-                        if !auth.is_job_token {
+                        // (prevents job → push → run recursion). Wiki pushes
+                        // never reach this — `gollum` is dispatched inside
+                        // notify_wiki_push with its own suppression.
+                        if !auth.is_job_token && !resolved.is_wiki {
                             let db2 = state.db.clone();
                             let git2 = state.git.clone();
                             let repos_dir2 = state.repos_dir.clone();
@@ -768,11 +885,15 @@ async fn authorize_and_cgi(
                                 .await;
                             });
                         }
-                        let db3 = state.db.clone();
-                        let git3 = state.git.clone();
-                        let repos3 = state.repos_dir.clone();
-                        let rid3 = resolved.row.id.clone();
-                        crate::mirror::notify_mirror_after_local_mutation(db3, git3, repos3, rid3);
+                        if !resolved.is_wiki {
+                            let db3 = state.db.clone();
+                            let git3 = state.git.clone();
+                            let repos3 = state.repos_dir.clone();
+                            let rid3 = resolved.row.id.clone();
+                            crate::mirror::notify_mirror_after_local_mutation(
+                                db3, git3, repos3, rid3,
+                            );
+                        }
                     }
                 }
             }

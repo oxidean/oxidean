@@ -117,7 +117,7 @@ jobs:
         run: test "$FOO" = "bar" || { echo "OXIDEAN_ENV_FILE propagation broken"; exit 1; }
       - name: job token authenticated read
         run: |
-          resp="$(curl -fsS -H "Authorization: Bearer $OXIDEAN_TOKEN" "$OXIDEAN_API_URL/v1/repos/$OXIDEAN_REPOSITORY")"
+          resp="$(curl -fsS -H "Authorization: Bearer $OXIDEAN_TOKEN" "$OXIDEAN_API_URL/repos/$OXIDEAN_REPOSITORY")"
           test "$(echo "$resp" | jq -r '.name')" = "${OXIDEAN_REPOSITORY##*/}" \
             && echo "job token read OK"
 YAML

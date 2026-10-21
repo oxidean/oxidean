@@ -3,12 +3,49 @@
 use crate::pool::DbPool;
 
 pub async fn run_migrations(pool: &DbPool) -> Result<(), String> {
+    reseat_renumbered_migrations(pool).await;
     let res = match pool {
         DbPool::Postgres(p) => sqlx::migrate!("migrations/postgres").run(p).await,
         DbPool::MySql(p) => sqlx::migrate!("migrations/mysql").run(p).await,
         DbPool::Sqlite(p) => sqlx::migrate!("migrations/sqlite").run(p).await,
     };
     res.map_err(|e| format!("migration failed: {e}"))
+}
+
+/// One-time repair for databases that applied this branch's migrations at
+/// their pre-rebase versions (53-78): main's VCS schema landed at 53-55, so
+/// the block renumbered to 56-81 with contents (and checksums) unchanged.
+/// Re-seat the old rows once — detected by version 53 still holding
+/// `action_job_payloads` — so sqlx's checksum validation passes and the VCS
+/// trio can apply. No-op on fresh databases, on databases that never ran
+/// this branch (prod has nothing ≥53), and after the repair succeeds (53
+/// then holds `vcs_schema`). Safe to remove once no deployment can still be
+/// carrying the pre-rebase numbering.
+async fn reseat_renumbered_migrations(pool: &DbPool) {
+    const RESEAT: &[&str] = &[
+        // Hoist old rows out of the target range first so the second
+        // statement's version writes can't collide with a live row.
+        // sqlx stores descriptions with underscores as spaces.
+        "UPDATE _sqlx_migrations SET version = version + 10000 \
+         WHERE version >= 53 \
+           AND EXISTS (SELECT 1 FROM _sqlx_migrations \
+                       WHERE version = 53 AND description = 'action job payloads')",
+        // Only hoisted rows can live ≥10053 — bring them down +3 net.
+        "UPDATE _sqlx_migrations SET version = version - 9997 \
+         WHERE version >= 10053",
+    ];
+    async fn run(pool: &DbPool) -> Result<(), sqlx::Error> {
+        for sql in RESEAT {
+            match pool {
+                DbPool::Postgres(p) => sqlx::query(*sql).execute(p).await.map(|_| ())?,
+                DbPool::MySql(p) => sqlx::query(*sql).execute(p).await.map(|_| ())?,
+                DbPool::Sqlite(p) => sqlx::query(*sql).execute(p).await.map(|_| ())?,
+            };
+        }
+        Ok(())
+    }
+    // Table not yet created (first boot) — nothing to re-seat.
+    let _ = run(pool).await;
 }
 
 /// Count user tables excluding sqlx's own bookkeeping table (D-16).

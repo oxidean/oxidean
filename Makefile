@@ -11,7 +11,7 @@
 .PHONY: cloud-plan cloud-docs cloud-production-autodeploy-check
 .PHONY: up-mysql up-sqlite down-mysql down-sqlite smoke-mysql smoke-sqlite
 .PHONY: up-dev-auth down-dev-auth up-with-dev-auth down-with-dev-auth test-e2e-stack seed-actions-demo test-e2e-actions
-.PHONY: db-migrate db-switch-dialect db-matrix
+.PHONY: db-migrate db-switch-dialect db-matrix actions-db-matrix
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
 .PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
 .PHONY: route-coverage-check-pr browser-coverage-check-pr
@@ -76,7 +76,8 @@ help:
 	@echo "  make cloud-production-autodeploy-check - assert production has no GitHub autodeploy triggers"
 	@echo "  make db-migrate     - apply migrations for DATABASE_URL"
 	@echo "  make db-switch-dialect - migrate an EMPTY target DB to a new dialect"
-	@echo "  make db-matrix      - run the dialect probe test against DATABASE_URL"
+	@echo "  make db-matrix      - run dialect probe + actions tests against DATABASE_URL"
+	@echo "  make actions-db-matrix - Actions API suites on PG/MySQL (OXIDEAN_TEST_PG_URL / OXIDEAN_TEST_MYSQL_URL admin URLs)"
 	@echo ""
 	@echo "Sample DATABASE_URLs:"
 	@echo "  postgres://oxidean:oxidean@localhost:5432/oxidean"
@@ -328,8 +329,26 @@ db-switch-dialect:
 	./scripts/db-switch-dialect.sh $(ARGS)
 
 db-matrix:
-	cargo test -p oxidean-db --test dialect_probe -- --nocapture
-	cargo test -p oxidean-db --test dialect_vcs -- --nocapture
+	cargo test -p oxidean-db --test dialect_probe --test dialect_vcs --test dialect_actions -- --nocapture
+
+# Every actions_* test binary plus the conformance corpus.
+ACTIONS_DB_TESTS := $(addprefix --test ,$(notdir $(basename $(wildcard crates/oxidean-api/tests/actions_*.rs))) workflow_conformance)
+
+# Run the Actions API suites against real Postgres/MySQL servers. Point
+# OXIDEAN_TEST_PG_URL / OXIDEAN_TEST_MYSQL_URL at SERVER-LEVEL admin URLs with
+# CREATE DATABASE privilege (the MySQL app user only owns its own schema —
+# use root). Each test provisions a fresh oxt_<uuid> database; created DBs are
+# not dropped (throwaway containers are the cleanup story). Unset legs skip.
+actions-db-matrix:
+	@set -e; \
+	for url in "$(OXIDEAN_TEST_PG_URL)" "$(OXIDEAN_TEST_MYSQL_URL)"; do \
+		[ -n "$$url" ] || continue; \
+		echo "==> actions-db-matrix: $$url"; \
+		OXIDEAN_TEST_DATABASE_URL="$$url" \
+			cargo nextest run -p oxidean-api $(ACTIONS_DB_TESTS); \
+	done; \
+	[ -n "$(OXIDEAN_TEST_PG_URL)$(OXIDEAN_TEST_MYSQL_URL)" ] || \
+		echo "==> no admin URLs set — pass OXIDEAN_TEST_PG_URL / OXIDEAN_TEST_MYSQL_URL (see docs/TESTING.md)"
 
 # D-QH-02 coverage collect + weighted gate (see docs/TESTING.md).
 # Collect continues when Vitest exits non-zero so summaries are still emitted
@@ -390,6 +409,7 @@ web-lint:
 	bun run --filter @oxidean/web lint
 	bun run scripts/check-octane-dom-races.ts
 	bun run scripts/check-internal-anchors.ts
+	bun run scripts/check-template-semicolons.ts
 	bun run scripts/check-route-sync.ts
 
 web-format-check:

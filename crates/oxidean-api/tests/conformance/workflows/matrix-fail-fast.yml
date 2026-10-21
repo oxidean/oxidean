@@ -1,0 +1,10 @@
+name: matrix-fail-fast
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        leg: [bad, ok]
+    steps:
+      - run: 'if [ "${{ matrix.leg }}" = bad ]; then exit 1; else echo leg-ok; fi'

@@ -11,7 +11,7 @@ use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::webhook::deliver::hmac_sha256_hex;
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
-use oxidean_git::CliGitBackend;
+use oxidean_git::{CliGitBackend, GitBackend};
 use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1609,7 +1609,7 @@ async fn webhook_ref_events_receive_pack() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let app = test_app(db.clone(), repos).await;
+    let app = test_app(db.clone(), repos.clone()).await;
     let cookie = verified_owner(&app, &db, "rp@ex.com", "rpown").await;
     let _ = rpc_json(
         &app,
@@ -1640,6 +1640,8 @@ async fn webhook_ref_events_receive_pack() {
         (three.clone(), zero.clone(), "refs/heads/old".to_string()),   // branch delete
         (one.clone(), two.clone(), "refs/heads/main".to_string()),     // push-only update
     ];
+    let git = CliGitBackend::new();
+    let bare = repos.join("rpown").join("demo.git");
     dispatch::notify_ref_events(
         &db,
         &repo_id,
@@ -1649,6 +1651,9 @@ async fn webhook_ref_events_receive_pack() {
         "uid",
         &updates,
         "development",
+        &git,
+        &bare,
+        false,
     )
     .await;
 
@@ -1753,6 +1758,9 @@ jobs:
         "abc1234deadbeef",
         "refs/heads/main",
         None,
+        None,
+        None,
+        false,
         None,
     )
     .await
@@ -1920,6 +1928,559 @@ async fn webhook_registry_package_generic_publish() {
     );
 }
 
+/// `workflow_job` lifecycle — a hook subscribed to the event receives
+/// `queued` when a job leg is enqueued and `completed` when the run is
+/// cancelled (conclusion carries the internal terminal status).
+#[tokio::test]
+async fn webhook_workflow_job_lifecycle() {
+    use oxidean_api::actions::{enqueue_run, parse_workflow_yaml};
+
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/wfj"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wfj.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "wfj@ex.com", "wfjown").await;
+    let created_repo = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created_repo["ok"], true, "{created_repo}");
+    let repo_id = created_repo["data"]["id"].as_str().unwrap().to_string();
+
+    let hook_url = format!("{}/wfj", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"wfjown","name":"demo","url":"{hook_url}","secret":"s","events":["workflow_job"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let doc = parse_workflow_yaml(
+        br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let (run_id, _jobs) = enqueue_run(
+        &db,
+        &repo_id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "abc1234deadbeef",
+        "refs/heads/main",
+        None,
+        None,
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let cancel = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"repo.actions.cancelRun","input":{{"owner":"wfjown","name":"demo","run_id":"{run_id}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(cancel["ok"], true, "{cancel}");
+
+    let mut actions = std::collections::HashSet::new();
+    let mut completed_payload = String::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "workflow_job") {
+            actions.insert(d.action.clone());
+            if d.action == "completed" {
+                completed_payload = d.payload_json.clone();
+            }
+        }
+        if actions.contains("queued") && actions.contains("completed") {
+            break;
+        }
+    }
+    assert!(actions.contains("queued"), "{actions:?}");
+    assert!(actions.contains("completed"), "{actions:?}");
+    assert!(
+        completed_payload.contains("\"conclusion\":\"cancelled\""),
+        "{completed_payload}"
+    );
+    assert!(
+        completed_payload.contains("\"workflow_job\""),
+        "{completed_payload}"
+    );
+}
+
+/// `on: issue_comment` end-to-end — a comment created through the real RPC
+/// enqueues an Actions run on the default-branch workflow.
+#[tokio::test]
+async fn actions_issue_comment_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ic.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "ic@ex.com", "icown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // `on: issue_comment` workflow on the default branch.
+    let git = CliGitBackend::new();
+    let bare = repos.join("icown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/comments.yml".into(),
+            br#"
+name: Comments
+on: issue_comment
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo comment-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"icown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    let comment = rpc_json(
+        &app,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"icown","name":"demo","number":1,"body":"looks good"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+
+    let mut fired = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 10, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| r.event == "issue_comment") {
+            fired = true;
+            let payload: serde_json::Value =
+                serde_json::from_str(runs[0].event_payload_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["action"], "created", "{payload}");
+            assert!(payload["comment"]["body"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("looks good"));
+            break;
+        }
+    }
+    assert!(fired, "expected an issue_comment action run");
+}
+
+/// `on: issues` `labeled`/`unlabeled` — `issue.labels.set` computes the label
+/// delta and fires one run per added/removed label.
+#[tokio::test]
+async fn actions_issue_label_delta_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("lb.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "lb@ex.com", "lbown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("lbown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/labels.yml".into(),
+            br#"
+name: Labels
+on:
+  issues:
+    types: [labeled, unlabeled]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo label-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let label = rpc_json(
+        &app,
+        r##"{"procedure":"label.create","input":{"owner":"lbown","repo":"demo","scope":"repo","name":"bug","color":"#ff0000"}}"##,
+        &cookie,
+    )
+    .await;
+    assert_eq!(label["ok"], true, "{label}");
+    let label_id = label["data"]["id"].as_str().unwrap().to_string();
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"lbown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+
+    // Applying the label fires `labeled` with payload.label.name = "bug".
+    let set = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"issue.labels.set","input":{{"owner":"lbown","name":"demo","number":1,"label_ids":["{label_id}"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+
+    let mut labeled = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if let Some(r) = runs.into_iter().find(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"labeled\"")
+        }) {
+            labeled = Some(r);
+            break;
+        }
+    }
+    let labeled = labeled.expect("labeled run enqueued");
+    let payload: serde_json::Value =
+        serde_json::from_str(labeled.event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"], "labeled");
+    assert_eq!(payload["label"]["name"], "bug");
+    assert_eq!(payload["issue"]["number"], 1);
+
+    // Removing it fires `unlabeled`.
+    let cleared = rpc_json(
+        &app,
+        r#"{"procedure":"issue.labels.set","input":{"owner":"lbown","name":"demo","number":1,"label_ids":[]}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    let mut unlabeled = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"unlabeled\"")
+        }) {
+            unlabeled = true;
+            break;
+        }
+    }
+    assert!(unlabeled, "expected an unlabeled run");
+}
+
+/// `on: milestone` end-to-end — milestone CRUD through the real RPC enqueues
+/// runs with GitHub's activity types (`created`/`closed`/`opened`/`edited`/`deleted`).
+#[tokio::test]
+async fn actions_milestone_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ms.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "ms@ex.com", "msown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("msown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/milestones.yml".into(),
+            br#"
+name: Milestones
+on: milestone
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo milestone-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let milestone = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.create","input":{"owner":"msown","name":"demo","title":"v1","description":"first","due_on":"2030-01-15"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(milestone["ok"], true, "{milestone}");
+    assert_eq!(milestone["data"]["number"], 1);
+    assert_eq!(milestone["data"]["due_on"], "2030-01-15");
+
+    let closed = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.update","input":{"owner":"msown","name":"demo","number":1,"state":"closed"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert!(closed["data"]["closed_at"].is_string());
+
+    let reopened = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.update","input":{"owner":"msown","name":"demo","number":1,"state":"open"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(reopened["ok"], true, "{reopened}");
+    assert!(reopened["data"]["closed_at"].is_null());
+
+    // Expect created + closed + opened runs (edited skipped — no field edit).
+    let mut actions: Vec<String> = Vec::new();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        actions = runs
+            .iter()
+            .filter(|r| r.event == "milestone")
+            .filter_map(|r| {
+                serde_json::from_str::<serde_json::Value>(
+                    r.event_payload_json.as_deref().unwrap_or_default(),
+                )
+                .ok()
+            })
+            .filter_map(|p| p["action"].as_str().map(str::to_string))
+            .collect();
+        if actions.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(actions.len(), 3, "milestone runs: {actions:?}");
+    for want in ["created", "closed", "opened"] {
+        assert!(
+            actions.iter().any(|a| a == want),
+            "missing {want}: {actions:?}"
+        );
+    }
+}
+
+/// `on: issues` `milestoned`/`demilestoned` — `issue.milestone.set` fires one
+/// run per link delta with `payload.milestone` naming the milestone.
+#[tokio::test]
+async fn actions_issue_milestone_delta_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("md.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "md@ex.com", "mdown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("mdown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/milestone-delta.yml".into(),
+            br#"
+name: MilestoneDelta
+on:
+  issues:
+    types: [milestoned, demilestoned]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo milestone-delta
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let milestone = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.create","input":{"owner":"mdown","name":"demo","title":"v1"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(milestone["ok"], true, "{milestone}");
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"mdown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+
+    let set = rpc_json(
+        &app,
+        r#"{"procedure":"issue.milestone.set","input":{"owner":"mdown","name":"demo","number":1,"milestone":1}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["data"]["milestone"]["number"], 1);
+    assert_eq!(set["data"]["milestone"]["title"], "v1");
+
+    let mut milestoned = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if let Some(r) = runs.into_iter().find(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"milestoned\"")
+        }) {
+            milestoned = Some(r);
+            break;
+        }
+    }
+    let milestoned = milestoned.expect("milestoned run enqueued");
+    let payload: serde_json::Value =
+        serde_json::from_str(milestoned.event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"], "milestoned");
+    assert_eq!(payload["milestone"]["number"], 1);
+    assert_eq!(payload["issue"]["number"], 1);
+
+    // Clearing fires `demilestoned` with the removed milestone embedded.
+    let cleared = rpc_json(
+        &app,
+        r#"{"procedure":"issue.milestone.set","input":{"owner":"mdown","name":"demo","number":1,"milestone":null}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert!(cleared["data"]["milestone"].is_null());
+    let mut demilestoned = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"demilestoned\"")
+        }) {
+            demilestoned = true;
+            break;
+        }
+    }
+    assert!(demilestoned, "expected a demilestoned run");
+}
+
 fn basic_auth(user: &str, password: &str) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let raw = format!("{user}:{password}");
@@ -1947,4 +2508,156 @@ fn basic_auth(user: &str, password: &str) -> String {
         });
     }
     format!("Basic {out}")
+}
+
+/// GitHub-shaped hook deliveries REST: `GET …/hooks/{id}/deliveries[/{did}]`,
+/// `POST …/attempts` (redeliver → 202), `POST …/pings` (→ 201) — all repo-admin.
+#[tokio::test]
+async fn webhook_deliveries_rest_surface() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("deliv_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "rest@ex.com", "restown").await;
+    rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"private","description":""}}"#,
+        &cookie,
+    )
+    .await;
+
+    let hook_url = format!("{}/hook", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"restown","name":"demo","url":"{hook_url}","secret":"hooksecret","events":["issues","push"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // Seed one delivered row + its attempt directly (no async wait).
+    db.insert_webhook_delivery(
+        "d-seed",
+        &hook_id,
+        "guid-seed",
+        "issues",
+        "opened",
+        r#"{"action":"opened","issue":{"number":1}}"#,
+    )
+    .await
+    .expect("seed delivery");
+    db.insert_webhook_delivery_attempt(
+        "a-seed",
+        "d-seed",
+        1,
+        Some(200),
+        None,
+        Some(42),
+        Some("ok"),
+    )
+    .await
+    .expect("seed attempt");
+    db.mark_webhook_delivery_result("d-seed", "success", 1, None)
+        .await
+        .expect("mark");
+
+    async fn rest(
+        app: &axum::Router,
+        method: &str,
+        uri: &str,
+        cookie: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::json!(null));
+        (status, v)
+    }
+
+    // List — GitHub shape.
+    let base = format!("/api/v1/repos/restown/demo/hooks/{hook_id}");
+    let (status, v) = rest(&app, "GET", &format!("{base}/deliveries"), &cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let arr = v.as_array().expect("array");
+    assert_eq!(arr.len(), 1, "{v}");
+    let d = &arr[0];
+    assert_eq!(d["id"], "d-seed");
+    assert_eq!(d["guid"], "guid-seed");
+    assert_eq!(d["event"], "issues");
+    assert_eq!(d["action"], "opened");
+    assert_eq!(d["status"], "OK");
+    assert_eq!(d["status_code"], 200);
+    assert_eq!(d["redelivery"], false);
+    assert!((d["duration"].as_f64().unwrap() - 0.042).abs() < 0.001);
+
+    // Detail — adds request/response.
+    let (status, v) = rest(&app, "GET", &format!("{base}/deliveries/d-seed"), &cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["request"]["payload"]["action"], "opened");
+    assert_eq!(v["response"]["payload"], "ok");
+
+    // Redeliver → 202 and a fresh delivery row carrying the same payload.
+    let (status, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/deliveries/d-seed/attempts"),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let rows = db.list_webhook_deliveries(&hook_id, 10).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    let redelivery = rows.iter().find(|r| r.id != "d-seed").expect("new row");
+    assert_eq!(redelivery.event, "issues");
+    assert!(redelivery.payload_json.contains("\"opened\""));
+
+    // Ping → 201.
+    let (status, _) = rest(&app, "POST", &format!("{base}/pings"), &cookie).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Cross-hook ids 404; a non-admin cookie is refused.
+    let (status, _) = rest(&app, "GET", &format!("{base}/deliveries/nope"), &cookie).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let other = verified_owner(&app, &db, "other@ex.com", "otherusr").await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("{base}/deliveries"))
+                .header("cookie", other)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.status() == StatusCode::FORBIDDEN || res.status() == StatusCode::NOT_FOUND,
+        "non-admin refused: {}",
+        res.status()
+    );
 }

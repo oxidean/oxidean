@@ -471,14 +471,15 @@ async fn rest_org_create_get() {
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["slug"], "acme");
 
-    // Members list requires org membership (RPC-level ACL, not anonymous).
+    // Members list requires org membership (RPC-level ACL, not anonymous);
+    // GitHub shape is a bare array.
     let (status, v) = json(
         &app,
         req_cookie("GET", "/api/v1/orgs/acme/members", None, &cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["members"].as_array().unwrap().len(), 1);
+    assert_eq!(v.as_array().unwrap().len(), 1);
 
     // PATs cannot create orgs (session-only procedure → 403 pat_scope).
     let res = app

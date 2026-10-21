@@ -52,6 +52,8 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         "tokhash",
         r#"["ubuntu-latest"]"#,
         Some(&repo.id),
+        None,
+        None,
         false,
     )
     .await
@@ -68,12 +70,19 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
             "CI",
             Some(&owner.id),
             None,
+            None,
         )
         .await
         .expect("run");
-    db.insert_action_job("job-fr", &run.id, "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .expect("job");
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        "job-fr",
+        &run.id,
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .expect("job");
     db.insert_action_secret("sec-fr", &repo.id, "SECRET", "cipher")
         .await
         .expect("secret");
@@ -85,11 +94,13 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         "tok2",
         r#"["self-hosted"]"#,
         None,
+        None,
+        None,
         true,
     )
     .await
     .expect("instance runner");
-    db.insert_action_runner_token("tok-fr", "reghash", "instance", None, true)
+    db.insert_action_runner_token("tok-fr", "reghash", "instance", None, "register", true)
         .await
         .expect("token");
 

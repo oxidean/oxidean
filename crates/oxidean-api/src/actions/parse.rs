@@ -19,7 +19,7 @@ impl std::error::Error for ParseError {}
 
 /// `contents` permission level granted to the per-job `OXIDEAN_TOKEN`
 /// (GitHub `permissions:` semantics — `none` revokes the token entirely).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentsPermission {
     None,
@@ -37,10 +37,33 @@ impl ContentsPermission {
     }
 }
 
-/// Parsed `permissions:` block — only `contents` is honoured today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// GitHub `permissions:` scope names — the full key set (parity).
+/// `id-token: write` gates the OIDC `ACTIONS_ID_TOKEN_REQUEST_*` surface.
+pub const GITHUB_PERMISSION_SCOPES: &[&str] = &[
+    "actions",
+    "attestations",
+    "checks",
+    "contents",
+    "deployments",
+    "discussions",
+    "id-token",
+    "issues",
+    "models",
+    "packages",
+    "pages",
+    "pull-requests",
+    "repository-projects",
+    "security-events",
+    "statuses",
+];
+
+/// Parsed `permissions:` block — `contents` stays promoted (git/LFS token
+/// path); `scopes` carries the remaining GitHub families with explicit
+/// `none|read|write` levels. A map resets unlisted scopes to `none`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkflowPermissions {
     pub contents: ContentsPermission,
+    pub scopes: std::collections::BTreeMap<String, ContentsPermission>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,13 +75,107 @@ pub struct WorkflowDocument {
     pub env: Option<JsonValue>,
     /// Workflow-level `permissions:` (`None` = not specified).
     pub permissions: Option<WorkflowPermissions>,
+    /// Structural features parsed but not executable — dispatch must refuse
+    /// the workflow rather than silently mis-execute it (D-parity: fail
+    /// loudly). Sorted, dedup'd feature keys (`needs`, `strategy`, …).
+    /// `expressions` flags malformed `${{ }}` syntax — evaluated keys no
+    /// longer pass through literally, so a broken expression is a parse-level
+    /// contract violation, not a runtime surprise.
+    pub unsupported: Vec<String>,
+    /// Workflow-level `concurrency:` — evaluated at enqueue onto the run row
+    /// (enforcement lands with the scheduler phase).
+    pub concurrency: Option<Concurrency>,
+    /// `run-name:` — per-run display name; expression source evaluated at
+    /// enqueue (`github`/`inputs`/`vars` contexts). `None` = runs title after
+    /// the workflow name.
+    pub run_name: Option<String>,
+    /// Dispatch-time warnings: features that run but are partially ignored
+    /// (`with:` inputs not applied, `concurrency` captured but not enforced).
+    /// Surfaced in each job's log at enqueue — never silent.
+    pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowTriggers {
     pub push: bool,
     pub pull_request: bool,
+    /// `on.pull_request_target` — trusted-context PR runs; dispatch requires
+    /// the repository `actions_pull_request_target` opt-in.
+    pub pull_request_target: bool,
     pub workflow_dispatch: bool,
+    /// `on.schedule` — fires from the cron sweeper (default branch only).
+    pub schedule: bool,
+    /// Filter detail under `on.push` — empty = match-all.
+    pub push_filters: EventFilters,
+    /// Filter detail under `on.pull_request`.
+    pub pull_request_filters: EventFilters,
+    /// Filter detail under `on.pull_request_target`.
+    pub pull_request_target_filters: EventFilters,
+    /// Domain-mutation lifecycle triggers — `release`, `issues`,
+    /// `issue_comment`, `create`, `delete`, `watch`, `fork`,
+    /// `pull_request_review`, `pull_request_review_comment`,
+    /// `registry_package`. Maps event name → `on.<event>.types`; an empty
+    /// list is GitHub's default (every activity type fires). Presence of
+    /// the key is the subscription.
+    pub lifecycle: std::collections::BTreeMap<String, Vec<String>>,
+    /// `on.schedule[].cron` entries.
+    pub schedule_crons: Vec<String>,
+    /// `on.workflow_dispatch.inputs` — `{name: {type, default, required,
+    /// options, description}}` normalized to JSON for the dispatch RPC.
+    pub dispatch_inputs: Option<JsonValue>,
+    /// `on.workflow_call` — the file is a reusable workflow; only reachable
+    /// via `jobs.<id>.uses`, never dispatched directly.
+    pub workflow_call: bool,
+    /// `on.workflow_call.inputs` — `{name: {type, required, default, …}}`.
+    pub call_inputs: Option<JsonValue>,
+    /// `on.workflow_call.outputs` — `{name: {value: "${{ jobs.*.outputs.* }}"}}`.
+    pub call_outputs: Option<JsonValue>,
+    /// `on.workflow_call.secrets` — `{name: {required, …}}` declarations.
+    pub call_secrets: Option<JsonValue>,
+    /// `on.workflow_run` — fires when another workflow run in the repo
+    /// completes; the downstream run executes from the *default branch*
+    /// (trusted context) with the completed run embedded in
+    /// `github.event.workflow_run`.
+    pub workflow_run: bool,
+    /// `on.workflow_run.workflows` — triggering workflow names/filename
+    /// stems. GitHub requires the key; an absent or empty list matches
+    /// nothing.
+    pub workflow_run_workflows: Vec<String>,
+    /// `on.workflow_run` filter detail — `branches`/`branches-ignore`
+    /// constrain the completed run's head branch; `types` carries the
+    /// activity types (`completed` is the only one we ever emit).
+    pub workflow_run_filters: EventFilters,
+}
+
+/// `on.<event>` filter detail. GitHub's semantics per key:
+/// - `branches`/`tags`/`paths`/`types` — at least one pattern must match;
+///   empty = no constraint.
+/// - `*-ignore` variants — fire only when NO pattern matches; GitHub forbids
+///   mixing a positive list with its `-ignore` twin on the same event.
+/// - `types` applies to `pull_request`/`pull_request_target` (activity types
+///   like `opened`/`synchronize`/`reopened`); meaningless on `push`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EventFilters {
+    pub branches: Vec<String>,
+    pub branches_ignore: Vec<String>,
+    pub tags: Vec<String>,
+    pub tags_ignore: Vec<String>,
+    pub paths: Vec<String>,
+    pub paths_ignore: Vec<String>,
+    pub types: Vec<String>,
+}
+
+impl EventFilters {
+    /// True when no constraint is set (bare `on: push` etc.).
+    pub fn is_empty(&self) -> bool {
+        self.branches.is_empty()
+            && self.branches_ignore.is_empty()
+            && self.tags.is_empty()
+            && self.tags_ignore.is_empty()
+            && self.paths.is_empty()
+            && self.paths_ignore.is_empty()
+            && self.types.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,34 +187,134 @@ pub struct JobSpec {
     pub env: Option<JsonValue>,
     /// Job-level `permissions:` — overrides the workflow-level block.
     pub permissions: Option<WorkflowPermissions>,
+    /// `jobs.<id>.if` — expression source, evaluated at enqueue.
+    pub if_expr: Option<String>,
+    /// `jobs.<id>.timeout-minutes` — expression source (usually a bare
+    /// number); evaluated at enqueue into `action_jobs.timeout_at`.
+    pub timeout_minutes: Option<String>,
+    /// `jobs.<id>.concurrency` — `{group, cancel-in-progress}` evaluated at
+    /// enqueue (enforcement lands with the scheduler phase).
+    pub concurrency: Option<Concurrency>,
+    /// `jobs.<id>.outputs` — raw `{name: expression}` map, materialized for
+    /// `needs.<id>.outputs.*` consumers when the scheduler lands.
+    pub outputs: Option<JsonValue>,
+    /// `jobs.<id>.needs` — upstream job keys; non-empty needs defer `if`
+    /// evaluation to ready-time (the `needs.<id>.result/outputs` context
+    /// only exists once the upstream legs finish).
+    pub needs: Vec<String>,
+    /// `jobs.<id>.strategy` — matrix expansion happens at enqueue into N
+    /// job rows sharing `job_key` with distinct `matrix_key` legs.
+    pub strategy: Option<StrategySpec>,
+    /// `jobs.<id>.container` — string (`image`) or object form, normalized
+    /// JSON; expressions evaluated at enqueue, executed by the runner.
+    pub container: Option<JsonValue>,
+    /// `jobs.<id>.services` — `{name: {image, env, ports, …}}` map.
+    pub services: Option<JsonValue>,
+    /// `jobs.<id>.environment` — scalar name or `{name, url}`; name/url may
+    /// interpolate and are evaluated at enqueue.
+    pub environment: Option<EnvironmentSpec>,
+    /// `jobs.<id>.continue-on-error` — bool or expression source, resolved
+    /// per leg at emit (matrix context available); a failing leg still marks
+    /// `failure` but the run concludes success and the leg can't trigger
+    /// `fail-fast` cancellation.
+    pub continue_on_error: Option<JsonValue>,
+    /// `jobs.<id>.uses` — reusable-workflow call target. Local
+    /// `./{path}.yml` reads the same repo at the run's `head_sha`;
+    /// `{owner}/{repo}/{path}@{ref}` reads another repository at `ref`.
+    /// A calling job carries no steps — the call expands into callee job
+    /// rows linked via `caller_job_id`.
+    pub uses: Option<String>,
+    /// `jobs.<id>.with` — raw `{name: expr}` map evaluated against the
+    /// caller's context when the call expands (needs/matrix/inputs visible).
+    pub with: Option<JsonValue>,
+    /// `jobs.<id>.secrets` — `inherit` | `{callee_name: expr}` map.
+    /// Absent = callee sees no repository secrets (GitHub parity).
+    pub secrets: Option<CallSecretsSpec>,
+    /// The raw YAML subtree for this job, re-marshaled at parse. The Gitea
+    /// actions-proto surface embeds it into the single-job workflow payload
+    /// stock act_runner executes — fields we don't model still reach the
+    /// runner verbatim.
+    pub raw_yaml: String,
+}
+
+/// `secrets:` on a reusable-workflow call — `inherit` forwards every secret
+/// the caller job could see; a map forwards each callee name from the
+/// caller-side expression value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallSecretsSpec {
+    Inherit,
+    Map(JsonValue),
+}
+
+/// `environment:` shape — a bare name string or `{name, url}` mapping.
+/// Fields stay expression-source strings; enqueue interpolates them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvironmentSpec {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+/// `strategy:` shape — `matrix` is an evaluatable map of `key → [values]`
+/// (embedded `${{ }}` against github/env/vars/inputs); `include`/`exclude`
+/// ride inside the matrix map itself, per GitHub.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategySpec {
+    pub matrix: Option<JsonValue>,
+    /// `fail-fast` — bool literal or expression source; default true.
+    pub fail_fast: Option<JsonValue>,
+    /// `max-parallel` — int literal or expression source; default unbounded.
+    pub max_parallel: Option<JsonValue>,
+}
+
+/// `concurrency:` shape — a bare group string or `{group, cancel-in-progress}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Concurrency {
+    /// Expression source for the group key.
+    pub group: Option<String>,
+    /// Expression source — usually a bare bool.
+    pub cancel_in_progress: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StepSpec {
+    /// `id:` — the step's address in `steps.<id>.outputs/outcome` contexts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub name: Option<String>,
     pub uses: Option<String>,
     pub run: Option<String>,
     pub shell: Option<String>,
     pub working_directory: Option<String>,
-    /// Opaque `with` / `env` / `if` — retained for runner; not interpreted in-process.
+    /// `with` / `env` / `if` retained as raw values/strings — the runner
+    /// evaluates their `${{ }}` expressions at step time.
     pub with: Option<JsonValue>,
     pub env: Option<JsonValue>,
     #[serde(rename = "if", skip_serializing_if = "Option::is_none")]
     pub if_expr: Option<String>,
+    /// `steps.*.timeout-minutes` — expression source; the runner enforces it.
+    #[serde(rename = "timeout-minutes", skip_serializing_if = "Option::is_none")]
+    pub timeout_minutes: Option<String>,
+    /// `steps.*.continue-on-error` — bool or `${{ }}` source; the runner
+    /// evaluates and applies failure-suppression semantics.
+    #[serde(rename = "continue-on-error", skip_serializing_if = "Option::is_none")]
+    pub continue_on_error: Option<JsonValue>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawWorkflow {
     name: Option<String>,
+    #[serde(rename = "run-name")]
+    run_name: Option<serde_yaml::Value>,
     #[serde(rename = "on")]
     on: Option<RawOn>,
     jobs: Option<serde_yaml::Mapping>,
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
     permissions: Option<serde_yaml::Value>,
+    concurrency: Option<serde_yaml::Value>,
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
-
-/// `defaults:` — currently only `run.shell` / `run.working-directory`
 /// are honoured (workflow-level fallback for every step).
 #[derive(Debug, Deserialize, Clone)]
 struct RawDefaults {
@@ -136,6 +353,26 @@ struct RawJob {
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
     permissions: Option<serde_yaml::Value>,
+    needs: Option<serde_yaml::Value>,
+    strategy: Option<serde_yaml::Value>,
+    container: Option<serde_yaml::Value>,
+    services: Option<serde_yaml::Value>,
+    environment: Option<serde_yaml::Value>,
+    concurrency: Option<serde_yaml::Value>,
+    outputs: Option<serde_yaml::Value>,
+    #[serde(rename = "if")]
+    if_expr: Option<serde_yaml::Value>,
+    uses: Option<serde_yaml::Value>,
+    with: Option<serde_yaml::Value>,
+    secrets: Option<serde_yaml::Value>,
+    #[serde(rename = "continue-on-error")]
+    continue_on_error: Option<serde_yaml::Value>,
+    #[serde(rename = "timeout-minutes")]
+    timeout_minutes: Option<serde_yaml::Value>,
+    /// Unknown job keys — GitHub rejects them; flagged `unsupported` so
+    /// dispatch fails validation.
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +384,7 @@ enum RawRunsOn {
 
 #[derive(Debug, Deserialize)]
 struct RawStep {
+    id: Option<String>,
     name: Option<String>,
     uses: Option<String>,
     run: Option<String>,
@@ -155,8 +393,20 @@ struct RawStep {
     working_directory: Option<String>,
     with: Option<serde_yaml::Value>,
     env: Option<serde_yaml::Value>,
+    /// `if:` accepts a bare scalar — `if: false` is valid YAML and GitHub
+    /// treats it as the boolean expression, so keep the raw value.
     #[serde(rename = "if")]
-    if_expr: Option<String>,
+    if_expr: Option<serde_yaml::Value>,
+    #[serde(rename = "continue-on-error")]
+    continue_on_error: Option<serde_yaml::Value>,
+    #[serde(rename = "timeout-minutes")]
+    timeout_minutes: Option<serde_yaml::Value>,
+    /// Unknown step keys — GitHub rejects the whole workflow for these
+    /// (bare `args:`/`entrypoint:` are not step keys; docker steps take
+    /// `with.args`/`with.entrypoint`); flagged `unsupported` so dispatch
+    /// fails validation.
+    #[serde(flatten)]
+    extra: serde_yaml::Mapping,
 }
 
 fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
@@ -165,69 +415,400 @@ fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
     })
 }
 
-fn parse_triggers(on: Option<RawOn>) -> WorkflowTriggers {
+/// Expression-source strings can be bare scalars (`if: false`,
+/// `timeout-minutes: 30`) — normalize YAML scalars to their source text.
+fn expr_src(v: &serde_yaml::Value) -> Option<String> {
+    match v {
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// [`expr_src`] over an `Option` raw value.
+fn expr_src_opt(v: &Option<serde_yaml::Value>) -> Option<String> {
+    v.as_ref().and_then(expr_src)
+}
+
+/// `concurrency:` is either a bare group string or
+/// `{group: …, cancel-in-progress: …}` — keep each field's expression source.
+fn parse_concurrency(raw: Option<&serde_yaml::Value>) -> Option<Concurrency> {
+    match raw? {
+        s @ serde_yaml::Value::String(_) => Some(Concurrency {
+            group: expr_src(s),
+            cancel_in_progress: None,
+        }),
+        serde_yaml::Value::Mapping(map) => {
+            let mut c = Concurrency {
+                group: None,
+                cancel_in_progress: None,
+            };
+            for (k, v) in map {
+                match k.as_str() {
+                    Some("group") => c.group = expr_src(v),
+                    Some("cancel-in-progress") => c.cancel_in_progress = expr_src(v),
+                    _ => {}
+                }
+            }
+            Some(c)
+        }
+        _ => None,
+    }
+}
+
+/// `needs:` — a job-id string or a list of job-id strings. Job-ids are
+/// literal (GitHub doesn't allow expressions here); anything else is a
+/// parse error.
+fn parse_needs(raw: Option<&serde_yaml::Value>, job_id: &str) -> Result<Vec<String>, ParseError> {
+    let bad = |v: &serde_yaml::Value| ParseError {
+        message: format!("job '{job_id}': needs must be a job id or a list of job ids, got {v:?}"),
+    };
+    match raw {
+        None => Ok(Vec::new()),
+        Some(serde_yaml::Value::String(s)) => Ok(vec![s.clone()]),
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .map(|v| match v {
+                serde_yaml::Value::String(s) => Ok(s.clone()),
+                other => Err(bad(other)),
+            })
+            .collect(),
+        Some(other) => Err(bad(other)),
+    }
+}
+
+/// `strategy:` — keep `matrix`/`fail-fast`/`max-parallel` as evaluatable
+/// JSON values; `${{ }}` inside them is syntax-checked but resolved at
+/// enqueue (`github`/`env`/`vars`/`inputs` contexts — `needs.*` matrices
+/// need the scheduler, flagged separately there).
+fn parse_strategy(
+    raw: Option<&serde_yaml::Value>,
+    job_id: &str,
+) -> Result<Option<StrategySpec>, ParseError> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let serde_yaml::Value::Mapping(map) = raw else {
+        return Err(ParseError {
+            message: format!("job '{job_id}': strategy must be a mapping"),
+        });
+    };
+    let mut s = StrategySpec {
+        matrix: None,
+        fail_fast: None,
+        max_parallel: None,
+    };
+    for (k, v) in map {
+        match k.as_str() {
+            Some("matrix") => s.matrix = Some(yaml_to_json(v.clone())?),
+            Some("fail-fast") => s.fail_fast = Some(yaml_to_json(v.clone())?),
+            Some("max-parallel") => s.max_parallel = Some(yaml_to_json(v.clone())?),
+            _ => {}
+        }
+    }
+    Ok(Some(s))
+}
+
+/// Check every `${{ }}` in `s` for syntax errors; detail strings go to
+/// `warnings`, the presence of any error sets the `expressions` flag.
+fn check_str(src: &str, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    for e in oxidean_actions_expr::check(src) {
+        flag(unsupported, "expressions");
+        warnings.push(format!("malformed expression in '{src}': {e}"));
+    }
+}
+
+/// `if:` fields are whole expressions — bare `github.sha` or `${{ }}`-wrapped,
+/// both must parse.
+fn check_if(src: &str, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    for e in oxidean_actions_expr::check_expr(src) {
+        flag(unsupported, "expressions");
+        warnings.push(format!("malformed expression in '{src}': {e}"));
+    }
+}
+
+/// Recursive walk for `env:`/`with:`/`outputs:` maps — only string leaves
+/// carry expressions.
+fn check_json(v: &JsonValue, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    match v {
+        JsonValue::String(s) => check_str(s, unsupported, warnings),
+        JsonValue::Array(items) => {
+            for i in items {
+                check_json(i, unsupported, warnings);
+            }
+        }
+        JsonValue::Object(map) => {
+            for (_, i) in map {
+                check_json(i, unsupported, warnings);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<String>) {
     let mut t = WorkflowTriggers::default();
+    let mut unsupported = Vec::new();
+    let mut warnings = Vec::new();
     match on {
         None => {}
-        Some(RawOn::Single(s)) => apply_event(&mut t, &s),
+        Some(RawOn::Single(s)) => {
+            if let Some(name) = apply_event(&mut t, &s, None) {
+                warnings.push(format!(
+                    "on.{name}: unsupported event — the workflow will never run on it"
+                ));
+            }
+        }
         Some(RawOn::List(list)) => {
             for s in list {
-                apply_event(&mut t, &s);
+                if let Some(name) = apply_event(&mut t, &s, None) {
+                    warnings.push(format!(
+                        "on.{name}: unsupported event — the workflow will never run on it"
+                    ));
+                }
             }
         }
         Some(RawOn::Map(map)) => {
-            for (k, _) in map {
+            for (k, v) in &map {
                 if let serde_yaml::Value::String(s) = k {
-                    apply_event(&mut t, &s);
+                    if let Some(name) = apply_event(&mut t, s, Some(v)) {
+                        warnings.push(format!(
+                            "on.{name}: unsupported event — the workflow will never run on it"
+                        ));
+                    }
                 }
             }
         }
     }
-    t
+    // GitHub forbids mixing a positive filter list with its `-ignore` twin on
+    // the same event — flag `unsupported` so dispatch fails validation rather
+    // than silently honoring one side.
+    for (event, f) in [
+        ("push", &t.push_filters),
+        ("pull_request", &t.pull_request_filters),
+        ("pull_request_target", &t.pull_request_target_filters),
+        ("workflow_run", &t.workflow_run_filters),
+    ] {
+        if !f.branches.is_empty() && !f.branches_ignore.is_empty() {
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'branches' and 'branches-ignore' are mutually exclusive"),
+            );
+        }
+        if !f.tags.is_empty() && !f.tags_ignore.is_empty() {
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'tags' and 'tags-ignore' are mutually exclusive"),
+            );
+        }
+        if !f.paths.is_empty() && !f.paths_ignore.is_empty() {
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'paths' and 'paths-ignore' are mutually exclusive"),
+            );
+        }
+    }
+    (t, unsupported, warnings)
 }
 
-fn apply_event(t: &mut WorkflowTriggers, name: &str) {
+/// Returns `Some(name)` when the event is unrecognized — unimplemented
+/// `on:` entries simply never fire, so the caller records a loud warning
+/// instead of silently ignoring them.
+fn apply_event(
+    t: &mut WorkflowTriggers,
+    name: &str,
+    value: Option<&serde_yaml::Value>,
+) -> Option<String> {
     match name.trim() {
-        "push" => t.push = true,
-        "pull_request" => t.pull_request = true,
-        "workflow_dispatch" => t.workflow_dispatch = true,
-        _ => {
-            // Unsupported triggers ignored for matching; jobs still parse.
+        "push" => {
+            t.push = true;
+            t.push_filters = parse_event_filters(value);
         }
+        "pull_request" => {
+            t.pull_request = true;
+            t.pull_request_filters = parse_event_filters(value);
+        }
+        "pull_request_target" => {
+            t.pull_request_target = true;
+            t.pull_request_target_filters = parse_event_filters(value);
+        }
+        "workflow_dispatch" => {
+            t.workflow_dispatch = true;
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                if let Some(inputs) = m.get(serde_yaml::Value::String("inputs".into())) {
+                    t.dispatch_inputs = serde_json::to_value(inputs).ok();
+                }
+            }
+        }
+        "workflow_call" => {
+            t.workflow_call = true;
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                for (key, slot) in [
+                    ("inputs", &mut t.call_inputs),
+                    ("outputs", &mut t.call_outputs),
+                    ("secrets", &mut t.call_secrets),
+                ] {
+                    if let Some(v) = m.get(serde_yaml::Value::String(key.into())) {
+                        *slot = serde_json::to_value(v).ok();
+                    }
+                }
+            }
+        }
+        "schedule" => {
+            t.schedule = true;
+            // `on.schedule` is a list of `{cron: "…"}` entries.
+            if let Some(serde_yaml::Value::Sequence(items)) = value {
+                for item in items {
+                    if let Some(cron) = item
+                        .get(serde_yaml::Value::String("cron".into()))
+                        .and_then(|v| v.as_str())
+                    {
+                        t.schedule_crons.push(cron.trim().to_string());
+                    }
+                }
+            }
+        }
+        "workflow_run" => {
+            t.workflow_run = true;
+            t.workflow_run_filters = parse_event_filters(value);
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                if let Some(v) = m.get(serde_yaml::Value::String("workflows".into())) {
+                    t.workflow_run_workflows = yaml_string_list(v);
+                }
+            }
+        }
+        // Lifecycle events dispatched from domain mutations — the shared
+        // `LifecycleEvent` fan-out. `types` narrows the activity types the
+        // workflow fires on; empty = GitHub's default (all).
+        // `gollum`/`page_build` have no activity types on GitHub — a `types:`
+        // list is ignored, not an error, so the lifecycle entry carries no
+        // filter.
+        name @ ("gollum" | "page_build") => {
+            t.lifecycle.insert(name.to_string(), Vec::new());
+        }
+        name @ ("release"
+        | "issues"
+        | "issue_comment"
+        | "create"
+        | "delete"
+        | "watch"
+        | "fork"
+        | "pull_request_review"
+        | "pull_request_review_comment"
+        | "registry_package"
+        | "label"
+        | "milestone"
+        | "deployment"
+        | "deployment_status"
+        | "check_run"
+        | "check_suite"
+        | "project"
+        | "project_column"
+        | "project_card"
+        | "discussion"
+        | "discussion_comment"
+        | "merge_group"
+        | "public"
+        | "status"
+        | "repository_dispatch"
+        | "branch_protection_rule") => {
+            t.lifecycle
+                .insert(name.to_string(), parse_event_filters(value).types);
+        }
+        other => {
+            // Other unimplemented events (security_advisory, …) never
+            // fire — the caller warns loudly so the gap isn't silent.
+            return Some(other.to_string());
+        }
+    }
+    None
+}
+
+/// Parse the `{branches, tags, paths, types, *-ignore}` mapping under an
+/// `on.<event>` key. Bare `on: push:` (null value) → empty filters.
+fn parse_event_filters(value: Option<&serde_yaml::Value>) -> EventFilters {
+    let mut f = EventFilters::default();
+    let Some(serde_yaml::Value::Mapping(m)) = value else {
+        return f;
+    };
+    for (k, v) in m {
+        let Some(key) = k.as_str() else { continue };
+        let list = yaml_string_list(v);
+        match key.trim() {
+            "branches" => f.branches = list,
+            "branches-ignore" => f.branches_ignore = list,
+            "tags" => f.tags = list,
+            "tags-ignore" => f.tags_ignore = list,
+            "paths" => f.paths = list,
+            "paths-ignore" => f.paths_ignore = list,
+            "types" => f.types = list,
+            _ => {}
+        }
+    }
+    f
+}
+
+/// YAML scalar-or-sequence → Vec<String> (filter keys accept both shapes).
+fn yaml_string_list(v: &serde_yaml::Value) -> Vec<String> {
+    match v {
+        serde_yaml::Value::String(s) => vec![s.clone()],
+        serde_yaml::Value::Sequence(items) => items
+            .iter()
+            .filter_map(|i| i.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
-/// Parse a `permissions:` value (GitHub subset).
+/// Parse a `permissions:` value (full GitHub key set).
 ///
-/// - `read-all` / `write-all` scalars set `contents` to read/write.
-/// - A map honours only the `contents` key (`read`/`write`/`none`); per GitHub
+/// - `read-all` / `write-all` scalars grant every scope that level.
+/// - A map sets each listed scope (`read`/`write`/`none`); per GitHub
 ///   semantics, specifying a map resets unlisted scopes to `none`, so a map
 ///   without `contents` — including `{}` — yields `contents: none`.
+/// - Unknown scope keys fail loud: the caller flags them `unsupported`.
 /// - `None` (absent) or an unrecognized shape → `None` ("not specified").
-fn parse_permissions(raw: Option<&serde_yaml::Value>) -> Option<WorkflowPermissions> {
+fn parse_permissions(
+    raw: Option<&serde_yaml::Value>,
+    unsupported: &mut Vec<String>,
+) -> Option<WorkflowPermissions> {
+    fn all(level: ContentsPermission) -> WorkflowPermissions {
+        WorkflowPermissions {
+            contents: level,
+            scopes: GITHUB_PERMISSION_SCOPES
+                .iter()
+                .filter(|s| **s != "contents")
+                .map(|s| (s.to_string(), level))
+                .collect(),
+        }
+    }
     match raw {
         None => None,
         Some(serde_yaml::Value::String(s)) => match s.trim() {
-            "read-all" => Some(WorkflowPermissions {
-                contents: ContentsPermission::Read,
-            }),
-            "write-all" => Some(WorkflowPermissions {
-                contents: ContentsPermission::Write,
-            }),
+            "read-all" => Some(all(ContentsPermission::Read)),
+            "write-all" => Some(all(ContentsPermission::Write)),
             _ => None,
         },
         Some(serde_yaml::Value::Mapping(map)) => {
             let mut contents = ContentsPermission::None;
+            let mut scopes = std::collections::BTreeMap::new();
             for (k, v) in map {
-                if k.as_str() == Some("contents") {
-                    contents = match v.as_str().map(str::trim) {
-                        Some("read") => ContentsPermission::Read,
-                        Some("write") => ContentsPermission::Write,
-                        _ => ContentsPermission::None,
-                    };
+                let Some(key) = k.as_str() else { continue };
+                let level = match v.as_str().map(str::trim) {
+                    Some("read") => ContentsPermission::Read,
+                    Some("write") => ContentsPermission::Write,
+                    _ => ContentsPermission::None,
+                };
+                if key == "contents" {
+                    contents = level;
+                } else if GITHUB_PERMISSION_SCOPES.contains(&key) {
+                    scopes.insert(key.to_string(), level);
+                } else {
+                    flag(unsupported, &format!("permissions:{key}"));
                 }
             }
-            Some(WorkflowPermissions { contents })
+            Some(WorkflowPermissions { contents, scopes })
         }
         Some(_) => None,
     }
@@ -237,9 +818,96 @@ fn parse_permissions(raw: Option<&serde_yaml::Value>) -> Option<WorkflowPermissi
 /// workflow-level, else `read` (the instance default).
 pub fn effective_contents_permission(doc: &WorkflowDocument, job: &JobSpec) -> ContentsPermission {
     job.permissions
+        .as_ref()
         .map(|p| p.contents)
-        .or_else(|| doc.permissions.map(|p| p.contents))
+        .or_else(|| doc.permissions.as_ref().map(|p| p.contents))
         .unwrap_or(ContentsPermission::Read)
+}
+
+/// The resolved GitHub scope set for a job — `{scope: none|read|write}` with
+/// every declared scope present. `default_permissions` is the repo's
+/// "Workflow permissions" setting (`read` restricted / `write` permissive)
+/// applied when neither job nor workflow declares `permissions:`.
+///
+/// Resolution (GitHub parity): a job-level `permissions:` block replaces the
+/// workflow-level one entirely — a map resets every unlisted scope to none.
+/// Absent both → `read` grants contents+packages read, `write` grants every
+/// scope write (GitHub's permissive default).
+pub fn effective_permissions(
+    doc: &WorkflowDocument,
+    job: &JobSpec,
+    default_permissions: &str,
+) -> std::collections::BTreeMap<String, ContentsPermission> {
+    let block = job.permissions.as_ref().or(doc.permissions.as_ref());
+    let mut out: std::collections::BTreeMap<String, ContentsPermission> = match block {
+        Some(p) => {
+            let mut m = p.scopes.clone();
+            m.insert("contents".to_string(), p.contents);
+            m
+        }
+        None => {
+            let mut m = std::collections::BTreeMap::new();
+            if default_permissions == "write" {
+                for s in GITHUB_PERMISSION_SCOPES {
+                    m.insert(s.to_string(), ContentsPermission::Write);
+                }
+            } else {
+                m.insert("contents".to_string(), ContentsPermission::Read);
+                m.insert("packages".to_string(), ContentsPermission::Read);
+            }
+            m
+        }
+    };
+    // A declared block resets unlisted scopes to none — fill the gaps so the
+    // frozen payload always carries the complete scope set.
+    for s in GITHUB_PERMISSION_SCOPES {
+        out.entry(s.to_string()).or_insert(ContentsPermission::None);
+    }
+    out
+}
+
+/// `environment:` — scalar name or `{name, url}`. Unknown shapes warn (the
+/// job still parses; the environment simply doesn't apply).
+fn parse_environment(
+    raw: Option<&serde_yaml::Value>,
+    warnings: &mut Vec<String>,
+) -> Option<EnvironmentSpec> {
+    match raw {
+        None => None,
+        Some(serde_yaml::Value::String(s)) => {
+            let name = s.trim().to_string();
+            (!name.is_empty()).then_some(EnvironmentSpec { name, url: None })
+        }
+        Some(serde_yaml::Value::Mapping(map)) => {
+            let name = map
+                .get(serde_yaml::Value::String("name".into()))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string();
+            let url = map
+                .get(serde_yaml::Value::String("url".into()))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if name.is_empty() {
+                warnings.push("environment mapping lacks a name".to_string());
+                None
+            } else {
+                Some(EnvironmentSpec { name, url })
+            }
+        }
+        Some(_) => {
+            warnings.push("unsupported environment shape".to_string());
+            None
+        }
+    }
+}
+
+/// Mark a feature key once per document (dedup'd, sorted at the end).
+fn flag(set: &mut Vec<String>, key: &str) {
+    if !set.iter().any(|k| k == key) {
+        set.push(key.to_string());
+    }
 }
 
 fn parse_runs_on(raw: Option<RawRunsOn>) -> Result<Vec<String>, ParseError> {
@@ -278,7 +946,41 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         });
     }
 
-    let triggers = parse_triggers(raw.on);
+    let (triggers, mut unsupported, mut warnings) = parse_triggers(raw.on);
+
+    // `run-name:` — expression source evaluated at enqueue into the run's
+    // display title (GitHub: `github`/`inputs`/`vars` contexts; falls back
+    // to the workflow name when absent).
+    let run_name = match raw.run_name.as_ref() {
+        None => None,
+        Some(serde_yaml::Value::String(s)) => Some(s.trim().to_string()),
+        Some(_) => {
+            warnings.push("run-name: must be a string — ignored".into());
+            None
+        }
+    };
+    // Unknown top-level keys: GitHub rejects keys outside the workflow
+    // schema — flag them `unsupported` so dispatch fails validation rather
+    // than running a workflow GitHub would refuse.
+    for (k, _) in &raw.extra {
+        let key = k.as_str().unwrap_or("<non-string>");
+        flag(&mut unsupported, &format!("unknown key '{key}'"));
+    }
+
+    let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
+    check_str(&name, &mut unsupported, &mut warnings);
+    if let Some(s) = &run_name {
+        check_str(s, &mut unsupported, &mut warnings);
+    }
+    let wf_env = raw.env.map(yaml_to_json).transpose()?;
+    if let Some(v) = &wf_env {
+        check_json(v, &mut unsupported, &mut warnings);
+    }
+    if let Some(c) = &wf_concurrency {
+        for s in [&c.group, &c.cancel_in_progress].into_iter().flatten() {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
+    }
     let jobs_map = raw.jobs.ok_or_else(|| ParseError {
         message: "workflow missing jobs".into(),
     })?;
@@ -304,17 +1006,184 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 message: format!("invalid job id '{id}'"),
             });
         }
+        let job_yaml = serde_yaml::to_string(&value).unwrap_or_default();
         let job: RawJob = serde_yaml::from_value(value).map_err(|e| ParseError {
             message: format!("invalid job '{id}': {e}"),
         })?;
-        let runs_on = parse_runs_on(job.runs_on)?;
+        for (k, _) in &job.extra {
+            flag(
+                &mut unsupported,
+                &format!(
+                    "unknown key 'jobs.{id}.{}'",
+                    k.as_str().unwrap_or("<non-string>")
+                ),
+            );
+        }
+        // `continue-on-error` is honored — failing coe legs don't fail the
+        // run, don't fire fail-fast, and report `failure` to needs so
+        // dependents skip (GitHub semantics).
+        // `uses:` makes the job a reusable-workflow call. GitHub restricts
+        // calling jobs to `concurrency`, `if`, `name`, `needs`, `permissions`,
+        // `secrets`, `strategy`, `uses`, `with` — anything else fails
+        // validation rather than silently dropping.
+        let uses = match job.uses.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::String(s)) => {
+                let s = s.trim().to_string();
+                if s.is_empty() {
+                    flag(&mut unsupported, "reusable-workflow");
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
+        if uses.is_some() {
+            for (present, key) in [
+                (job.runs_on.is_some(), "runs-on"),
+                (job.steps.as_ref().is_some_and(|s| !s.is_empty()), "steps"),
+                (job.env.is_some(), "env"),
+                (job.defaults.is_some(), "defaults"),
+                (job.container.is_some(), "container"),
+                (job.services.is_some(), "services"),
+                (job.environment.is_some(), "environment"),
+                (job.timeout_minutes.is_some(), "timeout-minutes"),
+                (job.continue_on_error.is_some(), "continue-on-error"),
+                (job.outputs.is_some(), "outputs"),
+            ] {
+                if present {
+                    flag(&mut unsupported, &format!("reusable-workflow:{key}"));
+                }
+            }
+        } else if job.with.is_some() || job.secrets.is_some() {
+            // `with:`/`secrets:` without `uses:` have no target — invalid.
+            flag(&mut unsupported, "reusable-workflow");
+        }
+        // `secrets:` — `inherit` scalar or a name→expr mapping.
+        let call_secrets = match job.secrets.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::String(s)) if s.trim() == "inherit" => {
+                Some(CallSecretsSpec::Inherit)
+            }
+            Some(serde_yaml::Value::Mapping(_)) => Some(CallSecretsSpec::Map(yaml_to_json(
+                job.secrets.clone().unwrap(),
+            )?)),
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
+        // `with:` — must be a mapping of input-name → value.
+        let call_with = match job.with.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::Mapping(_)) => {
+                let v = yaml_to_json(job.with.clone().unwrap())?;
+                check_json(&v, &mut unsupported, &mut warnings);
+                Some(v)
+            }
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
+        let job_concurrency = parse_concurrency(job.concurrency.as_ref());
+        let needs = parse_needs(job.needs.as_ref(), &id)?;
+        let strategy = parse_strategy(job.strategy.as_ref(), &id)?;
+        // Reusable-call jobs (`uses:`) carry no `runs-on`.
+        let runs_on = if uses.is_some() {
+            Vec::new()
+        } else {
+            parse_runs_on(job.runs_on)?
+        };
+        // Expression-syntax checks — evaluated fields can't carry malformed
+        // `${{ }}` through to silent mis-execution.
+        if let Some(s) = &job.name {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
+        if let Some(s) = expr_src_opt(&job.if_expr) {
+            check_if(&s, &mut unsupported, &mut warnings);
+        }
+        for s in &runs_on {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
+        if let Some(s) = expr_src_opt(&job.timeout_minutes) {
+            check_str(&s, &mut unsupported, &mut warnings);
+        }
+        if let Some(c) = &job_concurrency {
+            for s in [&c.group, &c.cancel_in_progress].into_iter().flatten() {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+        }
+        if let Some(s) = &strategy {
+            for v in [&s.matrix, &s.fail_fast, &s.max_parallel]
+                .into_iter()
+                .flatten()
+            {
+                check_json(v, &mut unsupported, &mut warnings);
+            }
+        }
+        let job_env = job.env.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_env {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
+        let job_outputs = job.outputs.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_outputs {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
+        let job_container = job.container.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_container {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
+        let job_services = job.services.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_services {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
         let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
+            for (k, _) in &step.extra {
+                flag(
+                    &mut unsupported,
+                    &format!(
+                        "unknown key 'jobs.{id}.steps[{i}].{}'",
+                        k.as_str().unwrap_or("<non-string>")
+                    ),
+                );
+            }
             if step.uses.is_none() && step.run.is_none() {
                 return Err(ParseError {
                     message: format!("job '{id}' step {i} needs uses or run"),
                 });
+            }
+            if step.with.is_some() && step.uses.is_none() {
+                flag(&mut warnings, "with on run: step has no effect");
+            }
+            if let Some(s) = &step.name {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = expr_src_opt(&step.if_expr) {
+                check_if(&s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = &step.run {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = &step.working_directory {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = expr_src_opt(&step.timeout_minutes) {
+                check_str(&s, &mut unsupported, &mut warnings);
+            }
+            let step_with = step.with.map(yaml_to_json).transpose()?;
+            if let Some(v) = &step_with {
+                check_json(v, &mut unsupported, &mut warnings);
+            }
+            let step_env = step.env.map(yaml_to_json).transpose()?;
+            if let Some(v) = &step_env {
+                check_json(v, &mut unsupported, &mut warnings);
             }
             // Precedence: step > job defaults > workflow defaults.
             let shell = step
@@ -326,32 +1195,108 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 .or_else(|| job_workdir.clone())
                 .or_else(|| wf_workdir.clone());
             steps.push(StepSpec {
+                id: step.id,
                 name: step.name,
                 uses: step.uses,
                 run: step.run,
                 shell,
                 working_directory,
-                with: step.with.map(yaml_to_json).transpose()?,
-                env: step.env.map(yaml_to_json).transpose()?,
-                if_expr: step.if_expr,
+                with: step_with,
+                env: step_env,
+                if_expr: expr_src_opt(&step.if_expr),
+                timeout_minutes: expr_src_opt(&step.timeout_minutes),
+                continue_on_error: step.continue_on_error.map(yaml_to_json).transpose()?,
             });
+        }
+        if steps.is_empty() && uses.is_none() {
+            // GitHub rejects the file: a job needs `steps:` or a `uses:` call.
+            flag(&mut unsupported, "steps");
         }
         jobs.push(JobSpec {
             id,
             name: job.name,
             runs_on,
             steps,
-            env: job.env.map(yaml_to_json).transpose()?,
-            permissions: parse_permissions(job.permissions.as_ref()),
+            env: job_env,
+            permissions: parse_permissions(job.permissions.as_ref(), &mut unsupported),
+            if_expr: expr_src_opt(&job.if_expr),
+            timeout_minutes: expr_src_opt(&job.timeout_minutes),
+            concurrency: job_concurrency,
+            outputs: job_outputs,
+            needs,
+            strategy,
+            container: job_container,
+            services: job_services,
+            environment: parse_environment(job.environment.as_ref(), &mut warnings),
+            continue_on_error: job.continue_on_error.map(yaml_to_json).transpose()?,
+            uses,
+            with: call_with,
+            secrets: call_secrets,
+            raw_yaml: job_yaml,
         });
     }
 
+    // `needs:` references must resolve to declared job ids — GitHub fails
+    // validation; we flag it loud rather than wedge a `waiting` job forever.
+    let job_ids: std::collections::BTreeSet<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+    for j in &jobs {
+        for n in &j.needs {
+            if !job_ids.contains(n.as_str()) {
+                flag(&mut unsupported, "needs");
+                warnings.push(format!("job '{}' needs unknown job '{n}'", j.id));
+            }
+        }
+    }
+    // Cyclic `needs:` would wedge every member in `waiting` — GitHub
+    // rejects the file; flag it loud.
+    {
+        let mut state: std::collections::HashMap<&str, u8> = std::collections::HashMap::new(); // 0=visiting,1=done
+        fn visit<'a>(
+            id: &'a str,
+            graph: &std::collections::HashMap<&'a str, &'a [String]>,
+            state: &mut std::collections::HashMap<&'a str, u8>,
+        ) -> bool {
+            match state.get(id) {
+                Some(0) => return true,  // back edge — cycle
+                Some(_) => return false, // already fully explored
+                None => {}
+            }
+            state.insert(id, 0);
+            let cyclic = graph
+                .get(id)
+                .into_iter()
+                .flat_map(|ns| ns.iter().map(String::as_str))
+                .filter(|n| graph.contains_key(n))
+                .any(|n| visit(n, graph, state));
+            state.insert(id, 1);
+            cyclic
+        }
+        let graph: std::collections::HashMap<&str, &[String]> = jobs
+            .iter()
+            .map(|j| (j.id.as_str(), j.needs.as_slice()))
+            .collect();
+        if jobs
+            .iter()
+            .any(|j| visit(j.id.as_str(), &graph, &mut state))
+        {
+            flag(&mut unsupported, "needs");
+            warnings.push("cyclic needs graph".to_string());
+        }
+    }
+
+    unsupported.sort();
+    warnings.sort();
+    warnings.dedup();
     Ok(WorkflowDocument {
         name,
         triggers,
         jobs,
-        env: raw.env.map(yaml_to_json).transpose()?,
-        permissions: parse_permissions(raw.permissions.as_ref()),
+        env: wf_env,
+        permissions: parse_permissions(raw.permissions.as_ref(), &mut unsupported),
+        unsupported,
+        concurrency: wf_concurrency,
+        run_name,
+        warnings,
     })
 }
 
@@ -389,7 +1334,7 @@ jobs:
 
     fn perm_of(yaml: &[u8]) -> (Option<WorkflowPermissions>, Option<WorkflowPermissions>) {
         let doc = parse_workflow_yaml(yaml).expect("parse");
-        (doc.permissions, doc.jobs[0].permissions)
+        (doc.permissions, doc.jobs[0].permissions.clone())
     }
 
     #[test]
@@ -406,12 +1351,10 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Read
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Read);
+        // read-all lifts every scope.
+        assert_eq!(wf.scopes.get("id-token"), Some(&ContentsPermission::Read));
 
         let (wf, _) = perm_of(
             br#"
@@ -425,11 +1368,11 @@ jobs:
       - run: echo hi
 "#,
         );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Write);
         assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Write
-            })
+            wf.scopes.get("pull-requests"),
+            Some(&ContentsPermission::Write)
         );
     }
 
@@ -441,6 +1384,7 @@ name: CI
 on: [push]
 permissions:
   contents: write
+  id-token: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -448,12 +1392,12 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Write
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Write);
+        assert_eq!(wf.scopes.get("id-token"), Some(&ContentsPermission::Write));
+        // Unlisted scopes are not recorded on the block — resolution fills
+        // them as `none` (GitHub's map-reset semantics).
+        assert!(!wf.scopes.contains_key("issues"));
     }
 
     #[test]
@@ -472,12 +1416,9 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::None
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::None);
+        assert_eq!(wf.scopes.get("issues"), Some(&ContentsPermission::Write));
         let (wf, _) = perm_of(
             br#"
 name: CI
@@ -490,12 +1431,92 @@ jobs:
       - run: echo hi
 "#,
         );
+        assert_eq!(wf.unwrap().contents, ContentsPermission::None);
+    }
+
+    #[test]
+    fn effective_permissions_resolution() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let m = effective_permissions(&doc, &doc.jobs[0], "read");
+        assert_eq!(m.get("contents"), Some(&ContentsPermission::Write));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::Write));
+        // Declared map — unlisted scopes resolve to none.
+        assert_eq!(m.get("issues"), Some(&ContentsPermission::None));
+
+        // No `permissions:` anywhere — 'read' default: contents+packages.
+        let doc2 = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let m = effective_permissions(&doc2, &doc2.jobs[0], "read");
+        assert_eq!(m.get("contents"), Some(&ContentsPermission::Read));
+        assert_eq!(m.get("packages"), Some(&ContentsPermission::Read));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::None));
+        // 'write' (permissive) default — every scope write.
+        let m = effective_permissions(&doc2, &doc2.jobs[0], "write");
+        assert_eq!(m.get("statuses"), Some(&ContentsPermission::Write));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::Write));
+    }
+
+    #[test]
+    fn environment_parses_scalar_and_mapping() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
         assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::None
-            })
+            doc.jobs[0].environment.as_ref().map(|e| e.name.as_str()),
+            Some("production")
         );
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    environment:
+      name: staging
+      url: https://staging.example.com
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let env = doc.jobs[0].environment.as_ref().unwrap();
+        assert_eq!(env.name, "staging");
+        assert_eq!(env.url.as_deref(), Some("https://staging.example.com"));
     }
 
     #[test]
@@ -561,6 +1582,383 @@ jobs:
         assert_eq!(
             effective_contents_permission(&doc, &doc.jobs[0]),
             ContentsPermission::Write
+        );
+    }
+
+    fn unsupported_of(yaml: &[u8]) -> Vec<String> {
+        parse_workflow_yaml(yaml).expect("parse").unsupported
+    }
+
+    #[test]
+    fn clean_workflow_has_no_unsupported() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        assert!(doc.warnings.is_empty());
+    }
+
+    #[test]
+    fn structural_features_are_flagged_unsupported() {
+        let cases: &[(&[u8], &[&str])] = &[
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: echo hi
+"#,
+                &["needs"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    needs: b
+    steps:
+      - run: echo hi
+  b:
+    runs-on: ubuntu-latest
+    needs: a
+    steps:
+      - run: echo hi
+"#,
+                &["needs"],
+            ),
+        ];
+        for (yaml, want) in cases {
+            let got = unsupported_of(yaml);
+            for key in *want {
+                assert!(
+                    got.iter().any(|k| k == key),
+                    "expected unsupported '{key}' in {got:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn captured_features_warn_not_unsupported() {
+        // env blocks and if/timeout/concurrency/outputs are evaluated or
+        // captured now — only not-yet-enforced pieces warn.
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+env:
+  A: "1"
+concurrency:
+  group: ci-${{ github.ref }}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 5
+    concurrency: inner
+    outputs:
+      v: ${{ steps.x.outputs.v }}
+    env:
+      B: "2"
+    container:
+      image: node:20
+      env:
+        INNER: "yes"
+    services:
+      pg:
+        image: postgres:16
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: echo hi
+        if: success()
+        timeout-minutes: 2
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        // `with:` applies to every uses: step now — nothing left to warn on.
+        assert!(doc.warnings.is_empty());
+        assert_eq!(
+            doc.jobs[0].if_expr.as_deref(),
+            Some("github.ref == 'refs/heads/main'")
+        );
+        assert_eq!(doc.jobs[0].timeout_minutes.as_deref(), Some("5"));
+        assert_eq!(
+            doc.concurrency.unwrap().group.as_deref(),
+            Some("ci-${{ github.ref }}")
+        );
+        let jc = doc.jobs[0].concurrency.as_ref().unwrap();
+        assert_eq!(jc.group.as_deref(), Some("inner"));
+        assert_eq!(doc.jobs[0].steps[2].if_expr.as_deref(), Some("success()"));
+        // container:/services: are captured for the runner, not unsupported.
+        assert_eq!(
+            doc.jobs[0].container.as_ref().unwrap()["image"],
+            serde_json::json!("node:20")
+        );
+        assert_eq!(
+            doc.jobs[0].services.as_ref().unwrap()["pg"]["ports"],
+            serde_json::json!(["5432:5432"])
+        );
+    }
+
+    #[test]
+    fn malformed_expressions_flag_unsupported() {
+        // A broken `${{ }}` anywhere an expression is evaluated is a
+        // parse-level contract violation — it must never reach silent
+        // mis-execution.
+        for yaml in [
+            // bad embedded expr in run
+            &br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ github.sha && }}
+"#[..],
+            // bad bare if expr
+            &br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref ==
+    steps:
+      - run: echo hi
+"#[..],
+            // bad expr inside env value
+            &br#"name: CI
+on: [push]
+env:
+  A: ${{ f(, }}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#[..],
+        ] {
+            let doc = parse_workflow_yaml(yaml).expect("parse");
+            assert!(
+                doc.unsupported.iter().any(|k| k == "expressions"),
+                "expected 'expressions' flag: {:?}",
+                doc.unsupported
+            );
+            assert!(
+                doc.warnings
+                    .iter()
+                    .any(|w| w.contains("malformed expression")),
+                "expected malformed-expression warning: {:?}",
+                doc.warnings
+            );
+        }
+        // Well-formed `${{ }}` everywhere is clean.
+        let ok = parse_workflow_yaml(
+            br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ${{ 'ubuntu-latest' }}
+    steps:
+      - run: echo ${{ github.sha }}
+"#,
+        )
+        .expect("parse");
+        assert!(ok.unsupported.is_empty());
+    }
+
+    #[test]
+    fn unimplemented_events_like_schedule_do_not_flag() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        assert!(doc.triggers.push);
+    }
+
+    #[test]
+    fn unimplemented_events_warn_loudly() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+  security_advisory:
+  unfamiliar_event:
+    types: [checks_requested]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        // Known events stay set; unknown ones warn instead of silently
+        // never firing.
+        assert!(doc.triggers.push);
+        assert!(
+            doc.warnings
+                .iter()
+                .any(|w| w.contains("on.security_advisory") && w.contains("unsupported event")),
+            "missing unsupported-event warning: {:?}",
+            doc.warnings
+        );
+        assert!(
+            doc.warnings
+                .iter()
+                .any(|w| w.contains("on.unfamiliar_event")),
+            "map entry with filters warns too: {:?}",
+            doc.warnings
+        );
+        // List form also warns.
+        let doc2 = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push, security_advisory]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc2
+            .warnings
+            .iter()
+            .any(|w| w.contains("on.security_advisory")));
+    }
+
+    #[test]
+    fn unknown_keys_fail_validation_at_every_level() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+run-name: ${{ github.actor }}
+bogus-top: 1
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    bogus-job-key: yes
+    steps:
+      - run: echo hi
+        args: [--verbose]
+"#,
+        )
+        .expect("parse");
+        for want in [
+            "unknown key 'bogus-top'",
+            "unknown key 'jobs.a.bogus-job-key'",
+            "unknown key 'jobs.a.steps[0].args'",
+        ] {
+            assert!(
+                doc.unsupported.iter().any(|u| u == want),
+                "missing unsupported flag '{want}': {:?}",
+                doc.unsupported
+            );
+        }
+    }
+
+    #[test]
+    fn run_name_parses_as_expression_source() {
+        let doc = parse_workflow_yaml(
+            b"name: CI\nrun-name: deploy ${{ github.ref_name }} by ${{ github.actor }}\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n",
+        )
+        .expect("parse");
+        assert_eq!(
+            doc.run_name.as_deref(),
+            Some("deploy ${{ github.ref_name }} by ${{ github.actor }}")
+        );
+        assert!(
+            !doc.warnings.iter().any(|w| w.contains("run-name")),
+            "run-name must not warn: {:?}",
+            doc.warnings
+        );
+        // Non-string run-name warns and is ignored.
+        let doc2 = parse_workflow_yaml(
+            b"name: CI\nrun-name: [a, b]\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n",
+        )
+        .expect("parse");
+        assert!(doc2.run_name.is_none());
+        assert!(doc2.warnings.iter().any(|w| w.contains("run-name")));
+    }
+
+    #[test]
+    fn job_id_rules_enforced() {
+        for bad in ["", "a/b", "a\\b"] {
+            let yaml = format!(
+                "name: CI\non: [push]\njobs:\n  '{bad}':\n    runs-on: x\n    steps:\n      - run: hi\n"
+            );
+            assert!(
+                parse_workflow_yaml(yaml.as_bytes()).is_err(),
+                "job id '{bad}' should be rejected"
+            );
+        }
+        // Duplicate ids are a YAML-level error.
+        let dup = b"name: CI\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n";
+        assert!(parse_workflow_yaml(dup).is_err());
+    }
+
+    #[test]
+    fn mixed_positive_and_ignore_filters_fail_validation() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+    branches: [main]
+    branches-ignore: [docs-*]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(
+            doc.unsupported
+                .iter()
+                .any(|u| u.contains("on.push") && u.contains("mutually exclusive")),
+            "missing mutual-exclusion flag: {:?}",
+            doc.unsupported
         );
     }
 }

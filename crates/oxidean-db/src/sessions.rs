@@ -131,7 +131,7 @@ VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7)",
         DbPool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO sessions (id, user_id, token_hash, expires_at, remember_me, ip_address, user_agent)
-VALUES (?, ?, ?, ?, ?, ?, ?)",
+VALUES (?, ?, ?, STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), ?, ?, ?)",
             )
             .bind(id)
             .bind(user_id)
@@ -239,7 +239,9 @@ WHERE id = $1",
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE sessions SET expires_at = ?, last_seen_at = ?,
+                "UPDATE sessions SET
+    expires_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),
+    last_seen_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),
     ip_address = COALESCE(?, ip_address), user_agent = COALESCE(?, user_agent)
 WHERE id = ?",
             )

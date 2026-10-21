@@ -28,6 +28,30 @@ pub struct ActionRunPublic {
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<String>,
+    /// Re-run counter — 1 for the first attempt (GitHub `run_attempt`).
+    #[serde(default)]
+    pub attempt: i64,
+    /// Why the run is held when `status` is `waiting_approval` — currently
+    /// always `"fork_approval"`; `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<String>,
+    /// The caller may release a fork-approval hold (`approveRun` → Write+).
+    #[serde(default)]
+    pub can_approve: bool,
+}
+
+/// One approve/reject decision recorded against an environment-held job
+/// (`action_deployment_reviews`, 0061).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewPublic {
+    /// Username of the reviewer who decided.
+    pub reviewer: String,
+    /// `'approved'` | `'rejected'`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -38,10 +62,38 @@ pub struct ActionJobPublic {
     pub name: String,
     pub status: String,
     pub runs_on: Vec<String>,
+    /// `needs:` upstream job keys (scheduling DAG).
+    #[serde(default)]
+    pub needs: Vec<String>,
+    /// Expanded matrix values for this leg (`{}` for non-matrix jobs).
+    #[serde(default)]
+    pub matrix: serde_json::Value,
+    /// Resolved `environment:` name when the job targets one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// Claim counter — bumped on requeue (GitHub `run_attempt` per leg).
+    #[serde(default)]
+    pub attempt: i64,
+    /// Why a `waiting`/`waiting_approval` job is held:
+    /// `"fork_approval"` | `"environment_review"` | `"environment_wait_timer"`
+    /// | `"needs"`. `None` for queued/in-flight/terminal jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<String>,
+    /// The caller may review this job's deployment hold (named required
+    /// reviewer, or Admin overriding reviewer membership — and not the run's
+    /// triggering actor when the env sets `prevent_self_review`).
+    #[serde(default)]
+    pub can_review: bool,
+    /// Deployment-review history for this job (newest last).
+    #[serde(default)]
+    pub reviews: Vec<ActionDeploymentReviewPublic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<String>,
+    /// `$GITHUB_STEP_SUMMARY` markdown reported at terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -107,6 +159,51 @@ pub struct ActionJobLogRequest {
     /// `next_offset` to receive only newly appended bytes.
     #[serde(default)]
     pub offset: Option<u64>,
+    /// Live-tail long-poll: when no bytes are available past `offset`, hold
+    /// the request up to this many milliseconds (server caps at 30s) and
+    /// return as soon as new bytes land or the job goes terminal. `0`/absent
+    /// keeps the old immediate-return behavior.
+    #[serde(default)]
+    pub wait_ms: Option<u64>,
+}
+
+/// `repo.actions.jobAnnotations` — annotations a job emitted through the
+/// `::error|warning|notice::` workflow commands (GitHub's run/job
+/// annotation surface). Fields follow GitHub's check-run annotation shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionAnnotationPublic {
+    /// `error` | `warning` | `notice`.
+    pub annotation_level: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_column: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobAnnotationsRequest {
+    pub owner: String,
+    pub name: String,
+    /// Restrict to one job; absent lists every annotation on the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobAnnotationsResponse {
+    pub annotations: Vec<ActionAnnotationPublic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -119,6 +216,10 @@ pub struct ActionJobLogResponse {
     /// Total log size in bytes at read time.
     #[serde(default)]
     pub size: u64,
+    /// The job reached a terminal status — callers can stop polling.
+    /// `false` on servers that predate the flag.
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// `repo.actions.listWorkflows` — discovered workflow files at a ref.
@@ -131,12 +232,49 @@ pub struct ActionWorkflowsListRequest {
     pub git_ref: Option<String>,
 }
 
+/// One declared `on.workflow_dispatch.inputs.<name>` entry — drives the
+/// dispatch form's typed controls.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDispatchInputPublic {
+    pub name: String,
+    /// `string` | `choice` | `boolean` | `number` | `environment`.
+    #[serde(rename = "type")]
+    pub input_type: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Declared default rendered for the control's initial value. `Value`
+    /// because `boolean`/`number` defaults are non-string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    /// `choice` options; empty for other types.
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowPublic {
     /// Repo-relative path, e.g. `.github/workflows/ci.yml`.
     pub path: String,
     pub name: String,
     pub supports_dispatch: bool,
+    /// GitHub "disabled" workflow state — no trigger (events, schedule,
+    /// dispatch, `workflow_call`) runs it until re-enabled.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Declared `workflow_dispatch` inputs; empty when dispatch is off.
+    #[serde(default)]
+    pub inputs: Vec<ActionDispatchInputPublic>,
+}
+
+/// `repo.actions.setWorkflowEnabled` — `{owner, name, path, enabled}`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionSetWorkflowEnabledRequest {
+    pub owner: String,
+    pub name: String,
+    pub path: String,
+    pub enabled: bool,
 }
 
 /// A workflow file that failed discovery validation and was skipped.
@@ -165,6 +303,10 @@ pub struct ActionDispatchRequest {
     pub workflow_id: String,
     /// Branch/tag/SHA to run against.
     pub git_ref: String,
+    /// `on.workflow_dispatch.inputs` values — validated against the declared
+    /// input types at dispatch; missing keys take their declared `default`.
+    #[serde(default)]
+    pub inputs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -173,6 +315,20 @@ pub struct ActionDispatchResponse {
     /// Run id when a run was enqueued.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+}
+
+/// `repo.actions.dispatchRepository` — Write+; `repository_dispatch` trigger.
+/// Mirrors GitHub `POST /repos/{owner}/{repo}/dispatches`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDispatchRepositoryRequest {
+    pub owner: String,
+    pub name: String,
+    /// Activity type the run records — `on: repository_dispatch` `types:`
+    /// filters match it (GitHub `event_type`).
+    pub event_type: String,
+    /// Arbitrary JSON echoed verbatim as `github.event.client_payload`.
+    #[serde(default)]
+    pub client_payload: Option<serde_json::Value>,
 }
 
 /// `repo.actions.rerunRun` / `repo.actions.cancelRun` — Write+.
@@ -189,6 +345,11 @@ pub struct ActionRunMutationRequest {
     /// (GitHub "Re-run failed jobs").
     #[serde(default)]
     pub failed_only: Option<bool>,
+    /// `rerunRun` only: stamp `debug_logging` on the requeued jobs —
+    /// GitHub's "enable debug logging" checkbox; surfaced to the runner as
+    /// `ACTIONS_STEP_DEBUG`/`ACTIONS_RUNNER_DEBUG` at claim.
+    #[serde(default)]
+    pub debug: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -199,10 +360,21 @@ pub struct ActionRunMutationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretPublic {
     pub name: String,
+    #[serde(default)]
+    pub created_at: String,
     pub updated_at: String,
 }
 
 pub type ActionSecretMetaPublic = ActionSecretPublic;
+
+/// `*.actions.*.secrets.publicKey` — libsodium `crypto_box_seal` receiver key
+/// (`gh secret set` encrypts client-side against this before PUT).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionSecretKeyPublic {
+    pub key_id: String,
+    /// base64 X25519 public key.
+    pub key: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsListRequest {
@@ -258,6 +430,48 @@ pub struct RepoActionsEnabledResponse {
 
 pub type ActionEnabledResponse = RepoActionsEnabledResponse;
 
+/// `repo.actions.getPullRequestTarget` / `setPullRequestTarget` — Admin;
+/// repository opt-in for the `pull_request_target` trigger (trusted-context
+/// PR workflows). Read: Read+; Write: Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsPullRequestTargetRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetPullRequestTargetRequest {
+    pub owner: String,
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsPullRequestTargetResponse {
+    pub enabled: bool,
+}
+
+/// `repo.actions.getForkPrApproval` / `setForkPrApproval` — Admin; fork PR
+/// run approval policy: `never` | `first-time` | `always`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsForkPrApprovalRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetForkPrApprovalRequest {
+    pub owner: String,
+    pub name: String,
+    /// `never` (default), `first-time`, or `always`.
+    pub policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsForkPrApprovalResponse {
+    pub policy: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminActionsCreateRegistrationTokenResponse {
     pub token: String,
@@ -289,6 +503,84 @@ pub struct AdminActionsListRunnersResponse {
 }
 
 pub type ActionListRunnersResponse = AdminActionsListRunnersResponse;
+
+/// `repo.actions.listRunners` — Read+; runners bound to the repo plus
+/// instance-wide shared runners (GitHub's repo runner list surfaces both).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoRunnersListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `repo.actions.getRunner` / `repo.actions.deleteRunner` — the runner must
+/// be bound to the repo (`repository_id`); shared instance runners are
+/// read-only through this surface and deletable only via admin routes.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerRequest {
+    pub owner: String,
+    pub name: String,
+    pub runner_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerGetResponse {
+    pub runner: ActionRunnerPublic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunnerDeleteResponse {
+    pub deleted: bool,
+}
+
+/// `repo.actions.createRegistrationToken` / `createRemoveToken` — Admin;
+/// mints a one-shot repo-scoped token (registering runner claims only this
+/// repo's jobs; a remove token authorizes runner deletion for this repo).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoRegistrationTokenRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `org.actions.runners.list` / token procs — Admin+; `slug` is the org slug.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsRunnersRequest {
+    pub slug: String,
+}
+
+/// `org.actions.runners.get` / `delete` — Admin+; the runner must be bound to
+/// the org (`owner_type='org'`, `owner_id=org.id`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsRunnerRequest {
+    pub slug: String,
+    pub runner_id: String,
+}
+
+/// `repo.actions.listRunApprovals` — Read+; environment-protection review
+/// decisions recorded against a run's jobs (GitHub `GET
+/// /actions/runs/{run_id}/approvals`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalsRequest {
+    pub owner: String,
+    pub name: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalPublic {
+    pub job_id: String,
+    pub environment: String,
+    pub reviewer_username: String,
+    /// `approved` | `rejected`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRunApprovalsResponse {
+    pub approvals: Vec<ActionRunApprovalPublic>,
+}
 
 /// Provenance of a workflow template in the `repo.actions.workflowTemplates`
 /// catalog.
@@ -510,4 +802,913 @@ pub struct AdminWorkflowTemplateSetEnabledRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminWorkflowTemplateDeleteRequest {
     pub id: String,
+}
+
+/// `repo.actions.getDefaultPermissions` / `setDefaultPermissions` — the
+/// permission floor applied when a workflow declares no `permissions:` block:
+/// `read` (contents+packages read) or `write` (all scopes write).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsDefaultPermissionsRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetDefaultPermissionsRequest {
+    pub owner: String,
+    pub name: String,
+    /// `read` (default) or `write`.
+    pub default_permissions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsDefaultPermissionsResponse {
+    pub default_permissions: String,
+}
+
+/// Environment protection rules — GitHub's `protection_rules` shape
+/// (`required_reviewers` = user ids, `wait_timer_minutes`,
+/// `deployment_branches` = branch allowlist). All fields optional.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionEnvironmentProtection {
+    #[serde(default)]
+    pub wait_timer_minutes: i64,
+    /// Reviewer user ids — write accepts ids or usernames (normalized to
+    /// ids); read additionally resolves `required_reviewer_usernames`.
+    #[serde(default)]
+    pub required_reviewers: Vec<String>,
+    /// Resolved usernames for `required_reviewers` (read-side only — ignored
+    /// on write; the UI displays these).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_reviewer_usernames: Vec<String>,
+    /// GitHub parity: when true the run's triggering actor may not review the
+    /// deployment even when named in `required_reviewers` (or an Admin).
+    #[serde(default)]
+    pub prevent_self_review: bool,
+    #[serde(default)]
+    pub deployment_branches: Vec<String>,
+}
+
+/// Public environment record (`repo.actions.environments.*`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionEnvironmentPublic {
+    pub id: String,
+    pub name: String,
+    pub protection: ActionEnvironmentProtection,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentsListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentsListResponse {
+    pub environments: Vec<ActionEnvironmentPublic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentResponse {
+    pub environment: ActionEnvironmentPublic,
+}
+
+/// `repo.actions.upsertEnvironment` — create or replace an environment's
+/// protection rules (Admin). Missing env rows are created on save.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentUpsertRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    #[serde(default)]
+    pub protection: ActionEnvironmentProtection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentDeleteResponse {
+    pub deleted: bool,
+}
+
+/// One recorded environment deployment (`action_deployments`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentPublic {
+    pub id: String,
+    pub environment: String,
+    /// Present for environment-job deployments; NULL for API-created ones.
+    pub run_id: Option<String>,
+    pub job_id: Option<String>,
+    pub sha: String,
+    /// Serializes as `ref` (GitHub `deployment.ref`).
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub url: Option<String>,
+    /// GitHub `deployment.task` — `deploy` for environment jobs.
+    pub task: String,
+    pub description: String,
+    /// Free-form JSON payload (GitHub `deployment.payload`).
+    pub payload: Option<serde_json::Value>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub transient_environment: bool,
+    pub production_environment: bool,
+    /// Latest `action_deployment_statuses.state` — the Deployments-API
+    /// `state` projection (NULL until the first status lands).
+    pub state: Option<String>,
+    /// Derived from the backing job's status (coalesced `waiting_approval`).
+    pub job_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `deployment.list` — repo-scoped listing (GitHub REST `GET /deployments`
+/// parity: `sha`, `ref`, `task`, `environment` filters).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentListRequest {
+    pub owner: String,
+    pub name: String,
+    pub sha: Option<String>,
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    pub task: Option<String>,
+    pub environment: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentListResponse {
+    pub deployments: Vec<ActionDeploymentPublic>,
+}
+
+/// `deployment.get` / `deployment.delete` — one deployment by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `deployment.create` — GitHub REST `POST /deployments` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    /// Task identifier (GitHub default `deploy`).
+    pub task: Option<String>,
+    /// Merge the default branch into the ref before deploying — creates a
+    /// merge commit on the ref (GitHub default `true`; only applies to
+    /// branch refs that aren't the default branch).
+    pub auto_merge: Option<bool>,
+    /// Commit-status contexts that must be `success`. Omitted verifies
+    /// every context present on the sha; `[]` skips verification (GitHub).
+    pub required_contexts: Option<Vec<String>>,
+    /// Free-form JSON stored on the deployment.
+    pub payload: Option<serde_json::Value>,
+    /// Environment name (GitHub default `production`).
+    pub environment: Option<String>,
+    pub description: Option<String>,
+    /// Transient envs never auto-inactivate prior deployments.
+    pub transient_environment: Option<bool>,
+    /// Defaults from the environment's protection rules when unset.
+    pub production_environment: Option<bool>,
+}
+
+pub type DeploymentCreateResponse = ActionDeploymentPublic;
+pub type DeploymentGetResponse = ActionDeploymentPublic;
+
+/// `deployment.status.create` — GitHub REST `POST
+/// /deployments/{id}/statuses` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub deployment_id: String,
+    /// `error`|`failure`|`inactive`|`in_progress`|`pending`|`queued`|
+    /// `success`|`waiting` (GitHub vocabulary).
+    pub state: String,
+    pub description: Option<String>,
+    /// Overrides the deployment's environment name on this status.
+    pub environment: Option<String>,
+    pub environment_url: Option<String>,
+    /// Logs/result link (GitHub `log_url`; `target_url` accepted as alias).
+    pub log_url: Option<String>,
+    pub target_url: Option<String>,
+    /// `success` statuses mark prior env deployments `inactive` (GitHub
+    /// default `true`).
+    pub auto_inactive: Option<bool>,
+}
+
+/// One `action_deployment_statuses` row in GitHub's status shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusPublic {
+    pub id: String,
+    pub deployment_id: String,
+    pub state: String,
+    pub description: String,
+    pub environment: Option<String>,
+    pub environment_url: Option<String>,
+    pub target_url: Option<String>,
+    pub log_url: Option<String>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusListRequest {
+    pub owner: String,
+    pub name: String,
+    pub deployment_id: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusListResponse {
+    pub statuses: Vec<DeploymentStatusPublic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentDeleteResponse {
+    pub ok: bool,
+}
+
+/// `repo.actions.listDeployments` — deployment records for a run, or for the
+/// repo (optionally narrowed to one environment) when `run_id` is absent.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentsListRequest {
+    pub owner: String,
+    pub name: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    /// Narrow a repo-level listing to one environment (ignored with `run_id`).
+    #[serde(default)]
+    pub environment: Option<String>,
+    /// Repo-level listing cap (default 100, max 500).
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentsListResponse {
+    pub deployments: Vec<ActionDeploymentPublic>,
+}
+
+/// `repo.actions.approveJob` — release one approval-held job (deployment
+/// review). Write+; when the environment names `required_reviewers` the
+/// caller must be one of them or an Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobApproveRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobApproveResponse {
+    pub job: ActionJobPublic,
+}
+
+/// `repo.actions.reviewDeployment` — approve or reject an environment-held
+/// job, mirroring GitHub's `pending_deployments` review. Write+ plus reviewer
+/// membership when the environment names `required_reviewers` (Admin
+/// overrides); `prevent_self_review` blocks the run's triggering actor.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+    /// `'approved'` | `'rejected'` — rejection fails the job and skips its
+    /// dependents (GitHub `state`).
+    pub state: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewResponse {
+    pub job: ActionJobPublic,
+}
+
+/// Public artifact metadata (`action_artifacts`) — the payload streams from
+/// the download route, never through RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactPublic {
+    pub id: String,
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    pub name: String,
+    pub size_bytes: i64,
+    pub digest_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// `repo.actions.listArtifacts` — Read+; every artifact recorded for a run.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactsListResponse {
+    pub artifacts: Vec<ActionArtifactPublic>,
+}
+
+/// `repo.actions.listAllArtifacts` — Read+; every committed artifact in the
+/// repository (the GitHub-compatible REST list is repo-wide).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionRepoArtifactsListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `repo.actions.getArtifact` — Read+; one artifact's metadata by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactGetResponse {
+    pub artifact: ActionArtifactPublic,
+}
+
+/// `repo.actions.getJob` — Read+; one job's public detail by id (the
+/// `GET /actions/jobs/{job_id}` backing proc).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobGetResponse {
+    pub job: ActionJobPublic,
+}
+
+/// `repo.actions.deleteArtifact` — Write+; removes the record and payload.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactDeleteResponse {
+    pub deleted: bool,
+}
+
+// --- actions/cache service (P14): repo management surface ---
+
+/// Public cache-entry metadata (`action_caches`) — payloads stream from the
+/// `_apis/artifactcache` download route, never through RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachePublic {
+    pub id: String,
+    pub key: String,
+    pub version: String,
+    /// Branch scope the entry was saved under.
+    pub scope: String,
+    pub size_bytes: i64,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub last_accessed_at: String,
+}
+
+/// `repo.actions.listCaches` — Read+; committed entries + usage rollup.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachesListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachesListResponse {
+    pub caches: Vec<ActionCachePublic>,
+    /// Sum of committed `size_bytes` — the GitHub `cache/usage` answer.
+    pub total_size_bytes: i64,
+}
+
+/// `repo.actions.deleteCache` — Write+; removes the record and payload.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCacheDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub cache_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCacheDeleteResponse {
+    pub deleted: bool,
+}
+
+// --- Phase 8: org + environment secrets ---
+
+/// `repo.actions.environments.secretsList` — names only, never values.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+/// `repo.actions.environments.secretsPut` — Admin; value never returned.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretPutRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub secret_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.environments.secretsDelete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub secret_name: String,
+}
+
+/// Public metadata for an org Actions secret — never the value.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgSecretMetaPublic {
+    pub name: String,
+    /// 'all' | 'private' | 'selected'.
+    pub visibility: String,
+    #[serde(default)]
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `org.actions.secrets.list` — Admin+; names + visibility only.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretsListRequest {
+    pub slug: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretsListResponse {
+    pub secrets: Vec<OrgSecretMetaPublic>,
+}
+
+/// `org.actions.secrets.put` — Admin+. `visibility` defaults to 'all';
+/// `repository_ids` replaces the selected-repo set when visibility is
+/// 'selected'.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretPutRequest {
+    pub slug: String,
+    pub secret_name: String,
+    pub value: String,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub repository_ids: Option<Vec<String>>,
+}
+
+/// `org.actions.secrets.delete` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretDeleteRequest {
+    pub slug: String,
+    pub secret_name: String,
+}
+
+/// `org.actions.secrets.listRepos` — Admin+; repo ids in the selected set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretReposRequest {
+    pub slug: String,
+    pub secret_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretReposResponse {
+    pub repository_ids: Vec<String>,
+}
+
+/// `org.actions.secrets.setRepos` — Admin+; replaces the secret's
+/// `visibility = 'selected'` allow set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretSetReposRequest {
+    pub slug: String,
+    pub secret_name: String,
+    pub repository_ids: Vec<String>,
+}
+
+// --- configuration variables (`vars` context) — plaintext, values ARE
+// returned on GET (they are not secrets). ---
+
+/// Public variable view — name + value (plaintext by design) + updated_at.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablePublic {
+    pub name: String,
+    pub value: String,
+    #[serde(default)]
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `repo.actions.variables.list` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesListResponse {
+    pub variables: Vec<ActionVariablePublic>,
+}
+
+/// `repo.actions.variables.put` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesPutRequest {
+    pub owner: String,
+    pub name: String,
+    pub variable_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.variables.delete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub variable_name: String,
+}
+
+/// `repo.actions.environments.variablesList` — Admin; values included.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariablesListRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+/// `repo.actions.environments.variablesPut` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariablePutRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub variable_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.environments.variablesDelete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariableDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub variable_name: String,
+}
+
+/// Public org variable view — value + visibility (plaintext by design).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgVariablePublic {
+    pub name: String,
+    pub value: String,
+    /// 'all' | 'private' | 'selected'.
+    pub visibility: String,
+    #[serde(default)]
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `org.actions.variables.list` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablesListRequest {
+    pub slug: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablesListResponse {
+    pub variables: Vec<OrgVariablePublic>,
+}
+
+/// `org.actions.variables.put` — Admin+. `visibility` defaults to 'all';
+/// `repository_ids` replaces the selected-repo set when 'selected'.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablePutRequest {
+    pub slug: String,
+    pub variable_name: String,
+    pub value: String,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub repository_ids: Option<Vec<String>>,
+}
+
+/// `org.actions.variables.delete` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableDeleteRequest {
+    pub slug: String,
+    pub variable_name: String,
+}
+
+/// `org.actions.variables.listRepos` — Admin+; repo ids in the selected set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableReposRequest {
+    pub slug: String,
+    pub variable_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableReposResponse {
+    pub repository_ids: Vec<String>,
+}
+
+/// `org.actions.variables.setRepos` — Admin+; replaces the variable's
+/// `visibility = 'selected'` allow set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableSetReposRequest {
+    pub slug: String,
+    pub variable_name: String,
+    pub repository_ids: Vec<String>,
+}
+
+// ---- Checks domain (check suites / check runs / annotations) ----
+
+/// One `check_suites` row in GitHub's check-suite shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuitePublic {
+    pub id: String,
+    pub head_sha: String,
+    pub head_branch: Option<String>,
+    /// Suite owner label — `github-actions` for Actions-run suites, `api`
+    /// for runs created through `check.runs.create`.
+    pub app: String,
+    /// Bound Actions run for workflow-projected suites.
+    pub run_id: Option<String>,
+    /// `queued` | `in_progress` | `completed`.
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    /// GitHub `latest_check_runs_count` — live count of runs under the suite.
+    pub check_runs_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// GitHub `check_run.output` object.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunOutput {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Inline annotations on create/update (GitHub caps at 50 per call).
+    #[serde(default)]
+    pub annotations: Vec<CheckRunAnnotationInput>,
+    /// Count of stored annotations (response-only; ignored on write).
+    #[serde(default)]
+    pub annotations_count: i64,
+}
+
+/// One annotation submitted inside `check_run.output.annotations`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationInput {
+    pub path: String,
+    pub start_line: i64,
+    pub end_line: i64,
+    #[serde(default)]
+    pub start_column: Option<i64>,
+    #[serde(default)]
+    pub end_column: Option<i64>,
+    /// `notice` | `warning` | `failure`.
+    pub annotation_level: String,
+    pub message: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub raw_details: Option<String>,
+}
+
+/// One stored `check_run_annotations` row in GitHub's annotation shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationPublic {
+    pub id: String,
+    pub check_run_id: String,
+    pub path: String,
+    /// GitHub `blob_href` — best-effort link into the file viewer.
+    pub blob_href: Option<String>,
+    pub start_line: i64,
+    pub end_line: i64,
+    pub start_column: Option<i64>,
+    pub end_column: Option<i64>,
+    pub annotation_level: String,
+    pub message: String,
+    pub title: Option<String>,
+    pub raw_details: Option<String>,
+    pub created_at: String,
+}
+
+/// One `check_runs` row in GitHub's check-run shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunPublic {
+    pub id: String,
+    pub name: String,
+    pub head_sha: String,
+    /// `queued` | `in_progress` | `completed` | `waiting` | `pending` |
+    /// `requested`.
+    pub status: String,
+    /// `success`|`failure`|`neutral`|`cancelled`|`skipped`|`timed_out`|
+    /// `action_required`|`startup_failure`|`stale` when completed.
+    pub conclusion: Option<String>,
+    pub details_url: Option<String>,
+    pub external_id: Option<String>,
+    pub check_suite_id: String,
+    /// Owning suite's `app` label.
+    pub app: String,
+    /// Backing Actions job/run for workflow-projected runs.
+    pub job_id: Option<String>,
+    pub run_id: Option<String>,
+    pub output: CheckRunOutput,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `check.suites.list` — suites for a repo, optionally narrowed to a ref/sha
+/// (GitHub `GET /commits/{ref}/check-suites` parity).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteListRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref", default)]
+    pub git_ref: Option<String>,
+    pub head_sha: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteListResponse {
+    pub suites: Vec<CheckSuitePublic>,
+}
+
+/// `check.suites.get` / `check.suites.rerequest` — one suite by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `check.suites.create` — GitHub `POST /check-suites` parity. Creating a
+/// suite emits `check_suite.requested`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub head_sha: String,
+}
+
+pub type CheckSuiteGetResponse = CheckSuitePublic;
+pub type CheckSuiteCreateResponse = CheckSuitePublic;
+pub type CheckSuiteRerequestResponse = CheckSuitePublic;
+
+/// `check.runs.listForSuite` — GitHub `GET
+/// /check-suites/{id}/check-runs` parity (`check_name`, `status` filters).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListForSuiteRequest {
+    pub owner: String,
+    pub name: String,
+    pub suite_id: String,
+    pub check_name: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// `check.runs.listForRef` — GitHub `GET /commits/{ref}/check-runs` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListForRefRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub check_name: Option<String>,
+    pub status: Option<String>,
+    /// Extra server-side filter — GitHub folds conclusions into `filter`.
+    pub conclusion: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListResponse {
+    pub check_runs: Vec<CheckRunPublic>,
+}
+
+/// `check.runs.get` / `check.runs.rerequest` — one run by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `check.runs.create` — GitHub `POST /check-runs` parity. A `completed`
+/// status requires `conclusion`; annotations ride inside `output`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// GitHub `check_run.name` — required.
+    pub check_name: String,
+    pub head_sha: String,
+    #[serde(default)]
+    pub details_url: Option<String>,
+    #[serde(default)]
+    pub external_id: Option<String>,
+    /// Defaults to `queued`.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub output: Option<CheckRunOutput>,
+}
+
+/// `check.runs.update` — GitHub `PATCH /check-runs/{id}` parity; omitted
+/// fields keep their stored values, explicit nulls clear.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+    #[serde(default)]
+    pub check_name: Option<String>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub details_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub external_id: Option<Option<String>>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub conclusion: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub started_at: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub completed_at: Option<Option<String>>,
+    #[serde(default)]
+    pub output: Option<CheckRunOutput>,
+}
+
+pub type CheckRunGetResponse = CheckRunPublic;
+pub type CheckRunCreateResponse = CheckRunPublic;
+pub type CheckRunUpdateResponse = CheckRunPublic;
+pub type CheckRunRerequestResponse = CheckRunPublic;
+
+/// `check.annotations.list` — annotations attached to one check run.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub check_run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationsListResponse {
+    pub annotations: Vec<CheckRunAnnotationPublic>,
 }

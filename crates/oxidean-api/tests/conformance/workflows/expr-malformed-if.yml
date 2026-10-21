@@ -1,0 +1,8 @@
+name: expr-malformed-if
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: "&&& bogus"
+    steps:
+      - run: echo x

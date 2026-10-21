@@ -28,6 +28,7 @@ path = "src/bin/protection_hook.rs"
 oxidean-core = { path = "../oxidean-core" }
 oxidean-db = { path = "../oxidean-db" }
 oxidean-git = { path = "../oxidean-git" }
+oxidean-actions-expr = { path = "../oxidean-actions-expr" }
 oxidean-vcs = { path = "../oxidean-vcs", features = ["server"] }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -52,10 +53,13 @@ password-hash = { version = "0.6", features = ["alloc", "phc", "getrandom"] }
 sha2 = "0.11.0"
 aes-gcm = "0.11"
 getrandom = "0.4"
+crypto_box = { version = "0.9.1", features = ["salsa20", "seal", "getrandom"] }
 rand = "0.10.2"
 uuid = { version = "1.26.0", features = ["v4"] }
 chrono = "0.4.45"
 cookie = "0.18.2"
+flate2 = "1.1"
+tar = "0.4"
 workos = "3.4"
 url = "2.5.8"
 openidconnect = { version = "4.0", features = ["reqwest"] }
@@ -89,14 +93,21 @@ webauthn-rs = "0.5.2"
 base64 = "0.23"
 schemars = { workspace = true }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+hex = "0.4.3"
+prost-types = "0.14"
+aws-lc-rs = "1.18"
 
 [dev-dependencies]
+oxidean-runner = { path = "../oxidean-runner" }
 http-body-util = "0.1"
+jsonwebtoken = "10.3.0"
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
 wiremock = "0.6.5"
 webauthn-authenticator-rs = { version = "0.5.0", default-features = false, features = ["softpasskey"] }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 prost-build = "0.14"
@@ -105,4 +116,4 @@ prost-build = "0.14"
 # prost-build-generated `pb` module (actions/runner_proto.rs) and prost-build
 # only runs from build.rs.
 [package.metadata.cargo-machete]
-ignored = ["prost", "prost-build"]
+ignored = ["prost", "prost-types", "prost-build"]

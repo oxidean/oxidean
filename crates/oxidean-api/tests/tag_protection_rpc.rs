@@ -250,3 +250,189 @@ async fn tag_protection_rpc_non_admin_denied() {
     assert_eq!(denied_list["ok"], false, "{denied_list}");
     assert_eq!(denied_list["error"]["code"], "repo.not_found");
 }
+
+/// Gitea REST surface for tag protections — `/repos/{o}/{r}/tag_protections`
+/// CRUD with `{name_pattern}` bodies and `{id, name_pattern, whitelist_*}` rows.
+#[tokio::test]
+async fn tag_protection_rest_crud() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("tp_rest.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let (cookie, login) = signup_and_login(&app, "rt@ex.com", "rtadmin").await;
+    verify_user(&db, login["data"]["id"].as_str().unwrap()).await;
+    let create = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.create","input":{"name":"tagged","visibility":"public","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rtadmin/tagged/tag_protections",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest_all(
+        &app,
+        "POST",
+        "/api/v1/repos/rtadmin/tagged/tag_protections",
+        &cookie,
+        Some(r#"{"name_pattern":"v*"}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name_pattern"], "v*");
+    let id = v["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/rtadmin/tagged/tag_protections/{id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], id);
+    let (s, _) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rtadmin/tagged/tag_protections/nope",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // PATCH merges — pattern change, flags retained.
+    let (s, v) = rest_all(
+        &app,
+        "PATCH",
+        &format!("/api/v1/repos/rtadmin/tagged/tag_protections/{id}"),
+        &cookie,
+        Some(r#"{"name_pattern":"release-*","allow_delete":true}"#.into()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["name_pattern"], "release-*");
+    assert_eq!(v["allow_delete"], true);
+
+    let (s, _) = rest_all(
+        &app,
+        "DELETE",
+        &format!("/api/v1/repos/rtadmin/tagged/tag_protections/{id}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest_all(
+        &app,
+        "GET",
+        "/api/v1/repos/rtadmin/tagged/tag_protections",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+}
+
+/// GitHub `/repos/{o}/{r}/activity` — the push feed with `activity_type`
+/// (our `push_type`) and `time_period` filters projected to GitHub rows.
+#[tokio::test]
+async fn rest_repo_activity() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("act_rest.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let (cookie, login) = signup_and_login(&app, "ra@ex.com", "raown").await;
+    verify_user(&db, login["data"]["id"].as_str().unwrap()).await;
+    let create = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.create","input":{"name":"feed","visibility":"public","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+
+    // Activity rows come from real pushes — create a branch so a
+    // branch_creation row lands in the feed.
+    let branched = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"raown","name":"feed","branch":"dev"}}"#,
+    )
+    .await;
+    assert_eq!(branched["ok"], true, "{branched}");
+
+    let (s, v) = rest_get(&app, "/api/v1/repos/raown/feed/activity", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v.as_array().unwrap();
+    assert!(
+        !items.is_empty(),
+        "expected at least the branch_creation row"
+    );
+    let creation = items
+        .iter()
+        .find(|a| a["activity_type"] == "branch_creation")
+        .expect("branch_creation row");
+    assert_eq!(creation["ref"], "refs/heads/dev");
+    assert_eq!(creation["actor"]["login"], "raown");
+    assert!(creation["timestamp"].is_string());
+
+    // Filter to a type that cannot exist yet → empty.
+    let (s, v) = rest_get(
+        &app,
+        "/api/v1/repos/raown/feed/activity?activity_type=force_push",
+        &cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+}
+
+async fn rest_all(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+async fn rest_get(app: &axum::Router, uri: &str, cookie: &str) -> (StatusCode, serde_json::Value) {
+    rest_all(app, "GET", uri, cookie, None).await
+}

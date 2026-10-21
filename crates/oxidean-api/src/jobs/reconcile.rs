@@ -136,6 +136,23 @@ pub async fn orphan_reconcile_with_retention(
             stats.errors += 1;
             continue;
         }
+        // The repo's wiki bare (`{name}.wiki.git`) dies with it — after the
+        // hard delete so a failed delete never strands a restorable wiki.
+        // Best-effort: step 2 sweeps `.wiki.git` orphans on the next pass.
+        match bare_repo_path(
+            repos_dir,
+            &row.owner_username,
+            &format!("{}.wiki", row.name),
+        ) {
+            Ok(wiki_path) => {
+                if let Err(e) = delete_under_repos_dir(repos_dir, &wiki_path).await {
+                    tracing::warn!(error = %e, path = %wiki_path.display(), "wiki bare purge failed");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e.message, repo = %row.name, "wiki path resolve failed");
+            }
+        }
         stats.purged_soft_deleted += 1;
     }
 
@@ -185,7 +202,13 @@ pub async fn orphan_reconcile_with_retention(
             if !name.ends_with(".git") {
                 continue;
             }
-            let key = format!("{owner_str}/{name}");
+            // `{name}.wiki.git` belongs to repo `{name}` — it is live while
+            // the repo row exists (active or restorable soft-delete) and an
+            // orphan only once the row is gone.
+            let key = match name.strip_suffix(".wiki.git") {
+                Some(base) => format!("{owner_str}/{base}.git"),
+                None => format!("{owner_str}/{name}"),
+            };
             if known.contains(&key) {
                 continue;
             }

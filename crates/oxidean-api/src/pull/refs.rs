@@ -9,9 +9,10 @@
 //! `hooks/update` via [`crate::protection::check_ref_update`].
 //!
 //! - `refs/pull/{N}/head` — the PR's current head tip (`pulls.head_sha`).
-//! - `refs/pull/{N}/merge` — written once the PR merges (the recorded merge
-//!   commit). No speculative test-merge commit is computed while open, so the
-//!   ref simply does not exist until then (documented in docs/API.md).
+//! - `refs/pull/{N}/merge` — while open, the test-merge commit produced by the
+//!   actions dispatch (`pull_request` events merge `base`+`head` off-ref, like
+//!   GitHub); once the PR merges it is repointed at the recorded merge commit.
+//!   Absent only when no test merge has run and the PR is unmerged.
 //!
 //! Refs are best-effort: a failed write never fails the PR mutation.
 
@@ -27,7 +28,8 @@ pub fn head_ref_name(number: i64) -> String {
     format!("refs/pull/{number}/head")
 }
 
-/// GitHub-conventional pull merge ref (API-06). Exists only post-merge.
+/// GitHub-conventional pull merge ref (API-06). Holds the test-merge commit
+/// while open; repointed at the recorded merge commit post-merge.
 pub fn merge_ref_name(number: i64) -> String {
     format!("refs/pull/{number}/merge")
 }

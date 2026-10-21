@@ -83,9 +83,19 @@ pub async fn run_git_http_backend(req: CgiRequest<'_>) -> Result<Response, Strin
         // upload-pack. Env config (vs per-repo `git config`) applies uniformly
         // to repos created before this flag existed, and `uploadpack.*` keys
         // are inert when the CGI dispatches receive-pack instead.
-        .env("GIT_CONFIG_COUNT", "1")
+        // allowReachableSHA1InWant lets runners fetch commits reachable from
+        // any ref tip — e.g. `refs/pull/N/merge` test-merge commits and
+        // `actions/checkout` `with: ref: <sha>` — without allowing fetches of
+        // unreachable objects. `hideRefs` keeps the `refs/actions/runs/*`
+        // sha-pin namespace out of ref advertisement (clones stay clean);
+        // sha-in-want fetches still resolve since the pins are ref tips.
+        .env("GIT_CONFIG_COUNT", "3")
         .env("GIT_CONFIG_KEY_0", "uploadpack.allowFilter")
-        .env("GIT_CONFIG_VALUE_0", "true");
+        .env("GIT_CONFIG_VALUE_0", "true")
+        .env("GIT_CONFIG_KEY_1", "uploadpack.allowReachableSHA1InWant")
+        .env("GIT_CONFIG_VALUE_1", "true")
+        .env("GIT_CONFIG_KEY_2", "uploadpack.hideRefs")
+        .env("GIT_CONFIG_VALUE_2", "refs/actions/");
 
     if let Some(ct) = req.content_type {
         cmd.env("CONTENT_TYPE", ct);

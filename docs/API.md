@@ -24,7 +24,7 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 - Manual HTTP: include `Cookie: oxidean_session=<token>`.
 - Signup, login, and WorkOS/OIDC callbacks attach `Set-Cookie`. Logout / logout-all clear the cookie (`Max-Age=0`).
 
-**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
+**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. The REST + RPC edge additionally accepts **Gitea-style `Authorization: Basic <user>:<pat>`** — the password slot must carry a PAT (or Actions job token); raw account passwords are never honored, matching Git Smart HTTP. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
 
 **Provider modes** (instance setting via `admin.auth.*`): `local` | `workos` | `oidc`. Local signup/login RPC only works when mode is `local`. SSO browser flows require matching mode and ENV secrets (see [CONFIGURATION.md](CONFIGURATION.md)).
 
@@ -134,6 +134,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
+| `repo.migrate` | Create a repo by cloning a remote git URL (`clone_addr`, http(s) + optional token auth); publishes all remote heads/tags, fixes `default_branch` to match the remote, optional `mirror` (registers ongoing sync) and `wiki` (`.wiki.git` sidecar) flags; `service` must be `git` — forge-object migration is out of scope | Session or PAT (`repo` scope) |
 | `repo.forkStatus` | Fork-vs-upstream divergence for a branch (default = repo default branch): `ahead_count` / `behind_count` / `status` (`up_to_date` \| `behind` \| `diverged`) | Session/anon + Read on fork and upstream |
 | `repo.syncFork` | Bring the fork branch up to date with the same-named upstream branch — fast-forward, or a merge commit when diverged. Errors: `repo.not_fork`, `repo.upstream_branch_not_found`, `repo.sync_diverged` (merge commits disabled), `repo.sync_conflict`, `repo.branch_protection` | Session + Write on the fork |
 | `repo.insights.contributors` / `repo.insights.commitActivity` / `repo.insights.forkNetwork` | Repo insights — top committers, weekly commit buckets, fork-network tree; bounded git scans report `scanned_commits` + `truncated` | Session + Read |
@@ -182,7 +183,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `pat.list` | List active PATs for the calling user (no secrets) | Session or PAT |
 | `pat.revoke` | Soft-revoke a PAT by `id`; bearer callers limited to their own id | Session or owning PAT |
 | `pat.self` / `pat.policy` / `pat.catalog` | Token introspection, effective expiry policy, scope catalog | Session or PAT |
-| `packages.list` | List packages for an owner login or `repository_id` (ACL-filtered) | Session + verified |
+| `packages.list` | List packages for an owner login or `repository_id` (ACL-filtered) | Anonymous OK for public; session for private |
+| `packages.delete` | Delete a package (all versions); `confirm` must equal the package name | Session + owner Admin capability |
 | `packages.deleteVersion` | Delete a version; `confirm` must equal `{name}@{version}` | Session + owner Admin capability |
 | `packages.adminUsage` | Per-owner storage usage + format/package breakdown | Sys-admin |
 | `packages.adminSetQuota` | Set per-owner package quota override (`max_bytes`) | Sys-admin |
@@ -232,23 +234,68 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | --- | --- | --- | --- |
 | `GET` | `/health` | `system.health` | Anonymous |
 | `GET` | `/user` | `auth.me` | Authenticated account |
+| `PATCH` | `/user` | `user.update_profile` | `name` → `display_name`; `bio`, `username`, `default_branch`; omitted fields keep current values |
 | `GET` | `/user/repos` | `repo.listMine` | Caller's repos |
 | `POST` | `/user/repos` | `repo.create` | Caller-owned repo |
 | `GET` | `/user/orgs` | `org.listMine` | |
 | `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
 | `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
+| `GET`/`POST` | `/users/{username}/tokens` | `pat.list` / `pat.createClassic` | Gitea token REST; self only; Gitea scope names translated |
+| `DELETE` | `/users/{username}/tokens/{token}` | `pat.revoke` | 204 |
+| `GET`/`POST` | `/user/applications` | `oauthApp.list` / `oauthApp.create` | Gitea OAuth2 app REST; `client_secret` on create only |
+| `GET`/`PATCH`/`DELETE` | `/user/applications/{id}` | `oauthApp.list` / `oauthApp.update` / `oauthApp.delete` | Owner-scoped; delete → 204 |
+| `GET` | `/user/applications/oauth2` | `oauthApp.listGrants` | Grants the user has authorized |
+| `DELETE` | `/user/applications/oauth2/{id}` | `oauthApp.revoke` | 204 |
+| `GET` | `/users/{username}/followers` and `/users/{username}/following` | `user.followers.list` / `user.following.list` | Bare `[{login, id, avatar_url, type}]` arrays; anonymous OK |
+| `GET` | `/users/{username}/following/{target}` | `user.following.list` | 204 / 404 |
+| `GET` | `/user/followers` and `/user/following` | `user.followers.list` / `user.following.list` (caller via `auth.me`) | |
+| `GET`/`PUT`/`DELETE` | `/user/following/{username}` | `user.following.list` / `user.follow` / `user.unfollow` | Check → 204/404; follow/unfollow → 204 |
+| `GET`/`POST`/`DELETE` | `/user/emails` | `email.list` / `email.add` / `email.remove` | `{emails: [..]}` bodies; add → 201 + list; delete resolves addresses to ids → 204 |
+| `GET`/`POST` | `/user/keys` | `sshKey.list` / `sshKey.add` | `{title, key}`; `read_only` ← `!can_authenticate` (sign-only keys) |
+| `GET`/`DELETE` | `/user/keys/{key_id}` | `sshKey.list` / `sshKey.revoke` | Get → 404 when absent; delete → 204 |
+| `GET`/`POST` | `/user/gpg_keys` | `gpgKey.list` / `gpgKey.add` | `{name, armored_public_key}`; `name` → `title` |
+| `GET`/`DELETE` | `/user/gpg_keys/{gpg_key_id}` | `gpgKey.list` / `gpgKey.revoke` | Get → 404 when absent; delete → 204 |
+| `GET` | `/notifications` | `notification.list` | GitHub thread shape (`repository`, `subject`, `unread`); `all`, `participating`, `since`, `before`, `page`/`per_page` |
+| `PUT` | `/notifications` | `notification.markAllRead` | 202 |
+| `GET` | `/notifications/threads/{thread_id}` | `notification.list` (id-filtered) | 404 when absent |
+| `PATCH` | `/notifications/threads/{thread_id}` | `notification.markRead` | 205 |
+| `GET`/`PUT` | `/repos/{owner}/{repo}/notifications` | `notification.list` / `notification.markRead` | Repo-scoped list; PUT marks the repo's threads read → 202 |
+| `GET` | `/notifications/new` | `notification.unreadCount` | Gitea unread count → `{new: N}` |
 | `POST` | `/orgs` | `org.create` | Session only |
 | `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
-| `GET` | `/orgs/{slug}/members` | `org.members.list` | |
+| `PATCH` | `/orgs/{slug}` | `org.updateSettings` | `{name, display_name, default_repository_permission, two_factor_requirement_enabled}` |
+| `GET` | `/orgs/{slug}/members` | `org.members.list` | Bare array `{login, id, type, role}` |
+| `GET`/`PUT`/`DELETE` | `/orgs/{slug}/memberships/{username}` | `org.members.list` / `.add` / `.updateRole` / `.remove` | `{state, role, user}`; PUT adds-or-updates; delete → 204; absent → 404 |
+| `DELETE` | `/orgs/{slug}/members/{username}` | `org.members.remove` | GitHub/Gitea remove-member alias → 204 |
+| `GET`/`POST` | `/orgs/{slug}/invitations` | `org.invites.list` / `org.invites.create` | Bare array; `{email}` or `{emails:[]}` + `role` → results array |
+| `DELETE` | `/orgs/{slug}/invitations/{invite_id}` | `org.invites.revoke` | → 204 |
 | `GET` | `/orgs/{slug}/repos` | `repo.listByOwner` | |
+| `GET`/`POST` | `/orgs/{slug}/labels` | `label.listForOrg` / `label.create` | Bare array; create → 201 |
+| `PATCH`/`DELETE` | `/orgs/{slug}/labels/{name}` | `label.update` / `label.delete` | Name-keyed; `new_name` renames; delete → 204 |
 | `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
 | `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
+| `POST` | `/repos/migrate` | `repo.migrate` | Gitea-compatible git migration: clones a remote `clone_addr` (http(s) + optional `auth_username`/`auth_token`/`auth_password`) into a new repo; `repo_name` empty → URL basename; `mirror: true` registers the remote as an ongoing mirror (requires a token — anonymous pull mirrors are not supported); `wiki: true` clones the `.wiki` sidecar; `service` other than `git` → 4xx; → 201 + repo |
 | `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
-| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` | `description`, `homepage`, `topics` |
+| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` (+`repo.rename`, `.updateVisibility`, `.setArchived`, `repo.*.setEnabled`) | `description`, `homepage`, `topics`; a differing `name` renames first; `private`/`visibility`, `archived`, `has_{issues,pull_requests,wiki,projects,discussions}`, and `allow_{merge_commit,squash_merge,rebase_merge}` fan out to the sibling procs |
+| `POST` | `/repos/{owner}/{repo}/transfer` | `repo.transfer` (+`repo.rename`) | `{new_owner, new_name?}`; `new_owner` resolved to user/org; → 202 + repo |
+| `GET`/`POST` | `/repos/{owner}/{repo}/keys` | `repo.deployKey.list` / `repo.deployKey.create` | Deploy keys; `{title, key, read_only}` ↔ `can_write` inverted |
+| `GET`/`DELETE` | `/repos/{owner}/{repo}/keys/{key_id}` | `repo.deployKey.list` / `repo.deployKey.delete` | Get → 404 when absent; delete → 204 |
 | `DELETE` | `/repos/{owner}/{repo}` | `repo.softDelete` | URL is the typed confirmation |
-| `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` | `refs/heads/*`, short names |
+| `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` + `repo.branchProtection.list` | GitHub bare array: `{name, commit, protected}` |
+| `GET` | `/repos/{owner}/{repo}/branches/{branch}` | `repo.refs` + `repo.branchProtection.list` | One branch; absent → 404 |
+| `POST` | `/repos/{owner}/{repo}/branches/{branch}/rename` | `repo.branchRename` | `{new_name}` → 201 |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/branches/{branch}/protection` | `repo.branchProtection.list` / `.create` / `.update` / `.delete` | GitHub protection body translated to a rule pinned on the branch name; GET merges every matching pattern (`?`/`*` glob), PUT upserts the exact-pattern rule |
+| `POST` | `/repos/{owner}/{repo}/merge-upstream` | `repo.syncFork` | `{branch}` → `{message, merge_type, base_branch}` |
+| `GET` | `/repos/{owner}/{repo}/git/matching-refs/{ref}` | `repo.refs` | Prefix match under `refs/`; bare array |
+| `GET` | `/repos/{owner}/{repo}/git/ref/{ref}` | `repo.refs` | Exact ref; absent → 404 |
+| `POST` | `/repos/{owner}/{repo}/git/refs` | `repo.branchCreate` | `{ref, sha}` — `refs/heads/*` only → 201 |
+| `DELETE` | `/repos/{owner}/{repo}/git/refs/{ref}` | `repo.branchDelete` | `refs/heads/*` only → 204 |
 | `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
+| `GET`/`POST` | `/repos/{owner}/{repo}/tag_protections` | `repo.tagProtection.list` / `.create` | Gitea shape (`name_pattern`); create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/tag_protections/{id}` | `repo.tagProtection.list` / `.update` / `.delete` | Get → 404 when absent; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/activity` | `repo.activity.list` | GitHub query names (`activity_type`, `time_period`, `page`, `per_page`) map to the activity request; `actor`/`direction` accepted, not yet filtered |
+| `POST` | `/repos/{owner}/{repo}/mirror-sync` | `repo.mirror.syncNow` | Gitea shape; → `{enqueued, mirror}` |
 | `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
 | `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/statuses/{sha}` | `repo.commitStatus.list` / `repo.commitStatus.create` | GitHub-shaped fields — see [GitHub compatibility](#github-compatibility) |
@@ -257,16 +304,71 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/compare/{basehead}` | `repo.compare` | `base...head` (`..` accepted) |
 | `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
+| `POST` | `/repos/{owner}/{repo}/generate` | `repo.get` → `repo.create` | GitHub/Gitea template-repo generate — creates a copy under the caller via `template_repo_id`; `owner`/`name`/`private`/`description` accepted; → 201 |
 | `GET` | `/repos/{owner}/{repo}/contents/{path}` | `repo.blob` | `?ref=`; base64 content |
+| `PUT`/`DELETE` | `/repos/{owner}/{repo}/contents/{path}` | `repo.file.create` / `.update` / `.delete` | GitHub contents write; `sha` present → update; PUT create → 201, update → 200; response `{content, commit}` |
+| `GET` | `/repos/{owner}/{repo}/contributors` | `repo.contributors.list` | Bare array; unlinked authors project as `type: "Anonymous"` |
+| `GET`/`PUT` | `/repos/{owner}/{repo}/topics` | `repo.get` / `repo.updateMetadata` | `{names: [...]}` round-trip |
+| `GET` | `/topics` | `repo.topicsSuggest` | `q`, `limit`; bare array (Gitea); anonymous OK |
+| `GET` | `/search/repositories` | `repo.explore` | `q`, `page`, `per_page` → `{total_count, incomplete_results, items}`; `sort`/`order` accepted, not applied; anonymous OK |
+| `GET` | `/search/users` | `search.global` | GitHub envelope; `{login, type: "User"}` items; anonymous callers see an empty group |
+| `GET` | `/search/issues` | `search.global` | `q` → issues; `is:pr` → pulls group; items carry `repository_url`/`pull_request` link |
+| `GET` | `/search/commits` | `search.global` | Bounded `git log --grep` scan; `incomplete_results` when coverage was partial |
+| `GET` | `/search/code` | `search.global` | Bounded `git grep` scan; `{name, path, repository.full_name}` items |
+| `GET` | `/search/topics` | `repo.topicsSuggest` | GitHub envelope over the same suggestion set as `GET /topics` |
+| `GET` | `/repos/{owner}/{repo}/stats/contributors` | `repo.insights.contributors` | `[{author, total}]` — no per-week breakdown |
+| `GET` | `/repos/{owner}/{repo}/stats/commit_activity` | `repo.insights.commitActivity` | `[{week, days[7], total}]` — GitHub shape |
+| `GET` | `/repos/{owner}/{repo}/wiki/pages` | `wiki.pages.list` | Bare array |
+| `POST` | `/repos/{owner}/{repo}/wiki/new` | `wiki.pages.create` | `title` + `content` or `content_base64` → 201; returns the page object |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/wiki/page/{page_name}` | `wiki.pages.get` / `.update` / `.delete` | Page object with `content`; update accepts `message`; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/wiki/revisions/{page_name}` | `wiki.revisions.list` | Bare array; `?limit=` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects` | `projects.list` / `projects.create` | Bare array, `?state=`; `name` → `title`; create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}` | `projects.get` / `.update` / `.delete` | Board addressed by per-repo `#{project}`; delete → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects/{project}/columns` | `projects.columns.list` / `.create` | Bare array; `name` → `column_name`; → 201 |
+| `PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}` | `projects.columns.update` / `.delete` | delete → 204 |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}/moves` | `projects.columns.move` | `{position: int}` (GitHub word vocabulary not modeled) |
+| `GET`/`POST` | `/repos/{owner}/{repo}/projects/{project}/columns/{column}/cards` | `projects.cards.list` / `.create` | Bare array, `?archived_state=`; `note` or `content_type`+`content_id` → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}` | `projects.cards.list` / `.update` / `.delete` | Get is list-filtered (404 absent); delete → 204 |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}/moves` | `projects.cards.move` | `{column_id?, position}` |
+| `POST` | `/repos/{owner}/{repo}/projects/{project}/cards/{card}/convert` | `projects.cards.convert` | Note card → real issue |
+| `GET`/`POST` | `/repos/{owner}/{repo}/invitations` | `repo.invites.list` / `repo.invites.create` | Bare array; `{email}` or `{emails:[]}` + `permission` → results array |
+| `DELETE` | `/repos/{owner}/{repo}/invitations/{invite_id}` | `repo.invites.revoke` | → 204 |
 | `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |
 | `GET` | `/repos/{owner}/{repo}/labels` | `label.listForRepo` | `includeHidden` |
 | `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |
+| `GET` | `/repos/{owner}/{repo}/subscribers` | `repo.watchers.list` | `q`, `offset`, `limit` |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/subscription` | `user.listWatched` / `repo.watch` / `repo.unwatch` | Caller's watch state; `{subscribed, ignored}` → level; delete → 204 |
+| `GET`/`PUT`/`DELETE` | `/user/starred/{owner}/{repo}` | `user.listStarred` / `repo.star` / `repo.unstar` | Check → 204/404; star/unstar → 204 |
+| `GET` | `/repos/{owner}/{repo}/collaborators` | `repo.collaborators.list` | GitHub projection (`login`, `permissions`, `role_name`) |
+| `GET`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/collaborators/{username}` | `repo.collaborators.list` / `.add` / `.update` / `.remove` | PUT: 201 new, 204 existing/updated; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/collaborators/{username}/permission` | `repo.collaborators.list` | Effective level; repo owner reports `admin` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/forks` | `repo.forks.list` / `repo.fork` | `sort`, `q`, paging; create → 202 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/hooks` | `webhook.list` / `webhook.create` | Repo Admin |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/hooks/{id}` | `webhook.get` / `webhook.update` / `webhook.delete` | Repo Admin |
+| `GET` | `/repos/{owner}/{repo}/hooks/{id}/deliveries` | `webhook.deliveries.list` | Repo Admin; GitHub delivery shape |
+| `GET` | `/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}` | `webhook.deliveries.get` | Repo Admin; adds `request`/`response` |
+| `POST` | `/repos/{owner}/{repo}/hooks/{id}/deliveries/{delivery_id}/attempts` | `webhook.redeliver` | Repo Admin; 202 |
+| `POST` | `/repos/{owner}/{repo}/hooks/{id}/pings` | `webhook.ping` | Repo Admin; 201 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues` | `issue.list` / `issue.create` | Filters: `state`, `author`, `label`, `assignee`, `q`, `offset`, `limit` |
 | `GET`/`PATCH` | `/repos/{owner}/{repo}/issues/{number}` | `issue.get` / `issue.update` (+`close`/`reopen` via `state`) | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/comments` | `issue.comments.list` / `issue.comments.create` | |
 | `PATCH`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}` | `issue.comments.update` / `issue.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/issues/comments/{id}` |
+| `GET`/`POST`/`PUT`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels` | `issue.get` / `issue.labels.set` | GitHub name-array bodies (`{labels: [..]}`); POST unions, PUT replaces, DELETE clears; unknown names → 422 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}/labels/{label_name}` | `issue.labels.set` | Removes one label by name; absent → 404 |
+| `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/assignees` | `issue.assignees.set` | `{assignees: [logins]}` resolved via `issue.assigneeCandidates`; unknown logins → 422 |
+| `GET` | `/repos/{owner}/{repo}/assignees` | `issue.assigneeCandidates` | GitHub assignee list; `prefix` filter; bare user array |
+| `GET` | `/repos/{owner}/{repo}/assignees/{assignee}` | `issue.assigneeCandidates` | 204 assignable / 404 otherwise |
+| `GET`/`POST` | `/repos/{owner}/{repo}/merge-queue/entries` | `merge_queue.list` / `merge_queue.enqueue` | `state`/`base_ref` filters; enqueue takes `{number}`/`{pull_number}` → 201 |
+| `GET`/`DELETE` | `/repos/{owner}/{repo}/merge-queue/entries/{entry_id}` | `merge_queue.list` / `merge_queue.dequeue` | Entry resolved to its pull number; delete → 204 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}` | `issue.delete` | Hard-delete; path `number` is the typed confirm → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/links` | `issue.links.list` / `issue.links.add` | Bare array; `{kind, target_number?, title?}` → 201 |
+| `DELETE` | `/repos/{owner}/{repo}/issues/{number}/links/{link_id}` | `issue.links.remove` | → 204 |
+| `GET`/`POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/reactions` | `issue.get` / `issue.reactions.toggle` | Aggregate `{content, count, viewerHasReacted}`; POST toggles → 201, DELETE force-off → 204 |
+| `POST`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}/reactions` | `issue.reactions.toggle` | Comment-scoped toggle; POST → 201, DELETE → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/milestones` | `milestone.list` / `milestone.create` | `state` filter; create → 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/milestones/{number}` | `milestone.get` / `milestone.update` / `milestone.delete` | `number` is the milestone `#N` |
+| `POST` | `/repos/{owner}/{repo}/labels` | `label.create` | Repo-scope labels; 201 |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/labels/{label_name}` | `label.listForRepo` / `label.update` / `label.delete` | Name-keyed; PATCH `new_name` renames; delete → 204 |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls` | `pull.list` / `pull.create` | `state` incl. `merged`; `review_state` filter |
 | `GET`/`PATCH` | `/repos/{owner}/{repo}/pulls/{number}` | `pull.get` / `pull.update` (+`close`/`reopen` via `state`) | |
 | `POST` | `/repos/{owner}/{repo}/pulls/{number}/merge` | `pull.merge` | `method`: `merge`\|`squash`\|`rebase` |
@@ -275,12 +377,48 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/comments` | `pull.comments.list` / `pull.comments.create` | Optional diff placement fields |
 | `PATCH`/`DELETE` | `/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}` | `pull.comments.update` / `pull.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/pulls/comments/{id}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews` | `pull.reviews.list` / `pull.reviews.submit` | `state`: `approved`\|`changes_requested`\|`commented` |
+| `POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/dismissals` | `pull.reviews.dismiss` | `message` maps to `reason` |
+| `GET`/`POST`/`DELETE` | `/repos/{owner}/{repo}/pulls/{number}/requested_reviewers` | `pull.reviewRequests.list` / `.add` / `.remove` | `{reviewers: [logins]}` fans out per login; list answers `{users, teams}` |
+| `PUT` | `/repos/{owner}/{repo}/pulls/{number}/update-branch` | `pull.updateBranch` | 202 `{pull, status, merge_commit_sha}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/releases` | `release.list` / `release.create` | Tag must already exist |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
+| `GET` | `/repos/{owner}/{repo}/releases/latest` | `release.list` | Newest non-draft non-prerelease; 404 when none |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/{release_id}` | `release.list` → `release.get` / `.update` / `.delete` | Id resolved to tag; delete → 204 |
+| `GET` | `/repos/{owner}/{repo}/releases/{release_id}/assets` | `release.list` | Bare array |
+| `DELETE` | `/repos/{owner}/{repo}/releases/assets/{asset_id}` | `release.deleteAsset` | → 204 |
 | `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
+| `GET` | `/admin/users/{username}` | `admin.users.list` (resolved) | Sys-admin session only |
+| `PATCH` | `/admin/users/{username}` | `admin.users.updateRole` + `admin.users.ban`/`unban` | Sys-admin session only; `admin`/`active` fields |
+| `DELETE` | `/admin/users/{username}` | `admin.users.delete` | Sys-admin session only; 204; `?purge=` maps `delete_orgs` |
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
+| `GET` | `/admin/actions/runners` | `admin.actions.listRunners` | Sys-admin session only |
+| `POST` | `/admin/actions/runners/registration-token` | `admin.actions.createRegistrationToken` | Sys-admin session only; 201 |
+| `POST` | `/admin/cron/{task}` | `admin.repos.gc` | Sys-admin session only; `repo_gc_check` only; 204 |
+| `GET` | `/user/packages` | `packages.list` | Session user's packages; `package_type`/`visibility` filters |
+| `GET` | `/users/{username}/packages` | `packages.list` | Anonymous OK (public packages only) |
+| `GET` | `/orgs/{org}/packages` | `packages.list` | Anonymous OK (public packages only) |
+| `GET`/`DELETE` | `/user/packages/{package_type}/{package_name}` | `packages.list` / `packages.delete` | GitHub shape; `container` ↔ stored `oci`; delete → 204 |
+| `GET` | `/users/{username}/packages/{package_type}/{package_name}` | `packages.list` | |
+| `GET`/`DELETE` | `/orgs/{org}/packages/{package_type}/{package_name}` | `packages.list` / `packages.delete` | Org-owner delete |
+| `GET` | `/{user,users/{u},orgs/{o}}/packages/{type}/{name}/versions[/{version_id}]` | `packages.list` | Version list + single-version detail (row `id` is the version id) |
+| `DELETE` | `/user/packages/{type}/{name}/versions/{version_id}` and `/orgs/{o}/…` | `packages.deleteVersion` | Owner-scope only; 204 |
+| `POST` | `/repos/{owner}/{repo}/check-runs` | `check.runs.create` | `name` maps to `check_name`; `output.annotations` inline |
+| `GET`/`PATCH` | `/repos/{owner}/{repo}/check-runs/{id}` | `check.runs.get` / `check.runs.update` | PATCH `name` renames; explicit nulls clear |
+| `POST` | `/repos/{owner}/{repo}/check-runs/{id}/rerequest` | `check.runs.rerequest` | 201 |
+| `GET` | `/repos/{owner}/{repo}/check-runs/{id}/annotations` | `check.annotations.list` | Bare array |
+| `GET` | `/repos/{owner}/{repo}/check-suites/{id}/check-runs` | `check.runs.listForSuite` | `{total_count, check_runs}`; `check_name`/`status`/`per_page` |
+| `GET` | `/repos/{owner}/{repo}/commits/{ref}/check-runs` | `check.runs.listForRef` | Same envelope; plus `conclusion` filter |
+| `POST` | `/repos/{owner}/{repo}/check-suites` | `check.suites.create` | `{head_sha}`; 201 |
+| `GET` | `/repos/{owner}/{repo}/check-suites/{id}` | `check.suites.get` | |
+| `POST` | `/repos/{owner}/{repo}/check-suites/{id}/rerequest` | `check.suites.rerequest` | 201 |
+| `GET` | `/repos/{owner}/{repo}/commits/{ref}/check-suites` | `check.suites.list` | `{total_count, check_suites}` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pages` | `pages.get` / `pages.enable` | Enable: `{source:{branch,path}}` or `build_type`; 201 |
+| `PUT`/`DELETE` | `/repos/{owner}/{repo}/pages` | `pages.update` / `pages.disable` | Delete → 204 |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pages/builds` | `pages.builds.list` / `pages.builds.request` | Bare array; `status`/`per_page`; request → 201 (legacy only) |
+| `GET` | `/repos/{owner}/{repo}/pages/builds/{id}` and `…/builds/latest` | `pages.builds.get` | |
+| `POST` | `/repos/{owner}/{repo}/pages/deployment` | `pages.deploys.create` | Job-token only (`environment: github-pages`); `artifact` name or `artifact_url` |
 
-Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, Actions runs, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+Not yet covered by v1 (use `/api/rpc`): notification thread subscriptions / done-state, per-user public key listings (`/users/{u}/keys`), PAT management, mirror config CRUD, LFS objects, shareable invite links (`*.createLink`), most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ### Per-repo unit toggles (COL-13)
 
@@ -530,7 +668,7 @@ Rules:
 | Classic `delete_repo` | `repo.softDelete` (not implied by `repo`) |
 | Classic `package:read` | `packages.list` |
 | Classic `package:write` | `packages.list` (implies `package:read`) |
-| Classic `package:delete` | `packages.deleteVersion` (not implied by `package:write`) |
+| Classic `package:delete` | `packages.delete` / `packages.deleteVersion` (not implied by `package:write`) |
 | Fine-grained `contents: read`/`write` | Contents-domain read/write procedures on covered repositories |
 | Fine-grained `perms` families | Their own domains on covered repositories (`issues`, `pull_requests`, `actions`, `commit_statuses`, `secrets`, `webhooks`, `administration`, `releases`, `metadata`, …) or on the token owner (account families) |
 | Fine-grained `packages: read`/`write` | `packages.list` when `repository_id` names a covered repository |
@@ -825,7 +963,7 @@ Oxidean speaks a GitHub-compatible subset so existing CI/deploy tooling can targ
 | Ref | Resolves to |
 | --- | --- |
 | `refs/pull/{N}/head` | The PR's current head tip (`head_sha`), refreshed on create / head-branch push / reopen. Fork heads are fetched into the base repo so the object is always fetchable. |
-| `refs/pull/{N}/merge` | The recorded merge commit, written when the PR merges. **Delta from GitHub:** no speculative test-merge commit is computed while the PR is open, so `/merge` simply does not exist until merge — `ls-remote`/`fetch` will not see it. |
+| `refs/pull/{N}/merge` | While open, the test-merge commit synthesized by actions dispatch (`pull_request` merges base tip + head off-ref, like GitHub); repointed at the recorded merge commit when the PR merges. Unmergeable heads skip the test-merge write (run fallback: head sha on `refs/pull/{N}/head`), so `/merge` is absent only until a dispatch computes it. |
 
 `refs/pull/*` is a **read-only namespace**: pushes that create, update, or delete it are denied (`git.pull_refs_read_only` over Smart HTTP; the pack bridge closes the stream over SSH; the installed `hooks/update` denies it as a backstop when the protection helper is wired). Refs persist after close/merge like GitHub's.
 

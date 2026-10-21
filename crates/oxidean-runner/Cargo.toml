@@ -10,9 +10,11 @@ name = "oxidean-runner"
 path = "src/main.rs"
 
 [dependencies]
+oxidean-actions-expr = { path = "../oxidean-actions-expr" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+sha2 = "0.11.0"
 reqwest = { version = "0.13", default-features = false, features = [
   "rustls",
   "json",
@@ -23,6 +25,8 @@ reqwest = { version = "0.13", default-features = false, features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.23"
+serde_yaml = "0.9"
+regex = "1.11"
 
 [dev-dependencies]
 tempfile = "3"

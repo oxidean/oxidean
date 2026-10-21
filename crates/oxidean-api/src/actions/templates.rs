@@ -11,7 +11,7 @@
 //! `.github/workflows/` through the same commit pipeline `repo.file.create`
 //! uses — protected-branch fallback included.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::response::IntoResponse;
 use include_dir::{include_dir, Dir};
@@ -96,11 +96,14 @@ struct TemplateProperties {
 }
 
 /// `catalog.json` — sync metadata + the hand-maintained `templates` overlay
-/// (`file_patterns` keyed `dir/<file-stem>`).
+/// (`file_patterns` keyed `dir/<file-stem>`) + `render` rules applied to
+/// `builtin:*` content at render time.
 #[derive(Debug, Deserialize)]
 struct TemplateCatalog {
     #[serde(default)]
     templates: std::collections::HashMap<String, CatalogOverlay>,
+    #[serde(default)]
+    render: std::collections::HashMap<String, Vec<RenderRule>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,13 +112,198 @@ struct CatalogOverlay {
     file_patterns: Vec<String>,
 }
 
+/// One byte-exact transform applied to a vendored `builtin:*` template at
+/// render time (`catalog.json` → `render.<dir/stem>`). `find` needles are
+/// asserted against the vendored bytes by tests, so an upstream re-vendor
+/// that invalidates a rule fails loudly instead of silently mis-transforming.
+/// `replace` may carry `${var}` placeholders resolved from the repository
+/// (see `TemplateRenderCtx::vars`).
+#[derive(Debug, Deserialize)]
+pub struct RenderRule {
+    pub find: String,
+    pub replace: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 fn catalog_overlay() -> TemplateCatalog {
     TEMPLATES
         .get_file("catalog.json")
         .and_then(|f| serde_json::from_str(f.contents_utf8()?).ok())
         .unwrap_or(TemplateCatalog {
             templates: std::collections::HashMap::new(),
+            render: std::collections::HashMap::new(),
         })
+}
+
+// ---------------------------------------------------------------------------
+// Render-time compatibility layer
+// ---------------------------------------------------------------------------
+//
+// Vendored starter workflows pin runtime versions that predate the stack
+// presets' own declarations (e.g. `ci/go` pins Go 1.20 while the `go` preset
+// seeds `go 1.22`), and a few ship steps that can never run on Oxidean
+// (GitHub-API dependency submission). The vendored bytes cannot be edited —
+// `sync-workflow-templates.mjs --check` enforces upstream drift — so the
+// catalog carries `render` rules that transform `builtin:*` content at
+// preview and commit. `instance:*`, `org:*`, and user-authored content are
+// never rewritten.
+
+/// Repo-scoped values for `render_template_content`.
+#[derive(Debug, Default)]
+pub struct RenderCtx {
+    pub default_branch: String,
+    /// `${name}` values resolved from repository files — `go_version` is read
+    /// from HEAD's `go.mod`. A rule whose replacement keeps an unresolved
+    /// `${…}` after substitution is skipped.
+    pub vars: BTreeMap<String, String>,
+}
+
+/// `${name}` placeholders referenced by a replacement string.
+fn render_var_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'$' && bytes[i + 1] == b'{' {
+            if let Some(end) = text[i + 2..].find('}') {
+                names.push(text[i + 2..i + 2 + end].to_string());
+                i += end + 3;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    names
+}
+
+/// Every `${var}` referenced by any render rule, so callers can resolve repo
+/// files lazily — only what the rules actually need is read.
+fn all_render_var_names() -> BTreeSet<String> {
+    catalog_overlay()
+        .render
+        .values()
+        .flat_map(|rules| rules.iter())
+        .flat_map(|r| render_var_names(&r.replace))
+        .collect()
+}
+
+/// Does this builtin template's rule set reference any `${var}` — i.e. does
+/// rendering it need repo-file reads?
+fn template_needs_vars(id: &str) -> bool {
+    let Some(key) = id.strip_prefix("builtin:") else {
+        return false;
+    };
+    catalog_overlay()
+        .render
+        .get(key)
+        .is_some_and(|rules| rules.iter().any(rule_needs_vars))
+}
+
+fn rule_needs_vars(rule: &RenderRule) -> bool {
+    !render_var_names(&rule.replace).is_empty()
+}
+
+/// Resolve repo-file-backed render vars. `go_version` parses the `go`
+/// directive out of HEAD's `go.mod`.
+async fn repo_render_vars(
+    ctx: &RpcCtx,
+    accessible: &AccessibleRepo,
+    bare: &std::path::Path,
+    treeish: &str,
+) -> BTreeMap<String, String> {
+    let needed = all_render_var_names();
+    let mut vars = BTreeMap::new();
+    for name in needed {
+        match name.as_str() {
+            "go_version" => {
+                if let Ok(bytes) = ctx.git.cat_blob(bare, treeish, "go.mod").await {
+                    let text = String::from_utf8_lossy(&bytes);
+                    if let Some(v) = text
+                        .lines()
+                        .find_map(|l| l.strip_prefix("go ").map(str::trim))
+                        .filter(|v| !v.is_empty())
+                    {
+                        vars.insert(name.clone(), v.to_string());
+                    }
+                }
+            }
+            other => {
+                tracing::warn!(var = other, "unknown workflow-template render var");
+            }
+        }
+    }
+    let _ = accessible;
+    vars
+}
+
+/// Build the render context for one template — resolves `${var}` values from
+/// repo files only when this template's rules reference them.
+async fn render_ctx_for(ctx: &RpcCtx, accessible: &AccessibleRepo, template_id: &str) -> RenderCtx {
+    let mut vars = BTreeMap::new();
+    if template_needs_vars(template_id) {
+        if let Ok(bare) = bare_repo_path(
+            &ctx.repos_dir,
+            &accessible.owner_username,
+            &accessible.row.name,
+        ) {
+            if let Ok(treeish) =
+                resolve_treeish(ctx, &accessible.row.default_branch, None, &bare).await
+            {
+                vars = repo_render_vars(ctx, accessible, &bare, &treeish).await;
+            }
+        }
+    }
+    RenderCtx {
+        default_branch: accessible.row.default_branch.clone(),
+        vars,
+    }
+}
+
+/// Apply `$default-branch` substitution plus the catalog's `render` rules to
+/// a resolved template's content. Rules only run for `builtin:*` ids — the
+/// vendored templates whose bytes we cannot edit. A needle that no longer
+/// matches is skipped with a warning (never produces garbage); the drift
+/// test asserts all needles still match so upstream re-vendoring fails CI.
+pub fn render_template_content(id: &str, content: &str, ctx: &RenderCtx) -> String {
+    let mut out = content.replace("$default-branch", &ctx.default_branch);
+    let Some(key) = id.strip_prefix("builtin:") else {
+        return out;
+    };
+    let catalog = catalog_overlay();
+    let Some(rules) = catalog.render.get(key) else {
+        return out;
+    };
+    for rule in rules {
+        let mut replacement = rule.replace.clone();
+        let mut unresolved = false;
+        for name in render_var_names(&rule.replace) {
+            match ctx.vars.get(&name) {
+                Some(v) => {
+                    replacement = replacement.replace(&format!("${{{name}}}"), v);
+                }
+                None => {
+                    unresolved = true;
+                }
+            }
+        }
+        if unresolved {
+            tracing::warn!(
+                template = id,
+                "workflow-template render rule skipped: unresolved substitution"
+            );
+            continue;
+        }
+        if !out.contains(&rule.find) {
+            tracing::warn!(
+                template = id,
+                "workflow-template render rule skipped: needle missing (vendored drift?)"
+            );
+            continue;
+        }
+        out = out.replace(&rule.find, &replacement);
+    }
+    out
 }
 
 /// One resolved template with content — the internal join point for
@@ -142,28 +330,307 @@ fn icon_url(icon_name: Option<&str>) -> Option<String> {
     }
 }
 
-/// Distinct `uses:` refs the bundled runner cannot execute — anything not
-/// `actions/checkout*` (Unit A runner supports local steps + checkout only).
-fn unsupported_actions(doc: &WorkflowDocument) -> Vec<String> {
-    let mut out = BTreeSet::new();
+// ---------------------------------------------------------------------------
+// Runner capability ledger
+// ---------------------------------------------------------------------------
+//
+// The bundled runner executes remote `owner/repo[/path]@ref` actions on the
+// node/composite/docker runtimes, the three `actions/` builtins, and local
+// `./` actions. `KNOWN_ACTION_CAVEATS` is the curated exception table: refs
+// that technically fetch and run, but whose real function needs something
+// Oxidean does not provide today. Categories decide where a hit lands —
+// hard misses go to `unsupported_actions`, degradations to `warnings`.
+
+/// Why a `uses:` ref needs a caveat despite a working action runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionCaveat {
+    /// Calls the GitHub REST/GraphQL API — Oxidean has no compatibility
+    /// layer, so the action fails at runtime.
+    GithubApi,
+    /// GitHub Pages hosting — no equivalent exists.
+    Pages,
+    /// `actions/attest*` artifact attestations — no equivalent exists.
+    Attestations,
+    /// Needs a Docker-capable runner (image pulls, docker CLI).
+    Docker,
+    /// Needs a Windows/macOS (or otherwise non-Linux) external runner.
+    ExternalOs,
+}
+
+impl ActionCaveat {
+    /// Short reason shown next to the action in catalog listings.
+    fn reason(self) -> &'static str {
+        match self {
+            ActionCaveat::GithubApi => "calls the GitHub API, which Oxidean does not emulate",
+            ActionCaveat::Pages => "GitHub Pages is not available on Oxidean",
+            ActionCaveat::Attestations => "artifact attestations are not available on Oxidean",
+            ActionCaveat::Docker => "requires a Docker-capable runner",
+            ActionCaveat::ExternalOs => "requires a Windows/macOS external runner",
+        }
+    }
+}
+
+/// Hard caveats — the action's function cannot work at all.
+fn caveat_is_hard(c: ActionCaveat) -> bool {
+    matches!(
+        c,
+        ActionCaveat::GithubApi | ActionCaveat::Pages | ActionCaveat::Attestations
+    )
+}
+
+/// `owner/repo[/path]` prefixes that need a caveat, longest-prefix match
+/// (`actions/cache` covers `actions/cache/save`). Ref is ignored — the
+/// caveat is about what the action does, not its version.
+static KNOWN_ACTION_CAVEATS: &[(&str, ActionCaveat)] = &[
+    // GitHub REST/GraphQL API — labels, comments, dependency submission,
+    // code scanning, scripting, models inference.
+    ("actions/stale", ActionCaveat::GithubApi),
+    ("actions/labeler", ActionCaveat::GithubApi),
+    ("actions/first-interaction", ActionCaveat::GithubApi),
+    ("actions/github-script", ActionCaveat::GithubApi),
+    ("actions/ai-inference", ActionCaveat::GithubApi),
+    ("actions/dependency-review-action", ActionCaveat::GithubApi),
+    (
+        "advanced-security/maven-dependency-submission-action",
+        ActionCaveat::GithubApi,
+    ),
+    (
+        "gradle/actions/dependency-submission",
+        ActionCaveat::GithubApi,
+    ),
+    ("github/codeql-action", ActionCaveat::GithubApi),
+    (
+        "scalacenter/sbt-dependency-submission",
+        ActionCaveat::GithubApi,
+    ),
+    // GitHub Pages.
+    ("actions/configure-pages", ActionCaveat::Pages),
+    ("actions/upload-pages-artifact", ActionCaveat::Pages),
+    ("actions/deploy-pages", ActionCaveat::Pages),
+    // Artifact attestations / SLSA provenance.
+    ("actions/attest", ActionCaveat::Attestations),
+    (
+        "actions/attest-build-provenance",
+        ActionCaveat::Attestations,
+    ),
+    ("actions/attest-sbom", ActionCaveat::Attestations),
+    (
+        "slsa-framework/slsa-github-generator",
+        ActionCaveat::Attestations,
+    ),
+    // Docker-capable runner required.
+    ("docker/setup-buildx-action", ActionCaveat::Docker),
+    ("docker/setup-qemu-action", ActionCaveat::Docker),
+    ("docker/login-action", ActionCaveat::Docker),
+    ("docker/build-push-action", ActionCaveat::Docker),
+    ("docker/metadata-action", ActionCaveat::Docker),
+    ("docker/bake-action", ActionCaveat::Docker),
+    ("azure/docker-login", ActionCaveat::Docker),
+    ("github/super-linter", ActionCaveat::Docker),
+    ("pypa/gh-action-pypi-publish", ActionCaveat::Docker),
+    // Windows/macOS-only actions.
+    ("microsoft/setup-msbuild", ActionCaveat::ExternalOs),
+];
+
+/// Builtins the runner implements natively (no checkout/fetch needed).
+fn is_builtin_action(uses: &str) -> bool {
+    [
+        "actions/checkout",
+        "actions/upload-artifact",
+        "actions/download-artifact",
+    ]
+    .iter()
+    .any(|b| uses == *b || uses.starts_with(&format!("{b}@")))
+}
+
+/// GitHub-hosted runner labels for non-Linux OSes (`windows-latest`,
+/// `windows-2022`, `macos-latest`, `macos-14`, `macos-15-arm64`, …).
+fn is_external_os_label(label: &str) -> bool {
+    label == "windows"
+        || label == "macos"
+        || label.starts_with("windows-")
+        || label.starts_with("macos-")
+}
+
+/// `runs-on: ${{ matrix.<key> }}` → `Some(<key>)` for a plain axis reference;
+/// anything richer (fallbacks, function calls) is left uninspected.
+fn matrix_axis_key(label: &str) -> Option<&str> {
+    let inner = label
+        .strip_prefix("${{")?
+        .strip_suffix("}}")?
+        .trim()
+        .strip_prefix("matrix.")?;
+    (inner
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && !inner.is_empty())
+    .then_some(inner)
+}
+
+/// Longest-prefix caveat lookup for `owner/repo[/path]@ref`.
+fn caveat_for(uses: &str) -> Option<ActionCaveat> {
+    let noref = uses.split('@').next().unwrap_or(uses).to_ascii_lowercase();
+    KNOWN_ACTION_CAVEATS
+        .iter()
+        .filter(|(prefix, _)| noref == *prefix || noref.starts_with(&format!("{prefix}/")))
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, c)| *c)
+}
+
+/// Classify every distinct `uses:` ref in the doc — supported refs
+/// (builtins, `./` local, plain `owner/repo@ref`) drop out; caveated refs
+/// land in `unsupported_actions` (hard) or `warnings` (degraded); anything
+/// unparseable also lands in `unsupported_actions`.
+fn classify_uses(doc: &WorkflowDocument) -> (Vec<String>, Vec<String>) {
+    let mut unsupported = BTreeSet::new();
+    let mut warnings = BTreeSet::new();
     for job in &doc.jobs {
-        for step in &job.steps {
-            if let Some(uses) = &step.uses {
-                if uses != "actions/checkout" && !uses.starts_with("actions/checkout@") {
-                    out.insert(uses.clone());
+        // `jobs.<id>.uses` — reusable-workflow calls carry the same
+        // capability caveats as step actions (e.g. the SLSA generators
+        // need OIDC/transparency infrastructure we cannot serve).
+        if let Some(call) = &job.uses {
+            if !call.starts_with("./") {
+                if let Some(c) = caveat_for(call) {
+                    if caveat_is_hard(c) {
+                        unsupported.insert(format!("{call} ({})", c.reason()));
+                    } else {
+                        warnings.insert(format!("{call} ({})", c.reason()));
+                    }
                 }
             }
         }
+        for step in &job.steps {
+            let Some(uses) = &step.uses else { continue };
+            if uses.starts_with("docker://") {
+                warnings.insert(format!("{uses} ({})", ActionCaveat::Docker.reason()));
+                continue;
+            }
+            if uses.starts_with("./") || is_builtin_action(uses) {
+                continue;
+            }
+            if let Some(c) = caveat_for(uses) {
+                if caveat_is_hard(c) {
+                    unsupported.insert(format!("{uses} ({})", c.reason()));
+                } else {
+                    warnings.insert(format!("{uses} ({})", c.reason()));
+                }
+                continue;
+            }
+            // owner/repo[/path]@ref — fetches and runs on the bundled runner.
+            if !uses.contains('@') {
+                unsupported.insert(format!("{uses} (missing @ref)"));
+            }
+        }
+        // Service containers and a job-level `container:` need a
+        // Docker-capable runner regardless of step actions.
+        if job.container.is_some() {
+            warnings.insert("jobs.<id>.container (requires a Docker-capable runner)".into());
+        }
+        if job.services.is_some() {
+            warnings.insert("jobs.<id>.services (requires a Docker-capable runner)".into());
+        }
+        // Non-Linux `runs-on` legs need an external Windows/macOS runner —
+        // bundled runners claim Linux labels only, so those legs would
+        // queue forever on a stock deployment. Soft caveat: a self-hosted
+        // runner registered under e.g. `macos-latest` can pick them up.
+        let external_os = job.runs_on.iter().any(|label| {
+            let l = label.to_ascii_lowercase();
+            if is_external_os_label(&l) {
+                return true;
+            }
+            let Some(key) = matrix_axis_key(&l) else {
+                return false;
+            };
+            job.strategy
+                .as_ref()
+                .and_then(|s| s.matrix.as_ref())
+                .and_then(|m| m.get(key))
+                .and_then(|v| v.as_array())
+                .is_some_and(|vals| {
+                    vals.iter()
+                        .filter_map(|v| v.as_str())
+                        .any(|v| is_external_os_label(&v.to_ascii_lowercase()))
+                })
+        });
+        if external_os {
+            warnings.insert("jobs.<id>.runs-on (requires a Windows/macOS external runner)".into());
+        }
     }
-    out.into_iter().collect()
+    (
+        unsupported.into_iter().collect(),
+        warnings.into_iter().collect(),
+    )
 }
 
-fn to_summary(t: &ResolvedTemplate, root_entries: &[String]) -> WorkflowTemplateSummary {
-    let substituted = t.content.replace("$default-branch", "main");
-    let (unsupported, parse_error) = match parse_workflow_yaml(substituted.as_bytes()) {
-        Ok(doc) => (unsupported_actions(&doc), None),
-        Err(e) => (Vec::new(), Some(e.message)),
-    };
+/// Compatibility classification for a template — the single source the
+/// `catalog.json` `compat` ledger is checked against (Phase 0 conformance).
+/// `missing_features` = structural features that force the validation-failure
+/// path; `unsupported_actions` = non-checkout `uses:` refs the runner can't
+/// execute yet; `warnings` = features that run degraded.
+#[derive(Debug, Clone)]
+pub struct TemplateCompat {
+    pub status: &'static str,
+    pub missing_features: Vec<String>,
+    pub unsupported_actions: Vec<String>,
+    pub warnings: Vec<String>,
+    pub parse_error: Option<String>,
+}
+
+pub fn classify_template_content(content: &str) -> TemplateCompat {
+    let substituted = content.replace("$default-branch", "main");
+    match parse_workflow_yaml(substituted.as_bytes()) {
+        Err(e) => TemplateCompat {
+            status: "parse_error",
+            missing_features: Vec::new(),
+            unsupported_actions: Vec::new(),
+            warnings: Vec::new(),
+            parse_error: Some(e.message),
+        },
+        Ok(doc) => {
+            let (unsupported, warnings) = classify_uses(&doc);
+            let warnings: Vec<String> = warnings
+                .into_iter()
+                .chain(doc.warnings.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            // Precedence: parse_error (early return above) > reusable-workflow
+            // > restricted (pull_request_target opt-in) > unsupported-runtime
+            // (>0 unsupported actions or missing features) > partial
+            // (warnings only) > runnable.
+            let status = if doc.unsupported.iter().any(|u| u == "reusable-workflow") {
+                "reusable-workflow"
+            } else if doc.unsupported.iter().any(|u| u == "pull_request_target") {
+                "restricted"
+            } else if !doc.unsupported.is_empty() || !unsupported.is_empty() {
+                "unsupported-runtime"
+            } else if !warnings.is_empty() {
+                "partial"
+            } else {
+                "runnable"
+            };
+            TemplateCompat {
+                status,
+                missing_features: doc.unsupported,
+                unsupported_actions: unsupported,
+                warnings,
+                parse_error: None,
+            }
+        }
+    }
+}
+
+fn to_summary(
+    t: &ResolvedTemplate,
+    root_entries: &[String],
+    render_ctx: &RenderCtx,
+) -> WorkflowTemplateSummary {
+    // Classify the *rendered* content — the compatibility users see reflects
+    // the workflow they would actually commit (e.g. dependency-submission
+    // steps removed, runtime pins aligned).
+    let rendered = render_template_content(&t.id, &t.content, render_ctx);
+    let compat = classify_template_content(&rendered);
+    let (unsupported, parse_error) = (compat.unsupported_actions, compat.parse_error);
     WorkflowTemplateSummary {
         id: t.id.clone(),
         name: t.name.clone(),
@@ -442,10 +909,16 @@ pub async fn list_templates(
         .map(|e| e.name.clone())
         .collect();
 
+    let render_vars = repo_render_vars(ctx, &accessible, &bare, &treeish).await;
+    let render_ctx = RenderCtx {
+        default_branch: accessible.row.default_branch.clone(),
+        vars: render_vars,
+    };
+
     let mut templates: Vec<WorkflowTemplateSummary> = resolve_all_templates(ctx, &accessible)
         .await?
         .iter()
-        .map(|t| to_summary(t, &root_entries))
+        .map(|t| to_summary(t, &root_entries, &render_ctx))
         .collect();
 
     // Filters: provenance, category (case-insensitive), name/description query.
@@ -560,10 +1033,9 @@ pub async fn get_template(
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let template = resolve_template_id(ctx, &accessible, req.id.trim()).await?;
-    let content = template
-        .content
-        .replace("$default-branch", &accessible.row.default_branch);
-    let summary = to_summary(&template, &[]);
+    let render_ctx = render_ctx_for(ctx, &accessible, &template.id).await;
+    let content = render_template_content(&template.id, &template.content, &render_ctx);
+    let summary = to_summary(&template, &[], &render_ctx);
     Ok(WorkflowTemplateGetResponse {
         template: summary,
         content,
@@ -605,9 +1077,8 @@ pub async fn create_workflow(
             req.template_id.as_deref().unwrap_or_default(),
         )
         .await?;
-        let content = template
-            .content
-            .replace("$default-branch", &accessible.row.default_branch);
+        let render_ctx = render_ctx_for(ctx, &accessible, &template.id).await;
+        let content = render_template_content(&template.id, &template.content, &render_ctx);
         (content, Some(template.filename))
     } else {
         (req.content.clone().unwrap_or_default(), None)
@@ -686,7 +1157,7 @@ pub async fn create_workflow(
         &accessible.row.name,
     )?;
     file_assert_path_creatable(ctx, &bare, &base_branch, &path).await?;
-    file_commit_changes(
+    Box::pin(file_commit_changes(
         ctx,
         &accessible,
         &user,
@@ -697,7 +1168,7 @@ pub async fn create_workflow(
             path,
             content: content.into_bytes(),
         }],
-    )
+    ))
     .await
 }
 
@@ -1027,19 +1498,24 @@ mod tests {
     }
 
     /// Every vendored template must have a properties sidecar; parse each
-    /// workflow (with `$default-branch` → `main`) and report failures instead
-    /// of failing the build — upstream syntax we do not support becomes
-    /// `parse_error` in the catalog response.
+    /// *rendered* workflow (with `$default-branch` → `main` plus the render
+    /// rules applied — the bytes users actually commit) and report failures
+    /// instead of failing the build — upstream syntax we do not support
+    /// becomes `parse_error` in the catalog response.
     #[test]
     fn vendored_templates_load_and_report_parse() {
         let templates = builtin_templates();
         assert!(!templates.is_empty(), "no vendored templates found");
+        let render_ctx = RenderCtx {
+            default_branch: "main".to_string(),
+            vars: BTreeMap::new(),
+        };
         let mut parsed = 0usize;
         let mut failures = Vec::new();
         for t in &templates {
             assert!(t.id.starts_with("builtin:"));
             assert!(t.filename.ends_with(".yml"));
-            let content = t.content.replace("$default-branch", "main");
+            let content = render_template_content(&t.id, &t.content, &render_ctx);
             match parse_workflow_yaml(content.as_bytes()) {
                 Ok(_) => parsed += 1,
                 Err(e) => failures.push(format!("{}: {}", t.id, e.message)),
@@ -1064,5 +1540,121 @@ mod tests {
             .count();
         assert_eq!(templates.len(), on_disk);
         assert!(parsed > 0);
+    }
+
+    /// Drift guard: every `render` rule's `find` needle must still match the
+    /// vendored bytes. An upstream re-vendor that changes the anchor fails
+    /// here instead of silently shipping an un-transformed template.
+    #[test]
+    fn render_rule_needles_match_vendored_bytes() {
+        let catalog = catalog_overlay();
+        assert!(!catalog.render.is_empty(), "expected render rules");
+        let templates = builtin_templates();
+        let mut misses = Vec::new();
+        for (key, rules) in &catalog.render {
+            let Some(t) = templates.iter().find(|t| t.id == format!("builtin:{key}")) else {
+                misses.push(format!("{key}: no such vendored template"));
+                continue;
+            };
+            for rule in rules {
+                if rule.find.is_empty() {
+                    misses.push(format!("{key}: empty find needle"));
+                } else if !t.content.contains(&rule.find) {
+                    misses.push(format!(
+                        "{key}: needle not in vendored bytes: {:?}",
+                        rule.find
+                    ));
+                }
+            }
+        }
+        assert!(
+            misses.is_empty(),
+            "render rules drifted from vendored bytes:\n{}",
+            misses.join("\n")
+        );
+    }
+
+    /// Rendered output pins: the version conflicts that motivated the layer.
+    #[test]
+    fn render_rules_produce_aligned_content() {
+        let templates = builtin_templates();
+        let find = |id: &str| {
+            templates
+                .iter()
+                .find(|t| t.id == id)
+                .unwrap_or_else(|| panic!("no template {id}"))
+        };
+        let ctx = RenderCtx {
+            default_branch: "main".into(),
+            vars: BTreeMap::from([("go_version".to_string(), "1.22".to_string())]),
+        };
+        let render = |id: &str| render_template_content(id, &find(id).content, &ctx);
+
+        let go = render("builtin:ci/go");
+        assert!(go.contains("actions/setup-go@v5"), "{go}");
+        assert!(go.contains("go-version-file: 'go.mod'"), "{go}");
+        assert!(!go.contains("go-version: '1.20'"), "{go}");
+        assert!(!go.contains("$default-branch"), "{go}");
+        assert!(go.contains("branches: [ main ]"), "{go}");
+
+        let django = render("builtin:ci/django");
+        assert!(django.contains("actions/setup-python@v6"), "{django}");
+        assert!(
+            django.contains("python-version: [3.10, 3.11, 3.12]"),
+            "{django}"
+        );
+        assert!(!django.contains("3.9"), "{django}");
+
+        let ruby = render("builtin:ci/ruby");
+        assert!(ruby.contains("ruby/setup-ruby@v1"), "{ruby}");
+        assert!(
+            ruby.contains("ruby-version: ['3.2', '3.3', '3.4']"),
+            "{ruby}"
+        );
+        assert!(!ruby.contains("'2.6'"), "{ruby}");
+
+        let laravel = render("builtin:ci/laravel");
+        assert!(laravel.contains("shivammathur/setup-php@v2"), "{laravel}");
+        assert!(laravel.contains("php-version: '8.2'"), "{laravel}");
+
+        let php = render("builtin:ci/php");
+        assert!(php.contains("uses: shivammathur/setup-php@v2"), "{php}");
+        assert!(php.contains("tools: composer"), "{php}");
+
+        let maven = render("builtin:ci/maven");
+        assert!(!maven.contains("dependency-submission"), "{maven}");
+        assert!(maven.contains("java-version: '17'"), "{maven}");
+
+        let gradle = render("builtin:ci/gradle");
+        assert!(!gradle.contains("dependency-submission:"), "{gradle}");
+        assert!(
+            gradle.contains("gradle/actions/setup-gradle@v4"),
+            "{gradle}"
+        );
+
+        let node = render("builtin:ci/node.js");
+        assert!(node.contains("node-version: [20.x, 22.x, 24.x]"), "{node}");
+        assert!(!node.contains("18.x"), "{node}");
+
+        let slsa = render("builtin:ci/go-ossf-slsa3-publish");
+        assert!(slsa.contains("builder_go_slsa3.yml@v2.1.0"), "{slsa}");
+        assert!(slsa.contains("go-version: 1.22"), "{slsa}");
+
+        // `${go_version}` unresolved without a repo var → literal kept.
+        let ctx_empty = RenderCtx {
+            default_branch: "main".into(),
+            vars: BTreeMap::new(),
+        };
+        let slsa_empty = render_template_content(
+            "builtin:ci/go-ossf-slsa3-publish",
+            &find("builtin:ci/go-ossf-slsa3-publish").content,
+            &ctx_empty,
+        );
+        assert!(slsa_empty.contains("go-version: 1.17"), "{slsa_empty}");
+
+        // Non-builtin templates are never rewritten.
+        let raw = "name: X\non: [push]\njobs:\n  j:\n    runs-on: linux\n    steps:\n      - uses: actions/setup-go@v4\n";
+        let out = render_template_content("instance:mine", raw, &ctx);
+        assert_eq!(out, raw.replace("$default-branch", "main"));
     }
 }

@@ -1,0 +1,653 @@
+//! Browser-facing Actions downloads — artifact archives and raw job logs.
+//!
+//! These are session/PAT-authed GETs (unlike the runner-token
+//! `/api/actions/artifacts/*` routes) so the web UI can offer download links
+//! and `ox` can fetch logs. Capability rule mirrors `repo.actions.*` RPCs:
+//! Read+ on the repository (public repos allow anonymous reads, private repos
+//! 404 for unauthorized callers).
+
+use std::io::Write as _;
+
+use axum::extract::{Path as AxumPath, State};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::{sse, IntoResponse, Response};
+use axum::Json;
+
+use crate::app::AppState;
+use crate::repo::{effective_capability, meets, resolve_owner_slug, Capability};
+
+use super::release_assets::{resolve_session_user_id, sanitize_filename};
+
+fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "ok": false,
+            "error": { "code": code, "message": message }
+        })),
+    )
+        .into_response()
+}
+
+fn pat_err_response(e: &oxidean_core::AppError) -> Response {
+    let status = if e.code.ends_with(".not_found") {
+        StatusCode::NOT_FOUND
+    } else if e.code == "auth.pat_scope" {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    err_response(status, &e.code, &e.message)
+}
+
+pub(crate) struct RepoLookup {
+    pub repo: oxidean_db::repositories::RepositoryRow,
+    pub owner_ref: crate::repo::OwnerRef,
+}
+
+/// `{owner}/{repo}` → repo row + owner ref (404-shaped errors).
+pub(crate) async fn lookup_repo(
+    state: &AppState,
+    owner: &str,
+    repo: &str,
+) -> Result<RepoLookup, Box<Response>> {
+    let owner_ref = resolve_owner_slug(&state.db, owner).await.map_err(|e| {
+        tracing::error!(error = %e, "resolve_owner_slug");
+        Box::new(err_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "repo.internal",
+            "lookup failed",
+        ))
+    })?;
+    let Some(owner_ref) = owner_ref else {
+        return Err(Box::new(err_response(
+            StatusCode::NOT_FOUND,
+            "repo.not_found",
+            "repository not found",
+        )));
+    };
+    let repo = state
+        .db
+        .find_repository_by_owner_name(owner_ref.id(), repo)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "find_repository_by_owner_name");
+            Box::new(err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "repo.internal",
+                "lookup failed",
+            ))
+        })?;
+    let Some(repo) = repo else {
+        return Err(Box::new(err_response(
+            StatusCode::NOT_FOUND,
+            "repo.not_found",
+            "repository not found",
+        )));
+    };
+    Ok(RepoLookup { repo, owner_ref })
+}
+
+/// Session/PAT credential + Read capability gate for Actions downloads.
+pub(crate) async fn authorize_read(
+    state: &AppState,
+    headers: &HeaderMap,
+    lookup: &RepoLookup,
+    pat_proc: &'static str,
+) -> Result<(), Box<Response>> {
+    let caller = resolve_session_user_id(state, headers).await;
+    if let Some((_, Some(pat))) = &caller {
+        if let Err(e) = crate::pat::bearer::authorize_pat_on_repo(
+            &state.db,
+            pat,
+            pat_proc,
+            &lookup.repo,
+            &lookup.owner_ref,
+        )
+        .await
+        {
+            return Err(Box::new(pat_err_response(&e)));
+        }
+    }
+    let capability = effective_capability(
+        &state.db,
+        caller.as_ref().map(|(id, _)| id.as_str()),
+        &lookup.repo,
+        &lookup.owner_ref,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "effective_capability actions download");
+        Box::new(err_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "repo.internal",
+            "lookup failed",
+        ))
+    })?;
+    if !meets(capability, Capability::Read) {
+        return Err(Box::new(err_response(
+            StatusCode::NOT_FOUND,
+            "repo.not_found",
+            "repository not found",
+        )));
+    }
+    Ok(())
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/artifacts/{artifact_id} — stream the
+/// stored tar.gz archive with an attachment disposition.
+pub async fn download_artifact(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, artifact_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getRun").await {
+        return *r;
+    }
+    let artifact = match state.db.find_action_artifact_by_id(&artifact_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.artifact_not_found",
+                "Artifact not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find artifact");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    if artifact.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.artifact_not_found",
+            "Artifact not found",
+        );
+    }
+    let path = state.actions_artifacts_dir.join(&artifact.storage_path);
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.artifact_not_found",
+                "Artifact not found",
+            );
+        }
+    };
+    let mut res = Response::new(axum::body::Body::from(bytes));
+    *res.status_mut() = StatusCode::OK;
+    if let Ok(hv) = HeaderValue::from_str("application/gzip") {
+        res.headers_mut().insert(header::CONTENT_TYPE, hv);
+    }
+    let disp = format!(
+        "attachment; filename=\"{}.tar.gz\"",
+        sanitize_filename(&artifact.name)
+    );
+    if let Ok(hv) = HeaderValue::from_str(&disp) {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
+    }
+    res
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs — the job's raw
+/// log as `text/plain` (transparently serves the gzip-at-rest form for
+/// finished runs).
+pub async fn download_job_log(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, job_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getJobLog").await {
+        return *r;
+    }
+    let job = match state.db.find_action_job_by_id(&job_id).await {
+        Ok(Some(j)) => j,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find job");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    let run = match state.db.find_action_run_by_id(&job.run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find run for job");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    if run.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.job_not_found",
+            "Job not found",
+        );
+    }
+    let (bytes, _size) =
+        crate::actions::logs::read_job_log(&state.actions_log_dir, &run.id, &job.id, 0)
+            .await
+            .unwrap_or_default();
+    let mut res = Response::new(axum::body::Body::from(bytes));
+    *res.status_mut() = StatusCode::OK;
+    if let Ok(hv) = HeaderValue::from_str("text/plain; charset=utf-8") {
+        res.headers_mut().insert(header::CONTENT_TYPE, hv);
+    }
+    let disp = format!(
+        "attachment; filename=\"{}.log\"",
+        sanitize_filename(&job.name)
+    );
+    if let Ok(hv) = HeaderValue::from_str(&disp) {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
+    }
+    res
+}
+
+/// Byte prefix of `bytes` that ends on a UTF-8 codepoint boundary. A live log
+/// file can end mid-sequence while a write is in flight; holding the partial
+/// tail back keeps streamed frames lossless — the held bytes ride out with the
+/// next append. Genuinely invalid bytes (`error_len` set) are sent as-is and
+/// render as U+FFFD, same as the raw download path.
+fn utf8_floor(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => bytes.len(),
+    }
+}
+
+/// One SSE `data:` frame — `{offset, content, size, done}`; `offset` is the
+/// byte position this chunk starts at so the client can detect a log wipe
+/// (`offset == 0` frames replace rather than append).
+fn tail_frame(offset: u64, content: &[u8], size: u64, done: bool) -> sse::Event {
+    sse::Event::default().data(
+        serde_json::json!({
+            "offset": offset,
+            "content": String::from_utf8_lossy(content),
+            "size": size,
+            "done": done,
+        })
+        .to_string(),
+    )
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs/stream — SSE live
+/// tail. Connect sends a full snapshot (`offset:0`), then every append pushes
+/// the new bytes; `done:true` is the last frame. The wake channel makes
+/// appends instant; a 2s fallback tick covers any missed notification, and a
+/// shrunk file (rerun wipe) re-sends the snapshot. Same auth as the raw
+/// download — the long-poll `repo.actions.getJobLog` RPC stays the portable
+/// client surface; this stream is the web UI's low-latency path.
+pub async fn stream_job_log(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, job_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getJobLog").await {
+        return *r;
+    }
+    let job = match state.db.find_action_job_by_id(&job_id).await {
+        Ok(Some(j)) => j,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find job for log stream");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "stream failed",
+            );
+        }
+    };
+    let run = match state.db.find_action_run_by_id(&job.run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find run for log stream");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "stream failed",
+            );
+        }
+    };
+    if run.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.job_not_found",
+            "Job not found",
+        );
+    }
+
+    let mut wakes = crate::actions::logs::subscribe_job_log_wakes();
+    let log_dir = state.actions_log_dir.clone();
+    let db = state.db.clone();
+    let run_id = run.id;
+    let job_id = job.id;
+    let mut live = !crate::actions::rpc::job_status_terminal(&job.status);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<sse::Event, std::convert::Infallible>>(16);
+    tokio::spawn(async move {
+        // Snapshot — always an `offset:0` replace frame. A live file can end
+        // mid-codepoint; hold the partial tail so frames stay lossless (it
+        // re-reads with the next append). Terminal jobs send the raw tail —
+        // nothing more is coming.
+        let (bytes, _file_size) = crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, 0)
+            .await
+            .unwrap_or_default();
+        let send_len = if live {
+            utf8_floor(&bytes)
+        } else {
+            bytes.len()
+        };
+        let mut cursor = send_len as u64;
+        if tx
+            .send(Ok(tail_frame(0, &bytes[..send_len], cursor, !live)))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        while live {
+            tokio::select! {
+                r = wakes.recv() => {
+                    match r {
+                        // Other job's append — keep waiting.
+                        Ok(id) if id != job_id => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        _ => {}
+                    }
+                }
+                _ = tick.tick() => {}
+            }
+            let (bytes, new_size) =
+                crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, cursor)
+                    .await
+                    .unwrap_or_default();
+            if new_size < cursor {
+                // Wiped (rerun replaces the prior attempt's log) — resend a
+                // snapshot frame so the client replaces rather than appends.
+                let (b, _file_size) =
+                    crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, 0)
+                        .await
+                        .unwrap_or_default();
+                let send_len = utf8_floor(&b);
+                cursor = send_len as u64;
+                if tx
+                    .send(Ok(tail_frame(0, &b[..send_len], cursor, false)))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            } else if new_size > cursor {
+                let send_len = utf8_floor(&bytes);
+                if send_len > 0 {
+                    let end = cursor + send_len as u64;
+                    if tx
+                        .send(Ok(tail_frame(cursor, &bytes[..send_len], end, false)))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    cursor = end;
+                }
+            }
+            live = db
+                .find_action_job_by_id(&job_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|j| !crate::actions::rpc::job_status_terminal(&j.status));
+            if !live {
+                // Final frame carries any bytes still held back (e.g. a
+                // permanently partial trailing codepoint) plus `done` so the
+                // client lands on the file's true end state.
+                let (rest, _) =
+                    crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, cursor)
+                        .await
+                        .unwrap_or_default();
+                let end = cursor + rest.len() as u64;
+                let _ = tx.send(Ok(tail_frame(cursor, &rest, end, true))).await;
+                return;
+            }
+        }
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    sse::Sse::new(stream)
+        .keep_alive(
+            sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keepalive"),
+        )
+        .into_response()
+}
+
+/// Split a job log stream on `##[step]`/`##[step-done]` markers into GitHub's
+/// per-step archive shape — `(preamble, steps, tail)`. Marker lines are
+/// stripped; content outside any step lands in the preamble or tail.
+fn split_step_sections(log: &str) -> (String, Vec<(String, String)>, String) {
+    let mut preamble = String::new();
+    let mut tail = String::new();
+    let mut steps: Vec<(String, String)> = Vec::new();
+    let mut current: Option<usize> = None;
+    for line in log.lines() {
+        if let Some(name) = line.strip_prefix("##[step]") {
+            steps.push((name.trim().to_string(), String::new()));
+            current = Some(steps.len() - 1);
+            continue;
+        }
+        if line.starts_with("##[step-done]") {
+            current = None;
+            continue;
+        }
+        match current {
+            Some(i) => {
+                steps[i].1.push_str(line);
+                steps[i].1.push('\n');
+            }
+            None if steps.is_empty() => {
+                preamble.push_str(line);
+                preamble.push('\n');
+            }
+            None => {
+                tail.push_str(line);
+                tail.push('\n');
+            }
+        }
+    }
+    (preamble, steps, tail)
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/runs/{run_id}/logs — every job log
+/// in the run as a zip archive. Entries follow GitHub's layout: one
+/// `{job_name}/` folder per job holding `{seq}_{step_name}.txt` per step
+/// (runner preamble → `0_setup.txt`, trailing lines → `N_teardown.txt`).
+/// Logs with no step markers (skipped legs, validation failures) keep the
+/// flat `{job_name}.txt` entry.
+pub async fn download_run_logs(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, run_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getJobLog").await {
+        return *r;
+    }
+    let run = match state.db.find_action_run_by_id(&run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.run_not_found",
+                "Run not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find run");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    if run.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.run_not_found",
+            "Run not found",
+        );
+    }
+    let jobs = match state.db.list_action_jobs_for_run(&run.id).await {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!(error = %e, "list run jobs");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let mut any_content = false;
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let mut used = std::collections::HashSet::new();
+        let archive_failed = || {
+            err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "archive build failed",
+            )
+        };
+        for job in &jobs {
+            let (bytes, _size) =
+                crate::actions::logs::read_job_log(&state.actions_log_dir, &run.id, &job.id, 0)
+                    .await
+                    .unwrap_or_default();
+            if !bytes.is_empty() {
+                any_content = true;
+            }
+            // Unique, filesystem-safe entry names — matrix siblings share a name.
+            let mut dir = sanitize_filename(&job.name);
+            for n in 2.. {
+                if used.insert(dir.clone()) {
+                    break;
+                }
+                dir = format!("{} ({n})", sanitize_filename(&job.name));
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            let (preamble, steps, tail) = split_step_sections(&text);
+            let mut entries: Vec<(String, &[u8])> = Vec::new();
+            if steps.is_empty() {
+                // No step markers — skipped/validation-failure legs keep the
+                // flat `{job}.txt` entry.
+                entries.push((format!("{dir}.txt"), &bytes));
+            } else {
+                if !preamble.trim().is_empty() {
+                    entries.push((format!("{dir}/0_setup.txt"), preamble.as_bytes()));
+                }
+                for (idx, (name, body)) in steps.iter().enumerate() {
+                    entries.push((
+                        format!("{dir}/{}_{}.txt", idx + 1, sanitize_filename(name)),
+                        body.as_bytes(),
+                    ));
+                }
+                if !tail.trim().is_empty() {
+                    entries.push((
+                        format!("{dir}/{}_teardown.txt", steps.len() + 1),
+                        tail.as_bytes(),
+                    ));
+                }
+            }
+            for (entry, content) in entries {
+                if zip.start_file(entry, opts).is_err() || zip.write_all(content).is_err() {
+                    return archive_failed();
+                }
+            }
+        }
+        if zip.finish().is_err() {
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "archive build failed",
+            );
+        }
+    }
+    // GitHub 404s when the run has no log content — deleted or never written.
+    if !any_content {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.logs_not_found",
+            "No logs found for this run",
+        );
+    }
+    let mut res = Response::new(axum::body::Body::from(buf.into_inner()));
+    *res.status_mut() = StatusCode::OK;
+    if let Ok(hv) = HeaderValue::from_str("application/zip") {
+        res.headers_mut().insert(header::CONTENT_TYPE, hv);
+    }
+    if let Ok(hv) = HeaderValue::from_str("attachment; filename=\"logs.zip\"") {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
+    }
+    res
+}

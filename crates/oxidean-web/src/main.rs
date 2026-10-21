@@ -212,7 +212,10 @@ async fn spa(
     // plus the `/{owner}/{repo}.git/*` smart-HTTP + LFS surface, which can't be
     // a prefix — matches Traefik's `PathRegexp(^/[^/]+/[^/]+\.git)` rule.
     if let Some(px) = &st.proxy {
-        if proxy::is_api_prefix(path) || proxy::is_api_git_path(path) {
+        if proxy::is_api_prefix(path)
+            || proxy::is_api_git_path(path)
+            || proxy::is_api_badge_path(path)
+        {
             return px.forward(req, peer).await;
         }
     }

@@ -101,7 +101,7 @@ fn actions_secrets_encrypt_never_stores_plaintext_blob() {
 #[tokio::test]
 async fn actions_secrets_list_names_only_never_echoes_value() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("sec.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("sec.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -170,7 +170,7 @@ async fn actions_secrets_list_names_only_never_echoes_value() {
 #[tokio::test]
 async fn actions_secrets_enable_toggle_persists() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("en.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("en.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -225,7 +225,7 @@ async fn actions_secrets_enable_toggle_persists() {
 async fn actions_secrets_injected_into_fetch_task() {
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("ft.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("ft.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -261,12 +261,25 @@ async fn actions_secrets_injected_into_fetch_task() {
         "CI",
         None,
         None,
+        None,
     )
     .await
     .unwrap();
-    db.insert_action_job("job-ft", "run-ft", "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .unwrap();
+    // 0053: fetch_task serves steps from the durable payload — hand-built
+    // jobs need one or the claim path fails them loudly.
+    db.insert_action_payload(
+        "sha-ft",
+        &repo.id,
+        ".github/workflows/ci.yml",
+        "abc",
+        r#"{"version":1,"steps":[{"run":"echo hi"}],"contents_permission":"read"}"#,
+    )
+    .await
+    .unwrap();
+    let mut ft =
+        oxidean_db::JobInsert::basic("job-ft", "run-ft", "build", "build", r#"["ubuntu-latest"]"#);
+    ft.payload_sha = Some("sha-ft".into());
+    db.insert_action_job(ft).await.unwrap();
 
     let app = test_app(db.clone()).await;
     let reg = mint_registration_token(&db).await.unwrap();
@@ -315,7 +328,7 @@ async fn actions_secrets_injected_into_fetch_task() {
 #[tokio::test]
 async fn actions_secrets_admin_create_registration_token() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("tok.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("tok.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -369,4 +382,43 @@ async fn actions_secrets_admin_create_registration_token() {
         .await
         .unwrap();
     assert_eq!(list.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn actions_secrets_value_size_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("cap.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+    let (cookie, _uid) = signup_login_verify(&app, &db, "cap@ex.com", "capown").await;
+
+    let create = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.create","input":{"name":"caprepo","visibility":"private"}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::OK);
+
+    // 49 KiB — over GitHub's 48 KiB secret limit → loud refusal.
+    let big = "x".repeat(49 * 1024);
+    let body = format!(
+        r#"{{"procedure":"repo.actions.secrets.put","input":{{"owner":"capown","name":"caprepo","secret_name":"TOO_BIG","value":"{big}"}}}}"#
+    );
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(&body, &cookie))
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        v["error"]["code"], "repo.actions.invalid_secret_value",
+        "over-limit secret must be refused: {v}"
+    );
 }

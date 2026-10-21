@@ -36,9 +36,42 @@ pub enum PatProc {
     /// Actions run/workflow reads. Classic `repo`|`public_repo`; FG
     /// `actions:read`.
     ActionsRead,
-    /// Workflow dispatch/rerun/cancel. Classic `workflow`|`repo`|
+    /// Workflow dispatch/rerun/cancel/approve. Classic `workflow`|`repo`|
     /// `public_repo`; FG `actions:write`.
     ActionsWrite,
+    /// Actions environments config (protection rules). Classic `repo`; FG
+    /// `environments` perm.
+    EnvironmentsRead,
+    EnvironmentsWrite,
+    /// Environment deployment records. Classic `repo`; FG `deployments`
+    /// perm.
+    DeploymentsRead,
+    /// Creating deployments and deployment statuses (GitHub Deployments
+    /// API). Classic `repo`; FG `deployments:write`.
+    DeploymentsWrite,
+    /// Check runs/suites and annotations. Classic `repo`; FG `checks` perm.
+    ChecksRead,
+    /// Creating/updating/rerequesting check runs and suites (GitHub Checks
+    /// API). Classic `repo`; FG `checks:write`.
+    ChecksWrite,
+    /// Project boards/columns/cards. Classic `repo`; FG
+    /// `repository_projects` perm.
+    ProjectsRead,
+    /// Board/column/card mutations (GitHub Projects API). Classic `repo`;
+    /// FG `repository_projects:write`.
+    ProjectsWrite,
+    /// Discussion categories/threads/comments. Classic `repo`; FG
+    /// `discussions` perm.
+    DiscussionsRead,
+    /// Discussion/category/comment mutations (GitHub Discussions surface).
+    /// Classic `repo`; FG `discussions:write`.
+    DiscussionsWrite,
+    /// Pages site config + build history reads. Classic `repo`; FG `pages`.
+    PagesRead,
+    /// Pages config mutations, manual builds, and the `deploys.create`
+    /// job-token publish seam (GitHub `pages` perm). Classic `repo`; FG
+    /// `pages:write`.
+    PagesWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -171,6 +204,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.lfs.download"
         | "repo.templates.getEnabled"
         | "repo.actions.getEnabled"
+        | "repo.actions.getPullRequestTarget"
+        | "repo.actions.getForkPrApproval"
+        | "repo.actions.getDefaultPermissions"
         | "repo.mergeSettings.get"
         | "repo.quota.get"
         | "repo.createDefaults"
@@ -182,18 +218,22 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.insights.forkNetwork"
         | "repo.issues.getEnabled"
         | "repo.pulls.getEnabled"
+        | "repo.wiki.getEnabled"
+        | "repo.projects.getEnabled"
+        | "wiki.pages.list"
+        | "wiki.pages.get"
+        | "wiki.revisions.list"
         | "repo.templates.list"
         | "repo.listMine"
         | "repo.listByOwner"
         | "search.global" => RepoRead,
 
-        // Contents writes + create/fork (the `repo.file.*` editor ops all
-        // commit through the contents domain).
-        "repo.create" | "repo.fork" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
+        // Contents writes + create/fork/migrate (the `repo.file.*` editor ops
+        // all commit through the contents domain).
+        "repo.create" | "repo.fork" | "repo.migrate" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
         | "repo.branchDelete" | "repo.syncFork" | "repo.file.create" | "repo.file.delete"
-        | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload" => {
-            RepoWrite
-        }
+        | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload"
+        | "wiki.pages.create" | "wiki.pages.update" | "wiki.pages.delete" => RepoWrite,
 
         "issue.get"
         | "issue.list"
@@ -202,6 +242,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "issue.comments.history"
         | "issue.links.list"
         | "issue.assigneeCandidates"
+        | "milestone.list"
+        | "milestone.get"
         | "label.listForRepo" => IssuesRead,
 
         "issue.create"
@@ -216,6 +258,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "issue.reactions.toggle"
         | "issue.links.add"
         | "issue.links.remove"
+        | "issue.milestone.set"
+        | "milestone.create"
+        | "milestone.update"
+        | "milestone.delete"
         | "label.create"
         | "label.update"
         | "label.delete" => IssuesWrite,
@@ -228,7 +274,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.comments.history"
         | "pull.reviews.list"
         | "pull.reviewRequests.list"
-        | "pull.branchStatus" => PullsRead,
+        | "pull.branchStatus"
+        | "merge_queue.list"
+        | "merge_queue.get"
+        | "merge_queue.groups" => PullsRead,
 
         "pull.create"
         | "pull.update"
@@ -243,18 +292,123 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.reviewRequests.add"
         | "pull.reviewRequests.remove"
         | "pull.merge"
-        | "pull.updateBranch" => PullsWrite,
+        | "pull.updateBranch"
+        | "merge_queue.enqueue"
+        | "merge_queue.dequeue" => PullsWrite,
 
         "repo.actions.listRuns"
         | "repo.actions.getRun"
+        | "repo.actions.getJob"
         | "repo.actions.getJobLog"
+        | "repo.actions.jobAnnotations"
         | "repo.actions.listWorkflows"
+        | "repo.actions.listArtifacts"
+        | "repo.actions.listAllArtifacts"
+        | "repo.actions.getArtifact"
+        | "repo.actions.listCaches"
+        | "repo.actions.listRunners"
+        | "repo.actions.getRunner"
+        | "repo.actions.listRunApprovals"
         | "repo.actions.workflowTemplates.list"
         | "repo.actions.workflowTemplates.get" => ActionsRead,
 
-        "repo.actions.dispatchWorkflow" | "repo.actions.rerunRun" | "repo.actions.cancelRun" => {
-            ActionsWrite
+        "repo.actions.dispatchWorkflow"
+        | "repo.actions.dispatchRepository"
+        | "repo.actions.rerunRun"
+        | "repo.actions.cancelRun"
+        | "repo.actions.approveRun"
+        | "repo.actions.approveJob"
+        | "repo.actions.reviewDeployment"
+        | "repo.actions.deleteRun"
+        | "repo.actions.deleteRunLogs"
+        | "repo.actions.setWorkflowEnabled"
+        | "repo.actions.deleteArtifact"
+        | "repo.actions.deleteCache"
+        | "repo.actions.deleteRunner"
+        | "repo.actions.createRegistrationToken"
+        | "repo.actions.createRemoveToken" => ActionsWrite,
+
+        // Configuration variables mirror the secrets families — GitHub
+        // groups both under the actions_variables fine-grained permission.
+        "repo.actions.variables.list"
+        | "repo.actions.environments.variablesList"
+        // Repo-visible org secrets/variables listings ride the same family —
+        // GitHub gates `organization-secrets`/`organization-variables` on the
+        // secrets/variables fine-grained read too.
+        | "repo.actions.organizationSecrets"
+        | "repo.actions.organizationVariables" => SecretsRead,
+        "repo.actions.variables.put"
+        | "repo.actions.variables.delete"
+        | "repo.actions.environments.variablesPut"
+        | "repo.actions.environments.variablesDelete" => SecretsWrite,
+
+        "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
+        "repo.actions.environments.secretsList" | "repo.actions.environments.secretsPublicKey" => {
+            SecretsRead
         }
+        "repo.actions.environments.upsert" | "repo.actions.environments.delete" => {
+            EnvironmentsWrite
+        }
+        "repo.actions.environments.secretsPut" | "repo.actions.environments.secretsDelete" => {
+            SecretsWrite
+        }
+        "repo.actions.listDeployments" => DeploymentsRead,
+        "deployment.list" | "deployment.get" | "deployment.status.list" => DeploymentsRead,
+        "deployment.create" | "deployment.status.create" | "deployment.delete" => DeploymentsWrite,
+        "check.suites.list"
+        | "check.suites.get"
+        | "check.runs.listForSuite"
+        | "check.runs.listForRef"
+        | "check.runs.get"
+        | "check.annotations.list" => ChecksRead,
+        "check.suites.create"
+        | "check.suites.rerequest"
+        | "check.runs.create"
+        | "check.runs.update"
+        | "check.runs.rerequest" => ChecksWrite,
+
+        "projects.list" | "projects.get" | "projects.columns.list" | "projects.cards.list" => {
+            ProjectsRead
+        }
+        "projects.create"
+        | "projects.update"
+        | "projects.delete"
+        | "projects.columns.create"
+        | "projects.columns.update"
+        | "projects.columns.move"
+        | "projects.columns.delete"
+        | "projects.cards.create"
+        | "projects.cards.update"
+        | "projects.cards.move"
+        | "projects.cards.convert"
+        | "projects.cards.delete" => ProjectsWrite,
+
+        "discussions.list"
+        | "discussions.get"
+        | "discussions.categories.list"
+        | "discussions.comments.list" => DiscussionsRead,
+        "discussions.create"
+        | "discussions.update"
+        | "discussions.delete"
+        | "discussions.pin"
+        | "discussions.lock"
+        | "discussions.transfer"
+        | "discussions.labels.set"
+        | "discussions.answer.set"
+        | "discussions.answer.clear"
+        | "discussions.categories.create"
+        | "discussions.categories.update"
+        | "discussions.categories.delete"
+        | "discussions.comments.create"
+        | "discussions.comments.update"
+        | "discussions.comments.delete" => DiscussionsWrite,
+
+        "pages.get" | "pages.builds.list" | "pages.builds.get" => PagesRead,
+        "pages.enable"
+        | "pages.update"
+        | "pages.disable"
+        | "pages.builds.request"
+        | "pages.deploys.create" => PagesWrite,
 
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
@@ -263,7 +417,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "repo.commitStatus.list" => StatusesRead,
         "repo.commitStatus.create" => StatusesWrite,
 
-        "repo.actions.secrets.list" => SecretsRead,
+        "repo.actions.secrets.list" | "repo.actions.secrets.publicKey" => SecretsRead,
         "repo.actions.secrets.put" | "repo.actions.secrets.delete" => SecretsWrite,
 
         "release.list" | "release.get" => ReleasesRead,
@@ -299,6 +453,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.tagProtection.delete"
         | "repo.issues.setEnabled"
         | "repo.pulls.setEnabled"
+        | "repo.wiki.setEnabled"
+        | "repo.projects.setEnabled"
         | "repo.mirror.upsert"
         | "repo.mirror.delete"
         | "repo.mirror.syncNow"
@@ -308,6 +464,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.deployKey.create"
         | "repo.deployKey.delete"
         | "repo.actions.setEnabled"
+        | "repo.actions.setPullRequestTarget"
+        | "repo.actions.setForkPrApproval"
+        | "repo.actions.setDefaultPermissions"
         | "repo.lfs.setEnabled"
         | "repo.templates.setEnabled"
         | "repo.mergeSettings.update"
@@ -342,6 +501,24 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "gpgKey.add" | "gpgKey.revoke" => GpgKeyWrite,
 
         "label.listForOrg" | "org.listMine" | "org.members.list" | "org.invites.list" => OrgRead,
+        // Org Actions secrets — classified with the secrets families like
+        // their repo-level siblings (FG `secrets` perm).
+        "org.actions.secrets.list"
+        | "org.actions.secrets.listRepos"
+        | "org.actions.secrets.publicKey" => SecretsRead,
+        "org.actions.secrets.put"
+        | "org.actions.secrets.delete"
+        | "org.actions.secrets.setRepos" => SecretsWrite,
+        "org.actions.variables.list" | "org.actions.variables.listRepos" => SecretsRead,
+        "org.actions.variables.put"
+        | "org.actions.variables.delete"
+        | "org.actions.variables.setRepos" => SecretsWrite,
+        // Org self-hosted runners — admin-gated inside; token-bearing procs
+        // stay SecretsWrite-family like the repo runner tokens (ActionsWrite).
+        "org.actions.runners.list" | "org.actions.runners.get" => ActionsRead,
+        "org.actions.runners.delete"
+        | "org.actions.runners.createRegistrationToken"
+        | "org.actions.runners.createRemoveToken" => ActionsWrite,
         "org.create"
         | "org.updateSettings"
         | "org.members.add"
@@ -352,7 +529,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "org.invites.revoke" => OrgWrite,
 
         "packages.list" => PackageRead,
-        "packages.deleteVersion" => PackageDelete,
+        "packages.deleteVersion" | "packages.delete" => PackageDelete,
 
         // Narrow self-management: a token may list its owner's tokens and
         // revoke itself (handler enforces `id == self`). `pat.create*` stays
@@ -409,6 +586,10 @@ pub fn public_repo_covers(class: PatProc) -> bool {
             | StatusesWrite
             | ReleasesRead
             | ReleasesWrite
+            | ProjectsRead
+            | ProjectsWrite
+            | DiscussionsRead
+            | DiscussionsWrite
             | StarringWrite
             | WatchingWrite
     )
@@ -423,8 +604,10 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
     match class {
         // `repo` umbrella classes (narrower scopes add on below).
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
-        | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite | RepoAdminRead
-        | RepoAdminWrite => &[S::Repo],
+        | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
+        | ChecksRead | ChecksWrite | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite
+        | ProjectsRead | ProjectsWrite | DiscussionsRead | DiscussionsWrite | PagesRead
+        | PagesWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -470,6 +653,12 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         IssuesRead | IssuesWrite => "issues",
         PullsRead | PullsWrite => "pull_requests",
         ActionsRead | ActionsWrite => "actions",
+        EnvironmentsRead | EnvironmentsWrite => "environments",
+        DeploymentsRead | DeploymentsWrite => "deployments",
+        ChecksRead | ChecksWrite => "checks",
+        ProjectsRead | ProjectsWrite => "repository_projects",
+        DiscussionsRead | DiscussionsWrite => "discussions",
+        PagesRead | PagesWrite => "pages",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

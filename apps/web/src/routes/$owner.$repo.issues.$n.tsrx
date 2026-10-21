@@ -14,6 +14,7 @@ import { IssueComments } from "@/components/repo/issue-comments";
 import { IssueDeleteDialog } from "@/components/repo/issue-delete-dialog";
 import { IssueHistoryPanel } from "@/components/repo/issue-history";
 import { IssueLabelsPanel } from "@/components/repo/issue-labels-panel";
+import { IssueMilestonePanel } from "@/components/repo/issue-milestone-panel";
 import { IssueLinkedPrsPanel } from "@/components/repo/issue-linked-prs";
 import { IssueReactionsBar } from "@/components/repo/issue-reactions";
 import { MarkdownHtml } from "@/components/repo/markdown-body";
@@ -489,6 +490,13 @@ function IssueDetailPageContent() @{
           </div>
           <aside className="flex flex-col gap-6">
             <IssueLabelsPanel
+              owner={owner}
+              repoName={repoName}
+              number={number}
+              issue={issue!}
+              canWrite={canWrite}
+            />
+            <IssueMilestonePanel
               owner={owner}
               repoName={repoName}
               number={number}

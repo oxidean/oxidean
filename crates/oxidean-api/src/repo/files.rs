@@ -501,20 +501,25 @@ pub(crate) async fn commit_changes(
         &user.id,
         &updates,
         &ctx.env_name,
+        crate::actions::events::rpc_caller_is_job_token(ctx),
     )
     .await;
-    crate::actions::notify_push_actions(
-        &ctx.db,
-        ctx.git.clone(),
-        &ctx.repos_dir,
-        &accessible.row.id,
-        &accessible.owner_username,
-        &accessible.row.name,
-        Some(&user.id),
-        &updates,
-        crate::actions::env_actions_enabled(),
-    )
-    .await;
+    // GITHUB_TOKEN parity — job-token commits never start `push` runs
+    // (webhooks above still fire, matching the git-receive-pack path).
+    if !crate::actions::events::rpc_caller_is_job_token(ctx) {
+        crate::actions::notify_push_actions(
+            &ctx.db,
+            ctx.git.clone(),
+            &ctx.repos_dir,
+            &accessible.row.id,
+            &accessible.owner_username,
+            &accessible.row.name,
+            Some(&user.id),
+            &updates,
+            crate::actions::env_actions_enabled(),
+        )
+        .await;
+    }
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),

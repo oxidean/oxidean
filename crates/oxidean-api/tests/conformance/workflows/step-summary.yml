@@ -1,0 +1,10 @@
+name: step-summary
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "- all green" >> $GITHUB_STEP_SUMMARY
+          echo step ran

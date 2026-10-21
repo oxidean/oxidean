@@ -1,7 +1,10 @@
 //! Organization RPC handlers (ORG-01 / ORG-02 / D-ORG-01 / D-ORG-02a / D-ORG-02b).
 
 mod invites;
-mod members;
+pub(crate) mod members;
+pub(crate) mod runners;
+mod secrets;
+pub mod vars;
 
 pub use invites::{
     accept as invites_accept, create as invites_create, create_link as invites_create_link,
@@ -10,6 +13,15 @@ pub use invites::{
 pub use members::{
     add as members_add, list as members_list, remove as members_remove,
     update_role as members_update_role,
+};
+pub use runners::{
+    create_registration_token as runners_create_registration_token,
+    create_remove_token as runners_create_remove_token, delete as runners_delete,
+    get as runners_get, list as runners_list,
+};
+pub use secrets::{
+    delete as secrets_delete, list as secrets_list, list_repos as secrets_list_repos,
+    public_key as secrets_public_key, put as secrets_put, set_repos as secrets_set_repos,
 };
 
 use oxidean_core::{

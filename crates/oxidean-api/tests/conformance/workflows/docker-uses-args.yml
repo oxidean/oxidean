@@ -1,0 +1,20 @@
+name: docker-uses-args
+on: [push]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      # with.entrypoint overrides the image ENTRYPOINT; with.args is a
+      # single string with quote-grouped arguments (docker:// steps take
+      # args via `with:`).
+      - uses: docker://alpine:3
+        with:
+          entrypoint: /bin/sh
+          args: -c "echo docker-entrypoint-args"
+      - uses: actions/checkout@v4
+      # Step-level with.entrypoint/with.args override the action.yml's
+      # entrypoint (/bin/cat) and args (/etc/hostname).
+      - uses: ./tools/dockact
+        with:
+          entrypoint: /bin/sh
+          args: -c "echo action-spec-override"

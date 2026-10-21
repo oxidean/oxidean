@@ -1020,7 +1020,7 @@ WHERE id = $1 AND revoked_at IS NULL",
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE oauth_access_tokens SET last_used_at = ?, last_used_ip = ?
+                "UPDATE oauth_access_tokens SET last_used_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), last_used_ip = ?
 WHERE id = ? AND revoked_at IS NULL",
             )
             .bind(last_used_at)

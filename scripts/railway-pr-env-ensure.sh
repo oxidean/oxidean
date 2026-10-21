@@ -281,10 +281,14 @@ ensure_support_services() {
 
 # Print the environment id after the idempotent support-service pass.
 # Skipped for --dry-run (a find may succeed but nothing may mutate).
+# The pass is best-effort — a reconciliation failure must never swallow the
+# id: a broken env produces a visible red Deployment on the PR, while an
+# empty id is a silent skip no one sees.
 emit_env_id() {
   local env_id="$1" project_id="$2"
   if [[ "$DRY_RUN" != "1" ]]; then
-    ensure_support_services "$env_id" "$project_id"
+    ensure_support_services "$env_id" "$project_id" \
+      || log "warning: support-service reconciliation failed for ${env_id} — emitting the id anyway"
   fi
   printf '%s' "$env_id"
 }

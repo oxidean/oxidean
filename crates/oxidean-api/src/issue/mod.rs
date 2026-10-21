@@ -91,6 +91,8 @@ struct IssueEnrichment {
     labels: std::collections::HashMap<String, Vec<oxidean_db::LabelRow>>,
     assignees: std::collections::HashMap<String, Vec<oxidean_db::issue_labels::IssueAssigneeRow>>,
     reactions: std::collections::HashMap<String, Vec<oxidean_db::issues::ReactionGroupRow>>,
+    /// milestone id → row for linked issues (embedded `milestone` object).
+    milestones: std::collections::HashMap<String, oxidean_db::MilestoneRow>,
 }
 
 async fn load_enrichment(ctx: &RpcCtx, rows: &[IssueRow]) -> Result<IssueEnrichment, AppError> {
@@ -108,16 +110,38 @@ async fn load_enrichment(ctx: &RpcCtx, rows: &[IssueRow]) -> Result<IssueEnrichm
             labels: HashMap::new(),
             assignees: HashMap::new(),
             reactions: HashMap::new(),
+            milestones: HashMap::new(),
         });
     }
-    let (users, label_pairs, assignee_pairs, reaction_pairs) = tokio::try_join!(
+    let milestone_ids: Vec<String> = {
+        let mut v: Vec<String> = rows.iter().filter_map(|r| r.milestone_id.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let (users, label_pairs, assignee_pairs, reaction_pairs, milestone_rows) = tokio::try_join!(
         ctx.db.find_users_by_ids(&author_ids),
         ctx.db.list_labels_for_issues(&issue_ids),
         ctx.db.list_assignees_for_issues(&issue_ids),
         ctx.db
             .list_issue_reaction_groups_for_issues(&issue_ids, viewer_id(ctx)),
+        ctx.db.list_milestones_by_ids(&milestone_ids),
     )
     .map_err(db_err)?;
+    let mut usernames: HashMap<String, String> =
+        users.into_iter().map(|u| (u.id, u.username)).collect();
+    // Milestone creators are often the issue authors already fetched; pull
+    // only the missing ids in one extra query.
+    let extra_creator_ids: Vec<String> = milestone_rows
+        .iter()
+        .filter_map(|m| m.creator_id.clone())
+        .filter(|id| !usernames.contains_key(id))
+        .collect();
+    if !extra_creator_ids.is_empty() {
+        if let Ok(extra) = ctx.db.find_users_by_ids(&extra_creator_ids).await {
+            usernames.extend(extra.into_iter().map(|u| (u.id, u.username)));
+        }
+    }
     let mut labels: HashMap<String, Vec<oxidean_db::LabelRow>> = HashMap::new();
     for (issue_id, label) in label_pairs {
         labels.entry(issue_id).or_default().push(label);
@@ -132,10 +156,14 @@ async fn load_enrichment(ctx: &RpcCtx, rows: &[IssueRow]) -> Result<IssueEnrichm
         reactions.entry(issue_id).or_default().push(g);
     }
     Ok(IssueEnrichment {
-        usernames: users.into_iter().map(|u| (u.id, u.username)).collect(),
+        usernames,
         labels,
         assignees,
         reactions,
+        milestones: milestone_rows
+            .into_iter()
+            .map(|m| (m.id.clone(), m))
+            .collect(),
     })
 }
 
@@ -176,6 +204,18 @@ fn issue_to_public(row: &IssueRow, enrichment: &IssueEnrichment) -> Result<Issue
             .unwrap_or(&[])
             .to_vec(),
     );
+    let milestone = row
+        .milestone_id
+        .as_ref()
+        .and_then(|id| enrichment.milestones.get(id))
+        .map(|m| {
+            Box::new(crate::milestone::milestone_to_public(
+                m,
+                m.creator_id
+                    .as_ref()
+                    .and_then(|id| enrichment.usernames.get(id).cloned()),
+            ))
+        });
     Ok(IssuePublic {
         id: row.id.clone(),
         repo_id: row.repo_id.clone(),
@@ -192,11 +232,12 @@ fn issue_to_public(row: &IssueRow, enrichment: &IssueEnrichment) -> Result<Issue
         labels,
         assignees,
         reactions,
+        milestone,
         comment_count: row.comment_count,
     })
 }
 
-async fn to_public(ctx: &RpcCtx, row: &IssueRow) -> Result<IssuePublic, AppError> {
+pub(crate) async fn to_public(ctx: &RpcCtx, row: &IssueRow) -> Result<IssuePublic, AppError> {
     let rows = std::slice::from_ref(row);
     let enrichment = load_enrichment(ctx, rows).await?;
     issue_to_public(row, &enrichment)
@@ -209,7 +250,7 @@ async fn to_public_many(ctx: &RpcCtx, rows: &[IssueRow]) -> Result<Vec<IssuePubl
         .collect()
 }
 
-async fn load_issue_in_repo(
+pub(crate) async fn load_issue_in_repo(
     ctx: &RpcCtx,
     repo_id: &str,
     number: i64,
@@ -289,7 +330,27 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
-    to_public(ctx, &row).await
+    notify_actions_issue(ctx, &accessible, "opened", &row, &user).await;
+    // `milestone: <#N>` assigns at create — fires `milestoned` after `opened`
+    // (GitHub ordering: the open lands first).
+    if let Some(number) = req.milestone {
+        let milestone = ctx
+            .db
+            .find_milestone_by_repo_number(&accessible.row.id, number)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| AppError::new("milestone.not_found", "Milestone not found"))?;
+        apply_milestone(ctx, &accessible, &row, Some(&milestone), &user).await?;
+    }
+    to_public(
+        ctx,
+        &ctx.db
+            .find_issue_by_id(&row.id)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(issue_not_found)?,
+    )
+    .await
 }
 
 /// `issue.get` — Read+; soft `repo.not_found` for unauthorized private (D-ISS-20).
@@ -350,11 +411,45 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    // GitHub `milestone` filter — a milestone `#N`, `*` (has any), or
+    // `none` (no milestone). An unknown number yields an empty page, same
+    // as the author/assignee resolution above.
+    let milestone_row = match req.milestone.as_deref().map(str::trim) {
+        None | Some("") | Some("*") | Some("none") => None,
+        Some(n) => {
+            let number: i64 = n.parse().map_err(|_| {
+                AppError::new("rpc.bad_input", format!("invalid milestone filter: {n}"))
+            })?;
+            let row = ctx
+                .db
+                .find_milestone_by_repo_number(&accessible.row.id, number)
+                .await
+                .map_err(db_err)?;
+            if row.is_none() {
+                return Ok(IssueListResponse {
+                    issues: vec![],
+                    total: 0,
+                });
+            }
+            row
+        }
+    };
+    let milestone = match req.milestone.as_deref().map(str::trim) {
+        Some("*") => oxidean_db::MilestoneListFilter::Has,
+        Some("none") => oxidean_db::MilestoneListFilter::Unset,
+        Some(n) if !n.is_empty() => match &milestone_row {
+            Some(m) => oxidean_db::MilestoneListFilter::Id(m.id.as_str()),
+            None => oxidean_db::MilestoneListFilter::Any,
+        },
+        _ => oxidean_db::MilestoneListFilter::Any,
+    };
+
     let filters = oxidean_db::IssueListFilters {
         state,
         author_id: author_id.as_deref(),
         label_id: label_id.as_deref(),
         assignee_id: assignee_id.as_deref(),
+        milestone,
         q: q.as_deref(),
         offset,
         limit,
@@ -389,8 +484,11 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     let user = require_verified(ctx).await?;
     let req: UpdateIssueRequest = serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.update input: {e}")))?;
-    if req.title.is_none() && req.body.is_none() {
-        return Err(AppError::new("rpc.bad_input", "title or body is required"));
+    if req.title.is_none() && req.body.is_none() && req.milestone.is_none() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "title, body, or milestone is required",
+        ));
     }
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     crate::repo::ensure_not_archived(&accessible)?;
@@ -408,7 +506,32 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         None => row.body.clone(),
     };
 
+    // `milestone` applies independently of title/body — `Some(Some(#N))`
+    // assigns, `Some(None)` clears, absent leaves the link alone.
+    if let Some(milestone_req) = &req.milestone {
+        let milestone = match milestone_req {
+            Some(number) => Some(
+                ctx.db
+                    .find_milestone_by_repo_number(&accessible.row.id, *number)
+                    .await
+                    .map_err(db_err)?
+                    .ok_or_else(|| AppError::new("milestone.not_found", "Milestone not found"))?,
+            ),
+            None => None,
+        };
+        apply_milestone(ctx, &accessible, &row, milestone.as_ref(), &user).await?;
+    }
+
     if new_title == row.title && new_body == row.body {
+        let row = if req.milestone.is_some() {
+            ctx.db
+                .find_issue_by_id(&row.id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(issue_not_found)?
+        } else {
+            row
+        };
         return to_public(ctx, &row).await;
     }
 
@@ -443,6 +566,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "edited", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -488,6 +612,7 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "closed", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -529,6 +654,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "reopened", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -791,10 +917,23 @@ pub async fn comments_create(
         &accessible.row.id,
         "issue_comment",
         "created",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "created",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     comment_to_public(ctx, &row).await
 }
 
@@ -854,10 +993,23 @@ pub async fn comments_update(
         &accessible.row.id,
         "issue_comment",
         "edited",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "edited",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     comment_to_public(ctx, &updated).await
 }
 
@@ -912,10 +1064,23 @@ pub async fn comments_delete(
         &accessible.row.id,
         "issue_comment",
         "deleted",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "deleted",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     Ok(DeleteIssueCommentResponse { ok: true })
 }
 
@@ -959,7 +1124,7 @@ pub async fn comments_history(
 
 /// `issue.labels.set` — Write+; replace label ids from effective repo set (D-ISS-07 / D-ISS-20).
 pub async fn labels_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
-    let _user = require_verified(ctx).await?;
+    let user = require_verified(ctx).await?;
     let req: SetIssueLabelsRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -995,10 +1160,40 @@ pub async fn labels_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueP
         }
     }
 
+    let before: std::collections::HashMap<String, oxidean_db::LabelRow> = ctx
+        .db
+        .list_labels_for_issue(&issue.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| (l.id.clone(), l))
+        .collect();
+
     ctx.db
         .set_issue_labels(&issue.id, &unique_ids)
         .await
         .map_err(db_err)?;
+
+    // `on: issues` `labeled`/`unlabeled` — one event per label delta, with
+    // `payload.label` naming the added/removed label (GitHub semantics).
+    let unique_set: std::collections::HashSet<&str> =
+        unique_ids.iter().map(String::as_str).collect();
+    let mut deltas: Vec<(&str, oxidean_db::LabelRow)> = Vec::new();
+    for (id, label) in &before {
+        if !unique_set.contains(id.as_str()) {
+            deltas.push(("unlabeled", label.clone()));
+        }
+    }
+    for id in &unique_ids {
+        if !before.contains_key(id) {
+            if let Ok(Some(label)) = ctx.db.find_label_by_id(id).await {
+                deltas.push(("labeled", label));
+            }
+        }
+    }
+    for (action, label) in deltas {
+        notify_actions_label_delta(ctx, &accessible, action, &issue, &label, &user).await;
+    }
 
     let refreshed = ctx
         .db
@@ -1442,4 +1637,258 @@ pub async fn links_remove(
         return Err(AppError::new("issue.link_not_found", "Link not found"));
     }
     Ok(RemoveIssueLinkResponse { ok: true })
+}
+
+/// `on: issues` Actions trigger — soft-fail (the mutation already committed).
+/// `action` is the same activity name the webhook fan-out emitted.
+/// `pub(crate)` for the project-card convert path — GitHub creates a real
+/// issue when a note is converted, and `issues.opened` fires alongside
+/// `project_card.converted`.
+pub(crate) async fn notify_actions_issue(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = crate::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let payload = crate::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            job_token_actor: crate::actions::events::rpc_caller_is_job_token(ctx),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
+}
+
+/// Set/clear an issue's milestone — shared by `issue.milestone.set`,
+/// `issue.create`, and `issue.update`. Emits `issues.milestoned`/
+/// `demilestoned` (webhook + Actions lifecycle) only on an actual change,
+/// matching GitHub.
+pub(crate) async fn apply_milestone(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    issue: &IssueRow,
+    milestone: Option<&oxidean_db::MilestoneRow>,
+    user: &oxidean_db::UserRow,
+) -> Result<(), AppError> {
+    let new_id = milestone.map(|m| m.id.as_str());
+    if issue.milestone_id.as_deref() == new_id {
+        return Ok(());
+    }
+    ctx.db
+        .set_issue_milestone(&issue.id, new_id)
+        .await
+        .map_err(db_err)?;
+    // GitHub fires `milestoned`/`demilestoned` on the *issues* event with
+    // the milestone object embedded — mirroring `notify_actions_label_delta`.
+    let (action, embed) = match milestone {
+        Some(m) => (
+            "milestoned",
+            serde_json::json!({
+                "number": m.number,
+                "title": m.title,
+                "state": m.state,
+                "due_on": m.due_on,
+            }),
+        ),
+        None => {
+            // Demilestoned embeds the *removed* milestone — resolve the
+            // previous id so receivers can tell which milestone was dropped.
+            let previous = match &issue.milestone_id {
+                Some(id) => ctx.db.find_milestone_by_id(id).await.ok().flatten(),
+                None => None,
+            };
+            (
+                "demilestoned",
+                previous
+                    .map(|m| {
+                        serde_json::json!({
+                            "number": m.number,
+                            "title": m.title,
+                            "state": m.state,
+                            "due_on": m.due_on,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null),
+            )
+        }
+    };
+    let mut payload = dispatch::issues_payload(
+        action,
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    payload["milestone"] = embed.clone();
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        action,
+        payload,
+        &ctx.env_name,
+    )
+    .await;
+    notify_actions_milestone_delta(ctx, accessible, action, issue, embed, user).await;
+    Ok(())
+}
+
+/// `on: issues` `milestoned`/`demilestoned` — same envelope as
+/// `notify_actions_label_delta`, with `payload.milestone` naming the
+/// added/removed milestone.
+async fn notify_actions_milestone_delta(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    milestone: serde_json::Value,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = crate::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let mut payload = crate::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    payload["milestone"] = milestone;
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            job_token_actor: crate::actions::events::rpc_caller_is_job_token(ctx),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
+}
+
+/// `on: issues` `labeled`/`unlabeled` — one dispatch per label delta; the
+/// `label` field names the added/removed label like GitHub's webhook body.
+async fn notify_actions_label_delta(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    label: &oxidean_db::LabelRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = crate::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let mut payload = crate::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    payload["label"] = serde_json::json!({
+        "id": label.id,
+        "name": label.name,
+        "color": label.color,
+        "description": label.description,
+    });
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            job_token_actor: crate::actions::events::rpc_caller_is_job_token(ctx),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
 }

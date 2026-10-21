@@ -140,6 +140,18 @@ const PULL_COLS_PG: &str = concat!(
     "(SELECT COUNT(*)::bigint FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
+/// MySQL stores timestamps as TIMESTAMP/DATETIME; decode as RFC3339 strings.
+const PULL_COLS_MYSQL: &str = concat!(
+    "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, head_repo_id, head_ref, head_sha, ",
+    "DATE_FORMAT(merged_at, '%Y-%m-%dT%H:%i:%sZ') AS merged_at, ",
+    "merged_by, merge_commit_sha, merge_method, ",
+    "DATE_FORMAT(closed_at, '%Y-%m-%dT%H:%i:%sZ') AS closed_at, ",
+    "closed_by, ",
+    "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, ",
+    "DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at, ",
+    "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
+);
+
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_pull(
     pool: &DbPool,
@@ -233,6 +245,51 @@ pub async fn insert_pull(
         .ok_or_else(|| "insert pull failed: row missing after insert".into())
 }
 
+/// Id lookup — used by project-card enrichment and other cross-entity joins
+/// that only hold the row id.
+pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<PullRow>, String> {
+    let sql = format!("SELECT {PULL_COLS_PG} FROM pull_requests WHERE id = $1");
+    match pool {
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS} FROM pull_requests WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+    }
+}
+
 pub async fn find_by_repo_and_number(
     pool: &DbPool,
     repo_id: &str,
@@ -255,7 +312,7 @@ pub async fn find_by_repo_and_number(
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ? AND number = ?"
+                "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE repo_id = ? AND number = ?"
             )))
             .bind(repo_id)
             .bind(number)
@@ -398,7 +455,7 @@ pub async fn list_by_repo(
                 .await
                 .map_err(|e| format!("count pulls failed: {e}"))?;
                 let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ? AND state = ?
+                    "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE repo_id = ? AND state = ?
                      ORDER BY updated_at DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repo_id)
@@ -417,7 +474,7 @@ pub async fn list_by_repo(
                         .await
                         .map_err(|e| format!("count pulls failed: {e}"))?;
                 let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?
+                    "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE repo_id = ?
                      ORDER BY updated_at DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repo_id)
@@ -601,7 +658,7 @@ WHERE repo_id = ?
             .await
             .map_err(|e| format!("count pull search failed: {e}"))?;
             let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                r#"SELECT {PULL_COLS} FROM pull_requests
+                r#"SELECT {PULL_COLS_MYSQL} FROM pull_requests
 WHERE repo_id = ?
   AND (? IS NULL OR state = ?)
   AND (? IS NULL OR author_id = ?)
@@ -666,8 +723,9 @@ pub async fn set_state(
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE pull_requests SET state = ?, closed_at = ?, closed_by = ?,
-                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE pull_requests SET state = ?, \
+                 closed_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), \
+                 closed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(state)
             .bind(closed_at)
@@ -956,8 +1014,10 @@ pub async fn mark_merged(
         DbPool::MySql(p) => {
             sqlx::query(
                 "UPDATE pull_requests SET state = 'merged', merged_by = ?, merge_commit_sha = ?,
-                 merge_method = ?, merged_at = ?, closed_at = ?, closed_by = ?,
-                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                 merge_method = ?,
+                 merged_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),
+                 closed_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),
+                 closed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(merged_by)
             .bind(merge_commit_sha)
@@ -1912,7 +1972,9 @@ pub async fn dismiss_pull_review(
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE pull_reviews SET state = 'dismissed', dismissed_at = ?, dismiss_reason = ? WHERE id = ?",
+                "UPDATE pull_reviews SET state = 'dismissed',
+                 dismissed_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),
+                 dismiss_reason = ? WHERE id = ?",
             )
             .bind(dismissed_at)
             .bind(reason)

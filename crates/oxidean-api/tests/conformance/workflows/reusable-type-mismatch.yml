@@ -1,0 +1,7 @@
+name: reusable-type-mismatch
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/typed.yml
+    with:
+      flag: notabool

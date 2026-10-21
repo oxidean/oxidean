@@ -1,0 +1,5 @@
+name: reusable-coe-callee
+on: push
+jobs:
+  call:
+    uses: ./.github/workflows/coe-callee.yml

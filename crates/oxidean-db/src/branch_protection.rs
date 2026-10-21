@@ -22,6 +22,9 @@ pub struct BranchProtectionRuleRow {
     pub required_linear_history: bool,
     pub lock_branch: bool,
     pub require_signed_commits: bool,
+    /// GitHub ruleset "Require merge queue" — matching branches route merges
+    /// through `merge_queue_entries`/`merge_groups` instead of direct merge.
+    pub required_merge_queue: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -90,6 +93,7 @@ macro_rules! map_rule {
             required_linear_history: flag_col!(row, "required_linear_history"),
             lock_branch: flag_col!(row, "lock_branch"),
             require_signed_commits: flag_col!(row, "require_signed_commits"),
+            required_merge_queue: flag_col!(row, "required_merge_queue"),
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("rule created_at: {e}"))?,
@@ -139,6 +143,7 @@ const RULE_SELECT_PG: &str =
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+ required_merge_queue, \
  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, \
  to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at \
  FROM branch_protection_rules";
@@ -148,6 +153,7 @@ const RULE_SELECT_MYSQL: &str =
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+ required_merge_queue, \
  DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, \
  DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at \
  FROM branch_protection_rules";
@@ -157,6 +163,7 @@ const RULE_SELECT_SQLITE: &str =
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+ required_merge_queue, \
  strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at, \
  strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at \
  FROM branch_protection_rules";
@@ -303,6 +310,7 @@ pub async fn insert_rule(
     required_linear_history: bool,
     lock_branch: bool,
     require_signed_commits: bool,
+    required_merge_queue: bool,
 ) -> Result<BranchProtectionRuleRow, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -311,8 +319,9 @@ pub async fn insert_rule(
                id, repo_id, pattern, require_reviews, required_approving_review_count, \
                dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
                required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
-               enforce_admins, required_linear_history, lock_branch, require_signed_commits) \
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
+               enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+               required_merge_queue) \
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
             )
             .bind(id)
             .bind(repo_id)
@@ -330,6 +339,7 @@ pub async fn insert_rule(
             .bind(required_linear_history)
             .bind(lock_branch)
             .bind(require_signed_commits)
+            .bind(required_merge_queue)
             .execute(p)
             .await
             .map_err(|e| format!("insert branch_protection_rule: {e}"))?;
@@ -340,8 +350,9 @@ pub async fn insert_rule(
                id, repo_id, pattern, require_reviews, required_approving_review_count, \
                dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
                required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
-               enforce_admins, required_linear_history, lock_branch, require_signed_commits) \
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+               enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+               required_merge_queue) \
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .bind(id)
             .bind(repo_id)
@@ -359,6 +370,7 @@ pub async fn insert_rule(
             .bind(as_int(required_linear_history))
             .bind(as_int(lock_branch))
             .bind(as_int(require_signed_commits))
+            .bind(as_int(required_merge_queue))
             .execute(p)
             .await
             .map_err(|e| format!("insert branch_protection_rule: {e}"))?;
@@ -369,8 +381,9 @@ pub async fn insert_rule(
                id, repo_id, pattern, require_reviews, required_approving_review_count, \
                dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
                required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
-               enforce_admins, required_linear_history, lock_branch, require_signed_commits) \
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+               enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
+               required_merge_queue) \
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             )
             .bind(id)
             .bind(repo_id)
@@ -388,6 +401,7 @@ pub async fn insert_rule(
             .bind(as_int(required_linear_history))
             .bind(as_int(lock_branch))
             .bind(as_int(require_signed_commits))
+            .bind(as_int(required_merge_queue))
             .execute(p)
             .await
             .map_err(|e| format!("insert branch_protection_rule: {e}"))?;
@@ -417,6 +431,7 @@ pub async fn update_rule(
     required_linear_history: bool,
     lock_branch: bool,
     require_signed_commits: bool,
+    required_merge_queue: bool,
 ) -> Result<BranchProtectionRuleRow, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -426,7 +441,8 @@ pub async fn update_rule(
                   require_conversation_resolution=$5, require_last_push_approval=$6, \
                   required_status_contexts=$7, strict_status_checks=$8, allow_force_pushes=$9, \
                   allow_deletions=$10, enforce_admins=$11, required_linear_history=$12, \
-                  lock_branch=$13, require_signed_commits=$14, updated_at=now() WHERE repo_id=$15 AND id=$16",
+                  lock_branch=$13, require_signed_commits=$14, required_merge_queue=$15, \
+                  updated_at=now() WHERE repo_id=$16 AND id=$17",
             )
             .bind(pattern)
             .bind(require_reviews)
@@ -442,6 +458,7 @@ pub async fn update_rule(
             .bind(required_linear_history)
             .bind(lock_branch)
             .bind(require_signed_commits)
+            .bind(required_merge_queue)
             .bind(repo_id)
             .bind(rule_id)
             .execute(p)
@@ -458,7 +475,7 @@ pub async fn update_rule(
                   require_conversation_resolution=?, require_last_push_approval=?, \
                   required_status_contexts=?, strict_status_checks=?, allow_force_pushes=?, \
                   allow_deletions=?, enforce_admins=?, required_linear_history=?, \
-                  lock_branch=?, require_signed_commits=?, \
+                  lock_branch=?, require_signed_commits=?, required_merge_queue=?, \
                   updated_at=CURRENT_TIMESTAMP WHERE repo_id=? AND id=?",
             )
             .bind(pattern)
@@ -475,6 +492,7 @@ pub async fn update_rule(
             .bind(as_int(required_linear_history))
             .bind(as_int(lock_branch))
             .bind(as_int(require_signed_commits))
+            .bind(as_int(required_merge_queue))
             .bind(repo_id)
             .bind(rule_id)
             .execute(p)
@@ -491,9 +509,9 @@ pub async fn update_rule(
                   require_conversation_resolution=?5, require_last_push_approval=?6, \
                   required_status_contexts=?7, strict_status_checks=?8, allow_force_pushes=?9, \
                   allow_deletions=?10, enforce_admins=?11, required_linear_history=?12, \
-                  lock_branch=?13, require_signed_commits=?14, \
+                  lock_branch=?13, require_signed_commits=?14, required_merge_queue=?15, \
                   updated_at=strftime('%Y-%m-%d %H:%M:%S','now') \
-                  WHERE repo_id=?15 AND id=?16",
+                  WHERE repo_id=?16 AND id=?17",
             )
             .bind(pattern)
             .bind(as_int(require_reviews))
@@ -509,6 +527,7 @@ pub async fn update_rule(
             .bind(as_int(required_linear_history))
             .bind(as_int(lock_branch))
             .bind(as_int(require_signed_commits))
+            .bind(as_int(required_merge_queue))
             .bind(repo_id)
             .bind(rule_id)
             .execute(p)

@@ -1,0 +1,8 @@
+name: run-shell-sh
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "shell is $0"
+        shell: sh

@@ -784,3 +784,141 @@ async fn deploy_key_does_not_affect_account_key() {
         "account key keeps full repo access"
     );
 }
+
+/// GitHub REST surface for deploy keys — `/repos/{o}/{r}/keys` list/get/add/del
+/// with `{title, key, read_only}` ↔ `{title, public_key, can_write}` mapping.
+#[tokio::test]
+async fn rest_deploy_keys() {
+    let dir = TempDir::new().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_keys.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, v) = signup_and_login(&app, "dk@ex.com", "dkown").await;
+    verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.create","input":{"name":"keyrepo","visibility":"private"}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let created: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+        panic!(
+            "repo.create status {status} body: {}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    assert_eq!(created["ok"], true, "{created}");
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/dkown/keyrepo/keys",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        "/api/v1/repos/dkown/keyrepo/keys",
+        &cookie,
+        Some(format!(
+            r#"{{"title":"ci","key":"{ED25519_A}","read_only":true}}"#
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["title"], "ci");
+    assert_eq!(v["key"], ED25519_A);
+    assert_eq!(v["read_only"], true);
+    let kid = v["id"].as_str().unwrap().to_string();
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/dkown/keyrepo/keys",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/repos/dkown/keyrepo/keys/{kid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["title"], "ci");
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/dkown/keyrepo/keys/nope",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("/api/v1/repos/dkown/keyrepo/keys/{kid}"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/dkown/keyrepo/keys",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+}
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<String>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or_default())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}

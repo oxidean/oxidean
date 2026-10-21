@@ -366,6 +366,7 @@ async fn search_issues(
         author_id: author_id.as_deref(),
         label_id: None,
         assignee_id: None,
+        milestone: oxidean_db::MilestoneListFilter::Any,
         q: q_opt,
         offset: offset as i64,
         limit: fetch_limit as i64,

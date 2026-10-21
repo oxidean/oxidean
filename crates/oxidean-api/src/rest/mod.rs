@@ -15,16 +15,22 @@
 //! Auth: the `oxidean_session` cookie wins; `Authorization: Bearer <pat>`
 //! applies when no cookie is present — same as `/api/rpc` (API-02).
 
+mod actions;
 mod admin;
+mod checks;
 mod issues;
 pub mod openapi;
 mod orgs;
+mod packages;
+mod pages;
+mod projects;
 mod pulls;
 mod releases;
 mod repos;
 pub mod spec;
 mod statuses;
 mod users;
+mod wiki;
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};

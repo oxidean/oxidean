@@ -1,0 +1,7 @@
+name: push-skip-ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo should-never-run

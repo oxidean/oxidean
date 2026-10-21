@@ -866,3 +866,197 @@ async fn notification_pr_close_notifies_author() {
         "expected pr_closed — {listed}"
     );
 }
+
+fn rest_req(method: &str, uri: &str, cookie: Option<&str>) -> Request<Body> {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    b.body(Body::empty()).unwrap()
+}
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(rest_req(method, uri, Some(cookie)))
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub REST surface: `/notifications` list (all/participating/paging),
+/// `/notifications/threads/{id}` get + mark-read (205), `PUT /notifications`
+/// (202), and the repo-scoped list/mark-read pair.
+#[tokio::test]
+async fn notification_rest_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("notif_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (author_cookie, author_v) = signup_and_login(&app, "rnot@ex.com", "rnot").await;
+    verify_user(&db, author_v["data"]["id"].as_str().unwrap()).await;
+    create_repo(&app, &author_cookie, "talk").await;
+    create_issue(&app, &author_cookie, "rnot", "talk", "Hello").await;
+
+    let (writer_cookie, writer_v) = signup_and_login(&app, "rwri@ex.com", "rwri").await;
+    verify_user(&db, writer_v["data"]["id"].as_str().unwrap()).await;
+    let add = rpc_json(
+        &app,
+        &author_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"rnot","name":"talk","username":"rwri","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(add["ok"], true, "{add}");
+    let comment = rpc_json(
+        &app,
+        &writer_cookie,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"rnot","name":"talk","number":1,"body":"ping"}}"#,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+
+    // Anonymous → 401.
+    let anon = app
+        .clone()
+        .oneshot(rest_req("GET", "/api/v1/notifications", None))
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    // Global list — GitHub thread shape.
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications", &author_cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let rows = v.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let t = &rows[0];
+    assert_eq!(t["unread"], true);
+    assert_eq!(t["reason"], "issue_comment");
+    assert_eq!(t["subject"]["type"], "Issue");
+    assert_eq!(t["subject"]["url"], "/api/v1/repos/rnot/talk/issues/1");
+    assert_eq!(t["repository"]["full_name"], "rnot/talk");
+    assert_eq!(t["repository"]["owner"]["login"], "rnot");
+    let thread_id = t["id"].as_str().unwrap().to_string();
+
+    // Writer sees nothing.
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications", &writer_cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // Repo-scoped list.
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/rnot/talk/notifications",
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    // Thread GET + PATCH (205).
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("/api/v1/notifications/threads/{thread_id}"),
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], thread_id);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/notifications/threads/nope",
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = rest(
+        &app,
+        "PATCH",
+        &format!("/api/v1/notifications/threads/{thread_id}"),
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::RESET_CONTENT);
+
+    // Default (unread) now empty; all=true shows it read.
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications", &author_cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/notifications?all=true",
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["unread"], false);
+
+    // Second comment → repo-scoped PUT marks it read (202).
+    let comment2 = rpc_json(
+        &app,
+        &writer_cookie,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"rnot","name":"talk","number":1,"body":"again"}}"#,
+    )
+    .await;
+    assert_eq!(comment2["ok"], true, "{comment2}");
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/repos/rnot/talk/notifications",
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        "/api/v1/repos/rnot/talk/notifications",
+        &author_cookie,
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications", &author_cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // PUT /notifications (mark-all) — 202 even when nothing unread.
+    let (s, _) = rest(&app, "PUT", "/api/v1/notifications", &author_cookie).await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+}
+
+/// `GET /notifications/new` — Gitea unread-count shape `{new: N}`.
+#[tokio::test]
+async fn rest_notifications_new_count() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("notif_new.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, v) = signup_and_login(&app, "new@ex.com", "newc").await;
+    verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
+
+    let (s, v) = rest(&app, "GET", "/api/v1/notifications/new", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["new"], 0, "{v}");
+}

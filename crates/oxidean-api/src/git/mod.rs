@@ -34,6 +34,18 @@ pub fn bare_repo_path(repos_dir: &Path, owner: &str, name: &str) -> Result<PathB
     Ok(repos_dir.join(owner).join(format!("{name}.git")))
 }
 
+/// Split a git-transport repo name into `(base_name, is_wiki)` — GitHub
+/// wikis clone as `{owner}/{name}.wiki.git`, so a request for `name.wiki`
+/// targets the wiki bare (`{name}.wiki.git` on disk) of repository `name`.
+/// Repo creation rejects `.wiki`-suffixed names so the split never shadows
+/// a real repo (see `oxidean_core::repo_types::validate_repo_name`).
+pub fn split_wiki_name(name: &str) -> (&str, bool) {
+    match name.strip_suffix(".wiki") {
+        Some(base) if !base.is_empty() => (base, true),
+        _ => (name, false),
+    }
+}
+
 /// Tip OID of `refs/heads/{branch}` in a bare repo — `Ok(None)` when the branch
 /// is absent. Shared by fork-sync and update-PR-branch paths (GIT-24).
 pub async fn branch_tip(

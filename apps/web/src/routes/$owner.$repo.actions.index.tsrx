@@ -11,9 +11,24 @@ import type {
   ActionRunsListResponse,
   ActionWorkflowPublic,
 } from "@oxidean/api-client";
-import { CheckCircle2, Circle, Loader2, Play, Plus, Workflow, XCircle } from "@octanejs/lucide";
+import {
+  CheckCircle2,
+  Circle,
+  Ellipsis,
+  Loader2,
+  Play,
+  Plus,
+  Workflow,
+  XCircle,
+} from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +40,11 @@ import {
   filtersActive,
   type ActionsFilterDraft,
 } from "@/components/repo/actions-filters";
+import {
+  ActionsDispatchInputs,
+  initialDispatchInputs,
+  type DispatchInputValues,
+} from "@/components/repo/actions-dispatch-inputs";
 import { WorkflowTemplateCatalog } from "@/components/repo/workflow-template-catalog";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
@@ -33,6 +53,7 @@ import {
   ACTIONS_RUNS_PER_PAGE,
   actionsDispatchWorkflowMutation,
   actionsRunsQuery,
+  actionsSetWorkflowEnabledMutation,
   actionsWorkflowsQuery,
   actionsWorkflowTemplatesQuery,
   type ActionsRunFilters,
@@ -209,6 +230,7 @@ function RepoActionsPageContent() @{
   const [dispatchWorkflow, setDispatchWorkflow] = useState("");
   const [dispatchRef, setDispatchRef] = useState("");
   const [dispatchError, setDispatchError] = useState("");
+  const [dispatchInputs, setDispatchInputs] = useState<DispatchInputValues>({});
 
   const filters: ActionsRunFilters = {
     status: search.status,
@@ -256,7 +278,7 @@ function RepoActionsPageContent() @{
   const workflows =
     workflowsQ.data?.workflows ??
     (routeLoader?.kind === "ready" ? (routeLoader.workflows ?? []) : []);
-  const dispatchable = workflows.filter((w) => w.supports_dispatch);
+  const dispatchable = workflows.filter((w) => w.supports_dispatch && !w.disabled);
 
   // Writer with no workflow files and no filters → inline template catalog.
   // Wait for the workflows query to settle first so the catalog query does
@@ -272,6 +294,12 @@ function RepoActionsPageContent() @{
     : null;
 
   const qc = useQueryClient();
+  const toggleM = useMutation({
+    ...actionsSetWorkflowEnabledMutation(),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["repo", "actions", "listWorkflows"] });
+    },
+  });
   const dispatchM = useMutation({
     ...actionsDispatchWorkflowMutation(),
     onSuccess: async () => {
@@ -316,21 +344,41 @@ function RepoActionsPageContent() @{
     goSearch({ ...search, workflow: path === (search.workflow ?? "") ? "" : path });
   }
 
+  const selectedWorkflow = dispatchable.find((w) => w.path === dispatchWorkflow);
+  const declaredInputs = selectedWorkflow?.inputs ?? [];
+  const missingRequired = declaredInputs.some(
+    (i) =>
+      i.required === true &&
+      (dispatchInputs[i.name] === undefined || dispatchInputs[i.name] === ""),
+  );
+
   function openDispatch(workflowPath?: string) {
     setDispatchError("");
     setDispatchRef(repo?.default_branch || "main");
-    setDispatchWorkflow(workflowPath ?? dispatchable[0]?.path ?? "");
+    const next = workflowPath ?? dispatchable[0]?.path ?? "";
+    setDispatchWorkflow(next);
+    setDispatchInputs(
+      initialDispatchInputs(dispatchable.find((w) => w.path === next)?.inputs ?? []),
+    );
     setDispatchOpen(true);
   }
 
+  function pickDispatchWorkflow(path: string) {
+    setDispatchWorkflow(path);
+    setDispatchInputs(
+      initialDispatchInputs(dispatchable.find((w) => w.path === path)?.inputs ?? []),
+    );
+  }
+
   function submitDispatch() {
-    if (!dispatchWorkflow || !dispatchRef.trim()) return;
+    if (!dispatchWorkflow || !dispatchRef.trim() || missingRequired) return;
     setDispatchError("");
     dispatchM.mutate({
       owner,
       name: repoName,
       workflow_id: dispatchWorkflow,
       git_ref: dispatchRef.trim(),
+      inputs: dispatchInputs,
     });
   }
 
@@ -406,11 +454,30 @@ function RepoActionsPageContent() @{
                   <Workflow
                     aria-hidden
                     size={15}
-                    className="shrink-0 text-muted-foreground"
+                    className={cn(
+                      "shrink-0",
+                      w.disabled ? "text-muted-foreground/50" : "text-muted-foreground",
+                    )}
                   />
-                  <span className="min-w-0 truncate">{w.name as string}</span>
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      w.disabled ? "text-muted-foreground" : "",
+                    )}
+                  >
+                    {w.name as string}
+                  </span>
+                  {w.disabled ? (
+                    <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+                      Disabled
+                    </span>
+                  ) : undefined}
                 </button>
-                @if (canWrite && w.supports_dispatch) {
+                @if (
+                  canWrite &&
+                  w.supports_dispatch &&
+                  !w.disabled
+                ) {
                   <button
                     type="button"
                     data-testid={`actions-dispatch-${w.path}`}
@@ -421,6 +488,33 @@ function RepoActionsPageContent() @{
                   >
                     <Play aria-hidden size={13} />
                   </button>;
+                }
+                @if (canWrite) {
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      data-testid={`actions-workflow-menu-${w.path}`}
+                      aria-label={`Actions for ${w.name}`}
+                      className="mr-1 hidden shrink-0 rounded p-1 text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:inline-flex data-[popup-open]:inline-flex"
+                    >
+                      <Ellipsis aria-hidden size={13} />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-44">
+                      <DropdownMenuItem
+                        data-testid={`actions-toggle-${w.path}`}
+                        disabled={toggleM.isPending}
+                        onClick={() =>
+                          toggleM.mutate({
+                            owner,
+                            name: repoName,
+                            path: w.path,
+                            enabled: !w.disabled,
+                          })
+                        }
+                      >
+                        {w.disabled ? "Enable workflow" : "Disable workflow"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>;
                 }
               </div>;
             }
@@ -646,7 +740,7 @@ function RepoActionsPageContent() @{
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted/40",
                     )}
-                    onClick={() => setDispatchWorkflow(w.path)}
+                    onClick={() => pickDispatchWorkflow(w.path)}
                   >
                     <span className="block font-medium text-foreground">
                       {w.name as string}
@@ -667,6 +761,21 @@ function RepoActionsPageContent() @{
                 placeholder="main"
               />
             </div>
+            @if (declaredInputs.length > 0) {
+              <div className="flex flex-col gap-3">
+                <span className="text-[14px] font-medium text-foreground">Inputs</span>
+                <ActionsDispatchInputs
+                  owner={owner}
+                  name={repoName}
+                  inputs={declaredInputs}
+                  values={dispatchInputs}
+                  disabled={dispatchM.isPending}
+                  onChange={(key, value) =>
+                    setDispatchInputs((prev) => ({ ...prev, [key]: value }))
+                  }
+                />
+              </div>;
+            }
             <p
               role="alert"
               className={
@@ -688,7 +797,12 @@ function RepoActionsPageContent() @{
               </Button>
               <Button
                 type="button"
-                disabled={!dispatchWorkflow || !dispatchRef.trim() || dispatchM.isPending}
+                disabled={
+                  !dispatchWorkflow ||
+                  !dispatchRef.trim() ||
+                  missingRequired ||
+                  dispatchM.isPending
+                }
                 onClick={submitDispatch}
               >
                 {(dispatchM.isPending ? "Running…" : "Run workflow") as string}

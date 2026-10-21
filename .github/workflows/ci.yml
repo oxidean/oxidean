@@ -181,6 +181,7 @@ jobs:
     name: rust-build
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: read
@@ -199,10 +200,30 @@ jobs:
         # Consumers run the exact artifacts this produces.
         env:
           CARGO_TARGET_DIR: /ci/target-dev
+          # Test binaries need no DWARF — the giant api units peak near
+          # 13 GB with debug=2; deps build under profile.dev so cooked
+          # fingerprints are unaffected.
+          CARGO_PROFILE_TEST_DEBUG: "0"
+          CARGO_BUILD_JOBS: "3"
         run: |
           set -euo pipefail
           df -h /
+          ( while :; do \
+              date +%H:%M:%S; \
+              free -m | awk 'NR==2{printf "mem used=%dM avail=%dM\n",$3,$7}'; \
+              ps -eo rss,etime,args --sort=-rss | head -4 | cut -c1-150; \
+              sleep 30; \
+            done ) &
+          MON=$!
+          trap 'kill $MON 2>/dev/null || true' EXIT
           cargo build --workspace --bins
+          # oxidean-api's libtest + rlib are each ~7-13 GB rustc units; two at
+          # once OOM the runner (telemetry: 2×7.6 GB → 97 MB avail → 137).
+          # api is a leaf crate — nothing else links it — so --exclude can't
+          # split the pair. Workspace-scoped --lib resolves the same dep
+          # graph as --all-targets, so this libtest caches straight into the
+          # archive; its rlib then builds alone (test bins queue behind it).
+          cargo test --workspace --lib --features server --no-run
           mkdir -p target
           cargo nextest archive --workspace --features server \
             --archive-file target/nextest-archive.tar.zst
@@ -433,6 +454,7 @@ jobs:
     name: coverage-weighted
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
@@ -449,6 +471,11 @@ jobs:
     env:
       CARGO_LLVM_COV_TARGET_DIR: /ci/target-cov
       NEXTEST_PROFILE: "ci"
+      # Instrumented test binaries + full DWARF push concurrent links past
+      # the runner's memory ceiling. Line tables are enough for llvm-cov
+      # region mapping; deps still build under profile.dev fingerprints.
+      CARGO_PROFILE_TEST_DEBUG: "1"
+      CARGO_BUILD_JOBS: "3"
     steps:
       - uses: actions/checkout@v7
       - name: bun install
@@ -459,8 +486,27 @@ jobs:
         # Collection only — the weighted gate composition (25/40/35) does not
         # consume these numbers.
         run: |
+          set -euo pipefail
           df -h /
-          make coverage-rust
+          mkdir -p var/coverage
+          ( while :; do \
+              date +%H:%M:%S; \
+              free -m | awk 'NR==2{printf "mem used=%dM avail=%dM\n",$3,$7}'; \
+              ps -eo rss,etime,args --sort=-rss | head -4 | cut -c1-150; \
+              sleep 30; \
+            done ) &
+          MON=$!
+          trap 'kill $MON 2>/dev/null || true' EXIT
+          # oxidean-api compiles twice per run — dev-profile rlib + test-profile
+          # libtest — at ~7.6 GB RSS each under instrumentation; concurrent
+          # they OOM the 16 GB runner. Build libtest alone first so the two
+          # giants never overlap, then let nextest reuse the cached units.
+          cargo llvm-cov --no-report --lib -p oxidean-api
+          cargo llvm-cov nextest --no-report -p oxidean-api
+          cargo llvm-cov nextest --no-report --workspace --exclude oxidean-api
+          cargo llvm-cov report --lcov --output-path var/coverage/rust-lcov.info
+          cargo llvm-cov report --json --output-path var/coverage/rust-summary.json
+          echo "==> rust coverage in var/coverage/rust-*.{info,json}"
       - name: collect web coverage + weighted gate
         env:
           COVERAGE_WEIGHTED_FLOOR: "0.70"
@@ -807,13 +853,28 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe) or binary_id(oxidean-db::dialect_vcs)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          # sqlite serializes: both probe binaries share one database file
-          # and parallel migrations race (duplicate column on migration 6).
+          # sqlite serializes: the probe/vcs/actions binaries share one
+          # database file and parallel migrations race (duplicate column on
+          # migration 6).
           probe sqlite sqlite:./var/oxidean.db --test-threads=1
+          # API actions conformance on real engines: every test provisions a
+          # fresh oxt_<uuid> database through OXIDEAN_TEST_DATABASE_URL. MySQL
+          # needs the root URL — MYSQL_USER only owns the oxidean schema.
+          # ubuntu-latest has git + bash + docker, so docker_gated conformance
+          # cases execute for real here.
+          for admin_url in \
+            "postgres://oxidean:oxidean@localhost:5432/postgres" \
+            "mysql://root:oxidean@127.0.0.1:3306/"; do
+            echo "==> workflow_conformance: $admin_url"
+            OXIDEAN_TEST_DATABASE_URL="$admin_url" \
+              cargo nextest run --archive-file target/nextest-archive.tar.zst \
+                --workspace-remap "${{ github.workspace }}" \
+                --profile ci -E 'binary_id(oxidean-api::workflow_conformance)'
+          done
 
   # Dedicated leg for the `server`-gated oxidean-vcs suite: the tests live
   # behind a non-default feature, so without `--features server` on the

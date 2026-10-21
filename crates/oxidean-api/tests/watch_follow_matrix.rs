@@ -1001,6 +1001,9 @@ jobs:
         "refs/heads/main",
         Some(&pusher_id),
         None,
+        None,
+        false,
+        None,
     )
     .await
     .unwrap();
@@ -1148,6 +1151,9 @@ async fn workflow_run_failure_fanout() {
         "refs/heads/main",
         Some(&pusher_id),
         None,
+        None,
+        false,
+        None,
     )
     .await
     .unwrap();
@@ -1269,6 +1275,9 @@ async fn workflow_run_cancel_fanout_and_finished_guard() {
         "deadbeef",
         "refs/heads/main",
         Some(&owner_id),
+        None,
+        None,
+        false,
         None,
     )
     .await
@@ -1421,4 +1430,177 @@ async fn banned_users_unfollowable_and_hidden_from_follow_lists() {
         0,
         "banned followed user excluded from profile count"
     );
+}
+
+fn rest_req(method: &str, uri: &str, cookie: Option<&str>, body: Option<&str>) -> Request<Body> {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    b.body(Body::from(body.unwrap_or("").to_owned())).unwrap()
+}
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+    body: Option<&str>,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(rest_req(method, uri, cookie, body))
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub REST surface for follows — `/user/following*`, `/users/{u}/followers`,
+/// `/users/{u}/following`, `/users/{u}/following/{target}`.
+#[tokio::test]
+async fn rest_user_follows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_follows.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (alice, alice_v) = signup_and_login(&app, "ra@ex.com", "ralice").await;
+    verify_user(&db, alice_v["data"]["id"].as_str().unwrap()).await;
+    let (_bob, bob_v) = signup_and_login(&app, "rb@ex.com", "rbob").await;
+    verify_user(&db, bob_v["data"]["id"].as_str().unwrap()).await;
+
+    // anonymous list routes are OK (empty), mutations need auth
+    let (s, v) = rest(&app, "GET", "/api/v1/users/ralice/followers", None, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+    let (s, _) = rest(&app, "PUT", "/api/v1/user/following/rbob", None, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    // follow → 204; lists + checks reflect it
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        "/api/v1/user/following/rbob",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/following/rbob",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/users/ralice/following/rbob",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest(&app, "GET", "/api/v1/user/following", Some(&alice), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["login"], "rbob");
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/users/rbob/followers",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["login"], "ralice");
+
+    // unfollow → 204; checks 404
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/user/following/rbob",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/following/rbob",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+/// GitHub REST surface for account emails — `/user/emails` list/add/delete
+/// with GitHub's `{emails: [..]}` bodies and `{email, primary, verified}` rows.
+#[tokio::test]
+async fn rest_user_emails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_emails.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, v) = signup_and_login(&app, "em@ex.com", "emuser").await;
+    verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
+
+    let (s, v) = rest(&app, "GET", "/api/v1/user/emails", Some(&cookie), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let rows = v.as_array().unwrap();
+    assert!(rows
+        .iter()
+        .any(|e| e["email"] == "em@ex.com" && e["primary"] == true));
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        "/api/v1/user/emails",
+        Some(&cookie),
+        Some(r#"{"emails":["second@ex.com"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert!(v
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["email"] == "second@ex.com"));
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/user/emails",
+        Some(&cookie),
+        Some(r#"{"emails":["second@ex.com"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, v) = rest(&app, "GET", "/api/v1/user/emails", Some(&cookie), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(!v
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["email"] == "second@ex.com"));
 }

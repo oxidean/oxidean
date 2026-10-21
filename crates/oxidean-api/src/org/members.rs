@@ -16,7 +16,7 @@ fn is_admin_plus(role: OrgRole) -> bool {
 }
 
 /// Caller must be Admin or Owner.
-async fn require_admin_plus(
+pub(crate) async fn require_admin_plus(
     ctx: &RpcCtx,
     org: &OrganizationRow,
     caller: &UserRow,

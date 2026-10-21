@@ -1,0 +1,5 @@
+name: reusable-nested
+on: [push]
+jobs:
+  outer:
+    uses: ./.github/workflows/mid.yml

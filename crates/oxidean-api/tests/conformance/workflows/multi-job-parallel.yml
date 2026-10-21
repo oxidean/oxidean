@@ -1,0 +1,11 @@
+name: multi-job-parallel
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo from build
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo from test

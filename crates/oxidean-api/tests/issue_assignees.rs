@@ -333,3 +333,81 @@ async fn issue_assignees_write_unassign() {
     );
     assert_eq!(reader_denied["error"]["code"], "repo.not_found");
 }
+
+/// GitHub `/repos/{o}/{r}/assignees*` REST surface over `issue.assigneeCandidates`.
+#[tokio::test]
+async fn rest_assignees_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("issue_assignees_rest.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let (owner_cookie, _, _, _) = setup_private_assign_fixture(&app, &db).await;
+
+    fn get(uri: &str, cookie: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("cookie", cookie)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    // List → GitHub user-shape array containing all collaborators.
+    let res = app
+        .clone()
+        .oneshot(get("/api/v1/repos/asg-org/core/assignees", &owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let logins: Vec<&str> = v
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|u| u["login"].as_str())
+        .collect();
+    for want in ["asgown", "asgwrite", "asgread"] {
+        assert!(logins.contains(&want), "missing {want} in {logins:?}");
+    }
+    assert!(!logins.contains(&"asgout"), "{logins:?}");
+
+    // Prefix filter narrows the list.
+    let res = app
+        .clone()
+        .oneshot(get(
+            "/api/v1/repos/asg-org/core/assignees?prefix=asgw",
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1, "{v}");
+
+    // Check → 204 assignable / 404 outsider.
+    let res = app
+        .clone()
+        .oneshot(get(
+            "/api/v1/repos/asg-org/core/assignees/asgwrite",
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = app
+        .clone()
+        .oneshot(get(
+            "/api/v1/repos/asg-org/core/assignees/asgout",
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

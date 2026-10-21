@@ -1,0 +1,7 @@
+name: run-fail
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1

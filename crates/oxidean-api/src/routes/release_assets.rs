@@ -90,7 +90,7 @@ pub async fn remove_asset_file(release_assets_dir: &Path, asset_id: &str) {
 /// CLI's path, so PATs (which never mint sessions) are honored alongside
 /// browser cookies. Returns the user id plus the `PatIdentity` (when
 /// bearer-authed) so callers can scope-gate the operation.
-async fn resolve_session_user_id(
+pub(crate) async fn resolve_session_user_id(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Option<(String, Option<crate::pat::bearer::PatIdentity>)> {

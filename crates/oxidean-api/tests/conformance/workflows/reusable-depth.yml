@@ -1,0 +1,5 @@
+name: reusable-depth
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/depth-a.yml

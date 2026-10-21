@@ -1,0 +1,15 @@
+name: concurrency-cancel-running
+on: [push]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Generous sleeps — the supersede push must land mid-flight even on
+      # slow engines (a per-test postgres under load needs seconds).
+      - run: sleep 1 && echo s1
+      - run: sleep 1 && echo s2
+      - run: sleep 1 && echo s3
+      - run: echo s4-final

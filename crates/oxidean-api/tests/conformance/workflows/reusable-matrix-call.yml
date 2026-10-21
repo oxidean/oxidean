@@ -1,0 +1,10 @@
+name: reusable-matrix-call
+on: [push]
+jobs:
+  call:
+    strategy:
+      matrix:
+        env: [dev, prod]
+    uses: ./.github/workflows/reusable.yml
+    with:
+      env: ${{ matrix.env }}

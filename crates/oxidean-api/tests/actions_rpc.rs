@@ -1,13 +1,14 @@
 //! Phase 19 — Actions RPC / log round-trip foundation (ACT-03 / D-ACT-13).
 
+mod support;
+
 use oxidean_api::actions::{append_job_log, read_job_log};
 use oxidean_core::Role;
-use oxidean_db::Database;
 
 #[tokio::test]
 async fn actions_rpc_list_runs() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("rpc.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("rpc.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -39,6 +40,7 @@ async fn actions_rpc_list_runs() {
         "CI",
         Some(&owner.id),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -53,7 +55,7 @@ async fn actions_rpc_list_runs() {
 #[tokio::test]
 async fn actions_rpc_run_detail() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("rpc2.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("rpc2.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -85,12 +87,19 @@ async fn actions_rpc_run_detail() {
         "CI",
         None,
         None,
+        None,
     )
     .await
     .unwrap();
-    db.insert_action_job("job-2", "run-2", "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .unwrap();
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        "job-2",
+        "run-2",
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .unwrap();
     let jobs = db.list_action_jobs_for_run("run-2").await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].job_key, "build");

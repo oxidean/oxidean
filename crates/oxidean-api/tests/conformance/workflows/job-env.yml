@@ -1,0 +1,9 @@
+name: job-env
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      JOB_VAR: from-job
+    steps:
+      - run: echo "JOB_VAR=$JOB_VAR"

@@ -1,0 +1,8 @@
+name: job-name-override
+on: [push]
+jobs:
+  build:
+    name: Fancy Build Job
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo named

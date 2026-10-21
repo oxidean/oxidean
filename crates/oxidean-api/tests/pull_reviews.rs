@@ -231,3 +231,170 @@ async fn pull_reviews_submit_dismiss_author_cannot_approve() {
         .iter()
         .any(|u| u.as_str() == Some("reviewer")));
 }
+
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    body: Option<&str>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", cookie);
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or("").to_owned())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub Pulls REST surface: requested_reviewers list/add/remove and
+/// review dismissals (body `message` maps to the RPC `reason`).
+#[tokio::test]
+async fn pull_reviews_rest_github_surface() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("pull_reviews_rest.db").display()
+    );
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "o@ex.com", "prown").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
+    let (rev_cookie, rev_v) = signup_and_login(&app, "r@ex.com", "previewer").await;
+    verify_user(&db, rev_v["data"]["id"].as_str().unwrap()).await;
+
+    rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"prown","name":"core","username":"previewer","permission":"write"}}"#,
+    )
+    .await;
+    rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"prown","name":"core","branch":"feature","start":"main"}}"#,
+    )
+    .await;
+    let pr = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"prown","name":"core","title":"PR","base_ref":"main","head_ref":"feature"}}"#,
+    )
+    .await;
+    let n = pr["data"]["number"].as_i64().unwrap();
+    let base = format!("/api/v1/repos/prown/core/pulls/{n}");
+
+    // empty reviewer set
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["users"].as_array().unwrap().len(), 0);
+    assert_eq!(v["teams"].as_array().unwrap().len(), 0);
+
+    // request one → 201 + the pull
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        Some(r#"{"reviewers":["previewer"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["number"], n);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["users"][0]["login"], "previewer");
+
+    // reviewer approves → dismiss via REST (`message` → `reason`)
+    let approve = rpc_json(
+        &app,
+        &rev_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"prown","name":"core","number":{n},"state":"approved","body":"lgtm"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(approve["ok"], true, "{approve}");
+    let rid = approve["data"]["id"].as_str().unwrap();
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/reviews/{rid}/dismissals"),
+        &owner_cookie,
+        Some(r#"{"message":"stale approval"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["state"], "dismissed");
+    assert_eq!(v["dismiss_reason"], "stale approval");
+
+    // remove the requested reviewer → 200 + pull
+    let (s, v) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        Some(r#"{"reviewers":["previewer"]}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["users"].as_array().unwrap().len(), 0);
+
+    // bad body → 422
+    let (s, _) = rest(
+        &app,
+        "POST",
+        &format!("{base}/requested_reviewers"),
+        &owner_cookie,
+        Some(r#"{"reviewers":"previewer"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+}

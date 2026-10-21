@@ -1,0 +1,10 @@
+name: reusable-needs-scope
+on: [push]
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "outer setup"
+  call:
+    needs: [setup]
+    uses: ./.github/workflows/reusable.yml

@@ -6,15 +6,33 @@ import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import type { ActionJobLogResponse, ActionRunGetResponse } from "@oxidean/api-client";
-import { ArrowLeft, Ban, RotateCcw, Workflow } from "@octanejs/lucide";
+import { ArrowLeft, Ban, Ellipsis, RotateCcw, Workflow } from "@octanejs/lucide";
+import { useEffect, useState } from "octane";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActionsAnnotations } from "@/components/repo/actions-annotations";
 import { ActionsLogViewer } from "@/components/repo/actions-log-viewer";
+import {
+  ActionsForkApprovalBanner,
+  ActionsJobReview,
+  ActionsJobWaitingChip,
+  waitingReasonLabel,
+} from "@/components/repo/actions-approvals";
+import { ActionsArtifacts } from "@/components/repo/actions-artifacts";
+import { ActionsDeployments } from "@/components/repo/actions-deployments";
 import { ActionsRerunMenu } from "@/components/repo/actions-rerun-menu";
+import { ActionsRunDeleteDialog } from "@/components/repo/actions-run-delete-dialog";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchActionsGetJobLog, fetchActionsGetRun } from "@/lib/ssr-repo";
@@ -22,8 +40,11 @@ import { cn } from "@/lib/utils";
 import {
   actionsCancelRunMutation,
   actionsJobLogQuery,
+  actionsJobLogStreamUrl,
   actionsRerunRunMutation,
   actionsRunDetailQuery,
+  applyJobLogFrame,
+  type JobLogTailFrame,
 } from "@/lib/actions-queries";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -34,6 +55,14 @@ function runStatusVariant(status: string): "success" | "destructive" | "primary"
   if (s === "failure" || s === "failed" || s === "error" || s === "cancelled") return "destructive";
   if (s === "in_progress" || s === "running" || s === "queued" || s === "pending") return "primary";
   return "default";
+}
+
+/** Compact matrix summary — `node: 20 · os: ubuntu-latest`. */
+function matrixSummary(matrix?: Record<string, unknown>): string {
+  if (!matrix) return "";
+  return Object.entries(matrix)
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join(" · ");
 }
 
 function isActiveStatus(status: string): boolean {
@@ -163,17 +192,52 @@ function RepoActionsRunPageContent() @{
     selectedJobId === routeLoader.detail.jobs[0]?.id
       ? routeLoader.firstJobLog
       : undefined;
+  const qc = useQueryClient();
+  // Live tail prefers the SSE push stream — frames write into the same query
+  // cache the long-poll query fills, so both transports stay byte-consistent.
+  // `deadTail` keys the job whose stream failed (pre-SSE server, repeated
+  // drops) and switches that job back to the long-poll RPC.
+  const [deadTail, setDeadTail] = useState("");
+  const tailKey = `${runId}/${selectedJobId}`;
+  const tailPoll = deadTail === tailKey || typeof EventSource === "undefined";
+  const logOpts = actionsJobLogQuery(owner, repoName, runId, selectedJobId);
   const logQ = useQuery({
-    ...actionsJobLogQuery(owner, repoName, runId, selectedJobId),
-    enabled: !!selectedJobId,
+    ...logOpts,
+    enabled: !!selectedJobId && tailPoll,
     initialData: ssrFirstJobLog,
   });
+  useEffect(() => {
+    if (!selectedJobId || tailPoll) return;
+    const es = new EventSource(actionsJobLogStreamUrl(owner, repoName, selectedJobId));
+    let drops = 0;
+    es.onmessage = (ev) => {
+      drops = 0;
+      try {
+        const frame = JSON.parse(ev.data) as JobLogTailFrame;
+        qc.setQueryData(logOpts.queryKey, (prev: ActionJobLogResponse | undefined) =>
+          applyJobLogFrame(prev, frame),
+        );
+        if (frame.done) es.close();
+      } catch {
+        // Malformed frame — ignore; the next snapshot frame self-corrects.
+      }
+    };
+    es.onerror = () => {
+      // EventSource auto-retries transient drops; give up after a few so a
+      // server without the stream route falls back to the long-poll RPC.
+      drops += 1;
+      if (drops >= 3 || es.readyState === EventSource.CLOSED) {
+        es.close();
+        setDeadTail(tailKey);
+      }
+    };
+    return () => es.close();
+  }, [selectedJobId, runId, tailPoll]);
   const logText =
     logQ.data?.content ??
     ssrFirstJobLog?.content ??
     (logQ.isPending ? "Loading log…" : "(empty log)");
 
-  const qc = useQueryClient();
   const rerunM = useMutation({
     ...actionsRerunRunMutation(),
     onSuccess: async () => {
@@ -186,6 +250,7 @@ function RepoActionsRunPageContent() @{
       await qc.invalidateQueries({ queryKey: ["repo", "actions"] });
     },
   });
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const mutationErr =
     rerunM.isError || cancelM.isError
       ? String(rerunM.error?.message ?? cancelM.error?.message ?? "Action failed")
@@ -199,7 +264,7 @@ function RepoActionsRunPageContent() @{
     );
   }
 
-  function rerun(target: { job_id?: string; failed_only?: boolean }) {
+  function rerun(target: { job_id?: string; failed_only?: boolean; debug?: boolean }) {
     rerunM.mutate({ owner, name: repoName, run_id: runId, ...target });
   }
 
@@ -283,6 +348,38 @@ function RepoActionsRunPageContent() @{
                   {canWrite && !runActive ? (
                     <ActionsRerunMenu jobs={jobs} busy={rerunM.isPending} onRerun={rerun} />
                   ) : undefined}
+                  {canWrite && !runActive ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        data-testid="actions-run-more"
+                        aria-label="More actions"
+                        className={cn(
+                          buttonVariants({ variant: "outline", size: "sm" }),
+                          "px-2",
+                        )}
+                      >
+                        <Ellipsis aria-hidden size={14} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-56">
+                        <DropdownMenuItem
+                          data-testid="actions-download-logs"
+                          onClick={() => {
+                            window.location.href = `/api/repos/${owner}/${repoName}/actions/runs/${runId}/logs`;
+                          }}
+                        >
+                          Download log archive
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          data-testid="actions-delete-run"
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteOpen(true)}
+                        >
+                          Delete workflow run
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : undefined}
                 </div>
               }
             />
@@ -291,6 +388,18 @@ function RepoActionsRunPageContent() @{
                 {mutationErr as string}
               </p>;
             }
+            <ActionsRunDeleteDialog
+              owner={owner}
+              name={repoName}
+              runId={runId}
+              runTitle={run.title}
+              open={deleteOpen}
+              onOpenChange={setDeleteOpen}
+              onDeleted={() =>
+                void navigate(routeHref("/$owner/$repo/actions", { owner, repo: repoName }))
+              }
+            />
+            <ActionsForkApprovalBanner owner={owner} name={repoName} run={run} />
             <div className="mt-8 grid gap-6 md:grid-cols-[16rem_1fr]">
               <List data-testid="repo-actions-jobs" className="self-start">
                 @for (const job of jobs; key job.id) {
@@ -309,18 +418,22 @@ function RepoActionsRunPageContent() @{
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate">{job.name as string}</span>
-                          @if (
-                            spanDuration(job.started_at, job.finished_at)
-                          ) {
-                            <span className="block text-[11px] text-muted-foreground">
-                              {
-                                spanDuration(
-                                  job.started_at,
-                                  job.finished_at,
-                                ) as string
-                              }
-                            </span>;
-                          }
+                          <span className="block text-[11px] text-muted-foreground">
+                            {
+                              [
+                                spanDuration(job.started_at, job.finished_at),
+                                matrixSummary(job.matrix),
+                                job.environment ? `env: ${job.environment}` : "",
+                                (job.attempt ?? 1) > 1 ? `attempt ${job.attempt}` : "",
+                                job.needs?.length
+                                  ? `needs ${job.needs.join(", ")}`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") as string
+                            }
+                          </span>
+                          <ActionsJobWaitingChip job={job} />
                         </span>
                         <Badge
                           className="shrink-0"
@@ -354,12 +467,58 @@ function RepoActionsRunPageContent() @{
                   </ListRow>;
                 }
               </List>
-              <ActionsLogViewer
-                log={logText}
-                jobStatus={selectedJob?.status ?? ""}
-                downloadName={selectedJob?.name || "job"}
-              />
+              <div className="min-w-0">
+                @if (selectedJob?.waiting_reason) {
+                  <p
+                    className="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-[13px] text-foreground"
+                    role="status"
+                    data-testid="actions-job-waiting-banner"
+                  >
+                    {waitingReasonLabel(selectedJob?.waiting_reason) as string}
+                    @if (
+                      selectedJob?.waiting_reason === "needs" &&
+                      selectedJob?.needs?.length
+                    ) {
+                      <span className="text-muted-foreground">
+                        {(": " + (selectedJob?.needs ?? []).join(", ")) as string}
+                      </span>;
+                    }
+                  </p>;
+                }
+                @if (selectedJob) {
+                  <ActionsJobReview owner={owner} name={repoName} job={selectedJob} />;
+                }
+                @if (selectedJob) {
+                  <ActionsAnnotations
+                    owner={owner}
+                    name={repoName}
+                    runId={runId}
+                    jobId={selectedJob.id}
+                  />;
+                }
+                <ActionsLogViewer
+                  log={logText}
+                  jobStatus={selectedJob?.status ?? ""}
+                  downloadName={selectedJob?.name || "job"}
+                  downloadHref={
+                    selectedJob
+                      ? `/api/repos/${owner}/${repoName}/actions/jobs/${selectedJob.id}/logs`
+                      : undefined
+                  }
+                />
+              </div>
             </div>
+            @if (run) {
+              <>
+                <ActionsArtifacts
+                  owner={owner}
+                  name={repoName}
+                  runId={run.id}
+                  canWrite={canWrite}
+                />
+                <ActionsDeployments owner={owner} name={repoName} runId={run.id} />
+              </>;
+            }
           </>;
         }
       }

@@ -21,6 +21,12 @@ pub struct JobConfig {
     pub lfs_gc_interval: Duration,
     /// Default 24h. Set `OXIDEAN_PACKAGES_GC_INTERVAL_SECS=0` to disable.
     pub packages_gc_interval: Duration,
+    /// Default 30s. Set `OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS=0` to disable the
+    /// `on.schedule` cron sweeper.
+    pub actions_schedule_sweep: Duration,
+    /// Default 1h. Set `OXIDEAN_ACTIONS_LOG_SWEEP_SECS=0` to disable the
+    /// finished-log gzip + retention sweeper.
+    pub actions_log_sweep: Duration,
 }
 
 impl JobConfig {
@@ -32,11 +38,15 @@ impl JobConfig {
             super::lfs_gc::DEFAULT_GC_INTERVAL_SECS,
         );
         let packages_gc_secs = parse_u64_env("OXIDEAN_PACKAGES_GC_INTERVAL_SECS", 86_400);
+        let actions_schedule_secs = parse_u64_env("OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS", 30);
+        let actions_log_secs = parse_u64_env("OXIDEAN_ACTIONS_LOG_SWEEP_SECS", 3_600);
         Self {
             orphan_interval: Duration::from_secs(orphan_secs),
             gc_interval: Duration::from_secs(gc_secs),
             lfs_gc_interval: Duration::from_secs(lfs_gc_secs),
             packages_gc_interval: Duration::from_secs(packages_gc_secs),
+            actions_schedule_sweep: Duration::from_secs(actions_schedule_secs),
+            actions_log_sweep: Duration::from_secs(actions_log_secs),
         }
     }
 }
@@ -59,7 +69,7 @@ pub fn spawn_background_jobs(
     vcs: Option<crate::vcs::SharedVcs>,
 ) {
     let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
-    crate::webhook::worker::spawn_webhook_worker(db.clone(), env_name);
+    crate::webhook::worker::spawn_webhook_worker(db.clone(), env_name.clone());
     crate::mirror::spawn_mirror_poller(db.clone(), git.clone(), repos_dir.clone());
     if config.orphan_interval.as_secs() > 0 {
         let db_o = db.clone();
@@ -99,6 +109,135 @@ pub fn spawn_background_jobs(
         );
     } else {
         tracing::info!("orphan reconcile job disabled (interval 0)");
+    }
+
+    if config.actions_schedule_sweep.as_secs() > 0 {
+        let db_c = db.clone();
+        let git_c = git.clone();
+        let repos_c = repos_dir.clone();
+        let env_c = env_name.clone();
+        let period = config.actions_schedule_sweep;
+        tokio::spawn(async move {
+            let mut ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            // Skip the immediate boot tick so a restart mid-minute cannot
+            // claim a tick the booting sweeper never observed; dedupe still
+            // guards the real double-fire window.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                match crate::actions::cron::sweep_scheduled_workflows(
+                    &db_c,
+                    git_c.clone(),
+                    &repos_c,
+                )
+                .await
+                {
+                    Ok(n) => {
+                        if n > 0 {
+                            tracing::info!(enqueued = n, "actions schedule sweep fired");
+                        }
+                    }
+                    Err(e) => tracing::error!(error = %e, "actions schedule sweep failed"),
+                }
+                // Environment wait timers — promote legs whose deadline
+                // lapsed (the same 30s granularity; GitHub's timers are
+                // minute-granularity anyway).
+                let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                match db_c.promote_due_deployment_jobs(&now).await {
+                    Ok(ids) if !ids.is_empty() => {
+                        for job_id in &ids {
+                            crate::webhook::dispatch::notify_workflow_job(&db_c, job_id, "queued")
+                                .await;
+                            crate::webhook::dispatch::notify_deployment_job_status(&db_c, job_id)
+                                .await;
+                        }
+                        crate::actions::task_wake::wake();
+                        tracing::info!(promoted = ids.len(), "deployment wait timer released jobs");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "deployment wait timer sweep failed")
+                    }
+                    _ => {}
+                }
+                // Stale claims + job timeouts — requeue dead runners' legs,
+                // fail legs past `timeout_at` (Phase 8).
+                let (timed_out, requeued) = crate::actions::sweeps::sweep_stale_action_jobs(
+                    &db_c,
+                    git_c.as_ref(),
+                    &repos_c,
+                    crate::actions::sweeps::stale_job_secs(),
+                    &env_c,
+                )
+                .await;
+                if timed_out > 0 || requeued > 0 {
+                    tracing::info!(timed_out, requeued, "stale-claim sweep reaped jobs");
+                }
+                // actions/cache upkeep — expired runtime tokens + abandoned
+                // `reserved` rows (their `.part` payloads get unlinked).
+                match crate::actions::cache::sweep_action_caches(
+                    &db_c,
+                    &crate::actions::cache::resolve_cache_dir(),
+                )
+                .await
+                {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(reaped = n, "actions cache sweep reaped rows");
+                    }
+                    Err(e) => tracing::error!(error = %e, "actions cache sweep failed"),
+                    _ => {}
+                }
+                // Artifact lifecycle reaps — Twirp reservations abandoned
+                // between CreateArtifact and FinalizeArtifact (job died
+                // mid-upload) plus committed artifacts past expires_at.
+                match crate::actions::artifacts_v2::sweep_artifacts(
+                    &db_c,
+                    &crate::actions::artifacts::resolve_artifact_dir(),
+                )
+                .await
+                {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(reaped = n, "artifact sweep reaped rows");
+                    }
+                    Err(e) => tracing::error!(error = %e, "artifact sweep failed"),
+                    _ => {}
+                }
+            }
+        });
+        tracing::info!(
+            secs = config.actions_schedule_sweep.as_secs(),
+            "actions schedule sweeper scheduled"
+        );
+    } else {
+        tracing::info!("actions schedule sweeper disabled (interval 0)");
+    }
+
+    if config.actions_log_sweep.as_secs() > 0 {
+        let db_l = db.clone();
+        let period = config.actions_log_sweep;
+        tokio::spawn(async move {
+            let mut ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                let log_dir = crate::actions::logs::resolve_log_dir();
+                let (compressed, deleted) = crate::actions::sweeps::sweep_action_logs(
+                    &db_l,
+                    &log_dir,
+                    crate::actions::sweeps::log_retention_days(),
+                )
+                .await;
+                if compressed > 0 || deleted > 0 {
+                    tracing::info!(compressed, deleted, "actions log maintenance pass done");
+                }
+            }
+        });
+        tracing::info!(
+            secs = config.actions_log_sweep.as_secs(),
+            "actions log maintenance sweeper scheduled"
+        );
+    } else {
+        tracing::info!("actions log maintenance sweeper disabled (interval 0)");
     }
 
     if config.gc_interval.as_secs() > 0 {

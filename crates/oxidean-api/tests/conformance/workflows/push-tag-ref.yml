@@ -1,0 +1,7 @@
+name: push-tag-ref
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ref is $GITHUB_REF"

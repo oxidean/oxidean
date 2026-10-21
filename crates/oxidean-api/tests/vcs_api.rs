@@ -916,6 +916,8 @@ async fn vcs_gc_job_invokes_gc_once() {
             gc_interval: std::time::Duration::ZERO,
             lfs_gc_interval: std::time::Duration::ZERO,
             packages_gc_interval: std::time::Duration::ZERO,
+            actions_schedule_sweep: std::time::Duration::ZERO,
+            actions_log_sweep: std::time::Duration::ZERO,
         },
         Some(slot),
     );

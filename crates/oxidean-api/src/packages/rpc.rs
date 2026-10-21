@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use oxidean_core::{
     AppError, PackagePublic, PackageUsageByFormat, PackageUsageRow, PackageVersionPublic,
     PackagesAdminSetQuotaRequest, PackagesAdminSetQuotaResponse, PackagesAdminUsageRequest,
-    PackagesAdminUsageResponse, PackagesDeleteVersionRequest, PackagesDeleteVersionResponse,
-    PackagesListRequest, PackagesListResponse,
+    PackagesAdminUsageResponse, PackagesDeleteRequest, PackagesDeleteResponse,
+    PackagesDeleteVersionRequest, PackagesDeleteVersionResponse, PackagesListRequest,
+    PackagesListResponse,
 };
 use oxidean_db::PackageRow;
 
@@ -77,9 +78,13 @@ async fn to_public(ctx: &RpcCtx, row: PackageRow) -> Result<Option<PackagePublic
         format: row.format,
         visibility: row.visibility,
         repository_id: row.repository_id,
+        description: row.description,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
         versions: versions
             .into_iter()
             .map(|v| PackageVersionPublic {
+                id: v.id,
                 version: v.version,
                 digest: v.digest,
                 created_at: v.created_at,
@@ -194,6 +199,69 @@ pub async fn delete_version(
         ctx.db.delete_package(&pkg.id).await.map_err(db_err)?;
     }
     Ok(PackagesDeleteVersionResponse { ok: true })
+}
+
+/// `packages.delete` — delete the whole package (every version + the row).
+/// Same Admin + `confirm` gate as `deleteVersion`; `confirm` must equal the
+/// package name.
+pub async fn delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<PackagesDeleteResponse, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: PackagesDeleteRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid packages.delete input: {e}"),
+        )
+    })?;
+
+    let pkg = ctx
+        .db
+        .find_package_by_id(&req.package_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("packages.not_found", "package not found"))?;
+
+    if req.confirm != pkg.name {
+        return Err(AppError::new(
+            "packages.confirm_mismatch",
+            format!("confirm must equal {}", pkg.name),
+        ));
+    }
+
+    let linked = match &pkg.repository_id {
+        Some(id) => ctx.db.find_repository_by_id(id).await.map_err(db_err)?,
+        None => None,
+    };
+    let have = acl::owner_capability(&ctx.db, Some(&user.id), &pkg, linked.as_ref())
+        .await
+        .map_err(db_err)?;
+    let visibility = acl::effective_visibility(&pkg, linked.as_ref());
+    if !acl::authorize(&visibility, have, true, PackageAction::Delete) {
+        return Err(AppError::new(
+            "packages.forbidden",
+            "Admin permission required to delete packages",
+        ));
+    }
+
+    for ver in ctx
+        .db
+        .list_package_versions(&pkg.id)
+        .await
+        .map_err(db_err)?
+    {
+        for d in ctx
+            .db
+            .list_package_version_blob_digests(&ver.id)
+            .await
+            .map_err(db_err)?
+        {
+            let _ = ctx.db.adjust_package_blob_refcount(&d, -1).await;
+        }
+    }
+    ctx.db.delete_package(&pkg.id).await.map_err(db_err)?;
+    Ok(PackagesDeleteResponse { ok: true })
 }
 
 pub async fn admin_usage(

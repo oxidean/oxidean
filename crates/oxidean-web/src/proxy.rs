@@ -15,7 +15,14 @@ use axum::response::{IntoResponse, Response};
 /// labels and the retired vite proxy table).
 const API_PREFIXES: &[&str] = &[
     "/api/",
+    // actions/cache@v4 Twirp service — the toolkit client resolves
+    // `new URL("/twirp/…", ACTIONS_RESULTS_URL)`, so it always lands at the
+    // origin root regardless of the env var's path.
+    "/twirp",
     "/uploads",
+    // Pages site trees (`pages.*` materialized sites) — user HTML/JS
+    // forwards verbatim; the API's CSP sandbox carries the hardening.
+    "/pages",
     // Package registry surfaces (D-PKG-01).
     "/v2",
     "/npm",
@@ -83,6 +90,20 @@ pub fn is_api_git_path(path: &str) -> bool {
     let mut segs = path.trim_start_matches('/').split('/');
     matches!(segs.next(), Some(s) if !s.is_empty())
         && segs.next().is_some_and(|repo| repo.ends_with(".git"))
+}
+
+/// GitHub-shaped workflow badge: `/{owner}/{repo}/actions/workflows/{file}/
+/// badge.svg` — README `<img>` URLs can't live under `/api/` when users copy
+/// GitHub badge markup, so the repo-path shape forwards to the API. The
+/// workflow segment is a single flat filename (workflow files live flat in
+/// `.github/workflows/`).
+pub fn is_api_badge_path(path: &str) -> bool {
+    let segs: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    matches!(
+        segs.as_slice(),
+        [owner, repo, "actions", "workflows", file, "badge.svg"]
+            if !owner.is_empty() && !repo.is_empty() && !file.is_empty()
+    )
 }
 
 pub struct ApiProxy {

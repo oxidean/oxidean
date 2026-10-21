@@ -256,6 +256,21 @@ pub struct SizedBlobEntry {
     pub size: u64,
 }
 
+/// One entry of a push's commit list — metadata plus the per-file change
+/// sets Actions `push` event payloads carry (`commits[].added/removed/modified`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushEventCommit {
+    pub sha: String,
+    pub subject: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// ISO-8601 author date (`%aI`).
+    pub authored_at: String,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub modified: Vec<String>,
+}
+
 /// One file in a commit or compare diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFile {
@@ -644,6 +659,19 @@ pub trait GitBackend: Send + Sync {
         message: &str,
     ) -> Result<String, GitError>;
 
+    /// Build a test-merge commit of `head_sha` into `base_sha` inside `repo`
+    /// without moving any branch — `merge-tree --write-tree` + `commit-tree`
+    /// with parents `(base_sha, head_sha)`. Conflicts → [`GitError::Process`].
+    /// Callers publish the result via [`update_ref`](Self::update_ref)
+    /// (e.g. `refs/pull/N/merge`).
+    async fn test_merge_commit(
+        &self,
+        repo: &Path,
+        base_sha: &str,
+        head_sha: &str,
+        message: &str,
+    ) -> Result<String, GitError>;
+
     /// Squash `head_sha` onto `base_ref` as a single commit.
     async fn squash_merge(
         &self,
@@ -717,6 +745,18 @@ pub trait GitBackend: Send + Sync {
         dir_path: &str,
         entry_names: &[String],
     ) -> Result<std::collections::HashMap<String, CommitSummary>, GitError>;
+
+    /// `git log --name-status <new> --not <old>` — commits a push introduces,
+    /// each with the per-file added/removed/modified sets Actions payloads and
+    /// `paths` filters need. `old` empty/all-zeros → full history up to `new`.
+    /// Bounded by `limit` (GitHub caps `push.commits` at 2048).
+    async fn push_event_commits(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+        limit: u32,
+    ) -> Result<Vec<PushEventCommit>, GitError>;
 
     /// `git rev-list --count <refname>`. Unborn → 0.
     async fn rev_list_count(&self, repo: &Path, refname: &str) -> Result<u64, GitError>;
@@ -863,6 +903,11 @@ pub trait GitBackend: Send + Sync {
     /// (e.g. `refs/pull/*` in API-06) that no push path may write; callers must
     /// ensure `sha` resolves to an object already present in `repo`.
     async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError>;
+
+    /// Repoint the bare `HEAD` symref at `refs/heads/<branch>`
+    /// (`git symbolic-ref HEAD …`) — used when a migration discovers the
+    /// remote's default branch differs from the one chosen at `init_bare`.
+    async fn set_head_branch(&self, repo: &Path, branch: &str) -> Result<(), GitError>;
 
     // ------------------------------------------------------------------
     // VCS git-interop plumbing (u6 / TD6.2)

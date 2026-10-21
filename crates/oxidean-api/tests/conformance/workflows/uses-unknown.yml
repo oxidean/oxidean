@@ -1,0 +1,7 @@
+name: uses-unknown
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: nonexistent-owner-xyz/no-such-repo-12345@v9

@@ -145,6 +145,51 @@ async fn orphan_reconcile_purges_soft_deleted_past_retention() {
 }
 
 #[tokio::test]
+async fn orphan_reconcile_wiki_bare_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!("sqlite:{}", dir.path().join("orphan_wiki.db").display());
+    let repos = dir.path().join("repos");
+    let bare = repos.join("adminuser").join("w.git");
+    let wiki = repos.join("adminuser").join("w.wiki.git");
+    let stray = repos.join("adminuser").join("ghost.wiki.git");
+    for p in [&bare, &wiki, &stray] {
+        tokio::fs::create_dir_all(p).await.unwrap();
+        tokio::fs::write(p.join("HEAD"), b"ref: refs/heads/main\n")
+            .await
+            .unwrap();
+    }
+
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    let owner_id = seed_sys_admin(&db).await;
+    let repo_id = Uuid::new_v4().to_string();
+    db.insert_repository(&repo_id, &owner_id, "user", "w", "public", "", "main")
+        .await
+        .expect("insert");
+
+    // Live repo: its wiki bare is not an orphan; a stray `{name}.wiki.git`
+    // with no repo row is.
+    let stats = orphan_reconcile(&db, &repos).await.expect("reconcile");
+    assert_eq!(stats.orphans_removed, 1, "{stats:?}");
+    assert!(wiki.exists(), "live repo's wiki must survive");
+    assert!(!stray.exists(), "wiki without repo row must be swept");
+
+    // Soft-delete within retention still protects the wiki (restore parity).
+    db.soft_delete_repository(&repo_id).await.expect("soft");
+    let stats = orphan_reconcile(&db, &repos).await.expect("reconcile");
+    assert_eq!(stats.orphans_removed, 0, "{stats:?}");
+    assert!(wiki.exists(), "restorable repo's wiki must survive");
+
+    // Past retention: the wiki bare dies with the repo row.
+    let stats = orphan_reconcile_with_retention(&db, &repos, 0)
+        .await
+        .expect("reconcile");
+    assert_eq!(stats.purged_soft_deleted, 1);
+    assert!(!bare.exists());
+    assert!(!wiki.exists(), "wiki must purge with the repo");
+}
+
+#[tokio::test]
 async fn admin_repos_gc_runs_for_one_and_all() {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite:{}", dir.path().join("repo_gc.db").display());

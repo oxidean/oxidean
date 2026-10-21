@@ -8,6 +8,7 @@ use oxidean_core::{
 use oxidean_db::BranchProtectionRuleRow;
 use uuid::Uuid;
 
+use crate::auth::gate::require_verified;
 use crate::repo::collaborators::resolve_repo_for_admin;
 use crate::rpc::RpcCtx;
 
@@ -88,6 +89,7 @@ fn row_public(row: &BranchProtectionRuleRow) -> BranchProtectionRulePublic {
         required_linear_history: row.required_linear_history,
         lock_branch: row.lock_branch,
         require_signed_commits: row.require_signed_commits,
+        required_merge_queue: row.required_merge_queue,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }
@@ -150,9 +152,11 @@ pub async fn create(
             req.required_linear_history,
             req.lock_branch,
             req.require_signed_commits,
+            req.required_merge_queue,
         )
         .await
         .map_err(db_err)?;
+    notify_actions_rule(ctx, &accessible, "created", &rule_payload(&row)).await;
     Ok(row_public(&row))
 }
 
@@ -190,9 +194,11 @@ pub async fn update(
             req.required_linear_history,
             req.lock_branch,
             req.require_signed_commits,
+            req.required_merge_queue,
         )
         .await
         .map_err(db_err)?;
+    notify_actions_rule(ctx, &accessible, "edited", &rule_payload(&row)).await;
     Ok(row_public(&row))
 }
 
@@ -209,5 +215,61 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         .delete_branch_protection_rule(&accessible.row.id, &req.id)
         .await
         .map_err(db_err)?;
+    // The row is gone at this point — the id is all the payload needs.
+    notify_actions_rule(
+        ctx,
+        &accessible,
+        "deleted",
+        &serde_json::json!({"id": req.id}),
+    )
+    .await;
     Ok(serde_json::json!({ "ok": true }))
+}
+
+/// `on: branch_protection_rule` — one dispatch per CRUD mutation. Soft-fail:
+/// the mutation already committed.
+async fn notify_actions_rule(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    rule: &serde_json::Value,
+) {
+    let Ok(user) = require_verified(ctx).await else {
+        return;
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let payload = serde_json::json!({
+        "action": action,
+        "rule": rule,
+        "repository": repository,
+        "sender": crate::actions::payload::user_embed(&user.username),
+    });
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "branch_protection_rule",
+        action,
+        payload,
+        Some(user.id),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
+}
+
+fn rule_payload(row: &BranchProtectionRuleRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.id,
+        "pattern": row.pattern,
+        "enforce_admins": row.enforce_admins,
+        "required_approving_review_count": row.required_approving_review_count,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
 }

@@ -320,6 +320,15 @@ pub struct FgPerms {
     /// Deployments — mintable forward-compat; no procedures map yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deployments: Option<FgPermLevel>,
+    /// Checks (check runs/suites/annotations).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<FgPermLevel>,
+    /// Repository projects (boards/columns/cards).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_projects: Option<FgPermLevel>,
+    /// Discussions (categories/threads/comments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussions: Option<FgPermLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks: Option<FgPermLevel>,
     /// Repository administration (collaborators, protection rules, mirrors,

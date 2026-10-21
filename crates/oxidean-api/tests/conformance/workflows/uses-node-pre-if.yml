@@ -1,0 +1,9 @@
+name: uses-node-pre-if
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./tools/np
+      - run: echo done

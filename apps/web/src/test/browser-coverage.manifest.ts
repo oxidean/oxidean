@@ -51,6 +51,12 @@ const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.brows
 const WEBHOOK_FORM_BROWSER = "apps/web/src/components/repo/webhook-form.browser.test.tsx";
 const ACTIONS_RERUN_BROWSER = "apps/web/src/components/repo/actions-rerun-menu.browser.test.tsx";
 const ACTIONS_FILTERS_BROWSER = "apps/web/src/components/repo/actions-filters.browser.test.tsx";
+const ACTIONS_SETTINGS_BROWSER =
+  "apps/web/src/components/repo/actions-settings-panel.browser.test.tsx";
+const ACTIONS_DISPATCH_INPUTS_BROWSER =
+  "apps/web/src/components/repo/actions-dispatch-inputs.browser.test.tsx";
+const ACTIONS_ENVIRONMENTS_BROWSER =
+  "apps/web/src/components/repo/actions-environments-panel.browser.test.tsx";
 const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
 const VCS_BROWSER = "apps/web/src/components/repo/vcs-settings-panel.browser.test.tsx";
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
@@ -63,6 +69,9 @@ const FORGE_MIRROR = "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test
 const NEW_REPO = "apps/web/e2e/stack-browser/new-repo-template.stack.browser.test.tsx";
 const FORGE_ISSUES = "apps/web/e2e/stack-browser/forge-issues-releases.stack.browser.test.tsx";
 const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.test.tsx";
+const FORGE_ACTIONS_PIPELINE =
+  "apps/web/e2e/stack-browser/forge-actions-pipeline.stack.browser.test.tsx";
+const PAGES_SETTINGS_BROWSER = "apps/web/src/components/repo/pages-settings-panel.browser.test.tsx";
 const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test.tsx";
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
 const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
@@ -247,8 +256,29 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/actions-settings-panel.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Actions enable Switch; promote on next actions-settings edit.",
+        kind: "browser",
+        test: ACTIONS_SETTINGS_BROWSER,
+        subject: "actions-settings-panel",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-dispatch-inputs.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_DISPATCH_INPUTS_BROWSER,
+        subject: "actions-dispatch-inputs",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-environments-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_ENVIRONMENTS_BROWSER,
+        subject: "actions-environments-panel",
       },
     ],
   },
@@ -288,6 +318,36 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "browser",
         test: ACTIONS_FILTERS_BROWSER,
         subject: "actions-filters",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pages-settings-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: PAGES_SETTINGS_BROWSER,
+        subject: "pages-settings-panel",
+      },
+    ],
+  },
+  {
+    surface: "routes/$owner.$repo.actions.index.tsrx",
+    coverage: [
+      {
+        kind: "stack-browser",
+        test: FORGE_ACTIONS_PIPELINE,
+        subject: "actions-workflow-menu",
+      },
+    ],
+  },
+  {
+    surface: "routes/$owner.$repo.actions.$run.tsrx",
+    coverage: [
+      {
+        kind: "stack-browser",
+        test: FORGE_ACTIONS_PIPELINE,
+        subject: "actions-run-more",
       },
     ],
   },

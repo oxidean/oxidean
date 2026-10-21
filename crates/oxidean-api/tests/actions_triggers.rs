@@ -1,5 +1,7 @@
 //! Phase 19 — push + pull_request triggers (ACT-02 / D-ACT-04 / D-ACT-05 / D-ACT-06).
 
+mod support;
+
 use std::sync::Arc;
 
 use oxidean_api::actions::{
@@ -64,7 +66,7 @@ async fn seed_repo_with_workflow(
 async fn actions_triggers_push_after_receive_pack() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("t.db");
-    let db = Database::connect(&format!("sqlite:{}", db_path.display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", db_path.display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -101,6 +103,9 @@ jobs:
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "push");
     assert_eq!(runs[0].status, "queued");
+    // GitHub `display_title` — no `run-name:` means the head commit subject,
+    // not the workflow name.
+    assert_eq!(runs[0].title, "wf");
     let jobs = db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, "queued");
@@ -110,7 +115,7 @@ jobs:
 async fn actions_triggers_push_skips_broken_workflow_file() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("t.db");
-    let db = Database::connect(&format!("sqlite:{}", db_path.display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", db_path.display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -191,22 +196,34 @@ jobs:
     )
     .await
     .expect("dispatch");
-    assert_eq!(
-        n, 1,
-        "good workflow must still enqueue despite broken sibling"
-    );
+    // One real run + one failed `__validation` run for the broken sibling.
+    assert_eq!(n, 2, "good workflow + broken-file validation run");
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
         .await
         .unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].workflow_path, ".github/workflows/ci.yml");
+    // Phase 8: the broken sibling isn't silent — a failed `__validation`
+    // run persists next to the good workflow's queued run.
+    assert_eq!(runs.len(), 2);
+    let good = runs
+        .iter()
+        .find(|r| r.workflow_path == ".github/workflows/ci.yml")
+        .expect("good run");
+    assert_ne!(good.status, "failure");
+    let bad = runs
+        .iter()
+        .find(|r| r.workflow_path == ".github/workflows/broken.yml")
+        .expect("validation run for broken file");
+    assert_eq!(bad.status, "failure");
+    let bad_jobs = db.list_action_jobs_for_run(&bad.id).await.unwrap();
+    assert_eq!(bad_jobs[0].job_key, "__validation");
+    assert_eq!(bad_jobs[0].status, "failure");
 }
 
 #[tokio::test]
 async fn actions_triggers_pull_request_lifecycle() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("pr.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("pr.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -327,7 +344,7 @@ jobs:
 #[tokio::test]
 async fn actions_triggers_respect_instance_and_repo_gates() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("g.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("g.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

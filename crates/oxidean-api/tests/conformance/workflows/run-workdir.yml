@@ -1,0 +1,9 @@
+name: run-workdir
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir -p sub && echo made
+      - run: pwd | grep -q '/sub$' || pwd
+        working-directory: sub

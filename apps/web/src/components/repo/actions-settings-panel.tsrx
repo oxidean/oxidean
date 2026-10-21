@@ -1,10 +1,26 @@
-import type { ActionSecretMetaPublic } from "@oxidean/api-client";
+import type { ActionSecretMetaPublic, ActionVariablePublic } from "@oxidean/api-client";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useState } from "octane";
+import { Check, ChevronDown } from "@octanejs/lucide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  SelectIcon,
+  SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectList,
+  SelectPopup,
+  SelectPortal,
+  SelectPositioner,
+  SelectRoot,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ActionsDeployments } from "@/components/repo/actions-deployments";
+import { ActionsEnvironmentsPanel } from "@/components/repo/actions-environments-panel";
 import { apiClient } from "@/lib/api-client";
 import { toastError, toastSuccess } from "@/lib/toast";
 
@@ -14,9 +30,24 @@ function secretsQueryKey(owner: string, name: string) {
   return ["repo", "actions", "secrets", owner, name] as const;
 }
 
+function variablesQueryKey(owner: string, name: string) {
+  return ["repo", "actions", "variables", owner, name] as const;
+}
+
 function enabledQueryKey(owner: string, name: string) {
   return ["repo", "actions", "getEnabled", owner, name] as const;
 }
+
+const FORK_PR_OPTIONS = [
+  { value: "never", label: "Never require approval" },
+  { value: "first-time", label: "Require approval for first-time contributors" },
+  { value: "always", label: "Require approval for all outside collaborators" },
+] as const;
+
+const DEFAULT_PERM_OPTIONS = [
+  { value: "read", label: "Read repository contents and packages" },
+  { value: "write", label: "Read and write permissions" },
+] as const;
 
 /** Repo Settings Actions enable + secrets CRUD (D-ACT-06 / D-ACT-17 / D-ACT-10). */
 export function ActionsSettingsPanel(props: {
@@ -48,11 +79,74 @@ export function ActionsSettingsPanel(props: {
     enabled: canAdmin,
   });
 
+  const variablesQ = useQuery({
+    queryKey: variablesQueryKey(owner, name),
+    queryFn: async (): Promise<ActionVariablePublic[]> => {
+      const res = await apiClient.repo.actions.variables.list({ owner, name });
+      if (!res.ok) throw new Error(res.error.message || "Could not load variables.");
+      return res.data.variables;
+    },
+    enabled: canAdmin,
+  });
+
   const [togglePending, setTogglePending] = useState(false);
   const [secretName, setSecretName] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [secretPending, setSecretPending] = useState(false);
+  const [varName, setVarName] = useState("");
+  const [varValue, setVarValue] = useState("");
+  const [varPending, setVarPending] = useState(false);
   const [error, setError] = useState("");
+
+  const forkPrQ = useQuery({
+    queryKey: ["repo", "actions", "forkPrApproval", owner, name] as const,
+    queryFn: async () => {
+      const res = await apiClient.repo.actions.getForkPrApproval({ owner, name });
+      if (!res.ok) throw new Error(res.error.message || "Could not load fork approval policy.");
+      return res.data.policy;
+    },
+    enabled: canAdmin,
+  });
+  const prTargetQ = useQuery({
+    queryKey: ["repo", "actions", "pullRequestTarget", owner, name] as const,
+    queryFn: async () => {
+      const res = await apiClient.repo.actions.getPullRequestTarget({ owner, name });
+      if (!res.ok)
+        throw new Error(res.error.message || "Could not load pull_request_target setting.");
+      return res.data.enabled;
+    },
+    enabled: canAdmin,
+  });
+  const defaultPermsQ = useQuery({
+    queryKey: ["repo", "actions", "defaultPermissions", owner, name] as const,
+    queryFn: async () => {
+      const res = await apiClient.repo.actions.getDefaultPermissions({ owner, name });
+      if (!res.ok) throw new Error(res.error.message || "Could not load default permissions.");
+      return res.data.default_permissions;
+    },
+    enabled: canAdmin,
+  });
+
+  type RpcResult = { ok: boolean; error?: { message?: string } };
+  async function saveSetting(
+    call: () => Promise<RpcResult>,
+    okMsg: string,
+    key: readonly unknown[],
+  ) {
+    if (!canAdmin) return;
+    setError("");
+    try {
+      const res = await call();
+      if (!res.ok) {
+        setError(res.error?.message || "Could not update Actions setting.");
+        return;
+      }
+      toastSuccess(okMsg);
+      await queryClient.invalidateQueries({ queryKey: key });
+    } catch {
+      setError(NETWORK_ERROR);
+    }
+  }
 
   async function toggleEnabled(next: boolean) {
     if (!canAdmin) return;
@@ -123,8 +217,58 @@ export function ActionsSettingsPanel(props: {
     }
   }
 
+  async function putVariable() {
+    if (!canAdmin) return;
+    const vn = varName.trim();
+    if (!vn) return;
+    setError("");
+    setVarPending(true);
+    try {
+      const res = await apiClient.repo.actions.variables.put({
+        owner,
+        name,
+        variable_name: vn,
+        value: varValue,
+      });
+      if (!res.ok) {
+        setError(res.error.message || "Could not save variable.");
+        setVarPending(false);
+        return;
+      }
+      setVarName("");
+      setVarValue("");
+      await queryClient.invalidateQueries({ queryKey: variablesQueryKey(owner, name) });
+      toastSuccess("Variable saved.");
+      setVarPending(false);
+    } catch {
+      setError(NETWORK_ERROR);
+      setVarPending(false);
+    }
+  }
+
+  async function deleteVariable(vn: string) {
+    if (!canAdmin) return;
+    setError("");
+    try {
+      const res = await apiClient.repo.actions.variables.delete({
+        owner,
+        name,
+        variable_name: vn,
+      });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not delete variable.");
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: variablesQueryKey(owner, name) });
+      toastSuccess("Variable deleted.");
+    } catch {
+      toastError(NETWORK_ERROR);
+    }
+  }
+
   const enabled = enabledQ.data ?? true;
   const secrets = secretsQ.data ?? [];
+  const variables = variablesQ.data ?? [];
 
   <section
     id="actions"
@@ -160,62 +304,278 @@ export function ActionsSettingsPanel(props: {
     }
 
     @if (canAdmin) {
-      <div className="mt-4 space-y-3">
-        <h3 className="text-[15px] font-semibold text-foreground">Repository secrets</h3>
-        <form
-          className="flex flex-wrap items-end gap-3"
-          method="post"
-          action="#"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void putSecret();
-          }}
-        >
-          <label className="flex flex-col gap-1 text-[14px]">
-            <span className="font-medium">Name</span>
-            <Input
-              data-testid="repo-actions-secret-name"
-              value={secretName}
-              onInput={(e) => setSecretName((e.target as HTMLInputElement).value)}
-              autocomplete="off"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[14px]">
-            <span className="font-medium">Value</span>
-            <Input
-              type="password"
-              data-testid="repo-actions-secret-value"
-              value={secretValue}
-              onInput={(e) => setSecretValue((e.target as HTMLInputElement).value)}
-              autocomplete="new-password"
-            />
-          </label>
-          <Button
-            type="submit"
-            disabled={secretPending}
-            data-testid="repo-actions-secret-save"
+      <>
+        <div className="mt-4 space-y-3">
+          <h3 className="text-[15px] font-semibold text-foreground">Repository secrets</h3>
+          <form
+            className="flex flex-wrap items-end gap-3"
+            method="post"
+            action="#"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void putSecret();
+            }}
           >
-            Save secret
-          </Button>
-        </form>
-        <ul className="space-y-2">
-          @for (const s of secrets; key s.name) {
-            <li className="flex items-center justify-between gap-3 text-[14px]">
-              <span className="font-mono">{s.name as string}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => void deleteSecret(s.name)}
-                data-testid={"repo-actions-secret-delete-" + s.name}
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Name</span>
+              <Input
+                data-testid="repo-actions-secret-name"
+                value={secretName}
+                onInput={(e) => setSecretName((e.target as HTMLInputElement).value)}
+                autocomplete="off"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Value</span>
+              <Input
+                type="password"
+                data-testid="repo-actions-secret-value"
+                value={secretValue}
+                onInput={(e) => setSecretValue((e.target as HTMLInputElement).value)}
+                autocomplete="new-password"
+              />
+            </label>
+            <Button
+              type="submit"
+              disabled={secretPending}
+              data-testid="repo-actions-secret-save"
+            >
+              Save secret
+            </Button>
+          </form>
+          <ul className="space-y-2">
+            @for (const s of secrets; key s.name) {
+              <li className="flex items-center justify-between gap-3 text-[14px]">
+                <span className="font-mono">{s.name as string}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void deleteSecret(s.name)}
+                  data-testid={"repo-actions-secret-delete-" + s.name}
+                >
+                  Delete
+                </Button>
+              </li>;
+            } @empty {
+              <li className="text-muted-foreground">No secrets yet.</li>;
+            }
+          </ul>
+        </div>
+        <div className="mt-6 space-y-3" data-testid="actions-variables-section">
+          <h3 className="text-[15px] font-semibold text-foreground">Repository variables</h3>
+          <p className="text-[13px] text-muted-foreground">
+            Plaintext configuration exposed as{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">vars.*</code>{" "}
+            in workflow expressions — visible to anyone with write access, unlike secrets.
+          </p>
+          <form
+            className="flex flex-wrap items-end gap-3"
+            method="post"
+            action="#"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void putVariable();
+            }}
+          >
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Name</span>
+              <Input
+                data-testid="repo-actions-variable-name"
+                value={varName}
+                onInput={(e) => setVarName((e.target as HTMLInputElement).value)}
+                autocomplete="off"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Value</span>
+              <Input
+                data-testid="repo-actions-variable-value"
+                value={varValue}
+                onInput={(e) => setVarValue((e.target as HTMLInputElement).value)}
+                autocomplete="off"
+              />
+            </label>
+            <Button
+              type="submit"
+              disabled={varPending}
+              data-testid="repo-actions-variable-save"
+            >
+              Save variable
+            </Button>
+          </form>
+          <ul className="space-y-2">
+            @for (const v of variables; key v.name) {
+              <li className="flex items-center justify-between gap-3 text-[14px]">
+                <span className="font-mono">
+                  {v.name as string}
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {v.value as string}
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void deleteVariable(v.name)}
+                  data-testid={"repo-actions-variable-delete-" + v.name}
+                >
+                  Delete
+                </Button>
+              </li>;
+            } @empty {
+              <li className="text-muted-foreground">No variables yet.</li>;
+            }
+          </ul>
+        </div>
+        <div className="mt-6 flex flex-col gap-4" data-testid="actions-permissions-section">
+          <h3 className="text-[15px] font-semibold text-foreground">Workflow permissions</h3>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="actions-default-perms">Default GITHUB_TOKEN permissions</Label>
+            <SelectRoot
+              value={defaultPermsQ.data ?? "read"}
+              onValueChange={(next) => {
+                if (typeof next === "string") {
+                  void saveSetting(
+                    () =>
+                      apiClient.repo.actions.setDefaultPermissions({
+                        owner,
+                        name,
+                        default_permissions: next,
+                      }),
+                    "Default workflow permissions saved.",
+                    ["repo", "actions", "defaultPermissions", owner, name],
+                  );
+                }
+              }}
+            >
+              <SelectTrigger
+                id="actions-default-perms"
+                className="w-full max-w-md"
+                data-testid="actions-default-perms"
               >
-                Delete
-              </Button>
-            </li>;
-          } @empty {
-            <li className="text-muted-foreground">No secrets yet.</li>;
-          }
-        </ul>
-      </div>;
+                <SelectValue>
+                  {
+                    (DEFAULT_PERM_OPTIONS.find(
+                      (o) => o.value === (defaultPermsQ.data ?? "read"),
+                    )?.label ?? "Read repository contents and packages") as string
+                  }
+                </SelectValue>
+                <SelectIcon>
+                  <ChevronDown aria-hidden size={14} />
+                </SelectIcon>
+              </SelectTrigger>
+              {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted
+escape hatch; popup is anchor-scoped under the Select root. */}
+              <SelectPortal>
+                <SelectPositioner sideOffset={4}>
+                  <SelectPopup>
+                    <SelectList>
+                      @for (const opt of DEFAULT_PERM_OPTIONS; key opt.value) {
+                        <SelectItem
+                          value={opt.value}
+                          data-testid={"actions-default-perms-option-" + opt.value}
+                        >
+                          <SelectItemIndicator>
+                            <Check aria-hidden size={14} className="text-primary" />
+                          </SelectItemIndicator>
+                          <SelectItemText>{opt.label as string}</SelectItemText>
+                        </SelectItem>;
+                      }
+                    </SelectList>
+                  </SelectPopup>
+                </SelectPositioner>
+              </SelectPortal>
+            </SelectRoot>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="actions-fork-pr">Fork pull request workflows</Label>
+            <SelectRoot
+              value={forkPrQ.data ?? "never"}
+              onValueChange={(next) => {
+                if (typeof next === "string") {
+                  void saveSetting(
+                    () =>
+                      apiClient.repo.actions.setForkPrApproval({ owner, name, policy: next }),
+                    "Fork PR approval policy saved.",
+                    ["repo", "actions", "forkPrApproval", owner, name],
+                  );
+                }
+              }}
+            >
+              <SelectTrigger
+                id="actions-fork-pr"
+                className="w-full max-w-md"
+                data-testid="actions-fork-pr"
+              >
+                <SelectValue>
+                  {
+                    (FORK_PR_OPTIONS.find((o) => o.value === (forkPrQ.data ?? "never"))
+                      ?.label ?? "Never require approval") as string
+                  }
+                </SelectValue>
+                <SelectIcon>
+                  <ChevronDown aria-hidden size={14} />
+                </SelectIcon>
+              </SelectTrigger>
+              {/* octane-dom-race-ok: same SelectPortal constraint. */}
+              <SelectPortal>
+                <SelectPositioner sideOffset={4}>
+                  <SelectPopup>
+                    <SelectList>
+                      @for (const opt of FORK_PR_OPTIONS; key opt.value) {
+                        <SelectItem
+                          value={opt.value}
+                          data-testid={"actions-fork-pr-option-" + opt.value}
+                        >
+                          <SelectItemIndicator>
+                            <Check aria-hidden size={14} className="text-primary" />
+                          </SelectItemIndicator>
+                          <SelectItemText>{opt.label as string}</SelectItemText>
+                        </SelectItem>;
+                      }
+                    </SelectList>
+                  </SelectPopup>
+                </SelectPositioner>
+              </SelectPortal>
+            </SelectRoot>
+            <p className="text-[12px] text-muted-foreground">
+              Held runs show an approval banner on the run page.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={prTargetQ.data ?? false}
+              disabled={!canAdmin}
+              data-testid="actions-pr-target"
+              onCheckedChange={(v) =>
+                void saveSetting(
+                  () =>
+                    apiClient.repo.actions.setPullRequestTarget({
+                      owner,
+                      name,
+                      enabled: !!v,
+                    }),
+                  "pull_request_target setting saved.",
+                  ["repo", "actions", "pullRequestTarget", owner, name],
+                )
+              }
+            />
+            <div className="flex flex-col">
+              <Label className="text-[14px]">
+                Allow workflows triggered by pull_request_target
+              </Label>
+              <span className="text-[12px] text-muted-foreground">
+                Runs in the base-repo context for fork PRs — only enable when workflows handle
+                untrusted code safely.
+              </span>
+            </div>
+          </div>
+        </div>
+        <ActionsEnvironmentsPanel owner={owner} name={name} can_admin={canAdmin} />
+        <div className="mt-2">
+          <h3 className="mb-1 text-[15px] font-semibold text-foreground">Deployments</h3>
+          <ActionsDeployments owner={owner} name={name} />
+        </div>
+      </>;
     }
 
     @if (error) {

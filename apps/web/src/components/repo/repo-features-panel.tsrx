@@ -8,11 +8,20 @@ import { toastSuccess } from "@/lib/toast";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
+type Unit = "issues" | "pulls" | "wiki" | "projects" | "discussions";
+
+const UNIT_LABEL: Record<Unit, string> = {
+  issues: "Issues",
+  pulls: "Pull requests",
+  wiki: "Wiki",
+  projects: "Projects",
+  discussions: "Discussions",
+};
+
 /**
- * Repo Settings → Features — per-repo unit toggles for Issues / Pulls
- * (COL-13). Writes go through `repo.issues.setEnabled` /
- * `repo.pulls.setEnabled` (Admin-only RPCs); the store update keeps the repo
- * chrome tabs in sync immediately.
+ * Repo Settings → Features — per-repo unit toggles for Issues / Pulls / Wiki /
+ * Projects (COL-13). Writes go through `repo.{unit}.setEnabled` (Admin-only
+ * RPCs); the store update keeps the repo chrome tabs in sync immediately.
  */
 export function RepoFeaturesPanel(props: {
   owner: string;
@@ -30,38 +39,27 @@ export function RepoFeaturesPanel(props: {
   const live = storeRepo && storeRepo.id === props.repo.id ? storeRepo : props.repo;
   const issuesEnabled = live.issues_enabled !== false;
   const pullsEnabled = live.pulls_enabled !== false;
+  const wikiEnabled = live.wiki_enabled !== false;
+  const projectsEnabled = live.projects_enabled !== false;
+  const discussionsEnabled = live.discussions_enabled !== false;
 
-  const [pendingUnit, setPendingUnit] = useState<"" | "issues" | "pulls">("");
+  const [pendingUnit, setPendingUnit] = useState<"" | Unit>("");
   const [error, setError] = useState("");
 
-  async function setUnit(unit: "issues" | "pulls", next: boolean) {
+  async function setUnit(unit: Unit, next: boolean) {
     if (!canAdmin || pendingUnit) return;
     setError("");
     setPendingUnit(unit);
     try {
-      const res =
-        unit === "issues"
-          ? await apiClient.repo.issues.setEnabled({ owner, name, enabled: next })
-          : await apiClient.repo.pulls.setEnabled({ owner, name, enabled: next });
+      const res = await apiClient.repo[unit].setEnabled({ owner, name, enabled: next });
       if (!res.ok) {
         setError(res.error.message || "Could not update repository features.");
         setPendingUnit("");
         return;
       }
-      setRepo(
-        unit === "issues"
-          ? { ...live, issues_enabled: res.data.enabled }
-          : { ...live, pulls_enabled: res.data.enabled },
-      );
-      toastSuccess(
-        unit === "issues"
-          ? next
-            ? "Issues enabled."
-            : "Issues disabled."
-          : next
-            ? "Pull requests enabled."
-            : "Pull requests disabled.",
-      );
+      const flag = `${unit}_enabled` as keyof RepoPublic;
+      setRepo({ ...live, [flag]: res.data.enabled });
+      toastSuccess(next ? `${UNIT_LABEL[unit]} enabled.` : `${UNIT_LABEL[unit]} disabled.`);
       setPendingUnit("");
     } catch {
       setError(NETWORK_ERROR);
@@ -106,6 +104,36 @@ export function RepoFeaturesPanel(props: {
           aria-label="Enable pull requests"
         />
         <Label className="text-[14px]">Pull requests</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={wikiEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("wiki", !!v)}
+          data-testid="repo-wiki-enabled"
+          aria-label="Enable wiki"
+        />
+        <Label className="text-[14px]">Wiki</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={projectsEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("projects", !!v)}
+          data-testid="repo-projects-enabled"
+          aria-label="Enable projects"
+        />
+        <Label className="text-[14px]">Projects</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={discussionsEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("discussions", !!v)}
+          data-testid="repo-discussions-enabled"
+          aria-label="Enable discussions"
+        />
+        <Label className="text-[14px]">Discussions</Label>
       </div>
     </div>
 

@@ -1,6 +1,16 @@
 import type {
+  ActionArtifactsListResponse,
+  ActionDeploymentsListResponse,
+  ActionJobAnnotationsResponse,
   ActionJobLogResponse,
+  ActionSecretsListResponse,
+  ActionVariablesListResponse,
   AdminWorkflowTemplatesListResponse,
+  OrgActionsSecretsListResponse,
+  OrgActionsSecretReposResponse,
+  OrgActionsVariableReposResponse,
+  OrgActionsVariablesListResponse,
+  RepoActionsEnvironmentsListResponse,
   WorkflowTemplateGetResponse,
   WorkflowTemplatesListResponse,
 } from "@oxidean/api-client";
@@ -13,6 +23,7 @@ import {
   actionsListRunsQueryOptions,
   actionsListWorkflowsQueryOptions,
   actionsRerunRunMutationOptions,
+  actionsSetWorkflowEnabledMutationOptions,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 
@@ -59,9 +70,13 @@ export function actionsRunDetailQuery(owner: string, name: string, runId: string
 }
 
 /**
- * Live job log — refetches every 5s, requesting only bytes after the
- * previously seen `next_offset` and appending the tail. If the stored log
- * shrank (rotation/rewrite), falls back to a full refetch.
+ * Live job log — server-side long-poll: each request passes `wait_ms` so the
+ * server holds it until new bytes land or the job goes terminal, then the
+ * query re-arms after `refetchInterval`. Effectively a live tail without
+ * fixed-cadence polling traffic; on server versions without `wait_ms`
+ * support the request returns immediately and the interval keeps things
+ * moving. If the stored log shrank (rotation/rewrite), falls back to a full
+ * refetch.
  */
 export function actionsJobLogQuery(owner: string, name: string, runId: string, jobId: string) {
   const base = actionsGetJobLogQueryOptions(apiClient, {
@@ -81,6 +96,7 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
         run_id: runId,
         job_id: jobId,
         offset,
+        wait_ms: 20_000,
       });
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       const data = res.data;
@@ -105,7 +121,88 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
       }
       return data;
     },
-    refetchInterval: 5_000,
+    // Re-arm quickly after each long-poll response — the server's 20s hold
+    // means this only fires when the job is live but silent (or pre-`wait_ms`
+    // servers, where it degrades to the old fixed-cadence poll). `done`
+    // stops polling entirely on terminal jobs; servers that predate the
+    // flag never set it and keep polling.
+    refetchInterval: (query: { state: { data?: ActionJobLogResponse } }) =>
+      query.state.data?.done ? false : 1_000,
+  };
+}
+
+/**
+ * One SSE frame from `GET …/logs/stream` — `offset` is the byte position the
+ * chunk starts at; an `offset:0` frame is a full snapshot (connect or
+ * post-wipe resend) and replaces rather than appends.
+ */
+export interface JobLogTailFrame {
+  offset: number;
+  content: string;
+  size: number;
+  done: boolean;
+}
+
+/**
+ * Apply one tail frame to the accumulated log state. The log is append-only
+ * byte-truth, so a frame whose `offset` matches the current size appends;
+ * `offset:0` replaces; anything else is a stale/duplicate frame and is
+ * dropped — the next snapshot frame self-corrects.
+ */
+export function applyJobLogFrame(
+  prev: ActionJobLogResponse | undefined,
+  frame: JobLogTailFrame,
+): ActionJobLogResponse {
+  const cur: ActionJobLogResponse = prev ?? {
+    content: "",
+    next_offset: 0,
+    size: 0,
+    done: false,
+  };
+  if (frame.offset === 0) {
+    return { content: frame.content, next_offset: frame.size, size: frame.size, done: frame.done };
+  }
+  if (frame.offset === cur.size) {
+    return {
+      content: cur.content + frame.content,
+      next_offset: frame.size,
+      size: frame.size,
+      done: frame.done,
+    };
+  }
+  return cur;
+}
+
+/** SSE live-tail endpoint for a job's log (`stream_job_log` route). */
+export function actionsJobLogStreamUrl(owner: string, name: string, jobId: string) {
+  return `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/actions/jobs/${encodeURIComponent(jobId)}/logs/stream`;
+}
+
+/**
+ * Structured `::error`/`::warning`/`::notice` annotations for one job
+ * (`repo.actions.jobAnnotations`). Live-tail cadence matches the log query —
+ * annotations accrue while the job runs.
+ */
+export function actionsJobAnnotationsQuery(
+  owner: string,
+  name: string,
+  runId: string,
+  jobId: string,
+) {
+  return {
+    queryKey: ["repo", "actions", "annotations", owner, name, runId, jobId] as const,
+    queryFn: async (): Promise<ActionJobAnnotationsResponse> => {
+      const res = await apiClient.repo.actions.jobAnnotations({
+        owner,
+        name,
+        run_id: runId,
+        job_id: jobId,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(runId && jobId),
+    refetchInterval: 10_000,
   };
 }
 
@@ -163,4 +260,153 @@ export function actionsRerunRunMutation() {
 
 export function actionsCancelRunMutation() {
   return actionsCancelRunMutationOptions(apiClient);
+}
+
+export function actionsSetWorkflowEnabledMutation() {
+  return actionsSetWorkflowEnabledMutationOptions(apiClient);
+}
+
+/** Run-scoped artifact listing (`repo.actions.listArtifacts`). */
+export function actionsArtifactsQuery(owner: string, name: string, runId: string) {
+  return {
+    queryKey: ["repo", "actions", "artifacts", owner, name, runId] as const,
+    queryFn: async (): Promise<ActionArtifactsListResponse> => {
+      const res = await apiClient.repo.actions.listArtifacts({ owner, name, run_id: runId });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(runId),
+    refetchInterval: 10_000,
+  };
+}
+
+/** Deployments — run-scoped when `runId` set, repo-level history otherwise. */
+export function actionsDeploymentsQuery(
+  owner: string,
+  name: string,
+  opts: { runId?: string; environment?: string } = {},
+) {
+  return {
+    queryKey: [
+      "repo",
+      "actions",
+      "deployments",
+      owner,
+      name,
+      opts.runId ?? "",
+      opts.environment ?? "",
+    ] as const,
+    queryFn: async (): Promise<ActionDeploymentsListResponse> => {
+      const res = await apiClient.repo.actions.listDeployments({
+        owner,
+        name,
+        run_id: opts.runId || undefined,
+        environment: opts.environment || undefined,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    refetchInterval: 15_000,
+  };
+}
+
+/** `repo.actions.environments.list`. */
+export function actionsEnvironmentsQuery(owner: string, name: string) {
+  return {
+    queryKey: ["repo", "actions", "environments", owner, name] as const,
+    queryFn: async (): Promise<RepoActionsEnvironmentsListResponse> => {
+      const res = await apiClient.repo.actions.environments.list({ owner, name });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+/** `repo.actions.environments.secretsList` — metadata only. */
+export function actionsEnvironmentSecretsQuery(owner: string, name: string, env: string) {
+  return {
+    queryKey: ["repo", "actions", "env-secrets", owner, name, env] as const,
+    queryFn: async (): Promise<ActionSecretsListResponse> => {
+      const res = await apiClient.repo.actions.environments.secretsList({
+        owner,
+        name,
+        environment: env,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(env),
+  };
+}
+
+/** `repo.actions.environments.variablesList` — values are plaintext. */
+export function actionsEnvironmentVariablesQuery(owner: string, name: string, env: string) {
+  return {
+    queryKey: ["repo", "actions", "env-variables", owner, name, env] as const,
+    queryFn: async (): Promise<ActionVariablesListResponse> => {
+      const res = await apiClient.repo.actions.environments.variablesList({
+        owner,
+        name,
+        environment: env,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(env),
+  };
+}
+
+/** `org.actions.secrets.list`. */
+export function orgActionsSecretsQuery(slug: string) {
+  return {
+    queryKey: ["org", "actions", "secrets", slug] as const,
+    queryFn: async (): Promise<OrgActionsSecretsListResponse> => {
+      const res = await apiClient.org.actions.secrets.list({ slug });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug),
+  };
+}
+
+/** `org.actions.secrets.listRepos` — selected-visibility repo ids. */
+export function orgActionsSecretReposQuery(slug: string, secret: string) {
+  return {
+    queryKey: ["org", "actions", "secret-repos", slug, secret] as const,
+    queryFn: async (): Promise<OrgActionsSecretReposResponse> => {
+      const res = await apiClient.org.actions.secrets.listRepos({ slug, secret_name: secret });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug && secret),
+  };
+}
+
+/** `org.actions.variables.list` — values are plaintext (not secrets). */
+export function orgActionsVariablesQuery(slug: string) {
+  return {
+    queryKey: ["org", "actions", "variables", slug] as const,
+    queryFn: async (): Promise<OrgActionsVariablesListResponse> => {
+      const res = await apiClient.org.actions.variables.list({ slug });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug),
+  };
+}
+
+/** `org.actions.variables.listRepos` — selected-visibility repo ids. */
+export function orgActionsVariableReposQuery(slug: string, variable: string) {
+  return {
+    queryKey: ["org", "actions", "variable-repos", slug, variable] as const,
+    queryFn: async (): Promise<OrgActionsVariableReposResponse> => {
+      const res = await apiClient.org.actions.variables.listRepos({
+        slug,
+        variable_name: variable,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug && variable),
+  };
 }

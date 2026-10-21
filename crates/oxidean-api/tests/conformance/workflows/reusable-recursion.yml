@@ -1,0 +1,5 @@
+name: reusable-recursion
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/loop.yml

@@ -1835,9 +1835,11 @@ async fn ref_actual_sqlite(
     Ok(row.flatten())
 }
 
-/// MySQL has no `RETURNING` and no `IS NOT DISTINCT FROM` — the CAS runs as
-/// `SELECT ... FOR UPDATE` → guarded write inside one tx (the locked read
-/// serializes concurrent CAS callers and sees the latest committed value).
+/// MySQL has no `RETURNING`, but `<=>` is its null-safe equality — the CAS
+/// runs as the same single-statement conditional writes as pg/sqlite. The
+/// previous `SELECT … FOR UPDATE` guard took a next-key/gap lock when the
+/// ref was absent, spanning neighbouring index space and deadlocking
+/// concurrent first-creates across repos (error 1213).
 async fn cas_ref_update_mysql(
     p: &sqlx::MySqlPool,
     repo_id: &str,
@@ -1845,99 +1847,103 @@ async fn cas_ref_update_mysql(
     expected_old: Option<&str>,
     new: Option<&str>,
 ) -> Result<CasOutcome, String> {
-    let mut tx = p
-        .begin()
-        .await
-        .map_err(|e| format!("vcs cas_ref begin: {e}"))?;
-    let current = sqlx::query(
-        "SELECT changeset_id,
-                DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
-         FROM vcs_refs WHERE repo_id = ? AND name = ? FOR UPDATE",
-    )
-    .bind(repo_id)
-    .bind(name)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| format!("vcs cas_ref read: {e}"))?
-    .map(|r| {
-        (
-            r.try_get::<Option<String>, _>("changeset_id")
-                .unwrap_or(None),
-            r.try_get::<String, _>("updated_at").unwrap_or_default(),
-        )
-    });
-    match current {
-        None => {
-            if expected_old.is_none() && new.is_some() {
+    match new {
+        Some(n) => {
+            let res = sqlx::query(
+                "UPDATE vcs_refs SET changeset_id = ?, updated_at = CURRENT_TIMESTAMP(6)
+                 WHERE repo_id = ? AND name = ? AND changeset_id <=> ?",
+            )
+            .bind(n)
+            .bind(repo_id)
+            .bind(name)
+            .bind(expected_old)
+            .execute(p)
+            .await
+            .map_err(|e| format!("vcs cas_ref update: {e}"))?;
+            if res.rows_affected() == 1 {
+                return Ok(CasOutcome::Applied(ref_row_mysql(p, repo_id, name).await?));
+            }
+            if expected_old.is_none() {
+                // Create path: the unique key arbitrates the insert — a
+                // duplicate means a head already landed and becomes the
+                // conflict actual (pg/sqlite's ON CONFLICT shape).
                 let ins = sqlx::query(
                     "INSERT INTO vcs_refs (repo_id, name, changeset_id) VALUES (?, ?, ?)",
                 )
                 .bind(repo_id)
                 .bind(name)
-                .bind(new)
-                .execute(&mut *tx)
+                .bind(n)
+                .execute(p)
                 .await;
                 if let Err(e) = ins {
-                    // Lost a create race — the winner's row is the conflict
-                    // actual. Any other failure (e.g. FK) propagates as Err.
-                    let _ = tx.rollback().await;
-                    let actual: Option<String> = sqlx::query_scalar::<_, Option<String>>(
-                        "SELECT changeset_id FROM vcs_refs WHERE repo_id = ? AND name = ?",
-                    )
-                    .bind(repo_id)
-                    .bind(name)
-                    .fetch_optional(p)
-                    .await
-                    .map_err(|e2| format!("vcs cas_ref actual: {e2}"))?
-                    .flatten();
+                    let actual = ref_actual_mysql(p, repo_id, name).await?;
                     return match actual {
                         Some(_) => Ok(CasOutcome::Conflict { actual }),
                         None => Err(format!("vcs cas_ref create: {e}")),
                     };
                 }
-            } else {
-                let _ = tx.rollback().await;
-                return Ok(CasOutcome::Conflict { actual: None });
+                return Ok(CasOutcome::Applied(ref_row_mysql(p, repo_id, name).await?));
             }
+            let actual = ref_actual_mysql(p, repo_id, name).await?;
+            Ok(CasOutcome::Conflict { actual })
         }
-        Some((actual, updated_at)) => {
-            if actual.as_deref() != expected_old {
-                let _ = tx.rollback().await;
-                return Ok(CasOutcome::Conflict { actual });
+        None => {
+            // No RETURNING: pre-read updated_at only for the Applied row —
+            // the delete is guarded by the same `<=>` predicate, not this read.
+            let updated_at: Option<String> = sqlx::query_scalar(
+                "SELECT DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ')
+                 FROM vcs_refs WHERE repo_id = ? AND name = ?",
+            )
+            .bind(repo_id)
+            .bind(name)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("vcs cas_ref read: {e}"))?;
+            let res = sqlx::query(
+                "DELETE FROM vcs_refs
+                 WHERE repo_id = ? AND name = ? AND changeset_id <=> ?",
+            )
+            .bind(repo_id)
+            .bind(name)
+            .bind(expected_old)
+            .execute(p)
+            .await
+            .map_err(|e| format!("vcs cas_ref delete: {e}"))?;
+            if res.rows_affected() == 1 {
+                return Ok(CasOutcome::Applied(VcsRefRow {
+                    repo_id: repo_id.to_string(),
+                    name: name.to_string(),
+                    changeset_id: None,
+                    updated_at: updated_at.unwrap_or_default(),
+                }));
             }
-            match new {
-                Some(n) => {
-                    sqlx::query(
-                        "UPDATE vcs_refs SET changeset_id = ?, updated_at = CURRENT_TIMESTAMP(6)
-                         WHERE repo_id = ? AND name = ?",
-                    )
-                    .bind(n)
-                    .bind(repo_id)
-                    .bind(name)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("vcs cas_ref update: {e}"))?;
-                }
-                None => {
-                    sqlx::query("DELETE FROM vcs_refs WHERE repo_id = ? AND name = ?")
-                        .bind(repo_id)
-                        .bind(name)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("vcs cas_ref delete: {e}"))?;
-                    tx.commit()
-                        .await
-                        .map_err(|e| format!("vcs cas_ref commit: {e}"))?;
-                    return Ok(CasOutcome::Applied(VcsRefRow {
-                        repo_id: repo_id.to_string(),
-                        name: name.to_string(),
-                        changeset_id: None,
-                        updated_at,
-                    }));
-                }
-            }
+            let actual = ref_actual_mysql(p, repo_id, name).await?;
+            Ok(CasOutcome::Conflict { actual })
         }
     }
+}
+
+async fn ref_actual_mysql(
+    p: &sqlx::MySqlPool,
+    repo_id: &str,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let row: Option<Option<String>> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT changeset_id FROM vcs_refs WHERE repo_id = ? AND name = ?",
+    )
+    .bind(repo_id)
+    .bind(name)
+    .fetch_optional(p)
+    .await
+    .map_err(|e| format!("vcs cas_ref actual: {e}"))?;
+    Ok(row.flatten())
+}
+
+async fn ref_row_mysql(
+    p: &sqlx::MySqlPool,
+    repo_id: &str,
+    name: &str,
+) -> Result<VcsRefRow, String> {
     let row = sqlx::query(
         "SELECT repo_id, name, changeset_id,
                 DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
@@ -1945,14 +1951,10 @@ async fn cas_ref_update_mysql(
     )
     .bind(repo_id)
     .bind(name)
-    .fetch_one(&mut *tx)
+    .fetch_one(p)
     .await
     .map_err(|e| format!("vcs cas_ref reread: {e}"))?;
-    let applied = map_ref!(row);
-    tx.commit()
-        .await
-        .map_err(|e| format!("vcs cas_ref commit: {e}"))?;
-    Ok(CasOutcome::Applied(applied))
+    Ok(map_ref!(row))
 }
 
 /// Unconditional ref delete — returns whether a row was removed. CAS-guarded

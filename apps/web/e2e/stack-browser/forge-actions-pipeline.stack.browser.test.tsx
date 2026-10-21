@@ -8,6 +8,9 @@ declare module "vitest/browser" {
   }
 }
 
+// Browser-coverage subjects exercised by expectActionsPipelineFlow:
+//   routes/$owner.$repo.actions.index.tsrx → actions-workflow-menu (workflow dropdown)
+//   routes/$owner.$repo.actions.$run.tsrx  → actions-run-more (run dropdown)
 describe("stack browser e2e: actions pipeline (runner → green run)", () => {
   beforeAll(() => {
     requireStack();

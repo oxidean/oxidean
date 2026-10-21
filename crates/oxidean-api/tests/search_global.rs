@@ -574,3 +574,126 @@ async fn search_global_empty_query() {
         );
     }
 }
+
+/// GitHub `/search/*` REST surface — users, issues (`is:pr` routing),
+/// commits, code, topics; all over `search.global`/`repo.topicsSuggest`.
+#[tokio::test]
+async fn rest_search_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("search_rest.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (cookie, v) = signup_and_login(&app, "gs@ex.com", "gsrest").await;
+    verify_email(&db, v["data"]["id"].as_str().unwrap()).await;
+
+    create_repo(&app, &cookie, "gadget", "public", "GSREST gadget").await;
+    seed_file(
+        &repos,
+        "gsrest",
+        "gadget",
+        "GSREST commit subject",
+        "src/main.rs",
+        "fn main() { GSREST }
+",
+    )
+    .await;
+    let iss = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"gsrest","name":"gadget","title":"GSREST issue","body":""}}"#,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(iss["ok"], true, "{iss}");
+    let br = rpc_json(
+        &app,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"gsrest","name":"gadget","branch":"feat","start":"main"}}"#,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(br["ok"], true, "{br}");
+    let pr = rpc_json(
+        &app,
+        r#"{"procedure":"pull.create","input":{"owner":"gsrest","name":"gadget","title":"GSREST pull","body":"","base_ref":"main","head_ref":"feat"}}"#,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(pr["ok"], true, "{pr}");
+
+    // /search/users — GitHub shape {login, type}.
+    let (s, v) = rest_get(&app, "/api/v1/search/users?q=gsrest", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["total_count"].as_i64().unwrap() >= 1, "{v}");
+    let items = v["items"].as_array().expect("items");
+    assert!(
+        items
+            .iter()
+            .any(|u| u["login"] == "gsrest" && u["type"] == "User"),
+        "{v}"
+    );
+
+    // /search/issues — issues by default, pulls under `is:pr`.
+    let (s, v) = rest_get(&app, "/api/v1/search/issues?q=GSREST", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().expect("items");
+    assert!(
+        items
+            .iter()
+            .any(|i| i["title"] == "GSREST issue" && i["pull_request"].is_null()),
+        "{v}"
+    );
+    let (s, v) = rest_get(&app, "/api/v1/search/issues?q=GSREST+is%3Apr", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().expect("items");
+    assert!(
+        items
+            .iter()
+            .any(|i| i["title"] == "GSREST pull" && i["pull_request"].is_object()),
+        "{v}"
+    );
+
+    // /search/commits + /search/code — git-scan groups.
+    let (s, v) = rest_get(&app, "/api/v1/search/commits?q=GSREST", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().expect("items");
+    assert!(
+        items
+            .iter()
+            .any(|c| c["commit"]["message"] == "GSREST commit subject"),
+        "{v}"
+    );
+    let (s, v) = rest_get(&app, "/api/v1/search/code?q=GSREST", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().expect("items");
+    assert!(items.iter().any(|c| c["path"] == "src/main.rs"), "{v}");
+
+    // /search/topics — envelope over topicsSuggest.
+    let (s, v) = rest_get(&app, "/api/v1/search/topics?q=rust", &cookie).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["total_count"].is_i64(), "{v}");
+    assert_eq!(v["incomplete_results"], false, "{v}");
+}
+
+async fn rest_get(app: &axum::Router, uri: &str, cookie: &str) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(uri)
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}

@@ -255,6 +255,93 @@ async fn git_smart_basic_account_password_rejected_401() {
     );
 }
 
+/// Wiki clone over Smart HTTP: `{name}.wiki.git` resolves the base repo's
+/// wiki bare — anonymous on a public repo, 404 when the unit is off or the
+/// wiki bare doesn't exist (GitHub parity).
+#[tokio::test]
+async fn git_smart_wiki_upload_pack_and_unit_gate() {
+    use oxidean_git::{CliGitBackend, GitBackend};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_wiki.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "wk@ex.com", "wkuser").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+
+    // No wiki bare on disk yet → GitHub 404s the clone.
+    let req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("wkuser", "hello.wiki"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "unborn wiki must 404");
+
+    // Seed the wiki bare the way `wiki.pages.create` does.
+    let wiki_bare = repos.join("wkuser").join("hello.wiki.git");
+    let git = CliGitBackend::new();
+    git.init_bare(&wiki_bare, "master").await.unwrap();
+    git.seed_commit(
+        &wiki_bare,
+        "master",
+        "home",
+        &[("Home.md".into(), b"# hi\n".to_vec())],
+    )
+    .await
+    .unwrap();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("wkuser", "hello.wiki"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "public anon wiki upload-pack info/refs must succeed"
+    );
+    let ct = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("git-upload-pack"),
+        "expected git-upload-pack content-type, got {ct}"
+    );
+
+    // Disable the unit → the same URL 404s (GitHub removes the wiki remote).
+    let toggle = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.wiki.setEnabled","input":{"owner":"wkuser","name":"hello","enabled":false}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(toggle.status(), StatusCode::OK);
+    let _ = toggle.into_body().collect().await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("wkuser", "hello.wiki"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "disabled wiki unit must 404 the remote"
+    );
+}
+
 /// Session cookie alone is treated as anonymous (D-12) — never authenticates Smart HTTP.
 #[tokio::test]
 async fn git_smart_session_cookie_ignored_as_anon() {
@@ -1041,12 +1128,19 @@ async fn mint_job_token(
         "ci",
         Some(user_id),
         None,
+        None,
     )
     .await
     .expect("insert run");
-    db.insert_action_job(&job_id, &run_id, "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .expect("insert job");
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        &job_id,
+        &run_id,
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .expect("insert job");
     let raw = format!("oxidean_job_{tag}0123456789abcdef0123456789abcdef");
     let expires = (chrono::Utc::now() + chrono::Duration::hours(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -1057,6 +1151,7 @@ async fn mint_job_token(
         repo_id,
         user_id,
         permission,
+        None,
         &sha256_hex(raw.as_bytes()),
         &expires,
     )

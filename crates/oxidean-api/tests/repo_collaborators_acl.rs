@@ -552,3 +552,334 @@ async fn collab_visibility_change_requires_admin() {
     );
     assert_eq!(admin_vis["data"]["visibility"], "private");
 }
+
+/// REST helper for the GitHub-shaped `/api/v1` surface.
+async fn rest(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+    body: Option<&str>,
+) -> (StatusCode, serde_json::Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    if body.is_some() {
+        b = b.header("content-type", "application/json");
+    }
+    let res = app
+        .clone()
+        .oneshot(b.body(Body::from(body.unwrap_or("").to_owned())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// GitHub REST surface: collaborators CRUD/check/permission, forks,
+/// subscription (watch), and `/user/starred` self-star routes.
+#[tokio::test]
+async fn repo_rest_social_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_social.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "ow@ex.com", "sowner").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
+    let (_collab_cookie, collab_v) = signup_and_login(&app, "cl@ex.com", "scollab").await;
+    verify_user(&db, collab_v["data"]["id"].as_str().unwrap()).await;
+    let (star_cookie, star_v) = signup_and_login(&app, "st@ex.com", "sstar").await;
+    verify_user(&db, star_v["data"]["id"].as_str().unwrap()).await;
+
+    rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    let base = "/api/v1/repos/sowner/core";
+
+    // ---- collaborators ----------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    // PUT adds → 201 with the GitHub collaborator projection.
+    let (s, v) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        Some(r#"{"permission":"write"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["login"], "scollab");
+    assert_eq!(v["permissions"]["push"], true);
+    assert_eq!(v["permissions"]["admin"], false);
+
+    // PUT same permission → 204 (idempotent)
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        Some(r#"{"permission":"write"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    // PUT different permission → 204 (update path)
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        Some(r#"{"permission":"admin"}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators/ghost"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // owner reports as admin via the permission endpoint
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators/sowner/permission"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["permission"], "admin");
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators/scollab/permission"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["permission"], "admin"); // updated above
+    assert_eq!(v["user"]["login"], "scollab");
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/collaborators/scollab"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- subscription (watch) ----------------------------------------------
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/subscription"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, v) = rest(
+        &app,
+        "PUT",
+        &format!("{base}/subscription"),
+        Some(&star_cookie),
+        Some(r#"{"subscribed":true}"#),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["subscribed"], true);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/subscription"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["subscribed"], true);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/subscribers"),
+        Some(&owner_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["login"], "sstar");
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        &format!("{base}/subscription"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        &format!("{base}/subscription"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- starring ------------------------------------------------------------
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/starred/sowner/core",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, _) = rest(
+        &app,
+        "PUT",
+        "/api/v1/user/starred/sowner/core",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/starred/sowner/core",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/starred",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v[0]["name"], "core");
+
+    let (s, _) = rest(
+        &app,
+        "DELETE",
+        "/api/v1/user/starred/sowner/core",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = rest(
+        &app,
+        "GET",
+        "/api/v1/user/starred/sowner/core",
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // ---- forks ---------------------------------------------------------------
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/forks"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 0);
+
+    let (s, v) = rest(
+        &app,
+        "POST",
+        &format!("{base}/forks"),
+        Some(&star_cookie),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+    assert_eq!(v["name"], "core");
+    assert_eq!(v["owner_username"], "sstar");
+
+    let (s, v) = rest(
+        &app,
+        "GET",
+        &format!("{base}/forks"),
+        Some(&star_cookie),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["full_name"], "sstar/core");
+    assert_eq!(v[0]["fork"], true);
+    assert_eq!(v[0]["owner"]["login"], "sstar");
+
+    // anonymous cannot star
+    let (s, _) = rest(&app, "PUT", "/api/v1/user/starred/sowner/core", None, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}

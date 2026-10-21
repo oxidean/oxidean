@@ -551,6 +551,8 @@ async fn put_publish(
         "published",
         &identity.user_id,
         &state.env_name,
+        state.git.as_ref(),
+        &state.repos_dir,
     )
     .await;
 

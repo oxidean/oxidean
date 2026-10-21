@@ -1,0 +1,19 @@
+name: needs-skipped-dep
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+    steps:
+      - run: echo should-not-run
+  b:
+    runs-on: ubuntu-latest
+    needs: a
+    steps:
+      - run: echo should-not-run
+  c:
+    runs-on: ubuntu-latest
+    needs: b
+    if: ${{ always() }}
+    steps:
+      - run: echo c-ran-after-skips

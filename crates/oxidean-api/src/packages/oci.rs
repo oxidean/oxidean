@@ -750,6 +750,8 @@ async fn put_manifest(
         action,
         &identity.user_id,
         &state.env_name,
+        state.git.as_ref(),
+        &state.repos_dir,
     )
     .await;
 

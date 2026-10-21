@@ -25,6 +25,21 @@ describe("repoChromeActiveFromPath", () => {
     expect(repoChromeActiveFromPath("/ada/hello/insights")).toBe("insights");
   });
 
+  it("maps /owner/repo/wiki (and nested) → wiki", () => {
+    expect(repoChromeActiveFromPath("/ada/hello/wiki")).toBe("wiki");
+    expect(repoChromeActiveFromPath("/ada/hello/wiki/Home/_edit")).toBe("wiki");
+  });
+
+  it("maps /owner/repo/projects (and nested) → projects", () => {
+    expect(repoChromeActiveFromPath("/ada/hello/projects")).toBe("projects");
+    expect(repoChromeActiveFromPath("/ada/hello/projects/3")).toBe("projects");
+  });
+
+  it("maps /owner/repo/discussions (and nested) → discussions", () => {
+    expect(repoChromeActiveFromPath("/ada/hello/discussions")).toBe("discussions");
+    expect(repoChromeActiveFromPath("/ada/hello/discussions/3")).toBe("discussions");
+  });
+
   it("maps known chrome segments; unknown → code", () => {
     expect(repoChromeActiveFromPath("/ada/hello/releases")).toBe("releases");
     expect(repoChromeActiveFromPath("/ada/hello/settings")).toBe("settings");

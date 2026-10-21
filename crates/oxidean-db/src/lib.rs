@@ -1,6 +1,8 @@
 //! Uniform database adapter boundary — the only place dialect branching is allowed (D-08).
 
 pub mod actions;
+pub mod actions_cache;
+pub mod admin;
 pub mod audit_events;
 pub mod auth_identities;
 pub mod auth_settings;
@@ -17,7 +19,9 @@ pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
 pub mod mcp_settings;
+pub mod merge_queue;
 pub mod migrate;
+pub mod milestones;
 pub mod mirrors;
 pub mod notifications;
 pub mod oauth;
@@ -25,10 +29,12 @@ pub mod org_invites;
 pub mod org_members;
 pub mod organizations;
 pub mod packages;
+pub mod pages;
 pub mod pat_settings;
 pub mod pats;
 pub mod pool;
 pub mod probe;
+pub mod projects;
 pub mod pulls;
 pub mod redirects;
 pub mod releases;
@@ -53,26 +59,36 @@ pub mod watches;
 pub mod webhooks;
 pub mod workflow_templates;
 
+pub mod checks;
+pub mod deployments;
+pub mod discussions;
 pub use actions::{
-    ActionJobRow, ActionJobTokenRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
-    ActionSecretCipherRow, ActionSecretMetaRow,
+    ActionArtifactRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
+    ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
+    ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas, OrgSecretRow, StaleJobRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
+pub use checks::{CheckRunAnnotationRow, CheckRunRow, CheckSuiteRow};
 pub use deploy_keys::DeployKeyRow;
+pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
 use dialect::resolve_dialect_from_env as resolve_from_env;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
+pub use discussions::{DiscussionCategoryRow, DiscussionCommentRow, DiscussionRow};
 pub use follows::UserFollowListRow;
 pub use git_settings::GitSettingsRow;
 pub use gpg_keys::GpgKeyRow;
 pub use instance_invites::InstanceInviteRow;
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
-    CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
+    CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow,
+    IssueRow, MilestoneListFilter,
 };
 pub use lfs::LfsObjectRow;
 pub use mcp_settings::McpSettingsRow;
+pub use merge_queue::{MergeGroupRow, MergeQueueEntryRow};
+pub use milestones::MilestoneRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthDeviceCodeRow, OAuthTokenRow};
@@ -81,9 +97,11 @@ pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
 pub use oxidean_core::DbProbeResponse;
 pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
+pub use pages::{PagesBuildRow, RepoPagesRow};
 pub use pats::PatRow;
 pub use pool::DbPool;
 use pool::DbPool as Pool;
+pub use projects::{ProjectCardRow, ProjectColumnRow, ProjectRow};
 pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoMergeSettingsRow};
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
@@ -142,6 +160,14 @@ impl Database {
 
     pub async fn connect(url: &str) -> Result<Self, String> {
         let dialect = resolve_from_env(url)?;
+        Self::connect_as(url, dialect).await
+    }
+
+    /// Connect with an explicit dialect, ignoring `OXIDEAN_DB_DIALECT`.
+    /// Tests and tools that manage more than one engine in one process
+    /// (e.g. a scratch sqlite DB under a postgres probe run) need this —
+    /// `connect` would reject the scheme mismatch.
+    pub async fn connect_as(url: &str, dialect: Dialect) -> Result<Self, String> {
         let pool = Pool::connect(url, dialect).await?;
         Ok(Self {
             pool: Some(pool),
@@ -1113,6 +1139,14 @@ impl Database {
         repositories::update_name(self.require_pool()?, id, name).await
     }
 
+    pub async fn update_repository_default_branch(
+        &self,
+        id: &str,
+        default_branch: &str,
+    ) -> Result<RepositoryRow, String> {
+        repositories::update_default_branch(self.require_pool()?, id, default_branch).await
+    }
+
     pub async fn update_repository_owner(
         &self,
         id: &str,
@@ -1223,6 +1257,12 @@ impl Database {
         number: i64,
     ) -> Result<Option<PullRow>, String> {
         pulls::find_by_repo_and_number(self.require_pool()?, repo_id, number).await
+    }
+
+    /// Id lookup — used by project-card enrichment and other cross-entity
+    /// joins that only hold the row id.
+    pub async fn find_pull_by_id(&self, id: &str) -> Result<Option<PullRow>, String> {
+        pulls::find_by_id(self.require_pool()?, id).await
     }
 
     pub async fn list_pulls_for_repo(
@@ -1563,6 +1603,7 @@ impl Database {
         required_linear_history: bool,
         lock_branch: bool,
         require_signed_commits: bool,
+        required_merge_queue: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::insert_rule(
             self.require_pool()?,
@@ -1582,6 +1623,7 @@ impl Database {
             required_linear_history,
             lock_branch,
             require_signed_commits,
+            required_merge_queue,
         )
         .await
     }
@@ -1605,6 +1647,7 @@ impl Database {
         required_linear_history: bool,
         lock_branch: bool,
         require_signed_commits: bool,
+        required_merge_queue: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::update_rule(
             self.require_pool()?,
@@ -1624,6 +1667,7 @@ impl Database {
             required_linear_history,
             lock_branch,
             require_signed_commits,
+            required_merge_queue,
         )
         .await
     }
@@ -1785,6 +1829,776 @@ impl Database {
     /// Hard-delete; does not reclaim `#N` (D-ISS-01).
     pub async fn delete_issue(&self, id: &str) -> Result<(), String> {
         issues::delete_issue(self.require_pool()?, id).await
+    }
+
+    // --- milestones ---
+
+    /// Allocate the next per-repo milestone `#N` (monotonic; never reclaims).
+    pub async fn allocate_next_milestone_number(&self, repo_id: &str) -> Result<i64, String> {
+        milestones::allocate_next_number(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_milestone(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        description: &str,
+        due_on: Option<&str>,
+        creator_id: Option<&str>,
+    ) -> Result<MilestoneRow, String> {
+        milestones::insert_milestone(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            description,
+            due_on,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn find_milestone_by_id(&self, id: &str) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_milestone_by_repo_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_repo_number(self.require_pool()?, repo_id, number).await
+    }
+
+    /// Case-insensitive title match within a repo (duplicate-create check).
+    pub async fn find_milestone_by_repo_title(
+        &self,
+        repo_id: &str,
+        title: &str,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_repo_title(self.require_pool()?, repo_id, title).await
+    }
+
+    /// `state` is `open`/`closed`/`all` — sorted by soonest due date.
+    pub async fn list_milestones_for_repo(
+        &self,
+        repo_id: &str,
+        state: &str,
+    ) -> Result<Vec<MilestoneRow>, String> {
+        milestones::list_milestones_for_repo(self.require_pool()?, repo_id, state).await
+    }
+
+    /// Batch lookup for issue enrichment.
+    pub async fn list_milestones_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<MilestoneRow>, String> {
+        milestones::list_milestones_by_ids(self.require_pool()?, ids).await
+    }
+
+    /// Edit title/description/due_on — `due_on` `Some(None)` clears the date.
+    /// `None` when the milestone vanished mid-update.
+    pub async fn update_milestone(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        due_on: Option<Option<&str>>,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::update_milestone(self.require_pool()?, id, title, description, due_on).await
+    }
+
+    /// Open/close a milestone (`closed_at` stamps on close, clears on reopen).
+    /// `None` when the milestone vanished mid-update.
+    pub async fn set_milestone_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::set_milestone_state(self.require_pool()?, id, state).await
+    }
+
+    /// Hard-delete; `issues.milestone_id` clears via `ON DELETE SET NULL`.
+    pub async fn delete_milestone(&self, id: &str) -> Result<(), String> {
+        milestones::delete_milestone(self.require_pool()?, id).await
+    }
+
+    /// Set/clear an issue's milestone (`None` clears).
+    pub async fn set_issue_milestone(
+        &self,
+        issue_id: &str,
+        milestone_id: Option<&str>,
+    ) -> Result<(), String> {
+        milestones::set_issue_milestone(self.require_pool()?, issue_id, milestone_id).await
+    }
+
+    // --- projects (classic boards) ---
+
+    pub async fn allocate_next_project_number(&self, repo_id: &str) -> Result<i64, String> {
+        projects::allocate_next_project_number(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn insert_project(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        body: &str,
+        creator_id: Option<&str>,
+    ) -> Result<ProjectRow, String> {
+        projects::insert_project(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            body,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn find_project_by_id(&self, id: &str) -> Result<Option<ProjectRow>, String> {
+        projects::find_project_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_project_by_repo_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::find_project_by_repo_number(self.require_pool()?, repo_id, number).await
+    }
+
+    pub async fn list_projects_for_repo(
+        &self,
+        repo_id: &str,
+        state: &str,
+    ) -> Result<Vec<ProjectRow>, String> {
+        projects::list_projects_for_repo(self.require_pool()?, repo_id, state).await
+    }
+
+    pub async fn update_project(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::update_project(self.require_pool()?, id, title, body).await
+    }
+
+    pub async fn set_project_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::set_project_state(self.require_pool()?, id, state).await
+    }
+
+    pub async fn delete_project(&self, id: &str) -> Result<(), String> {
+        projects::delete_project(self.require_pool()?, id).await
+    }
+
+    pub async fn find_column_by_id(&self, id: &str) -> Result<Option<ProjectColumnRow>, String> {
+        projects::find_column_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_column_in_project(
+        &self,
+        project_id: &str,
+        id: &str,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::find_column_in_project(self.require_pool()?, project_id, id).await
+    }
+
+    pub async fn list_columns_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProjectColumnRow>, String> {
+        projects::list_columns_for_project(self.require_pool()?, project_id).await
+    }
+
+    pub async fn insert_project_column(
+        &self,
+        id: &str,
+        project_id: &str,
+        name: &str,
+    ) -> Result<ProjectColumnRow, String> {
+        projects::insert_project_column(self.require_pool()?, id, project_id, name).await
+    }
+
+    pub async fn update_project_column(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::update_project_column(self.require_pool()?, id, name).await
+    }
+
+    pub async fn move_project_column(
+        &self,
+        id: &str,
+        new_position: i64,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::move_project_column(self.require_pool()?, id, new_position).await
+    }
+
+    pub async fn delete_project_column(&self, id: &str) -> Result<(), String> {
+        projects::delete_project_column(self.require_pool()?, id).await
+    }
+
+    pub async fn find_card_by_id(&self, id: &str) -> Result<Option<ProjectCardRow>, String> {
+        projects::find_card_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_card_in_column(
+        &self,
+        column_id: &str,
+        id: &str,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::find_card_in_column(self.require_pool()?, column_id, id).await
+    }
+
+    pub async fn list_cards_for_column(
+        &self,
+        column_id: &str,
+        include_archived: bool,
+    ) -> Result<Vec<ProjectCardRow>, String> {
+        projects::list_cards_for_column(self.require_pool()?, column_id, include_archived).await
+    }
+
+    pub async fn insert_project_card(
+        &self,
+        id: &str,
+        column_id: &str,
+        note: Option<&str>,
+        content_type: Option<&str>,
+        content_id: Option<&str>,
+        creator_id: Option<&str>,
+    ) -> Result<ProjectCardRow, String> {
+        projects::insert_project_card(
+            self.require_pool()?,
+            id,
+            column_id,
+            note,
+            content_type,
+            content_id,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn update_project_card(
+        &self,
+        id: &str,
+        note: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::update_project_card(self.require_pool()?, id, note, archived).await
+    }
+
+    pub async fn convert_project_card(
+        &self,
+        id: &str,
+        content_type: &str,
+        content_id: &str,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::convert_project_card(self.require_pool()?, id, content_type, content_id).await
+    }
+
+    pub async fn move_project_card(
+        &self,
+        id: &str,
+        dest_column_id: &str,
+        new_position: i64,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::move_project_card(self.require_pool()?, id, dest_column_id, new_position).await
+    }
+
+    pub async fn delete_project_card(&self, id: &str) -> Result<(), String> {
+        projects::delete_project_card(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_discussion_category(
+        &self,
+        id: &str,
+        repo_id: &str,
+        name: &str,
+        slug: &str,
+        emoji: &str,
+        description: &str,
+        is_answerable: bool,
+    ) -> Result<DiscussionCategoryRow, String> {
+        discussions::insert_category(
+            self.require_pool()?,
+            id,
+            repo_id,
+            name,
+            slug,
+            emoji,
+            description,
+            is_answerable,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_category_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::find_category_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_discussion_category_by_slug(
+        &self,
+        repo_id: &str,
+        slug: &str,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::find_category_by_slug(self.require_pool()?, repo_id, slug).await
+    }
+
+    pub async fn list_discussion_categories(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<DiscussionCategoryRow>, String> {
+        discussions::list_categories(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn update_discussion_category(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        emoji: Option<&str>,
+        description: Option<&str>,
+        is_answerable: Option<bool>,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::update_category(
+            self.require_pool()?,
+            id,
+            name,
+            emoji,
+            description,
+            is_answerable,
+        )
+        .await
+    }
+
+    pub async fn delete_discussion_category(&self, id: &str) -> Result<(), String> {
+        discussions::delete_category(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_discussion(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        body: &str,
+        category_id: Option<&str>,
+        author_id: Option<&str>,
+    ) -> Result<DiscussionRow, String> {
+        discussions::insert_discussion(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            body,
+            category_id,
+            author_id,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_by_id(&self, id: &str) -> Result<Option<DiscussionRow>, String> {
+        discussions::find_discussion_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_discussion_by_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::find_discussion_by_number(self.require_pool()?, repo_id, number).await
+    }
+
+    pub async fn list_discussions(
+        &self,
+        repo_id: &str,
+        category_id: Option<&str>,
+        answered: Option<bool>,
+    ) -> Result<Vec<DiscussionRow>, String> {
+        discussions::list_discussions(self.require_pool()?, repo_id, category_id, answered).await
+    }
+
+    pub async fn update_discussion(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        category_id: Option<Option<&str>>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::update_discussion(self.require_pool()?, id, title, body, category_id).await
+    }
+
+    pub async fn set_discussion_flags(
+        &self,
+        id: &str,
+        pinned: Option<bool>,
+        locked: Option<bool>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::set_discussion_flags(self.require_pool()?, id, pinned, locked).await
+    }
+
+    pub async fn set_discussion_answer(
+        &self,
+        id: &str,
+        comment_id: Option<&str>,
+        actor_id: Option<&str>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::set_discussion_answer(self.require_pool()?, id, comment_id, actor_id).await
+    }
+
+    pub async fn transfer_discussion(
+        &self,
+        id: &str,
+        target_repo_id: &str,
+        target_number: i64,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::transfer_discussion(self.require_pool()?, id, target_repo_id, target_number)
+            .await
+    }
+
+    pub async fn delete_discussion(&self, id: &str) -> Result<(), String> {
+        discussions::delete_discussion(self.require_pool()?, id).await
+    }
+
+    pub async fn insert_discussion_comment(
+        &self,
+        id: &str,
+        discussion_id: &str,
+        parent_id: Option<&str>,
+        author_id: Option<&str>,
+        body: &str,
+    ) -> Result<DiscussionCommentRow, String> {
+        discussions::insert_comment(
+            self.require_pool()?,
+            id,
+            discussion_id,
+            parent_id,
+            author_id,
+            body,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_comment_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DiscussionCommentRow>, String> {
+        discussions::find_comment_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn list_discussion_comments(
+        &self,
+        discussion_id: &str,
+    ) -> Result<Vec<DiscussionCommentRow>, String> {
+        discussions::list_comments(self.require_pool()?, discussion_id).await
+    }
+
+    pub async fn update_discussion_comment(
+        &self,
+        id: &str,
+        body: &str,
+    ) -> Result<Option<DiscussionCommentRow>, String> {
+        discussions::update_comment(self.require_pool()?, id, body).await
+    }
+
+    pub async fn delete_discussion_comment(&self, id: &str) -> Result<(), String> {
+        discussions::delete_comment(self.require_pool()?, id).await
+    }
+
+    pub async fn set_discussion_labels(
+        &self,
+        discussion_id: &str,
+        label_ids: &[String],
+    ) -> Result<(), String> {
+        discussions::set_discussion_labels(self.require_pool()?, discussion_id, label_ids).await
+    }
+
+    pub async fn list_discussion_label_ids(
+        &self,
+        discussion_id: &str,
+    ) -> Result<Vec<String>, String> {
+        discussions::list_discussion_label_ids(self.require_pool()?, discussion_id).await
+    }
+
+    pub async fn find_repo_pages(&self, repo_id: &str) -> Result<Option<RepoPagesRow>, String> {
+        pages::find_repo_pages(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_repo_pages(
+        &self,
+        repo_id: &str,
+        build_type: &str,
+        source_branch: &str,
+        source_path: &str,
+        cname: &str,
+        https_enforced: bool,
+    ) -> Result<RepoPagesRow, String> {
+        pages::upsert_repo_pages(
+            self.require_pool()?,
+            repo_id,
+            build_type,
+            source_branch,
+            source_path,
+            cname,
+            https_enforced,
+        )
+        .await
+    }
+
+    pub async fn delete_repo_pages(&self, repo_id: &str) -> Result<(), String> {
+        pages::delete_repo_pages(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_pages_build(
+        &self,
+        id: &str,
+        repo_id: &str,
+        build_type: &str,
+        commit_sha: &str,
+        branch: &str,
+        path: &str,
+        pusher_id: Option<&str>,
+        run_id: Option<&str>,
+    ) -> Result<PagesBuildRow, String> {
+        pages::insert_pages_build(
+            self.require_pool()?,
+            id,
+            repo_id,
+            build_type,
+            commit_sha,
+            branch,
+            path,
+            pusher_id,
+            run_id,
+        )
+        .await
+    }
+
+    pub async fn finish_pages_build(
+        &self,
+        id: &str,
+        status: &str,
+        url: &str,
+        error_message: &str,
+        duration_ms: i64,
+    ) -> Result<Option<PagesBuildRow>, String> {
+        pages::finish_pages_build(
+            self.require_pool()?,
+            id,
+            status,
+            url,
+            error_message,
+            duration_ms,
+        )
+        .await
+    }
+
+    pub async fn find_pages_build(&self, id: &str) -> Result<Option<PagesBuildRow>, String> {
+        pages::find_pages_build(self.require_pool()?, id).await
+    }
+
+    pub async fn latest_pages_build(
+        &self,
+        repo_id: &str,
+        status: Option<&str>,
+    ) -> Result<Option<PagesBuildRow>, String> {
+        pages::latest_pages_build(self.require_pool()?, repo_id, status).await
+    }
+
+    pub async fn list_pages_builds(
+        &self,
+        repo_id: &str,
+        status: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<PagesBuildRow>, String> {
+        pages::list_pages_builds(self.require_pool()?, repo_id, status, limit).await
+    }
+
+    pub async fn delete_pages_builds_for_repo(&self, repo_id: &str) -> Result<(), String> {
+        pages::delete_pages_builds_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    // --- merge queue ---------------------------------------------------
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_merge_queue_entry(
+        &self,
+        id: &str,
+        repo_id: &str,
+        pull_id: &str,
+        pull_number: i64,
+        base_ref: &str,
+        enqueued_by: &str,
+    ) -> Result<MergeQueueEntryRow, String> {
+        merge_queue::insert_merge_queue_entry(
+            self.require_pool()?,
+            id,
+            repo_id,
+            pull_id,
+            pull_number,
+            base_ref,
+            enqueued_by,
+        )
+        .await
+    }
+
+    pub async fn find_merge_queue_entry(
+        &self,
+        id: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_merge_queue_entry(self.require_pool()?, id).await
+    }
+
+    pub async fn find_queued_entry_for_pull(
+        &self,
+        pull_id: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_queued_entry_for_pull(self.require_pool()?, pull_id).await
+    }
+
+    pub async fn find_merge_queue_entry_for_pull_number(
+        &self,
+        repo_id: &str,
+        pull_number: i64,
+        state: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_merge_queue_entry_for_pull_number(
+            self.require_pool()?,
+            repo_id,
+            pull_number,
+            state,
+        )
+        .await
+    }
+
+    pub async fn find_latest_merge_queue_entry_for_pull_number(
+        &self,
+        repo_id: &str,
+        pull_number: i64,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::find_latest_merge_queue_entry_for_pull_number(
+            self.require_pool()?,
+            repo_id,
+            pull_number,
+        )
+        .await
+    }
+
+    pub async fn list_merge_queue_entries(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+        state: &str,
+    ) -> Result<Vec<MergeQueueEntryRow>, String> {
+        merge_queue::list_merge_queue_entries(self.require_pool()?, repo_id, base_ref, state).await
+    }
+
+    pub async fn list_merge_queue_entries_for_group(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<MergeQueueEntryRow>, String> {
+        merge_queue::list_merge_queue_entries_for_group(self.require_pool()?, group_id).await
+    }
+
+    pub async fn set_merge_queue_entry_state(
+        &self,
+        id: &str,
+        state: &str,
+        dequeue_reason: &str,
+    ) -> Result<Option<MergeQueueEntryRow>, String> {
+        merge_queue::set_merge_queue_entry_state(self.require_pool()?, id, state, dequeue_reason)
+            .await
+    }
+
+    pub async fn set_entry_group_and_chain(
+        &self,
+        entry_id: &str,
+        group_id: Option<&str>,
+        chain_sha: &str,
+    ) -> Result<(), String> {
+        merge_queue::set_entry_group_and_chain(self.require_pool()?, entry_id, group_id, chain_sha)
+            .await
+    }
+
+    pub async fn insert_merge_group(
+        &self,
+        id: &str,
+        repo_id: &str,
+        base_ref: &str,
+        base_sha: &str,
+        head_ref: &str,
+        head_sha: &str,
+    ) -> Result<MergeGroupRow, String> {
+        merge_queue::insert_merge_group(
+            self.require_pool()?,
+            id,
+            repo_id,
+            base_ref,
+            base_sha,
+            head_ref,
+            head_sha,
+        )
+        .await
+    }
+
+    pub async fn set_merge_group_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::set_merge_group_state(self.require_pool()?, id, state).await
+    }
+
+    pub async fn find_merge_group(&self, id: &str) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_merge_group(self.require_pool()?, id).await
+    }
+
+    pub async fn find_checking_merge_group(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_checking_merge_group(self.require_pool()?, repo_id, base_ref).await
+    }
+
+    pub async fn find_checking_merge_group_for_head(
+        &self,
+        repo_id: &str,
+        head_sha: &str,
+    ) -> Result<Option<MergeGroupRow>, String> {
+        merge_queue::find_checking_merge_group_for_head(self.require_pool()?, repo_id, head_sha)
+            .await
+    }
+
+    pub async fn list_merge_groups(
+        &self,
+        repo_id: &str,
+        base_ref: &str,
+        limit: i64,
+    ) -> Result<Vec<MergeGroupRow>, String> {
+        merge_queue::list_merge_groups(self.require_pool()?, repo_id, base_ref, limit).await
     }
 
     pub async fn insert_issue_revision(
@@ -3295,6 +4109,10 @@ impl Database {
 
     // --- actions (Phase 19) ---
 
+    /// `owner_type`/`owner_id` mark non-repo ownership — `('org', org_id)`
+    /// for org-level runners (GitHub `POST /orgs/{org}/actions/runners/…`
+    /// registration); repo-bound runners set `repository_id` instead.
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_runner(
         &self,
         id: &str,
@@ -3302,6 +4120,8 @@ impl Database {
         token_hash: &str,
         labels_json: &str,
         repository_id: Option<&str>,
+        owner_type: Option<&str>,
+        owner_id: Option<&str>,
         ephemeral: bool,
     ) -> Result<actions::ActionRunnerRow, String> {
         actions::insert_runner(
@@ -3311,6 +4131,8 @@ impl Database {
             token_hash,
             labels_json,
             repository_id,
+            owner_type,
+            owner_id,
             ephemeral,
         )
         .await
@@ -3336,6 +4158,7 @@ impl Database {
         title: &str,
         triggered_by: Option<&str>,
         head_repo_id: Option<&str>,
+        event_payload_json: Option<&str>,
     ) -> Result<actions::ActionRunRow, String> {
         actions::insert_run(
             self.require_pool()?,
@@ -3349,6 +4172,7 @@ impl Database {
             title,
             triggered_by,
             head_repo_id,
+            event_payload_json,
         )
         .await
     }
@@ -3360,23 +4184,51 @@ impl Database {
         actions::find_run_by_id(self.require_pool()?, id).await
     }
 
+    /// Record the evaluated workflow-level `concurrency:` group on a run.
+    pub async fn set_action_run_concurrency(
+        &self,
+        run_id: &str,
+        group: &str,
+    ) -> Result<(), String> {
+        actions::set_run_concurrency(self.require_pool()?, run_id, group).await
+    }
+
+    /// Insert a job + its claim labels in one transaction (Phase-1 durable
+    /// payloads): `JobInsert::basic` for plain jobs, full struct for
+    /// scheduled/matrix jobs.
     pub async fn insert_action_job(
         &self,
-        id: &str,
-        run_id: &str,
-        job_key: &str,
-        name: &str,
-        runs_on_json: &str,
+        job: actions::JobInsert,
     ) -> Result<actions::ActionJobRow, String> {
-        actions::insert_job(
+        actions::insert_job(self.require_pool()?, &job).await
+    }
+
+    /// Content-addressed job payload — `INSERT OR IGNORE` semantics (shas
+    /// dedupe across runs/reruns).
+    pub async fn insert_action_payload(
+        &self,
+        sha: &str,
+        repository_id: &str,
+        workflow_path: &str,
+        head_sha: &str,
+        payload_json: &str,
+    ) -> Result<(), String> {
+        actions::insert_payload(
             self.require_pool()?,
-            id,
-            run_id,
-            job_key,
-            name,
-            runs_on_json,
+            sha,
+            repository_id,
+            workflow_path,
+            head_sha,
+            payload_json,
         )
         .await
+    }
+
+    pub async fn find_action_payload(
+        &self,
+        sha: &str,
+    ) -> Result<Option<actions::ActionPayloadRow>, String> {
+        actions::find_payload(self.require_pool()?, sha).await
     }
 
     pub async fn find_action_job_by_id(
@@ -3418,16 +4270,178 @@ impl Database {
         actions::delete_secret_by_name(self.require_pool()?, repository_id, name).await
     }
 
+    // ---- configuration variables (`vars` context — plaintext) -------------
+
+    pub async fn upsert_action_variable(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        actions::upsert_variable(self.require_pool()?, id, repository_id, name, value).await
+    }
+
+    pub async fn find_action_variable(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::ActionVariableRow>, String> {
+        actions::find_variable_by_name(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn delete_action_variable(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_variable(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn list_action_variables(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::ActionVariableRow>, String> {
+        actions::list_variables(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn list_action_variable_values(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_variable_values(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_org_variable(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        value: &str,
+        visibility: &str,
+    ) -> Result<(), String> {
+        actions::upsert_org_variable(self.require_pool()?, id, owner_id, name, value, visibility)
+            .await
+    }
+
+    pub async fn find_action_org_variable(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::OrgVariableRow>, String> {
+        actions::find_org_variable_by_name(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn delete_action_org_variable(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_org_variable(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn list_action_org_variables(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<actions::OrgVariableRow>, String> {
+        actions::list_org_variables(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn set_action_org_variable_repos(
+        &self,
+        variable_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        actions::set_org_variable_repos(self.require_pool()?, variable_id, repository_ids).await
+    }
+
+    pub async fn list_action_org_variable_repos(
+        &self,
+        variable_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::list_org_variable_repos(self.require_pool()?, variable_id).await
+    }
+
+    pub async fn list_action_org_variables_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_org_variables_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment_variable(
+        &self,
+        id: &str,
+        environment_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment_variable(self.require_pool()?, id, environment_id, name, value)
+            .await
+    }
+
+    pub async fn list_action_environment_variables(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<actions::EnvVariableRow>, String> {
+        actions::list_environment_variables(self.require_pool()?, environment_id).await
+    }
+
+    pub async fn delete_action_environment_variable(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment_variable(self.require_pool()?, environment_id, name).await
+    }
+
+    pub async fn list_action_environment_variable_values(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_environment_variable_values(self.require_pool()?, environment_id).await
+    }
+
     pub async fn list_action_runners(&self) -> Result<Vec<actions::ActionRunnerRow>, String> {
         actions::list_runners(self.require_pool()?).await
     }
 
+    /// Runners scoped to the repo plus instance-wide shared runners.
+    pub async fn list_action_runners_for_repo(
+        &self,
+        repository_id: &str,
+        owner_org: Option<&str>,
+    ) -> Result<Vec<actions::ActionRunnerRow>, String> {
+        actions::list_runners_for_repo(self.require_pool()?, repository_id, owner_org).await
+    }
+
+    /// Runners bound to an organization (`owner_type='org'`).
+    pub async fn list_action_runners_for_org(
+        &self,
+        org_id: &str,
+    ) -> Result<Vec<actions::ActionRunnerRow>, String> {
+        actions::list_runners_for_org(self.require_pool()?, org_id).await
+    }
+
+    /// Delete a runner row by id; false when absent.
+    pub async fn delete_action_runner(&self, runner_id: &str) -> Result<bool, String> {
+        actions::delete_runner(self.require_pool()?, runner_id).await
+    }
+
+    /// True while the runner executes a job (`status = in_progress`).
+    pub async fn action_runner_busy(&self, runner_id: &str) -> Result<bool, String> {
+        actions::runner_busy(self.require_pool()?, runner_id).await
+    }
+
+    /// `purpose` separates credential kinds: `register` (runner bootstrap) vs
+    /// `remove` (GitHub's `remove-token` — authorizes runner deletion only).
     pub async fn insert_action_runner_token(
         &self,
         id: &str,
         token_hash: &str,
         scope_type: &str,
         scope_id: Option<&str>,
+        purpose: &str,
         active: bool,
     ) -> Result<(), String> {
         actions::insert_runner_token(
@@ -3436,6 +4450,7 @@ impl Database {
             token_hash,
             scope_type,
             scope_id,
+            purpose,
             active,
         )
         .await
@@ -3453,7 +4468,655 @@ impl Database {
         actions::set_actions_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
-    /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.
+    /// `pull_request_target` opt-in — trusted-context PR workflows on forks.
+    pub async fn get_repo_actions_pull_request_target(
+        &self,
+        repo_id: &str,
+    ) -> Result<bool, String> {
+        actions::get_actions_pull_request_target(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_pull_request_target(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        actions::set_actions_pull_request_target(self.require_pool()?, repo_id, enabled).await
+    }
+
+    /// Fork-PR approval policy: 'never' | 'first-time' | 'always'.
+    pub async fn get_repo_actions_fork_pr_approval(&self, repo_id: &str) -> Result<String, String> {
+        actions::get_actions_fork_pr_approval(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_fork_pr_approval(
+        &self,
+        repo_id: &str,
+        policy: &str,
+    ) -> Result<(), String> {
+        actions::set_actions_fork_pr_approval(self.require_pool()?, repo_id, policy).await
+    }
+
+    /// Hold a run for maintainer approval (run + claimable jobs →
+    /// `waiting_approval`).
+    pub async fn hold_run_for_approval(&self, run_id: &str) -> Result<(), String> {
+        actions::hold_run_for_approval(self.require_pool()?, run_id).await
+    }
+
+    /// Release an approval-held run — jobs become `waiting` for the
+    /// scheduler's recompute pass to restore.
+    pub async fn approve_action_run(&self, run_id: &str) -> Result<(), String> {
+        actions::approve_run(self.require_pool()?, run_id).await
+    }
+
+    /// Release one approval-held job — per-deployment review approval.
+    pub async fn approve_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::approve_job(self.require_pool()?, job_id).await
+    }
+
+    /// Reject one approval-held job — terminal `failure`, hold cleared.
+    pub async fn reject_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::reject_action_job(self.require_pool()?, job_id).await
+    }
+
+    /// `first-time` policy probe — actor has a prior non-held run in repo.
+    pub async fn actor_has_prior_approved_run(
+        &self,
+        repo_id: &str,
+        actor_id: &str,
+    ) -> Result<bool, String> {
+        actions::actor_has_prior_approved_run(self.require_pool()?, repo_id, actor_id).await
+    }
+
+    /// Cron-sweeper tick claim — one fire per (repo, workflow, cron, minute).
+    pub async fn claim_schedule_tick(
+        &self,
+        repo_id: &str,
+        workflow_path: &str,
+        cron: &str,
+        minute: i64,
+    ) -> Result<bool, String> {
+        actions::claim_schedule_tick(self.require_pool()?, repo_id, workflow_path, cron, minute)
+            .await
+    }
+
+    /// Every repo with Actions enabled — the cron sweeper's iteration set.
+    pub async fn list_actions_enabled_repo_ids(&self) -> Result<Vec<String>, String> {
+        actions::list_actions_enabled_repo_ids(self.require_pool()?).await
+    }
+
+    /// `read` (restricted) | `write` (permissive) — the effective permission
+    /// floor when a workflow declares no `permissions:` block.
+    pub async fn get_repo_actions_default_permissions(
+        &self,
+        repo_id: &str,
+    ) -> Result<String, String> {
+        actions::get_actions_default_permissions(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_default_permissions(
+        &self,
+        repo_id: &str,
+        default_permissions: &str,
+    ) -> Result<(), String> {
+        actions::set_actions_default_permissions(self.require_pool()?, repo_id, default_permissions)
+            .await
+    }
+
+    /// Auto-create the environment row on first workflow reference; returns
+    /// the stored row either way.
+    pub async fn ensure_action_environment(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<ActionEnvironmentRow, String> {
+        actions::ensure_environment(self.require_pool()?, id, repository_id, name).await
+    }
+
+    pub async fn find_action_environment(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<Option<ActionEnvironmentRow>, String> {
+        actions::find_environment(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn list_action_environments(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<ActionEnvironmentRow>, String> {
+        actions::list_environments(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+        protection_json: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment(
+            self.require_pool()?,
+            id,
+            repository_id,
+            name,
+            protection_json,
+        )
+        .await
+    }
+
+    pub async fn delete_action_environment(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn insert_action_deployment(
+        &self,
+        d: &deployments::NewDeployment<'_>,
+    ) -> Result<ActionDeploymentRow, String> {
+        deployments::insert_deployment(self.require_pool()?, d).await
+    }
+
+    pub async fn find_action_deployment_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ActionDeploymentRow>, String> {
+        deployments::find_deployment_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_action_deployment_by_job_id(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<ActionDeploymentRow>, String> {
+        deployments::find_deployment_by_job_id(self.require_pool()?, job_id).await
+    }
+
+    pub async fn list_action_deployments_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_deployments_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Repo-scoped deployment listing, newest first; `environment` narrows.
+    pub async fn list_action_deployments_for_repo(
+        &self,
+        repository_id: &str,
+        environment: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_deployments_for_repo(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            limit,
+        )
+        .await
+    }
+
+    /// Public Deployments-API listing with all GitHub query filters.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_action_deployments_filtered(
+        &self,
+        repository_id: &str,
+        environment: Option<&str>,
+        sha: Option<&str>,
+        git_ref: Option<&str>,
+        task: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_deployments_filtered(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            sha,
+            git_ref,
+            task,
+            limit,
+        )
+        .await
+    }
+
+    /// Deployments in `repo + environment` whose latest status is not
+    /// `inactive` — `auto_inactive` targets.
+    pub async fn list_active_deployments_for_environment(
+        &self,
+        repository_id: &str,
+        environment: &str,
+        except_deployment_id: &str,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_active_deployments_for_environment(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            except_deployment_id,
+        )
+        .await
+    }
+
+    pub async fn delete_action_deployment(&self, id: &str) -> Result<bool, String> {
+        deployments::delete_deployment(self.require_pool()?, id).await
+    }
+
+    pub async fn insert_action_deployment_status(
+        &self,
+        s: &deployments::NewDeploymentStatus<'_>,
+    ) -> Result<deployments::ActionDeploymentStatusRow, String> {
+        deployments::insert_deployment_status(self.require_pool()?, s).await
+    }
+
+    /// Statuses for one deployment, newest first.
+    pub async fn list_action_deployment_statuses(
+        &self,
+        deployment_id: &str,
+        limit: i64,
+    ) -> Result<Vec<deployments::ActionDeploymentStatusRow>, String> {
+        deployments::list_deployment_statuses(self.require_pool()?, deployment_id, limit).await
+    }
+
+    // ---- check_suites / check_runs / check_run_annotations ----
+
+    pub async fn insert_check_suite(
+        &self,
+        s: &checks::NewCheckSuite<'_>,
+    ) -> Result<checks::CheckSuiteRow, String> {
+        checks::insert_check_suite(self.require_pool()?, s).await
+    }
+
+    pub async fn find_check_suite(
+        &self,
+        id: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite(self.require_pool()?, id).await
+    }
+
+    /// The shared non-run suite for (repo, sha, app) — GitHub's per-app
+    /// suite semantics for API-created check runs.
+    pub async fn find_check_suite_for(
+        &self,
+        repository_id: &str,
+        head_sha: &str,
+        app: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite_for(self.require_pool()?, repository_id, head_sha, app).await
+    }
+
+    /// The Actions-run suite bound to `run_id`, if projected yet.
+    pub async fn find_check_suite_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Suites newest-first, optionally narrowed to a head sha.
+    pub async fn list_check_suites(
+        &self,
+        repository_id: &str,
+        head_sha: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckSuiteRow>, String> {
+        checks::list_check_suites(self.require_pool()?, repository_id, head_sha, limit).await
+    }
+
+    pub async fn update_check_suite_state(
+        &self,
+        id: &str,
+        status: &str,
+        conclusion: Option<&str>,
+    ) -> Result<(), String> {
+        checks::update_check_suite_state(self.require_pool()?, id, status, conclusion).await
+    }
+
+    /// Recompute suite status/conclusion from its runs (GitHub rollup).
+    pub async fn recompute_check_suite(
+        &self,
+        suite_id: &str,
+    ) -> Result<(String, Option<String>), String> {
+        checks::recompute_check_suite(self.require_pool()?, suite_id).await
+    }
+
+    pub async fn insert_check_run(
+        &self,
+        r: &checks::NewCheckRun<'_>,
+    ) -> Result<checks::CheckRunRow, String> {
+        checks::insert_check_run(self.require_pool()?, r).await
+    }
+
+    pub async fn find_check_run(&self, id: &str) -> Result<Option<checks::CheckRunRow>, String> {
+        checks::find_check_run(self.require_pool()?, id).await
+    }
+
+    /// The check run projected for an Actions job.
+    pub async fn find_check_run_by_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<checks::CheckRunRow>, String> {
+        checks::find_check_run_by_job(self.require_pool()?, job_id).await
+    }
+
+    /// Runs under one suite, oldest first.
+    pub async fn list_check_runs_for_suite(
+        &self,
+        suite_id: &str,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckRunRow>, String> {
+        checks::list_check_runs_for_suite(self.require_pool()?, suite_id, limit).await
+    }
+
+    /// Runs on a commit with GitHub's `check_name`/`status`/`conclusion`
+    /// filters (each `None` passes).
+    pub async fn list_check_runs_for_sha(
+        &self,
+        repository_id: &str,
+        head_sha: &str,
+        check_name: Option<&str>,
+        status: Option<&str>,
+        conclusion: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckRunRow>, String> {
+        checks::list_check_runs_for_sha(
+            self.require_pool()?,
+            repository_id,
+            head_sha,
+            check_name,
+            status,
+            conclusion,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn update_check_run(
+        &self,
+        id: &str,
+        patch: &checks::CheckRunPatch<'_>,
+    ) -> Result<checks::CheckRunRow, String> {
+        checks::update_check_run(self.require_pool()?, id, patch).await
+    }
+
+    pub async fn insert_check_run_annotation(
+        &self,
+        a: &checks::NewCheckRunAnnotation<'_>,
+    ) -> Result<(), String> {
+        checks::insert_check_run_annotation(self.require_pool()?, a).await
+    }
+
+    /// Annotations on one check run, insertion order.
+    pub async fn list_check_run_annotations(
+        &self,
+        check_run_id: &str,
+    ) -> Result<Vec<checks::CheckRunAnnotationRow>, String> {
+        checks::list_check_run_annotations(self.require_pool()?, check_run_id).await
+    }
+
+    /// Record one approve/reject decision on an environment-held job.
+    pub async fn insert_deployment_review(
+        &self,
+        r: &actions::ActionDeploymentReviewRow,
+    ) -> Result<(), String> {
+        actions::insert_deployment_review(self.require_pool()?, r).await
+    }
+
+    /// Every review recorded against a run's jobs.
+    pub async fn list_deployment_reviews_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionDeploymentReviewRow>, String> {
+        actions::list_deployment_reviews_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Record one workflow-command annotation (`::error|warning|notice::`)
+    /// extracted at log ingest.
+    pub async fn insert_action_annotation(
+        &self,
+        a: &actions::ActionAnnotationRow,
+    ) -> Result<(), String> {
+        actions::insert_action_annotation(self.require_pool()?, a).await
+    }
+
+    /// Annotations for one job, oldest first.
+    pub async fn list_action_annotations_for_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<actions::ActionAnnotationRow>, String> {
+        actions::list_action_annotations_for_job(self.require_pool()?, job_id).await
+    }
+
+    /// Annotations across a run's jobs — the run summary surface.
+    pub async fn list_action_annotations_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionAnnotationRow>, String> {
+        actions::list_action_annotations_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Stamp the environment wait-timer deadline on a needs-gated leg.
+    pub async fn set_job_deployment_timer(
+        &self,
+        job_id: &str,
+        not_before: &str,
+    ) -> Result<(), String> {
+        actions::set_deployment_timer(self.require_pool()?, job_id, not_before).await
+    }
+
+    /// Promote `waiting` legs whose wait timer lapsed (scheduler sweep tick).
+    pub async fn promote_due_deployment_jobs(&self, now: &str) -> Result<Vec<String>, String> {
+        actions::promote_due_deployment_jobs(self.require_pool()?, now).await
+    }
+
+    pub async fn insert_action_oidc_key(
+        &self,
+        kid: &str,
+        alg: &str,
+        private_der: &str,
+        private_enc: Option<&str>,
+        public_jwk_json: &str,
+    ) -> Result<(), String> {
+        actions::insert_oidc_key(
+            self.require_pool()?,
+            kid,
+            alg,
+            private_der,
+            private_enc,
+            public_jwk_json,
+        )
+        .await
+    }
+
+    pub async fn find_active_action_oidc_key(
+        &self,
+        alg: &str,
+    ) -> Result<Option<ActionOidcKeyRow>, String> {
+        actions::find_active_oidc_key(self.require_pool()?, alg).await
+    }
+
+    /// Public JWK JSON for every key of an algorithm — JWKS keeps rotated keys
+    /// of the current alg verifiable.
+    pub async fn list_action_oidc_public_jwks(&self, alg: &str) -> Result<Vec<String>, String> {
+        actions::list_oidc_public_jwks(self.require_pool()?, alg).await
+    }
+
+    // ---- Phase 8: heartbeat, log ordering, org/env secrets -----------------
+
+    /// Bump a live job's `heartbeat_at` — every runner contact is a liveness
+    /// proof for the stale-claim sweeper. Best-effort.
+    pub async fn touch_action_job_heartbeat(&self, job_id: &str, at: &str) -> Result<(), String> {
+        actions::touch_job_heartbeat(self.require_pool()?, job_id, at).await
+    }
+
+    /// Log-batch ordering CAS — see [`actions::advance_job_log_index`].
+    pub async fn advance_action_job_log_index(
+        &self,
+        job_id: &str,
+        index: i64,
+    ) -> Result<actions::LogIndexCas, String> {
+        actions::advance_job_log_index(self.require_pool()?, job_id, index).await
+    }
+
+    /// Guarded cursor move for the gitea row-index protocol.
+    pub async fn set_action_job_log_index_if(
+        &self,
+        job_id: &str,
+        expected: i64,
+        next: i64,
+    ) -> Result<bool, String> {
+        actions::set_job_log_index_if(self.require_pool()?, job_id, expected, next).await
+    }
+
+    /// The stored next-expected log batch index for a job.
+    pub async fn action_job_log_index(&self, job_id: &str) -> Result<i64, String> {
+        actions::job_log_index(self.require_pool()?, job_id).await
+    }
+
+    /// All `in_progress` jobs — the sweeper evaluates staleness/deadline in
+    /// Rust (dialect timestamp formats stay inside this crate).
+    pub async fn list_in_progress_action_jobs(&self) -> Result<Vec<StaleJobRow>, String> {
+        actions::list_in_progress_jobs(self.require_pool()?).await
+    }
+
+    /// Requeue a stale `in_progress` job (runner_id/log cursor cleared,
+    /// attempt bumped). Returns false when the row already left `in_progress`.
+    pub async fn requeue_stale_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::requeue_stale_job(self.require_pool()?, job_id).await
+    }
+
+    /// Fail a job whose `timeout_at` deadline lapsed while `in_progress`.
+    pub async fn fail_action_job_deadline(&self, job_id: &str, now: &str) -> Result<bool, String> {
+        actions::fail_job_deadline(self.require_pool()?, job_id, now).await
+    }
+
+    pub async fn upsert_action_org_secret(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        ciphertext: &str,
+        visibility: &str,
+    ) -> Result<(), String> {
+        actions::upsert_org_secret(
+            self.require_pool()?,
+            id,
+            owner_id,
+            name,
+            ciphertext,
+            visibility,
+        )
+        .await
+    }
+
+    pub async fn list_action_org_secrets(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<OrgSecretRow>, String> {
+        actions::list_org_secrets(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn find_action_org_secret(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<Option<OrgSecretRow>, String> {
+        actions::find_org_secret_by_name(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn delete_action_org_secret(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_org_secret(self.require_pool()?, owner_id, name).await
+    }
+
+    /// Replace the `visibility = 'selected'` repo set for an org secret.
+    pub async fn set_action_org_secret_repos(
+        &self,
+        secret_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        actions::set_org_secret_repos(self.require_pool()?, secret_id, repository_ids).await
+    }
+
+    /// Repo ids in an org secret's `visibility = 'selected'` allow set.
+    pub async fn list_action_org_secret_repos(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::list_org_secret_repos(self.require_pool()?, secret_id).await
+    }
+
+    /// Org secrets visible to a repo at claim — owner + visibility resolved
+    /// inside the query.
+    pub async fn list_action_org_secret_ciphertexts_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<ActionSecretCipherRow>, String> {
+        actions::list_org_secret_ciphertexts_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    /// Org-secret metadata visible to this repo (all/private/selected
+    /// visibility) — GitHub's repo `organization-secrets` listing.
+    pub async fn list_action_org_secret_metas_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::OrgSecretRow>, String> {
+        actions::list_org_secret_metas_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    /// Org variables (plaintext value + visibility) visible to this repo —
+    /// GitHub's repo `organization-variables` listing.
+    pub async fn list_action_org_variable_rows_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::OrgVariableRow>, String> {
+        actions::list_org_variable_rows_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment_secret(
+        &self,
+        id: &str,
+        environment_id: &str,
+        name: &str,
+        ciphertext: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment_secret(
+            self.require_pool()?,
+            id,
+            environment_id,
+            name,
+            ciphertext,
+        )
+        .await
+    }
+
+    pub async fn list_action_environment_secrets(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<EnvSecretMetaRow>, String> {
+        actions::list_environment_secrets(self.require_pool()?, environment_id).await
+    }
+
+    pub async fn delete_action_environment_secret(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment_secret(self.require_pool()?, environment_id, name).await
+    }
+
+    /// Claim-time environment-secret read — ciphertexts only.
+    pub async fn list_action_environment_secret_ciphertexts(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ActionSecretCipherRow>, String> {
+        actions::list_environment_secret_ciphertexts(self.require_pool()?, environment_id).await
+    }
+
+    /// Per-repo unit enable flags (COL-13): issues / pulls / wiki.
     pub async fn get_repo_unit_flags(&self, repo_id: &str) -> Result<RepoUnitFlags, String> {
         repo_units::get_unit_flags(self.require_pool()?, repo_id).await
     }
@@ -3470,11 +5133,42 @@ impl Database {
         repo_units::set_pulls_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
+    pub async fn set_repo_wiki_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_wiki_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_projects_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        repo_units::set_projects_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_discussions_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        repo_units::set_discussions_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    /// Consume a registration token, returning `(scope_type, scope_id)` so
+    /// the caller can bind the runner to the token's scope.
     pub async fn consume_action_runner_registration_token(
         &self,
         token_hash: &str,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<(String, Option<String>)>, String> {
         actions::consume_registration_token(self.require_pool()?, token_hash).await
+    }
+
+    /// Consume a `purpose='remove'` runner token — returns `(scope_type,
+    /// scope_id)` so the caller can bound the delete to a repo or org.
+    pub async fn consume_action_runner_remove_token(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<(String, Option<String>)>, String> {
+        actions::consume_remove_token(self.require_pool()?, token_hash).await
     }
 
     pub async fn find_action_runner_by_token_hash(
@@ -3490,6 +5184,26 @@ impl Database {
         labels: &[String],
     ) -> Result<Option<actions::ActionJobRow>, String> {
         actions::claim_queued_job_for_labels(self.require_pool()?, runner_id, labels).await
+    }
+
+    /// Runner scope isolation — `repo_scope` binds to one repository's queue;
+    /// `org_scope` binds to repositories owned by that org; `(None, None)`
+    /// keeps the global queue.
+    pub async fn claim_queued_action_job_for_labels_scoped(
+        &self,
+        runner_id: &str,
+        labels: &[String],
+        repo_scope: Option<&str>,
+        org_scope: Option<&str>,
+    ) -> Result<Option<actions::ActionJobRow>, String> {
+        actions::claim_queued_job_for_labels_scoped(
+            self.require_pool()?,
+            runner_id,
+            labels,
+            repo_scope,
+            org_scope,
+        )
+        .await
     }
 
     pub async fn list_action_runs_for_repo(
@@ -3513,13 +5227,89 @@ impl Database {
 
     /// `failed_only` requeues just failed/cancelled jobs; `job_id` requeues a
     /// single job; both unset requeues all jobs.
+    /// Requeue a run for re-run; returns the ids of the jobs whose state was
+    /// reset so the caller can wipe their on-disk logs (rerun replaces the
+    /// prior attempt's output rather than appending to it).
+    /// `debug` stamps `debug_logging` on the reset jobs — GitHub's "enable
+    /// debug logging" checkbox — surfaced at claim as ACTIONS_*_DEBUG vars.
     pub async fn requeue_action_run(
         &self,
         run_id: &str,
         failed_only: bool,
         job_id: Option<&str>,
+        debug: bool,
+    ) -> Result<Vec<String>, String> {
+        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id, debug).await
+    }
+
+    /// `concurrency` pending-supersede — cancels older same-group *queued*
+    /// runs (GitHub: newest pending wins, `cancel-in-progress` or not).
+    pub async fn cancel_pending_concurrency_runs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_pending_concurrency_runs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Job-level variant — cancels older same-group *queued/waiting* jobs in
+    /// other runs; returns affected run ids for rollup + status publishing.
+    pub async fn cancel_pending_concurrency_jobs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_pending_concurrency_jobs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// `deleteRun` — cascades jobs/tokens/artifacts on `run_id` and returns
+    /// the on-disk paths the caller should remove. `None` when absent.
+    pub async fn delete_action_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<actions::RunFilesToDelete>, String> {
+        actions::delete_run(self.require_pool()?, run_id).await
+    }
+
+    /// `setWorkflowEnabled` — upserts the disable flag for `(repo, path)`.
+    pub async fn set_action_workflow_disabled(
+        &self,
+        repository_id: &str,
+        path: &str,
+        disabled: bool,
     ) -> Result<(), String> {
-        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id).await
+        actions::set_workflow_disabled(self.require_pool()?, repository_id, path, disabled).await
+    }
+
+    /// Disabled workflow paths for a repo — `listWorkflows` marks these.
+    pub async fn list_disabled_action_workflows(
+        &self,
+        repository_id: &str,
+    ) -> Result<std::collections::HashSet<String>, String> {
+        actions::list_disabled_workflows(self.require_pool()?, repository_id).await
+    }
+
+    /// Single-path check for the dispatch/event/`workflow_call` gates.
+    pub async fn is_action_workflow_disabled(
+        &self,
+        repository_id: &str,
+        path: &str,
+    ) -> Result<bool, String> {
+        actions::is_workflow_disabled(self.require_pool()?, repository_id, path).await
     }
 
     /// `false` when the run had already finished — nothing was clobbered.
@@ -3544,8 +5334,273 @@ impl Database {
         actions::update_job_status(self.require_pool()?, job_id, status).await
     }
 
+    /// Guarded transition — only lands while the job is nonterminal.
+    /// `false` = the job was already terminal (e.g. server-side cancel).
+    pub async fn transition_action_job_status(
+        &self,
+        job_id: &str,
+        status: &str,
+    ) -> Result<bool, String> {
+        actions::transition_job_status(self.require_pool()?, job_id, status).await
+    }
+
+    /// Delete a caller leg's callee rows (re-expansion on rerun replaces
+    /// them); only rows whose `caller_job_id` matches are touched.
+    pub async fn delete_callee_jobs(&self, caller_job_id: &str) -> Result<u64, String> {
+        actions::delete_callee_jobs(self.require_pool()?, caller_job_id).await
+    }
+
+    /// Persist the evaluated `outputs` map — read by `needs.<id>.outputs.*`.
+    pub async fn set_action_job_outputs(
+        &self,
+        job_id: &str,
+        outputs_json: &str,
+    ) -> Result<(), String> {
+        actions::set_job_outputs(self.require_pool()?, job_id, outputs_json).await
+    }
+
+    /// `$GITHUB_STEP_SUMMARY` markdown reported by the runner at terminal.
+    pub async fn set_action_job_summary(
+        &self,
+        job_id: &str,
+        summary_md: &str,
+    ) -> Result<(), String> {
+        actions::set_job_summary(self.require_pool()?, job_id, summary_md).await
+    }
+
+    /// Insert-or-replace an artifact record (GitHub v4 `overwrite` semantics).
+    pub async fn upsert_action_artifact(
+        &self,
+        a: &actions::ActionArtifactRow,
+    ) -> Result<(), String> {
+        actions::upsert_action_artifact(self.require_pool()?, a).await
+    }
+
+    pub async fn find_action_artifact(
+        &self,
+        run_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::ActionArtifactRow>, String> {
+        actions::find_action_artifact(self.require_pool()?, run_id, name).await
+    }
+
+    pub async fn list_action_artifacts_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_action_artifacts_for_run(self.require_pool()?, run_id).await
+    }
+
+    pub async fn find_action_artifact_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<actions::ActionArtifactRow>, String> {
+        actions::find_action_artifact_by_id(self.require_pool()?, id).await
+    }
+
+    /// Delete an artifact record (row only; caller owns the payload file).
+    pub async fn delete_action_artifact(&self, id: &str) -> Result<bool, String> {
+        actions::delete_action_artifact(self.require_pool()?, id).await
+    }
+
+    /// 'pending' → 'committed' once the Twirp blob upload verifies.
+    pub async fn commit_action_artifact(
+        &self,
+        id: &str,
+        size_bytes: i64,
+        digest_sha256: &str,
+    ) -> Result<bool, String> {
+        actions::commit_action_artifact(self.require_pool()?, id, size_bytes, digest_sha256).await
+    }
+
+    /// Repo-wide committed artifact listing (GitHub REST facade), newest
+    /// first.
+    pub async fn list_action_artifacts_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_action_artifacts_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    /// 'pending' rows older than `cutoff` — abandoned Twirp reservations.
+    pub async fn list_stale_pending_artifacts(
+        &self,
+        cutoff: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_stale_pending_artifacts(self.require_pool()?, cutoff).await
+    }
+
+    /// Committed artifacts past `expires_at` — returns payload paths.
+    pub async fn reap_expired_action_artifacts(&self, now: &str) -> Result<Vec<String>, String> {
+        actions::reap_expired_action_artifacts(self.require_pool()?, now).await
+    }
+
+    // --- actions/cache service (0062) ----------------------------------------
+
+    /// Exact committed-entry lookup by (repo, key, version, scope) hash.
+    pub async fn find_action_cache(
+        &self,
+        repo_id: &str,
+        lookup_hash: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache(self.require_pool()?, repo_id, lookup_hash).await
+    }
+
+    /// Reserved-row lookup by (repo, key, version, scope) — the v2
+    /// FinalizeCacheEntryUpload RPC binds the pending row this way.
+    pub async fn find_action_cache_reservation(
+        &self,
+        repo_id: &str,
+        lookup_hash: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache_reservation(self.require_pool()?, repo_id, lookup_hash)
+            .await
+    }
+
+    /// By-id probe — any state; caller filters reserved/committed.
+    pub async fn find_action_cache_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache_by_id(self.require_pool()?, id).await
+    }
+
+    /// Prefix fallback for `restore-keys` — committed rows, newest first.
+    pub async fn find_action_caches_by_key_prefix(
+        &self,
+        repo_id: &str,
+        prefix: &str,
+        scope: &str,
+    ) -> Result<Vec<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_caches_by_key_prefix(
+            self.require_pool()?,
+            repo_id,
+            prefix,
+            scope,
+        )
+        .await
+    }
+
+    /// Reserve an entry (`POST /caches`). Unique-conflict surfaces as Err.
+    pub async fn insert_action_cache(
+        &self,
+        c: &actions_cache::ActionCacheRow,
+    ) -> Result<(), String> {
+        actions_cache::insert_action_cache(self.require_pool()?, c).await
+    }
+
+    /// Finalize a reservation (`POST /caches/{id}`); false = already committed.
+    pub async fn commit_action_cache(&self, id: &str, size_bytes: i64) -> Result<bool, String> {
+        actions_cache::commit_action_cache(self.require_pool()?, id, size_bytes).await
+    }
+
+    /// Bump `last_accessed_at` on download (LRU basis).
+    pub async fn touch_action_cache(&self, id: &str) -> Result<(), String> {
+        actions_cache::touch_action_cache(self.require_pool()?, id).await
+    }
+
+    /// Delete a cache row (caller owns the payload file).
+    pub async fn delete_action_cache(&self, id: &str) -> Result<bool, String> {
+        actions_cache::delete_action_cache(self.require_pool()?, id).await
+    }
+
+    /// Committed rows for a repo, LRU-first (eviction scans head → tail).
+    pub async fn list_action_caches_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<actions_cache::ActionCacheRow>, String> {
+        actions_cache::list_action_caches_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    /// Reap `reserved` rows older than `cutoff` (abandoned uploads) — returns
+    /// their storage paths for payload cleanup.
+    pub async fn reap_stale_action_cache_reservations(
+        &self,
+        cutoff: &str,
+    ) -> Result<Vec<String>, String> {
+        actions_cache::reap_stale_action_cache_reservations(self.require_pool()?, cutoff).await
+    }
+
+    /// Mint a per-job cache-service token (hash persisted; plaintext stays
+    /// with the claiming runner).
+    pub async fn insert_action_cache_token(
+        &self,
+        token_hash: &str,
+        job_id: &str,
+        repository_id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        actions_cache::insert_action_cache_token(
+            self.require_pool()?,
+            token_hash,
+            job_id,
+            repository_id,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Resolve a presented bearer token → job + repo scope (unexpired only).
+    pub async fn find_action_cache_token(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<actions_cache::ActionCacheTokenRow>, String> {
+        actions_cache::find_action_cache_token(self.require_pool()?, token_hash, now).await
+    }
+
+    /// Drop expired token rows (sweep).
+    pub async fn reap_action_cache_tokens(&self, now: &str) -> Result<u64, String> {
+        actions_cache::reap_action_cache_tokens(self.require_pool()?, now).await
+    }
+
+    /// `concurrency.cancel-in-progress` — cancel every nonterminal run in
+    /// the same repo+group, returning the superseded run ids.
+    pub async fn cancel_superseded_concurrency_runs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_superseded_concurrency_runs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Job-level `concurrency.cancel-in-progress` — cancel nonterminal
+    /// same-group jobs in *other* unfinished runs; returns affected run ids.
+    pub async fn cancel_superseded_concurrency_jobs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_superseded_concurrency_jobs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Restore/clear `action_jobs.timeout_at` after a requeue reset —
+    /// `timeout_at` is RFC3339 text (Postgres casts it).
+    pub async fn set_action_job_timeout_at(
+        &self,
+        job_id: &str,
+        timeout_at: Option<&str>,
+    ) -> Result<(), String> {
+        actions::set_job_timeout_at(self.require_pool()?, job_id, timeout_at).await
+    }
+
     /// Per-job bearer token (`OXIDEAN_TOKEN`) — upserts on `job_id` so a
     /// requeued job re-mints cleanly. `expires_at` is RFC3339 text.
+    /// `perms_json` carries the serialized effective permission map (Phase 7).
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_job_token(
         &self,
@@ -3555,6 +5610,7 @@ impl Database {
         repository_id: &str,
         user_id: &str,
         permission: &str,
+        perms_json: Option<&str>,
         token_hash: &str,
         expires_at: &str,
     ) -> Result<(), String> {
@@ -3566,6 +5622,7 @@ impl Database {
             repository_id,
             user_id,
             permission,
+            perms_json,
             token_hash,
             expires_at,
         )
@@ -3579,6 +5636,26 @@ impl Database {
         token_hash: &str,
     ) -> Result<Option<ActionJobTokenRow>, String> {
         actions::find_action_job_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_action_job_token_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_action_job_token_by_id(self.require_pool()?, id).await
+    }
+
+    /// Bind the per-job OIDC request-token hash (`ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
+    pub async fn set_job_token_oidc_hash(&self, job_id: &str, hash: &str) -> Result<(), String> {
+        actions::set_job_token_oidc_hash(self.require_pool()?, job_id, hash).await
+    }
+
+    /// Resolve an `ACTIONS_ID_TOKEN_REQUEST_TOKEN` to its bound job token row.
+    pub async fn find_job_token_by_oidc_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_job_token_by_oidc_hash(self.require_pool()?, hash).await
     }
 
     pub async fn revoke_action_job_token_for_job(&self, job_id: &str) -> Result<(), String> {
@@ -4945,5 +7022,35 @@ impl Database {
 
     pub async fn delete_instance_workflow_template(&self, id: &str) -> Result<(), String> {
         workflow_templates::delete_instance_workflow_template(self.require_pool()?, id).await
+    }
+}
+
+// --- `runner.v1` task claims + tasks_version (0055) ------------------------
+impl Database {
+    /// Bump the global `tasks` watermark and return the new value.
+    pub async fn bump_action_tasks_version(&self) -> Result<i64, String> {
+        actions::bump_action_tasks_version(self.require_pool()?).await
+    }
+
+    /// Current `tasks` watermark (0 before the first enqueue).
+    pub async fn action_tasks_version(&self) -> Result<i64, String> {
+        actions::action_tasks_version(self.require_pool()?).await
+    }
+
+    /// Mint a never-reused numeric task_id for a claimed job.
+    pub async fn mint_action_task_claim(
+        &self,
+        job_id: &str,
+        runner_id: &str,
+    ) -> Result<i64, String> {
+        actions::mint_task_claim(self.require_pool()?, job_id, runner_id).await
+    }
+
+    /// Resolve a task_id to `(job_id, runner_id)`.
+    pub async fn find_action_task_claim(
+        &self,
+        task_id: i64,
+    ) -> Result<Option<(String, String)>, String> {
+        actions::find_task_claim(self.require_pool()?, task_id).await
     }
 }

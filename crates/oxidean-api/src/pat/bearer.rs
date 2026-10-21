@@ -393,6 +393,10 @@ async fn resolve_job_token(
             &tail[..tail.len().min(8)]
         )
     };
+    // The granted scope map (frozen at claim, capability-capped at mint) gates
+    // domain RPCs — `issues: write` jobs may comment, ungranted scopes deny.
+    // `contents`/`packages` ride their dedicated identity fields.
+    let (contents, perms, scopes) = crate::actions::job_tokens::rpc_identity_grants(&row);
     let identity = PatIdentity {
         token_id: row.id.clone(),
         user_id: owner.id.clone(),
@@ -402,11 +406,11 @@ async fn resolve_job_token(
         expires_at_raw: Some(row.expires_at.clone()),
         last_used_at: None,
         created_at: row.created_at.clone(),
-        scopes: Vec::new(),
-        contents: ContentsPerm::parse(&row.permission).ok(),
+        scopes,
+        contents,
         repo_access: Some(FgRepoAccess::Selected),
         repository_ids: vec![row.repository_id.clone()],
-        perms: FgPerms::default(),
+        perms,
     };
     let session = ResolvedSession {
         session_id: format!("job:{}", row.id),
@@ -420,7 +424,7 @@ async fn resolve_job_token(
 /// Whether `pat` is a synthesized Actions job-token identity. Job tokens are
 /// strictly pinned to their repository — unlike FG PATs they get no
 /// public-repo read bypass on other repositories (GITHUB_TOKEN parity).
-fn is_job_token(pat: &PatIdentity) -> bool {
+pub(crate) fn is_job_token(pat: &PatIdentity) -> bool {
     pat.token_prefix
         .starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }
@@ -598,6 +602,18 @@ fn fg_repo_perm(pat: &PatIdentity, class: PatProc) -> Option<(Option<FgPermLevel
         PullsWrite => (p.pull_requests, FgPermLevel::Write),
         ActionsRead => (p.actions, FgPermLevel::Read),
         ActionsWrite => (p.actions, FgPermLevel::Write),
+        EnvironmentsRead => (p.environments, FgPermLevel::Read),
+        EnvironmentsWrite => (p.environments, FgPermLevel::Write),
+        DeploymentsRead => (p.deployments, FgPermLevel::Read),
+        DeploymentsWrite => (p.deployments, FgPermLevel::Write),
+        ChecksRead => (p.checks, FgPermLevel::Read),
+        ChecksWrite => (p.checks, FgPermLevel::Write),
+        ProjectsRead => (p.repository_projects, FgPermLevel::Read),
+        ProjectsWrite => (p.repository_projects, FgPermLevel::Write),
+        DiscussionsRead => (p.discussions, FgPermLevel::Read),
+        DiscussionsWrite => (p.discussions, FgPermLevel::Write),
+        PagesRead => (p.pages, FgPermLevel::Read),
+        PagesWrite => (p.pages, FgPermLevel::Write),
         StatusesRead => (p.commit_statuses, FgPermLevel::Read),
         StatusesWrite => (p.commit_statuses, FgPermLevel::Write),
         SecretsRead => (p.secrets, FgPermLevel::Read),

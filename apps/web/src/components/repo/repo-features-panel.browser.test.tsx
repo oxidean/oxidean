@@ -17,6 +17,9 @@ import type { RepoPublic } from "@oxidean/api-client";
 
 const issuesSetMock = vi.fn();
 const pullsSetMock = vi.fn();
+const wikiSetMock = vi.fn();
+const projectsSetMock = vi.fn();
+const discussionsSetMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -26,6 +29,15 @@ vi.mock("@/lib/api-client", () => ({
       },
       pulls: {
         setEnabled: (...args: unknown[]) => pullsSetMock(...args),
+      },
+      wiki: {
+        setEnabled: (...args: unknown[]) => wikiSetMock(...args),
+      },
+      projects: {
+        setEnabled: (...args: unknown[]) => projectsSetMock(...args),
+      },
+      discussions: {
+        setEnabled: (...args: unknown[]) => discussionsSetMock(...args),
       },
     },
   },
@@ -62,6 +74,9 @@ async function waitForTestId(testId: string, ms = 10_000): Promise<Element> {
 beforeEach(() => {
   issuesSetMock.mockReset();
   pullsSetMock.mockReset();
+  wikiSetMock.mockReset();
+  projectsSetMock.mockReset();
+  discussionsSetMock.mockReset();
 });
 
 afterEach(async () => {
@@ -74,6 +89,9 @@ describe("RepoFeaturesPanel browser DOM races", () => {
     try {
       issuesSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
       pullsSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
+      wikiSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
+      projectsSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
+      discussionsSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
 
       await mountWithQueryClient(RepoFeaturesPanel, {
         owner: "ada",
@@ -85,6 +103,9 @@ describe("RepoFeaturesPanel browser DOM races", () => {
       await waitForTestId("repo-features-settings");
       await waitForTestId("repo-issues-enabled");
       await waitForTestId("repo-pulls-enabled");
+      await waitForTestId("repo-wiki-enabled");
+      await waitForTestId("repo-projects-enabled");
+      await waitForTestId("repo-discussions-enabled");
 
       await clickAriaLabel("Enable Issues");
       const issuesDeadline = Date.now() + 5_000;
@@ -103,6 +124,39 @@ describe("RepoFeaturesPanel browser DOM races", () => {
         await new Promise((r) => setTimeout(r, 50));
       }
       expect(pullsSetMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        enabled: false,
+      });
+
+      await clickAriaLabel("Enable wiki");
+      const wikiDeadline = Date.now() + 5_000;
+      while (wikiSetMock.mock.calls.length === 0 && Date.now() < wikiDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(wikiSetMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        enabled: false,
+      });
+
+      await clickAriaLabel("Enable projects");
+      const projectsDeadline = Date.now() + 5_000;
+      while (projectsSetMock.mock.calls.length === 0 && Date.now() < projectsDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(projectsSetMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        enabled: false,
+      });
+
+      await clickAriaLabel("Enable discussions");
+      const discussionsDeadline = Date.now() + 5_000;
+      while (discussionsSetMock.mock.calls.length === 0 && Date.now() < discussionsDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(discussionsSetMock).toHaveBeenCalledWith({
         owner: "ada",
         name: "hello",
         enabled: false,
