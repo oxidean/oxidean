@@ -148,8 +148,9 @@ async fn migrate_reseats_pre_rebase_versions() {
             (81, "merge queue"),
             (82, "action artifacts state"),
             (83, "runner remove tokens"),
+            (84, "action artifacts mime type"),
         ],
-        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-83"
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84"
     );
     // Repair is idempotent — a second migrate changes nothing.
     db.migrate().await.expect("idempotent migrate");
