@@ -1,0 +1,3 @@
+-- logical: 0084_action_artifacts_mime_type — postgres-only backfill; sqlite
+-- already gained mime_type in 0082, so this file intentionally executes no
+-- statements. Kept for migration-file parity across dialects.
