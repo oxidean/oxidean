@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PRESETS="$ROOT/crates/oxidean-api/assets/stack-presets"
+PRESETS="$ROOT/crates/oxidean-api-repo/assets/stack-presets"
 CATALOG="$PRESETS/catalog.json"
 
 MAX_PACK_BYTES=$((2 * 1024 * 1024))

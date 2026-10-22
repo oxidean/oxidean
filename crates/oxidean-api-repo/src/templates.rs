@@ -1,6 +1,6 @@
 //! Vendored stack / license / gitignore catalogs + initial-commit file assembly (D-02–D-04).
 //!
-//! Assets live under `crates/oxidean-api/assets/` and are embedded at compile time.
+//! Assets live under `crates/oxidean-api-repo/assets/` and are embedded at compile time.
 //! Pack IDs are resolved via allowlist maps only — never raw filesystem joins (T-07-09).
 
 use std::collections::BTreeMap;

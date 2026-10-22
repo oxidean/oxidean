@@ -443,7 +443,8 @@ fn client_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
 ///
 /// Accepts `application/x-www-form-urlencoded` (standard) or
 /// `application/json` bodies. Codes are single-use and expire after
-/// [`OAUTH_CODE_TTL_SECS`] — the `used_at` claim is atomic.
+/// [`OAUTH_CODE_TTL_SECS`](oxidean_core::OAUTH_CODE_TTL_SECS) — the `used_at`
+/// claim is atomic.
 pub async fn token(
     State(state): State<AppState>,
     headers: HeaderMap,

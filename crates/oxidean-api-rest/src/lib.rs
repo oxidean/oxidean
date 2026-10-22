@@ -2,7 +2,7 @@
 //!
 //! `/api/v1/**` is a companion surface to `POST /api/rpc` — every REST route
 //! translates its path/query/body into the matching RPC procedure's input and
-//! runs through [`rpc::dispatch`], so ACLs, PAT scope gates (`authorize_rpc`),
+//! runs through `dispatch`, so ACLs, PAT scope gates (`authorize_rpc`),
 //! the bootstrap lock, and notification/webhook side effects all behave
 //! exactly as they do for RPC callers. No business logic is duplicated here.
 //!
