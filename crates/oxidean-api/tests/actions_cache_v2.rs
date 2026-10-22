@@ -484,11 +484,11 @@ async fn v1_download_works_without_bearer() {
         serde_json::json!({"key":"v1k","version":"v1"}),
     )
     .await;
-    let id = body_json(res).await["cacheId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    blob_req(
+    let status = res.status();
+    let v = body_json(res).await;
+    assert_eq!(status, StatusCode::CREATED, "reserve failed: {v}");
+    let id = v["cacheId"].as_str().unwrap().to_string();
+    let res = blob_req(
         &app,
         "PATCH",
         &format!("{base}/caches/{id}"),
@@ -496,7 +496,8 @@ async fn v1_download_works_without_bearer() {
         &[("authorization", &format!("Bearer {tok}"))],
     )
     .await;
-    v1_json(
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "chunk upload failed");
+    let res = v1_json(
         &app,
         "POST",
         &format!("{base}/caches/{id}"),
@@ -504,6 +505,7 @@ async fn v1_download_works_without_bearer() {
         serde_json::json!({"size":4}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "commit failed");
 
     // Probe → archiveLocation carries ?t=; GET it with NO headers.
     let res = app
@@ -518,10 +520,10 @@ async fn v1_download_works_without_bearer() {
         )
         .await
         .unwrap();
-    let loc = body_json(res).await["archiveLocation"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let status = res.status();
+    let v = body_json(res).await;
+    assert_eq!(status, StatusCode::OK, "cache probe missed: {v}");
+    let loc = v["archiveLocation"].as_str().unwrap().to_string();
     assert!(loc.contains("?t="), "{loc}");
     let res = blob_req(&app, "GET", rel(&loc), &[], &[]).await;
     assert_eq!(res.status(), StatusCode::OK);

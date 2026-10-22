@@ -145,8 +145,14 @@ mod tests {
     fn decrypt_rejects_tampered() {
         std::env::set_var("OXIDEAN_TEST_SECRET_KEY_TAMPER", "crypto-unit-key");
         let keys = &["OXIDEAN_TEST_SECRET_KEY_TAMPER"];
-        let mut ct = encrypt(keys, "data").unwrap();
-        ct.replace_range(0..2, "ff");
+        let ct = encrypt(keys, "data").unwrap();
+        // Flip a bit in the ciphertext, not a fixed overwrite — `hex(nonce ||
+        // ciphertext)` means a constant write is a no-op ~1/256 of the time
+        // (the byte already holds it), which read as "tamper accepted" and
+        // flaked this assertion.
+        let mut raw = hex_decode(&ct).unwrap();
+        raw[12] ^= 0x01;
+        let ct = hex_encode(&raw);
         assert!(decrypt(keys, &ct).is_err());
         std::env::remove_var("OXIDEAN_TEST_SECRET_KEY_TAMPER");
     }
