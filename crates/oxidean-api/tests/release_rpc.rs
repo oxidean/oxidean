@@ -851,7 +851,7 @@ async fn rest_releases_surface() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v[0]["filename"], "bin.zip", "{v}");
+    assert_eq!(v[0]["name"], "bin.zip", "{v}");
 
     // PATCH by id — title only.
     let (s, v) = rest_json(
@@ -863,7 +863,7 @@ async fn rest_releases_surface() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["title"], "One Renamed", "{v}");
+    assert_eq!(v["name"], "One Renamed", "{v}");
 
     // Asset delete → 204; then the release row.
     let (s, _) = rest_json(

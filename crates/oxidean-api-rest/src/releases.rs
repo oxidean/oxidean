@@ -15,8 +15,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
-use super::{call, ctx_for, dispatch, merge_fields, repo_ref, status_for_error, RepoPath};
+use super::{call, ctx_for, dispatch, github, merge_fields, repo_ref, status_for_error, RepoPath};
 use oxidean_api_core::app::AppState;
+use oxidean_core::AppError;
 
 pub const ROUTES: &[RouteDef] = &[
     RouteDef {
@@ -324,9 +325,11 @@ async fn releases_for(
         RpcResponse::Ok { data, .. } => {
             Ok(data["releases"].as_array().cloned().unwrap_or_default())
         }
-        RpcResponse::Err { error, .. } => Err(Box::new(
-            (status_for_error(&error), Json(error)).into_response(),
-        )),
+        RpcResponse::Err { error, .. } => Err(Box::new(if state.rest_shim_enabled {
+            github::error_compat(&error, headers)
+        } else {
+            (status_for_error(&error), Json(error)).into_response()
+        })),
     }
 }
 
@@ -344,13 +347,18 @@ async fn release_tag_for_id(
         .into_iter()
         .find(|r| r["id"].as_str() == Some(id))
         .ok_or_else(|| {
-            Box::new(
+            Box::new(if state.rest_shim_enabled {
+                github::error_compat(
+                    &AppError::new("release.not_found", "release not found"),
+                    headers,
+                )
+            } else {
                 (
                     StatusCode::NOT_FOUND,
                     Json(json!({"code": "release.not_found", "message": "release not found"})),
                 )
-                    .into_response(),
-            )
+                    .into_response()
+            })
         })
 }
 
@@ -370,7 +378,18 @@ async fn get_latest_release(
         .filter(|r| r["draft"] != true && r["prerelease"] != true)
         .max_by(|a, b| a["created_at"].as_str().cmp(&b["created_at"].as_str()));
     match latest {
+        Some(r) if state.rest_shim_enabled => github::respond_data_compat(
+            r.clone(),
+            StatusCode::OK,
+            "release.get",
+            &repo_ref(&p.owner, &p.repo),
+            &headers,
+        ),
         Some(r) => (StatusCode::OK, Json(r.clone())).into_response(),
+        None if state.rest_shim_enabled => github::error_compat(
+            &AppError::new("release.not_found", "no non-draft release"),
+            &headers,
+        ),
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({"code": "release.not_found", "message": "no non-draft release"})),
@@ -386,6 +405,13 @@ async fn get_release_by_id(
     Path(p): Path<ReleaseIdPath>,
 ) -> Response {
     match release_tag_for_id(&state, &headers, &p.owner, &p.repo, &p.release_id).await {
+        Ok(rel) if state.rest_shim_enabled => github::respond_data_compat(
+            rel,
+            StatusCode::OK,
+            "release.get",
+            &repo_ref(&p.owner, &p.repo),
+            &headers,
+        ),
         Ok(rel) => (StatusCode::OK, Json(rel)).into_response(),
         Err(r) => *r,
     }
@@ -436,11 +462,19 @@ async fn list_release_assets(
     Path(p): Path<ReleaseIdPath>,
 ) -> Response {
     match release_tag_for_id(&state, &headers, &p.owner, &p.repo, &p.release_id).await {
-        Ok(rel) => (
-            StatusCode::OK,
-            Json(rel["assets"].as_array().cloned().unwrap_or_default()),
-        )
-            .into_response(),
+        Ok(rel) => {
+            let assets = rel["assets"].as_array().cloned().unwrap_or_default();
+            if state.rest_shim_enabled {
+                return github::respond_data_compat(
+                    json!({"assets": assets}),
+                    StatusCode::OK,
+                    "release.assets.list",
+                    &repo_ref(&p.owner, &p.repo),
+                    &headers,
+                );
+            }
+            (StatusCode::OK, Json(assets)).into_response()
+        }
         Err(r) => *r,
     }
 }

@@ -38,8 +38,11 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/api/rpc", post(rpc_http))
         .route("/api/rpc/ws", get(rpc_ws))
-        // REST facade over the RPC domain (API-01).
+        // REST facade over the RPC domain (API-01). `/api/v1/` (trailing
+        // slash) falls outside the nest — mount the GitHub root-meta handler
+        // explicitly, the same paired-spelling pattern as `/v2` below.
         .nest("/api/v1", crate::rest::router())
+        .route("/api/v1/", get(crate::rest::github::meta_root))
         .route(
             "/api/mcp",
             post(crate::mcp::handle_post).get(crate::mcp::handle_get),

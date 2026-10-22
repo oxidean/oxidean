@@ -226,7 +226,7 @@ oxidean/
 ├── crates/
 │   ├── oxidean-api/      # Axum server shell: binaries, route wiring, dispatch assembly, rpc-gen
 │   ├── oxidean-api-core/   # Shared API machinery: AppState/RpcCtx/gate, auth/session, domain engines
-│   ├── oxidean-api-rest/   # GitHub-compat REST surface (dispatches into RPC)
+│   ├── oxidean-api-rest/   # GitHub-compat REST surface (`/api/v1` → RPC; `github.rs` = GitHub-exact wire shapes, issue #160)
 │   ├── oxidean-api-<dom>/  # Per-domain RPC dispatch crates (issues, pulls, repo, actions, org, admin, …)
 │   ├── oxidean-core/     # Shared domain / RPC types (no I/O)
 │   ├── oxidean-db/       # Multi-dialect sqlx adapter + migrations/
@@ -247,6 +247,7 @@ oxidean/
 ```
 
 - **Split JS/Rust workspaces** — UI and generated client stay in Bun/Turbo; API and persistence stay in Cargo so dialect and auth logic remain typed and testable in Rust.
+- **REST as a compat adapter, not a second API** — `/api/v1` translates path/query/body into the same RPC procedures `POST /api/rpc` serves, so ACLs, PAT scopes, job-token repo pinning, and side effects are identical. `oxidean-api-rest/src/github.rs` (`OXIDEAN_ACTIONS_REST_SHIM`, default on) layers GitHub-exact wire shapes on top — bare-array lists + `Link`/`ETag`/`X-RateLimit-*`, `{message,documentation_url,errors[]}` errors, `per_page`/`page` → `limit`/`offset` query rewrite, meta routes, and an admin `/_compat/stats` observed-vs-covered counter — without touching internal DTOs. See [guides/actions-runtime.md](guides/actions-runtime.md#github-rest-compatibility-github_api_url).
 - **`oxidean-db` as the only dialect boundary** — Callers use `Database` methods; migrations live under `migrations/{postgres,mysql,sqlite}/`.
 - **`oxidean-git` as the only git process boundary** — Callers use `GitBackend`; CLI argv construction and future gitoxide live in this crate only.
 - **Same-origin Traefik (Compose)** — Avoids cross-origin cookie issues locally; Docker provider requires a socket — **Compose-only**.

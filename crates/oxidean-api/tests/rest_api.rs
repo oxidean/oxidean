@@ -207,7 +207,7 @@ async fn rest_repo_flow_with_cookie() {
     let (status, v) = json(&app, req("GET", "/api/v1/repos/alice/demo", None)).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["name"], "demo");
-    assert_eq!(v["owner_username"], "alice");
+    assert_eq!(v["owner"]["login"], "alice");
     assert!(
         v.get("ok").is_none(),
         "REST must not wrap in RPC envelope — {v}"
@@ -230,12 +230,12 @@ async fn rest_repo_flow_with_cookie() {
     // GET /user/repos lists it.
     let (status, v) = json(&app, req_cookie("GET", "/api/v1/user/repos", None, &cookie)).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["repos"].as_array().unwrap().len(), 1);
+    assert_eq!(v.as_array().unwrap().len(), 1);
 
     // GET issues — empty list.
     let (status, v) = json(&app, req("GET", "/api/v1/repos/alice/demo/issues", None)).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["total"], 0);
+    assert_eq!(v.as_array().unwrap().len(), 0);
 }
 
 /// Issue + comment lifecycle over REST.
@@ -292,7 +292,7 @@ async fn rest_issue_comment_lifecycle() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["comments"].as_array().unwrap().len(), 1);
+    assert_eq!(v.as_array().unwrap().len(), 1);
 
     // Edit the comment.
     let (status, v) = json(
@@ -329,7 +329,7 @@ async fn rest_issue_comment_lifecycle() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["total"], 1);
+    assert_eq!(v.as_array().unwrap().len(), 1);
 
     // Delete the comment.
     let (status, v) = json(
@@ -349,7 +349,7 @@ async fn rest_issue_comment_lifecycle() {
         req("GET", "/api/v1/repos/bob/tracker/issues/1/comments", None),
     )
     .await;
-    assert_eq!(v["comments"].as_array().unwrap().len(), 0);
+    assert_eq!(v.as_array().unwrap().len(), 0);
 }
 
 /// PAT Bearer on REST: `repo` scope reads repos + identity; `package:read`
@@ -645,5 +645,5 @@ async fn rest_pull_comment_update_delete() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(v["comments"].as_array().unwrap().len(), 0);
+    assert_eq!(v.as_array().unwrap().len(), 0);
 }

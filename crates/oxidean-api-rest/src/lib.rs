@@ -19,6 +19,7 @@ pub mod action_downloads;
 mod actions;
 mod admin;
 mod checks;
+pub mod github;
 mod issues;
 pub mod openapi;
 mod orgs;
@@ -51,9 +52,21 @@ use self::spec::{RespSpec, RouteDef};
 pub use action_downloads::{authorize_read, lookup_repo, RepoLookup};
 
 /// `/api/v1` route group — mounted in `app::router_with_state`, built from the
-/// same `RouteDef` table that generates `openapi.json` (single source).
+/// same `RouteDef` table that generates `openapi.json` (single source). When
+/// `OXIDEAN_ACTIONS_REST_SHIM` is on (default) the GitHub-compat layer merges
+/// meta routes (`/`, `/rate_limit`, `/zen`, `/_compat/stats`), rewrites
+/// `per_page`/`page` pagination into `limit`/`offset`, and renders GitHub-exact
+/// response envelopes (issue #160).
 pub fn router() -> Router<AppState> {
-    spec::router_from_defs().merge(openapi::router())
+    let router = spec::router_from_defs().merge(openapi::router());
+    if oxidean_api_core::app::env_rest_shim_enabled() {
+        router
+            .merge(github::compat_router())
+            .layer(axum::middleware::from_fn(github::githubify))
+            .layer(axum::middleware::from_fn(github::compat_responses))
+    } else {
+        router
+    }
 }
 
 /// Meta routes owned by `rest::mod` — just health for now.
@@ -119,7 +132,10 @@ async fn ctx_for(state: &AppState, headers: &HeaderMap) -> Result<RpcCtx, Respon
     .map_err(bearer_rejection_response)
 }
 
-/// Run one RPC procedure and render the REST response.
+/// Run one RPC procedure and render the REST response. Under the compat flag
+/// (`AppState::rest_shim_enabled`) the response goes through `github::`
+/// shaping — GitHub envelopes, `Link`/`ETag`/`X-RateLimit-*` headers — and the
+/// observed-vs-covered counter records the procedure.
 async fn call(
     state: &AppState,
     headers: &HeaderMap,
@@ -131,7 +147,14 @@ async fn call(
         Ok(ctx) => ctx,
         Err(res) => return res,
     };
-    let resp = dispatch(&mut ctx, procedure, input).await;
+    let shim = state.rest_shim_enabled;
+    if shim {
+        github::record_observed(procedure, true);
+    }
+    let resp = dispatch(&mut ctx, procedure, input.clone()).await;
+    if shim {
+        return github::respond_compat(resp, ok_status, procedure, &input, headers);
+    }
     respond(resp, ok_status)
 }
 
@@ -152,7 +175,14 @@ where
         Ok(ctx) => ctx,
         Err(res) => return res,
     };
-    let resp = dispatch(&mut ctx, procedure, input).await;
+    let shim = state.rest_shim_enabled;
+    if shim {
+        github::record_observed(procedure, true);
+    }
+    let resp = dispatch(&mut ctx, procedure, input.clone()).await;
+    if shim {
+        return github::respond_compat_map(resp, ok_status, procedure, &input, headers, f);
+    }
     match resp {
         RpcResponse::Ok { data, .. } => (ok_status, Json(f(data))).into_response(),
         RpcResponse::Err { error, .. } => (status_for_error(&error), Json(error)).into_response(),

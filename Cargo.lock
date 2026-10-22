@@ -4141,6 +4141,7 @@ dependencies = [
  "tar",
  "tokio",
  "tracing",
+ "url",
  "utoipa-swagger-ui",
  "zip",
 ]

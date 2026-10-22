@@ -114,11 +114,11 @@ pub const ROUTES: &[RouteDef] = &[
         mount: || patch(update_pull),
     },
     RouteDef {
-        method: "POST",
+        method: "PUT",
         path: "/repos/{owner}/{repo}/pulls/{number}/merge",
         tags: &["pulls"],
         operation_id: "mergePull",
-        summary: "Merge pull request (`pull.merge`)",
+        summary: "Merge pull request (`pull.merge`) — `merge_method` → `method`",
         procedure: "pull.merge",
         ok: StatusCode::OK,
         anonymous: false,
@@ -130,7 +130,7 @@ pub const ROUTES: &[RouteDef] = &[
         response: Some(RespSpec::Schema(
             SchemaGenerator::subschema_for::<MergePullResponse>,
         )),
-        mount: || post(merge_pull),
+        mount: || put(merge_pull),
     },
     RouteDef {
         method: "GET",
@@ -396,16 +396,41 @@ async fn list_pulls(
     call(&state, &headers, "pull.list", input, StatusCode::OK).await
 }
 
+/// GitHub `head`/`base` → `pull.create`'s `head_ref`/`base_ref`; an
+/// `owner:branch` head additionally sets `head_owner` (cross-repo).
+fn gh_pull_refs(body: Value) -> Value {
+    let mut body = body;
+    let Some(o) = body.as_object_mut() else {
+        return body;
+    };
+    if let Some(head) = o
+        .remove("head")
+        .and_then(|v| v.as_str().map(str::to_string))
+    {
+        if let Some((owner, branch)) = head.split_once(':') {
+            o.insert("head_owner".into(), json!(owner));
+            o.insert("head_ref".into(), json!(branch));
+        } else {
+            o.insert("head_ref".into(), json!(head));
+        }
+    }
+    if let Some(v) = o.remove("base") {
+        o.insert("base_ref".into(), v);
+    }
+    body
+}
+
 /// `POST /api/v1/repos/{owner}/{repo}/pulls` (`pull.create`) —
-/// body: `title`, `base_ref`, `head_ref` (required); `body`, `head_owner`,
-/// `head_name`, `draft` (optional).
+/// GitHub body: `title`, `head`, `base` (required); `body`, `draft`
+/// (optional). `head`/`base` translate to `head_ref`/`base_ref` via
+/// [`gh_pull_refs`]; native `head_ref`/`base_ref` keys pass through.
 async fn create_pull(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoPath>,
     Json(body): Json<Value>,
 ) -> Response {
-    let input = merge_fields(repo_ref(&p.owner, &p.repo), body);
+    let input = merge_fields(repo_ref(&p.owner, &p.repo), gh_pull_refs(body));
     call(&state, &headers, "pull.create", input, StatusCode::CREATED).await
 }
 
@@ -427,13 +452,14 @@ async fn update_pull(
     Path(p): Path<RepoNumberPath>,
     Json(body): Json<Value>,
 ) -> Response {
+    let body = gh_pull_refs(body);
     let has_fields = body.get("title").is_some()
         || body.get("body").is_some()
         || body.get("base_ref").is_some()
         || body.get("draft").is_some();
     let state_change = body.get("state").and_then(|v| v.as_str());
     if !has_fields && state_change.is_none() {
-        return bad_input("PATCH requires at least one of: title, body, base_ref, draft, state");
+        return bad_input("PATCH requires at least one of: title, body, base, draft, state");
     }
     if let Some(other) = state_change {
         if !matches!(other, "open" | "closed") {
@@ -467,7 +493,7 @@ async fn update_pull(
     }
     match last {
         Some(resp) => respond(resp, StatusCode::OK),
-        None => bad_input("PATCH requires at least one of: title, body, base_ref, draft, state"),
+        None => bad_input("PATCH requires at least one of: title, body, base, draft, state"),
     }
 }
 
@@ -479,15 +505,22 @@ fn bad_input(message: &str) -> Response {
         .into_response()
 }
 
-/// `POST /api/v1/repos/{owner}/{repo}/pulls/{number}/merge` (`pull.merge`) —
-/// body: `method` (`merge`|`squash`|`rebase`, required); `commit_title`,
-/// `commit_message`, `delete_branch` (optional).
+/// `PUT /api/v1/repos/{owner}/{repo}/pulls/{number}/merge` (`pull.merge`) —
+/// GitHub body: `merge_method` (`merge`|`squash`|`rebase`, required);
+/// `commit_title`, `commit_message`, `sha` (optional). `merge_method`
+/// translates to `pull.merge`'s `method`; native `method` passes through.
 async fn merge_pull(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoNumberPath>,
     Json(body): Json<Value>,
 ) -> Response {
+    let mut body = body;
+    if let Some(o) = body.as_object_mut() {
+        if let Some(v) = o.remove("merge_method") {
+            o.insert("method".into(), v);
+        }
+    }
     let input = merge_fields(p.ref_input(), body);
     call(&state, &headers, "pull.merge", input, StatusCode::OK).await
 }

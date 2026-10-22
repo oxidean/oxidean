@@ -17,8 +17,8 @@ use super::{
 use oxidean_api_core::app::AppState;
 use oxidean_core::{
     CreateIssueCommentRequest, CreateIssueRequest, DeleteIssueCommentResponse, IssueCommentPublic,
-    IssueCommentsListResponse, IssueListRequest, IssueListResponse, IssuePublic, RpcResponse,
-    UpdateIssueCommentRequest,
+    IssueCommentsListResponse, IssueHistoryResponse, IssueListRequest, IssueListResponse,
+    IssuePublic, RpcResponse, UpdateIssueCommentRequest,
 };
 
 /// `PATCH /issues/{number}` body — `title`/`body` go to `issue.update`;
@@ -110,6 +110,23 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<IssuePublic>,
         )),
         mount: || patch(update_issue),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/issues/{number}/timeline",
+        tags: &["issues"],
+        operation_id: "listIssueTimeline",
+        summary: "Issue timeline (`issue.history` — title/body snapshots; partial GitHub coverage, issue #160)",
+        procedure: "issue.history",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<IssueHistoryResponse>,
+        )),
+        mount: || get(issue_timeline),
     },
     RouteDef {
         method: "GET",
@@ -597,16 +614,141 @@ async fn list_issues(
     call(&state, &headers, "issue.list", input, StatusCode::OK).await
 }
 
+/// Resolve `assignees: ["login"]` → user ids via `issue.assigneeCandidates`.
+async fn assignee_ids_for_logins(
+    ctx: &mut oxidean_api_core::rpc::RpcCtx,
+    owner: &str,
+    repo: &str,
+    logins: &[String],
+) -> Result<Vec<String>, Box<Response>> {
+    let resp = dispatch(ctx, "issue.assigneeCandidates", repo_ref(owner, repo)).await;
+    let data = match resp {
+        RpcResponse::Ok { data, .. } => data,
+        RpcResponse::Err { error, .. } => {
+            return Err(Box::new(
+                (super::status_for_error(&error), Json(error)).into_response(),
+            ))
+        }
+    };
+    let all = data["users"].as_array().cloned().unwrap_or_default();
+    let mut ids = Vec::with_capacity(logins.len());
+    for l in logins {
+        match all.iter().find(|u| {
+            u["username"]
+                .as_str()
+                .map(|n| n.eq_ignore_ascii_case(l))
+                .unwrap_or(false)
+        }) {
+            Some(u) => ids.push(u["user_id"].as_str().unwrap_or_default().to_string()),
+            None => {
+                return Err(Box::new(validation_failed(&format!(
+                    "assignee '{l}' is not eligible on this repository"
+                ))))
+            }
+        }
+    }
+    Ok(ids)
+}
+
 /// `POST /api/v1/repos/{owner}/{repo}/issues` (`issue.create`) —
-/// body: `title` (required), `body`.
+/// GitHub body: `title` (required), `body`, `milestone`, `labels`,
+/// `assignees`. Labels/assignees fan out to `issue.labels.set` /
+/// `issue.assignees.set` after create; the response re-reads the issue.
 async fn create_issue(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoPath>,
     Json(body): Json<Value>,
 ) -> Response {
-    let input = merge_fields(repo_ref(&p.owner, &p.repo), body);
-    call(&state, &headers, "issue.create", input, StatusCode::CREATED).await
+    let labels: Vec<String> = body
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| {
+                    l.as_str()
+                        .map(str::to_string)
+                        .or_else(|| l["name"].as_str().map(str::to_string))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let assignees: Vec<String> = body
+        .get("assignees")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|u| u.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut create_body = body.clone();
+    if let Some(o) = create_body.as_object_mut() {
+        o.remove("labels");
+        o.remove("assignees");
+    }
+    let mut ctx = match ctx_for(&state, &headers).await {
+        Ok(ctx) => ctx,
+        Err(res) => return res,
+    };
+    let resp = dispatch(
+        &mut ctx,
+        "issue.create",
+        merge_fields(repo_ref(&p.owner, &p.repo), create_body),
+    )
+    .await;
+    let number = match &resp {
+        RpcResponse::Ok { data, .. } => match data["number"].as_i64() {
+            Some(n) => n,
+            None => return respond(resp, StatusCode::CREATED),
+        },
+        RpcResponse::Err { .. } => return respond(resp, StatusCode::CREATED),
+    };
+    if !labels.is_empty() {
+        let ids = match label_ids_for_names(&state, &headers, &p.owner, &p.repo, &labels).await {
+            Ok(ids) => ids,
+            Err(res) => return *res,
+        };
+        let resp = dispatch(
+            &mut ctx,
+            "issue.labels.set",
+            merge_fields(
+                repo_ref(&p.owner, &p.repo),
+                json!({ "number": number, "label_ids": ids }),
+            ),
+        )
+        .await;
+        if matches!(resp, RpcResponse::Err { .. }) {
+            return respond(resp, StatusCode::CREATED);
+        }
+    }
+    if !assignees.is_empty() {
+        let ids = match assignee_ids_for_logins(&mut ctx, &p.owner, &p.repo, &assignees).await {
+            Ok(ids) => ids,
+            Err(res) => return *res,
+        };
+        let resp = dispatch(
+            &mut ctx,
+            "issue.assignees.set",
+            merge_fields(
+                repo_ref(&p.owner, &p.repo),
+                json!({ "number": number, "user_ids": ids }),
+            ),
+        )
+        .await;
+        if matches!(resp, RpcResponse::Err { .. }) {
+            return respond(resp, StatusCode::CREATED);
+        }
+    }
+    call(
+        &state,
+        &headers,
+        "issue.get",
+        json!({ "owner": p.owner, "name": p.repo, "number": number }),
+        StatusCode::CREATED,
+    )
+    .await
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}/issues/{number}` (`issue.get`).
@@ -619,18 +761,44 @@ async fn get_issue(
 }
 
 /// `PATCH /api/v1/repos/{owner}/{repo}/issues/{number}` — `issue.update`
-/// for `title`/`body`; `state: "closed"|"open"` maps to `issue.close` /
-/// `issue.reopen`. Both may be combined in one request.
+/// for `title`/`body`/`milestone`; `state: "closed"|"open"` maps to
+/// `issue.close`/`issue.reopen`; `labels`/`assignees` fan out to
+/// `issue.labels.set`/`issue.assignees.set`. Any may combine in one request.
 async fn update_issue(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(p): Path<RepoNumberPath>,
     Json(body): Json<Value>,
 ) -> Response {
-    let has_fields = body.get("title").is_some() || body.get("body").is_some();
+    let labels: Option<Vec<String>> = body.get("labels").and_then(|v| v.as_array()).map(|a| {
+        a.iter()
+            .filter_map(|l| {
+                l.as_str()
+                    .map(str::to_string)
+                    .or_else(|| l["name"].as_str().map(str::to_string))
+            })
+            .collect()
+    });
+    let assignees: Option<Vec<String>> =
+        body.get("assignees").and_then(|v| v.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|u| u.as_str().map(str::to_string))
+                .collect()
+        });
+
+    let mut update_body = body.clone();
+    if let Some(o) = update_body.as_object_mut() {
+        o.remove("labels");
+        o.remove("assignees");
+    }
+    let has_fields = update_body.get("title").is_some()
+        || update_body.get("body").is_some()
+        || update_body.get("milestone").is_some();
     let state_change = body.get("state").and_then(|v| v.as_str());
-    if !has_fields && state_change.is_none() {
-        return bad_input("PATCH requires at least one of: title, body, state");
+    if !has_fields && state_change.is_none() && labels.is_none() && assignees.is_none() {
+        return bad_input(
+            "PATCH requires at least one of: title, body, milestone, state, labels, assignees",
+        );
     }
     if let Some(other) = state_change {
         if !matches!(other, "open" | "closed") {
@@ -644,7 +812,7 @@ async fn update_issue(
     };
     let mut last: Option<RpcResponse> = None;
     if has_fields {
-        let input = merge_fields(p.ref_input(), body.clone());
+        let input = merge_fields(p.ref_input(), update_body);
         let resp = dispatch(&mut ctx, "issue.update", input).await;
         if matches!(resp, RpcResponse::Err { .. }) {
             return respond(resp, StatusCode::OK);
@@ -654,17 +822,59 @@ async fn update_issue(
     match state_change {
         Some("closed") => {
             let resp = dispatch(&mut ctx, "issue.close", p.ref_input()).await;
-            return respond(resp, StatusCode::OK);
+            if matches!(resp, RpcResponse::Err { .. }) {
+                return respond(resp, StatusCode::OK);
+            }
+            last = Some(resp);
         }
         Some("open") => {
             let resp = dispatch(&mut ctx, "issue.reopen", p.ref_input()).await;
-            return respond(resp, StatusCode::OK);
+            if matches!(resp, RpcResponse::Err { .. }) {
+                return respond(resp, StatusCode::OK);
+            }
+            last = Some(resp);
         }
         _ => {}
     }
+    if let Some(names) = labels {
+        let ids = match label_ids_for_names(&state, &headers, &p.owner, &p.repo, &names).await {
+            Ok(ids) => ids,
+            Err(res) => return *res,
+        };
+        let resp = dispatch(
+            &mut ctx,
+            "issue.labels.set",
+            merge_fields(p.ref_input(), json!({ "label_ids": ids })),
+        )
+        .await;
+        if matches!(resp, RpcResponse::Err { .. }) {
+            return respond(resp, StatusCode::OK);
+        }
+        last = None;
+    }
+    if let Some(logins) = assignees {
+        let ids = match assignee_ids_for_logins(&mut ctx, &p.owner, &p.repo, &logins).await {
+            Ok(ids) => ids,
+            Err(res) => return *res,
+        };
+        let resp = dispatch(
+            &mut ctx,
+            "issue.assignees.set",
+            merge_fields(p.ref_input(), json!({ "user_ids": ids })),
+        )
+        .await;
+        if matches!(resp, RpcResponse::Err { .. }) {
+            return respond(resp, StatusCode::OK);
+        }
+        last = None;
+    }
+    // Labels/assignees set procs answer `{ok}` — re-read for the full DTO.
     match last {
         Some(resp) => respond(resp, StatusCode::OK),
-        None => bad_input("PATCH requires at least one of: title, body, state"),
+        None => {
+            let resp = dispatch(&mut ctx, "issue.get", p.ref_input()).await;
+            respond(resp, StatusCode::OK)
+        }
     }
 }
 
@@ -674,6 +884,25 @@ fn bad_input(message: &str) -> Response {
         Json(json!({ "code": "rpc.bad_input", "message": message })),
     )
         .into_response()
+}
+
+/// `GET /api/v1/repos/{owner}/{repo}/issues/{number}/timeline`
+/// (`issue.history`) — GitHub timeline backed by Oxidean's title/body
+/// revision snapshots; partial coverage vs GitHub's labelled-event feed
+/// (issue #160).
+async fn issue_timeline(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<RepoNumberPath>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "issue.history",
+        p.ref_input(),
+        StatusCode::OK,
+    )
+    .await
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}/issues/{number}/comments`
