@@ -18,7 +18,7 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-import { HomePage, selectHomeTree } from "./index";
+import { AnonLanding, HomePage, selectHomeTree } from "./index";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -205,5 +205,49 @@ describe("index signed-in repo loading (no empty-state flicker)", () => {
     });
     expect(document.body.textContent).toContain("ada/hello");
     expect(document.body.textContent).not.toContain("No repositories yet.");
+  });
+});
+
+/**
+ * Issue #165 — a `;` typed into JSX children position renders as a literal
+ * text node. The shipped instance was `</AppLink>;` between the hero CTAs
+ * ("Get started ; Explore"). Rendering `AnonLanding` directly covers the
+ * marketing tree without the auth.me dance; the structural gate for every
+ * template is scripts/check-template-semicolons.ts (runs in `make web-lint`).
+ */
+describe("index landing markup hygiene (issue #165)", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders no stray `;` text nodes anywhere", () => {
+    render(AnonLanding, {});
+    const strays: string[] = [];
+    const walk = (node: Node) => {
+      for (const child of Array.from(node.childNodes)) {
+        if (child.nodeType === 3 && /^\s*;+\s*$/.test(child.nodeValue ?? "")) {
+          strays.push(child.nodeValue ?? "");
+        }
+        walk(child);
+      }
+    };
+    walk(document.body);
+    expect(strays).toEqual([]);
+  });
+
+  it("hero CTAs are exactly the two anchors — no interstitial text", () => {
+    render(AnonLanding, {});
+    const ctas = document.querySelectorAll("[data-anon-signup-cta]");
+    expect(ctas.length).toBe(2);
+    for (const cta of Array.from(ctas)) {
+      const parent = cta.parentElement!;
+      // Elements and Octane's comment anchors are fine; a non-whitespace text
+      // node here is a leaked statement terminator (or stray punctuation).
+      const strayText = Array.from(parent.childNodes).filter(
+        (n) => n.nodeType === 3 && (n.nodeValue ?? "").trim() !== "",
+      );
+      expect(strayText.map((n) => n.nodeValue)).toEqual([]);
+      expect(parent.children).toHaveLength(2);
+    }
   });
 });
