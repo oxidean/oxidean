@@ -612,15 +612,6 @@ pub async fn write_git_stderr_deny(
     let _ = handle.close(channel).await;
 }
 
-/// Map forge capability to `OXIDEAN_ACTOR_CAPABILITY` (D-PKG-01 / Smart HTTP).
-pub fn capability_env_label(capability: Option<Capability>) -> &'static str {
-    match capability {
-        Some(Capability::Admin) => "admin",
-        Some(Capability::Write) => "write",
-        Some(Capability::Read) | None => "read",
-    }
-}
-
 /// Env pairs injected into `git upload-pack` (GIT-27).
 ///
 /// `GIT_CONFIG_*` advertises the `filter` capability so partial clone
@@ -674,6 +665,7 @@ pub fn receive_pack_protection_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::capability_env_label;
     use std::collections::HashMap;
 
     #[test]

@@ -62,9 +62,283 @@ kind = "crate"
 manifest_path = "crates/oxidean-api/Cargo.toml"
 tag_prefix = "oxidean-api-v"
 changelog_path = "crates/oxidean-api/CHANGELOG.md"
+# The api binary is assembled from the shell crate plus oxidean-api-core and
+# the per-domain `oxidean-api-*` dispatch crates (#162) — each registered as
+# its own component below; depends_on propagation rolls every domain bump
+# forward into this component (oxidean-core/db/git/vcs flow via api-core).
 globs = ["crates/oxidean-api/**"]
 scopes = ["api"]
-depends_on = ["oxidean-core", "oxidean-db", "oxidean-git", "oxidean-actions-expr", "wire"]
+depends_on = ["wire", "oxidean-runner", "oxidean-api-actions", "oxidean-api-admin", "oxidean-api-auth", "oxidean-api-check", "oxidean-api-core", "oxidean-api-deployment", "oxidean-api-discussion", "oxidean-api-email", "oxidean-api-issues", "oxidean-api-keys", "oxidean-api-merge-queue", "oxidean-api-mirror", "oxidean-api-notification", "oxidean-api-oauth", "oxidean-api-org", "oxidean-api-packages", "oxidean-api-pages", "oxidean-api-pat", "oxidean-api-project", "oxidean-api-pulls", "oxidean-api-release", "oxidean-api-repo", "oxidean-api-rest", "oxidean-api-user", "oxidean-api-vcs", "oxidean-api-webhook", "oxidean-api-wiki"]
+
+[[component]]
+id = "oxidean-api-actions"
+kind = "crate"
+manifest_path = "crates/oxidean-api-actions/Cargo.toml"
+tag_prefix = "oxidean-api-actions-v"
+changelog_path = "crates/oxidean-api-actions/CHANGELOG.md"
+globs = ["crates/oxidean-api-actions/**"]
+scopes = ["api-actions"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-admin"
+kind = "crate"
+manifest_path = "crates/oxidean-api-admin/Cargo.toml"
+tag_prefix = "oxidean-api-admin-v"
+changelog_path = "crates/oxidean-api-admin/CHANGELOG.md"
+globs = ["crates/oxidean-api-admin/**"]
+scopes = ["api-admin"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-auth"
+kind = "crate"
+manifest_path = "crates/oxidean-api-auth/Cargo.toml"
+tag_prefix = "oxidean-api-auth-v"
+changelog_path = "crates/oxidean-api-auth/CHANGELOG.md"
+globs = ["crates/oxidean-api-auth/**"]
+scopes = ["api-auth"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-check"
+kind = "crate"
+manifest_path = "crates/oxidean-api-check/Cargo.toml"
+tag_prefix = "oxidean-api-check-v"
+changelog_path = "crates/oxidean-api-check/CHANGELOG.md"
+globs = ["crates/oxidean-api-check/**"]
+scopes = ["api-check"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-core"
+kind = "crate"
+manifest_path = "crates/oxidean-api-core/Cargo.toml"
+tag_prefix = "oxidean-api-core-v"
+changelog_path = "crates/oxidean-api-core/CHANGELOG.md"
+globs = ["crates/oxidean-api-core/**"]
+scopes = ["api-core"]
+depends_on = ["oxidean-core", "oxidean-db", "oxidean-git", "oxidean-actions-expr", "oxidean-vcs", "wire"]
+
+[[component]]
+id = "oxidean-api-deployment"
+kind = "crate"
+manifest_path = "crates/oxidean-api-deployment/Cargo.toml"
+tag_prefix = "oxidean-api-deployment-v"
+changelog_path = "crates/oxidean-api-deployment/CHANGELOG.md"
+globs = ["crates/oxidean-api-deployment/**"]
+scopes = ["api-deployment"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-discussion"
+kind = "crate"
+manifest_path = "crates/oxidean-api-discussion/Cargo.toml"
+tag_prefix = "oxidean-api-discussion-v"
+changelog_path = "crates/oxidean-api-discussion/CHANGELOG.md"
+globs = ["crates/oxidean-api-discussion/**"]
+scopes = ["api-discussion"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-email"
+kind = "crate"
+manifest_path = "crates/oxidean-api-email/Cargo.toml"
+tag_prefix = "oxidean-api-email-v"
+changelog_path = "crates/oxidean-api-email/CHANGELOG.md"
+globs = ["crates/oxidean-api-email/**"]
+scopes = ["api-email"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-issues"
+kind = "crate"
+manifest_path = "crates/oxidean-api-issues/Cargo.toml"
+tag_prefix = "oxidean-api-issues-v"
+changelog_path = "crates/oxidean-api-issues/CHANGELOG.md"
+globs = ["crates/oxidean-api-issues/**"]
+scopes = ["api-issues"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-keys"
+kind = "crate"
+manifest_path = "crates/oxidean-api-keys/Cargo.toml"
+tag_prefix = "oxidean-api-keys-v"
+changelog_path = "crates/oxidean-api-keys/CHANGELOG.md"
+globs = ["crates/oxidean-api-keys/**"]
+scopes = ["api-keys"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-merge-queue"
+kind = "crate"
+manifest_path = "crates/oxidean-api-merge-queue/Cargo.toml"
+tag_prefix = "oxidean-api-merge-queue-v"
+changelog_path = "crates/oxidean-api-merge-queue/CHANGELOG.md"
+globs = ["crates/oxidean-api-merge-queue/**"]
+scopes = ["api-merge-queue"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-mirror"
+kind = "crate"
+manifest_path = "crates/oxidean-api-mirror/Cargo.toml"
+tag_prefix = "oxidean-api-mirror-v"
+changelog_path = "crates/oxidean-api-mirror/CHANGELOG.md"
+globs = ["crates/oxidean-api-mirror/**"]
+scopes = ["api-mirror"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-notification"
+kind = "crate"
+manifest_path = "crates/oxidean-api-notification/Cargo.toml"
+tag_prefix = "oxidean-api-notification-v"
+changelog_path = "crates/oxidean-api-notification/CHANGELOG.md"
+globs = ["crates/oxidean-api-notification/**"]
+scopes = ["api-notification"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-oauth"
+kind = "crate"
+manifest_path = "crates/oxidean-api-oauth/Cargo.toml"
+tag_prefix = "oxidean-api-oauth-v"
+changelog_path = "crates/oxidean-api-oauth/CHANGELOG.md"
+globs = ["crates/oxidean-api-oauth/**"]
+scopes = ["api-oauth"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-org"
+kind = "crate"
+manifest_path = "crates/oxidean-api-org/Cargo.toml"
+tag_prefix = "oxidean-api-org-v"
+changelog_path = "crates/oxidean-api-org/CHANGELOG.md"
+globs = ["crates/oxidean-api-org/**"]
+scopes = ["api-org"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-packages"
+kind = "crate"
+manifest_path = "crates/oxidean-api-packages/Cargo.toml"
+tag_prefix = "oxidean-api-packages-v"
+changelog_path = "crates/oxidean-api-packages/CHANGELOG.md"
+globs = ["crates/oxidean-api-packages/**"]
+scopes = ["api-packages"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-pages"
+kind = "crate"
+manifest_path = "crates/oxidean-api-pages/Cargo.toml"
+tag_prefix = "oxidean-api-pages-v"
+changelog_path = "crates/oxidean-api-pages/CHANGELOG.md"
+globs = ["crates/oxidean-api-pages/**"]
+scopes = ["api-pages"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-pat"
+kind = "crate"
+manifest_path = "crates/oxidean-api-pat/Cargo.toml"
+tag_prefix = "oxidean-api-pat-v"
+changelog_path = "crates/oxidean-api-pat/CHANGELOG.md"
+globs = ["crates/oxidean-api-pat/**"]
+scopes = ["api-pat"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-project"
+kind = "crate"
+manifest_path = "crates/oxidean-api-project/Cargo.toml"
+tag_prefix = "oxidean-api-project-v"
+changelog_path = "crates/oxidean-api-project/CHANGELOG.md"
+globs = ["crates/oxidean-api-project/**"]
+scopes = ["api-project"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-pulls"
+kind = "crate"
+manifest_path = "crates/oxidean-api-pulls/Cargo.toml"
+tag_prefix = "oxidean-api-pulls-v"
+changelog_path = "crates/oxidean-api-pulls/CHANGELOG.md"
+globs = ["crates/oxidean-api-pulls/**"]
+scopes = ["api-pulls"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-release"
+kind = "crate"
+manifest_path = "crates/oxidean-api-release/Cargo.toml"
+tag_prefix = "oxidean-api-release-v"
+changelog_path = "crates/oxidean-api-release/CHANGELOG.md"
+globs = ["crates/oxidean-api-release/**"]
+scopes = ["api-release"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-repo"
+kind = "crate"
+manifest_path = "crates/oxidean-api-repo/Cargo.toml"
+tag_prefix = "oxidean-api-repo-v"
+changelog_path = "crates/oxidean-api-repo/CHANGELOG.md"
+globs = ["crates/oxidean-api-repo/**"]
+scopes = ["api-repo"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-rest"
+kind = "crate"
+manifest_path = "crates/oxidean-api-rest/Cargo.toml"
+tag_prefix = "oxidean-api-rest-v"
+changelog_path = "crates/oxidean-api-rest/CHANGELOG.md"
+globs = ["crates/oxidean-api-rest/**"]
+scopes = ["api-rest"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-user"
+kind = "crate"
+manifest_path = "crates/oxidean-api-user/Cargo.toml"
+tag_prefix = "oxidean-api-user-v"
+changelog_path = "crates/oxidean-api-user/CHANGELOG.md"
+globs = ["crates/oxidean-api-user/**"]
+scopes = ["api-user"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-vcs"
+kind = "crate"
+manifest_path = "crates/oxidean-api-vcs/Cargo.toml"
+tag_prefix = "oxidean-api-vcs-v"
+changelog_path = "crates/oxidean-api-vcs/CHANGELOG.md"
+globs = ["crates/oxidean-api-vcs/**"]
+scopes = ["api-vcs"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-webhook"
+kind = "crate"
+manifest_path = "crates/oxidean-api-webhook/Cargo.toml"
+tag_prefix = "oxidean-api-webhook-v"
+changelog_path = "crates/oxidean-api-webhook/CHANGELOG.md"
+globs = ["crates/oxidean-api-webhook/**"]
+scopes = ["api-webhook"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-wiki"
+kind = "crate"
+manifest_path = "crates/oxidean-api-wiki/Cargo.toml"
+tag_prefix = "oxidean-api-wiki-v"
+changelog_path = "crates/oxidean-api-wiki/CHANGELOG.md"
+globs = ["crates/oxidean-api-wiki/**"]
+scopes = ["api-wiki"]
+depends_on = ["oxidean-api-core"]
 
 [[component]]
 id = "oxidean-runner"

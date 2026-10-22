@@ -198,6 +198,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
         vcs: state.vcs.clone(),
+        rpc_dispatch: state.rpc_dispatch.clone(),
     }
 }
 

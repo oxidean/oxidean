@@ -308,22 +308,22 @@ Or wipe `users` / `sessions` and re-bootstrap with `OXIDEAN_ADMIN_*` or the `/se
 | `OXIDEAN_ENV` | `development` | `crates/oxidean-api/src/main.rs` |
 | `API_BIND` | `0.0.0.0:8080` | `main.rs` |
 | `OXIDEAN_AUTO_MIGRATE` | `true` (any value other than `true`/`1` disables) | `main.rs` |
-| `OXIDEAN_ALLOW_SIGNUP` | `false` (only `true`/`1` opens signup at seed) | `crates/oxidean-api/src/auth/seed.rs` / bootstrap |
-| `OXIDEAN_MAIL_FROM` | `Oxidean <noreply@localhost>` | `crates/oxidean-api/src/email/mod.rs` |
-| Resend API base | `https://api.resend.com` | `crates/oxidean-api/src/email/resend.rs` |
+| `OXIDEAN_ALLOW_SIGNUP` | `false` (only `true`/`1` opens signup at seed) | `crates/oxidean-api-core/src/auth/seed.rs` / bootstrap |
+| `OXIDEAN_MAIL_FROM` | `Oxidean <noreply@localhost>` | `crates/oxidean-api-core/src/email/mod.rs` |
+| Resend API base | `https://api.resend.com` | `crates/oxidean-api-core/src/email/resend.rs` |
 | Compose `DATABASE_URL` | `postgres://oxidean:oxidean@postgres:5432/oxidean` | `docker-compose.yml` |
 | Compose `OXIDEAN_ENV` | `compose` | `docker-compose.yml` |
 | Compose CORS | `http://localhost,http://127.0.0.1` | `docker-compose.yml` |
 | Dialect | Inferred from `DATABASE_URL` scheme | `crates/oxidean-db/src/dialect.rs` |
-| `OXIDEAN_REPOS_DIR` | `var/repos` | `crates/oxidean-api/src/app.rs` |
-| `OXIDEAN_LFS_DIR` | `var/lfs` | `crates/oxidean-api/src/app.rs` |
-| `OXIDEAN_LFS_MAX_OBJECT_BYTES` | 2147483648 | `crates/oxidean-api/src/lfs/quota.rs` |
+| `OXIDEAN_REPOS_DIR` | `var/repos` | `crates/oxidean-api-core/src/app.rs` |
+| `OXIDEAN_LFS_DIR` | `var/lfs` | `crates/oxidean-api-core/src/app.rs` |
+| `OXIDEAN_LFS_MAX_OBJECT_BYTES` | 2147483648 | `crates/oxidean-api-core/src/lfs/quota.rs` |
 | `OXIDEAN_LFS_QUOTA_REPO_BYTES` | 10737418240 | `lfs/quota.rs` |
 | `OXIDEAN_LFS_QUOTA_USER_BYTES` | 53687091200 | `lfs/quota.rs` |
-| Orphan reconcile interval | 86400s | `crates/oxidean-api/src/jobs/schedule.rs` |
-| Soft-delete retention | 14 days | `crates/oxidean-api/src/jobs/reconcile.rs` |
-| Repo redirect retention | 90 days | `crates/oxidean-api/src/repo/rename_transfer.rs` / `app.rs` |
-| Git gc interval | 604800s | `crates/oxidean-api/src/jobs/schedule.rs` |
+| Orphan reconcile interval | 86400s | `crates/oxidean-api-core/src/jobs/schedule.rs` |
+| Soft-delete retention | 14 days | `crates/oxidean-api-core/src/jobs/reconcile.rs` |
+| Repo redirect retention | 90 days | `crates/oxidean-api-core/src/repo/rename_transfer.rs` / `app.rs` |
+| Git gc interval | 604800s | `crates/oxidean-api-core/src/jobs/schedule.rs` |
 | LFS GC interval | 86400s | `jobs/schedule.rs` / `jobs/lfs_gc.rs` |
 | Mirror poll ticker | 30s | `OXIDEAN_MIRROR_POLL_TICK_SECS` / `mirror/queue.rs` |
 

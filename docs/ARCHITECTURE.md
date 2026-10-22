@@ -50,10 +50,10 @@ OAuth/OIDC browser flows leave the SPA for `/api/auth/workos/start|callback` and
 
 | Abstraction | Role | Location |
 | --- | --- | --- |
-| `AppState` | Shared Axum state: DB, swappable email sender, sessions, pending auth, uploads dir, `GitBackend`, repos dir | `crates/oxidean-api/src/app.rs` |
-| `RpcCtx` / `dispatch` | Session-aware RPC context and procedure router (`system.*`, `auth.*`, `user.*`, `org.*`, `repo.*`, `pat.*`, `admin.*`, `invites.*`) | `crates/oxidean-api/src/rpc.rs` |
-| `SessionService` | Opaque HttpOnly cookie; CSPRNG token in cookie, SHA-256 hash in DB; idle 24h / remember-me 30d | `crates/oxidean-api/src/auth/session.rs` |
-| `EmailSender` | Trait + adapters: log sink, SMTP (`OXIDEAN_SMTP_URL`), Resend (`OXIDEAN_RESEND_API_KEY`) | `crates/oxidean-api/src/email/` |
+| `AppState` | Shared Axum state: DB, swappable email sender, sessions, pending auth, uploads dir, `GitBackend`, repos dir | `crates/oxidean-api-core/src/app.rs` |
+| `RpcCtx` / `dispatch` | Session-aware RPC context and procedure router (`system.*`, `auth.*`, `user.*`, `org.*`, `repo.*`, `pat.*`, `admin.*`, `invites.*`) | `crates/oxidean-api-core/src/rpc.rs` |
+| `SessionService` | Opaque HttpOnly cookie; CSPRNG token in cookie, SHA-256 hash in DB; idle 24h / remember-me 30d | `crates/oxidean-api-core/src/auth/session.rs` |
+| `EmailSender` | Trait + adapters: log sink, SMTP (`OXIDEAN_SMTP_URL`), Resend (`OXIDEAN_RESEND_API_KEY`) | `crates/oxidean-api-core/src/email/` |
 | `GitBackend` | Trait seam for all forge git ops (init, tree, blob, refs, history, branch, archive, gc) | `crates/oxidean-git/src/backend.rs` |
 | `CliGitBackend` | Shipped Phase 7 adapter: system `git` CLI ≥ 2.5 via argv arrays (never `sh -c`) | `crates/oxidean-git/src/cli.rs` |
 | `Database` / `DbPool` / `Dialect` | Uniform DB façade over sqlx Postgres, MySQL, SQLite pools | `crates/oxidean-db/src/{lib,pool,dialect}.rs` |
@@ -72,7 +72,7 @@ Phase 7 ships a self-hosted forge browse/create surface behind a deep **`GitBack
 | **Future adapter** | **`GixGitBackend`** (gitoxide) is **documented, not shipped**. Implement the same `GitBackend` trait when create / browse / branch / archive / gc coverage reaches parity. Do **not** call `gix` from API handlers or treat gitoxide as the Phase 7 primary backend. |
 | **On-disk layout** | Bare repos at `{OXIDEAN_REPOS_DIR}/{owner}/{name}.git` (default root `var/repos`). |
 | **Owners** | Polymorphic `repositories.owner_type` (`user` \| `org`) + `owner_id`. Path `/{owner}/{repo}` resolves **user slug then org slug** in a shared namespace (same reserved-username rules). |
-| **Capability ACL** | Central evaluator in `crates/oxidean-api/src/repo/acl.rs` returns effective `Capability` (`Read` \| `Write` \| `Admin`). Highest-wins coalesce: personal owner / org Owner|Admin, org `member_base_permission` for Members, per-repo collaborator grants, public→Read. Collaborator is **per-repo only** — never an org membership role. |
+| **Capability ACL** | Central evaluator in `crates/oxidean-api-core/src/repo/acl.rs` returns effective `Capability` (`Read` \| `Write` \| `Admin`). Highest-wins coalesce: personal owner / org Owner|Admin, org `member_base_permission` for Members, per-repo collaborator grants, public→Read. Collaborator is **per-repo only** — never an org membership role. |
 | **Anti-enumeration** | Missing repos and unauthorized private **web/RPC** reads return identical `repo.not_found`. Smart HTTP maps private denials to **401 Basic** (not soft 404). |
 | **RPC vs HTTP** | Metadata and mutations use JSON RPC (`repo.create`, `repo.tree`, `repo.blob`, `repo.commits`, branch/settings, collaborators, …). Large binary payloads use HTTP GET: `/api/repos/{owner}/{repo}/raw/{ref}/…` and `/api/repos/{owner}/{repo}/archive/{ref}.zip` / `.tar.gz` — same ACL resolve as RPC. |
 
@@ -165,7 +165,7 @@ Phase 9 adds SSH clone/fetch/push beside Smart HTTP:
 
 | Concern | Contract |
 | --- | --- |
-| **Process** | In-process **`russh`** listener in `oxidean-api` (`crates/oxidean-api/src/ssh/`), gated by `OXIDEAN_SSH_ENABLED`. Shares DB + `OXIDEAN_REPOS_DIR` with Smart HTTP. |
+| **Process** | In-process **`russh`** listener in `oxidean-api` (`crates/oxidean-api-core/src/ssh/`), gated by `OXIDEAN_SSH_ENABLED`. Shares DB + `OXIDEAN_REPOS_DIR` with Smart HTTP. |
 | **Pack** | Allowlist `git-upload-pack` / `git-receive-pack` only; spawn system `git` with argv (no shell). ACL reuses Smart HTTP owner / visibility / verified-email rules; denials via **git stderr** (not HTTP codes). |
 | **Auth** | Force SSH username **`git`**. Identity = registered public-key fingerprint (`ssh_public_keys`). Keys map to **full account** — no PAT scopes. When no account key matches, the handshake falls back to per-repo **deploy keys** (`deploy_keys`, GIT-23); each pack exec re-checks the fingerprint is attached to the target repo, and `can_write` gates receive-pack. Deploy keys are transport-only (no RPC/web). |
 | **Clone URL** | scp-style `git@{OXIDEAN_SSH_HOST}:{owner}/{repo}.git` (D-SSH-02). Port advertised separately; `~/.ssh/config` when ≠ 22. |
@@ -224,7 +224,10 @@ oxidean/
 ├── apps/web/              # Octane islands on Astro shells (pages/, components/, chrome, auth screens)
 ├── packages/api-client/   # Generated TS RPC client (do not hand-edit src/index.ts)
 ├── crates/
-│   ├── oxidean-api/      # Axum HTTP/WS server, auth, repo RPC/HTTP, email, rpc-gen
+│   ├── oxidean-api/      # Axum server shell: binaries, route wiring, dispatch assembly, rpc-gen
+│   ├── oxidean-api-core/   # Shared API machinery: AppState/RpcCtx/gate, auth/session, domain engines
+│   ├── oxidean-api-rest/   # GitHub-compat REST surface (dispatches into RPC)
+│   ├── oxidean-api-<dom>/  # Per-domain RPC dispatch crates (issues, pulls, repo, actions, org, admin, …)
 │   ├── oxidean-core/     # Shared domain / RPC types (no I/O)
 │   ├── oxidean-db/       # Multi-dialect sqlx adapter + migrations/
 │   └── oxidean-git/      # GitBackend trait + CliGitBackend (system git)
@@ -249,14 +252,14 @@ oxidean/
 - **Same-origin Traefik (Compose)** — Avoids cross-origin cookie issues locally; Docker provider requires a socket — **Compose-only**.
 - **Cloud gateway (`deploy/cloud`)** — File-configured Caddy mirrors Compose path priorities for Railway-class hosts; IaC in `.railway/railway.ts` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 - **`deploy/`** — Traefik notes for Compose; cloud ingress under `deploy/cloud/`.
-- **Stack presets** — Day-one `/new` templates are in-repo packs under `crates/oxidean-api/assets/stack-presets/` (community PRs; no marketplace UI yet). See [guides/stack-presets.md](guides/stack-presets.md).
+- **Stack presets** — Day-one `/new` templates are in-repo packs under `crates/oxidean-api-repo/assets/stack-presets/` (community PRs; no marketplace UI yet). See [guides/stack-presets.md](guides/stack-presets.md).
 - **Workflow templates** — The Actions "New workflow" catalog merges vendored `actions/starter-workflows`, admin instance templates, and org `.github` repos. See [guides/workflow-templates.md](guides/workflow-templates.md).
 - **Repos volume** — Compose binds `./var/repos` for bare git objects and `./var/lfs` for Git LFS OIDs; cloud mounts `forge-data` at `/var`. Knobs in [CONFIGURATION.md](CONFIGURATION.md) (`OXIDEAN_REPOS_DIR`, `OXIDEAN_LFS_DIR`, orphan/gc/LFS intervals).
 
 
 ## Actions control plane (Phase 19)
 
-Actions lives in `crates/oxidean-api/src/actions/`:
+Actions lives in `crates/oxidean-api-core/src/actions/` (the shared engine; `oxidean-api-actions` holds its RPC dispatch):
 
 | Module | Role |
 |--------|------|

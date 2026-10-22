@@ -163,7 +163,7 @@ async fn actions_dispatch_policy_no_in_process_execution() {
             .exists()
             || true
     );
-    let src = include_str!("../src/actions/dispatch.rs");
+    let src = include_str!("../../oxidean-api-core/src/actions/dispatch.rs");
     assert!(!src.contains("std::process::Command"));
     assert!(!src.contains("tokio::process"));
 }
@@ -171,8 +171,8 @@ async fn actions_dispatch_policy_no_in_process_execution() {
 #[test]
 fn actions_dispatch_policy_no_managed_executor_symbols() {
     // ACT-07 / D-ACT-10: control plane must not ship in-process or hosted-minutes executors.
-    let dispatch = include_str!("../src/actions/dispatch.rs");
-    let runner = include_str!("../src/actions/runner_proto.rs");
+    let dispatch = include_str!("../../oxidean-api-core/src/actions/dispatch.rs");
+    let runner = include_str!("../../oxidean-api-core/src/actions/runner_proto.rs");
     for src in [dispatch, runner] {
         assert!(!src.contains("managed_minutes"));
         assert!(!src.contains("ManagedMinutes"));

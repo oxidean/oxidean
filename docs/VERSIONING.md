@@ -160,7 +160,7 @@ existing components:
   tags only. Retag is a manifest copy — no rebuild; a missing `sha` image
   falls back to a real build.
 - **`chore(release):` bump commits** need no rebuild either: the version.rs
-  helper (`crates/oxidean-api/src/version.rs`) reads
+  helper (`crates/oxidean-api-core/src/version.rs`) reads
   `/usr/local/share/oxidean/VERSION` before `env!("CARGO_PKG_VERSION")`, so
   `images.yml` makes `sha-<bump>` a layer on the parent sha's image
   (api VERSION file) or a pure retag (other services) — the deployed

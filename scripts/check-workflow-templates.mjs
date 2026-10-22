@@ -7,7 +7,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TEMPLATES = join(ROOT, "crates/oxidean-api/assets/workflow-templates");
+const TEMPLATES = join(ROOT, "crates/oxidean-api-core/assets/workflow-templates");
 const CATALOG = join(TEMPLATES, "catalog.json");
 const MAX_TOTAL_BYTES = 1024 * 1024;
 

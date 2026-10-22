@@ -1,7 +1,7 @@
 # One target per .PHONY line group — checkmake does not parse backslash-continued
 # .PHONY lists, so keep each declaration on a single physical line.
 .PHONY: help makefile-lint
-.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check cli-parity-check skill-sync-check check-stack-presets sync-stack-presets check-workflow-templates sync-workflow-templates
+.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check cli-parity-check skill-sync-check check-stack-presets sync-stack-presets check-workflow-templates sync-workflow-templates api-domain-graph-check
 .PHONY: up down logs test smoke smoke-git-https smoke-git-ssh
 .PHONY: smoke-git-lfs
 .PHONY: smoke-packages
@@ -116,6 +116,9 @@ makefile-lint:
 
 check-stack-presets:
 	@./scripts/check-stack-presets.sh
+
+api-domain-graph-check:
+	@bun scripts/check-api-domain-graph.mjs
 
 check-workflow-templates:
 	@bun scripts/check-workflow-templates.mjs

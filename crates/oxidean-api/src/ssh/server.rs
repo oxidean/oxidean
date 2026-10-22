@@ -267,7 +267,7 @@ impl Handler for SshHandler {
                 // Post-push hooks attribute to the account user, or to the
                 // admin who attached the authorizing deploy key (GIT-23).
                 let user_id = actor_user_id.clone();
-                let actor_capability = pack::capability_env_label(capability);
+                let actor_capability = crate::repo::capability_env_label(capability);
                 tokio::spawn(async move {
                     let git: std::sync::Arc<dyn oxidean_git::GitBackend> =
                         std::sync::Arc::new(oxidean_git::CliGitBackend::new());

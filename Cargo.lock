@@ -3722,6 +3722,140 @@ dependencies = [
 name = "oxidean-api"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "chrono",
+ "crypto_box",
+ "flate2",
+ "futures-util",
+ "hex",
+ "http-body-util",
+ "image",
+ "jsonwebtoken",
+ "oxidean-actions-expr",
+ "oxidean-api-actions",
+ "oxidean-api-admin",
+ "oxidean-api-auth",
+ "oxidean-api-check",
+ "oxidean-api-core",
+ "oxidean-api-deployment",
+ "oxidean-api-discussion",
+ "oxidean-api-email",
+ "oxidean-api-issues",
+ "oxidean-api-keys",
+ "oxidean-api-merge-queue",
+ "oxidean-api-mirror",
+ "oxidean-api-notification",
+ "oxidean-api-oauth",
+ "oxidean-api-org",
+ "oxidean-api-packages",
+ "oxidean-api-pages",
+ "oxidean-api-pat",
+ "oxidean-api-project",
+ "oxidean-api-pulls",
+ "oxidean-api-release",
+ "oxidean-api-repo",
+ "oxidean-api-rest",
+ "oxidean-api-user",
+ "oxidean-api-vcs",
+ "oxidean-api-webhook",
+ "oxidean-api-wiki",
+ "oxidean-core",
+ "oxidean-db",
+ "oxidean-git",
+ "oxidean-runner",
+ "oxidean-vcs",
+ "prost",
+ "prost-types",
+ "rand 0.10.3",
+ "reqwest 0.13.5",
+ "russh",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "ssh-key",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "tower",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "webauthn-authenticator-rs",
+ "wiremock",
+ "workos",
+ "zip",
+]
+
+[[package]]
+name = "oxidean-api-actions"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-admin"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "rand 0.10.3",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-auth"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde",
+ "serde_json",
+ "tracing",
+ "url",
+ "uuid",
+ "webauthn-rs",
+]
+
+[[package]]
+name = "oxidean-api-check"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-core"
+version = "0.2.0"
+dependencies = [
  "aes-gcm 0.11.1",
  "argon2",
  "async-trait",
@@ -3737,17 +3871,13 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "hmac 0.13.0",
- "http-body-util",
- "image",
  "include_dir",
- "jsonwebtoken",
  "lettre",
  "openidconnect",
  "oxidean-actions-expr",
  "oxidean-core",
  "oxidean-db",
  "oxidean-git",
- "oxidean-runner",
  "oxidean-vcs",
  "password-hash",
  "prost",
@@ -3756,31 +3886,308 @@ dependencies = [
  "rand 0.10.3",
  "reqwest 0.13.5",
  "russh",
- "schemars 1.2.2",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha1 0.11.0",
  "sha2 0.11.0",
- "ssh-key",
  "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-tungstenite 0.30.0",
  "tokio-util",
- "tower",
- "tower-http 0.7.1",
  "tracing",
- "tracing-subscriber",
  "url",
- "utoipa-swagger-ui",
  "uuid",
- "webauthn-authenticator-rs",
  "webauthn-rs",
  "wiremock",
  "workos",
  "zip",
+]
+
+[[package]]
+name = "oxidean-api-deployment"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-discussion"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-email"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-issues"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-keys"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde",
+ "serde_json",
+ "ssh-key",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-merge-queue"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-mirror"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-git",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "oxidean-api-notification"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "oxidean-api-oauth"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "rand 0.9.5",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-org"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "rand 0.10.3",
+ "serde_json",
+ "sha2 0.11.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-packages"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "oxidean-api-pages"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "oxidean-api-pat"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-project"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-pulls"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-release"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-repo"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "include_dir",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "oxidean-git",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-rest"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "chrono",
+ "flate2",
+ "futures-util",
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tar",
+ "tokio",
+ "tracing",
+ "utoipa-swagger-ui",
+ "zip",
+]
+
+[[package]]
+name = "oxidean-api-user"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "oxidean-api-vcs"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+]
+
+[[package]]
+name = "oxidean-api-webhook"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "oxidean-api-wiki"
+version = "0.2.0"
+dependencies = [
+ "oxidean-api-core",
+ "oxidean-core",
+ "oxidean-db",
+ "oxidean-git",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

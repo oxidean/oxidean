@@ -9,34 +9,12 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use uuid::Uuid;
 
+use crate::app::resolve_session_user_id;
 use crate::app::AppState;
-use crate::auth::session::SESSION_COOKIE_NAME;
+use crate::release::asset_files::sanitize_filename;
 use crate::repo::{
     effective_capability, meets, owner_ref_for_repo, resolve_owner_slug, Capability,
 };
-use crate::rpc::RpcCtx;
-
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
-    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
-    for part in cookie_header.split(';') {
-        let part = part.trim();
-        let prefix = format!("{SESSION_COOKIE_NAME}=");
-        if let Some(value) = part.strip_prefix(prefix.as_str()) {
-            return Some(value.to_string());
-        }
-    }
-    None
-}
-
-fn bearer_token_from_headers(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-}
 
 fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
     (
@@ -52,78 +30,6 @@ fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
 /// Opaque on-disk path: `{release_assets_dir}/{asset_id}` (D-REL-04).
 pub fn asset_fs_path(release_assets_dir: &Path, asset_id: &str) -> PathBuf {
     release_assets_dir.join(asset_id)
-}
-
-pub fn sanitize_filename(name: &str) -> String {
-    let base = Path::new(name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("asset")
-        .trim();
-    let cleaned: String = base
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
-        "asset".into()
-    } else {
-        cleaned
-    }
-}
-
-pub async fn remove_asset_file(release_assets_dir: &Path, asset_id: &str) {
-    let path = asset_fs_path(release_assets_dir, asset_id);
-    match tokio::fs::remove_file(&path).await {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!(error = %e, path = %path.display(), "remove release asset file"),
-    }
-}
-
-/// Cookie session or `Authorization: Bearer <pat>` — asset up/download is the
-/// CLI's path, so PATs (which never mint sessions) are honored alongside
-/// browser cookies. Returns the user id plus the `PatIdentity` (when
-/// bearer-authed) so callers can scope-gate the operation.
-pub(crate) async fn resolve_session_user_id(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Option<(String, Option<crate::pat::bearer::PatIdentity>)> {
-    let client = crate::rpc::ClientMeta::from_headers(headers);
-    if let Some(token) = session_token_from_headers(headers) {
-        return match state
-            .sessions
-            .resolve(
-                &state.db,
-                &token,
-                client.ip_address.as_deref(),
-                client.user_agent.as_deref(),
-            )
-            .await
-        {
-            Ok(Some(s)) => Some((s.user_id, None)),
-            _ => None,
-        };
-    }
-    if let Some(token) = bearer_token_from_headers(headers) {
-        return match crate::pat::bearer::resolve_bearer(
-            &state.db,
-            &state.git_auth_limiter,
-            token,
-            client.ip_address.as_deref(),
-        )
-        .await
-        {
-            Ok((session, identity)) => Some((session.user_id, Some(identity))),
-            Err(_) => None,
-        };
-    }
-    None
 }
 
 /// Map a `pat::bearer` scope error to the route's error body (mirrors the
@@ -571,18 +477,4 @@ pub async fn download_asset(
         res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
     }
     res
-}
-
-/// Helper for RPC deleteAsset / release.delete — remove DB row + file.
-pub async fn delete_asset_with_file(
-    ctx: &RpcCtx,
-    release_assets_dir: &Path,
-    asset_id: &str,
-) -> Result<(), oxidean_core::AppError> {
-    ctx.db.delete_release_asset(asset_id).await.map_err(|e| {
-        tracing::error!(error = %e, "delete_release_asset");
-        oxidean_core::AppError::new("release.internal", "could not delete asset")
-    })?;
-    remove_asset_file(release_assets_dir, asset_id).await;
-    Ok(())
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Vendor GitHub starter-workflows into crates/oxidean-api/assets/workflow-templates.
+ * Vendor GitHub starter-workflows into crates/oxidean-api-core/assets/workflow-templates.
  *
  * Usage:
  *   bun scripts/sync-workflow-templates.mjs                  # sync at the pinned commit
@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const DEST = join(ROOT, "crates/oxidean-api/assets/workflow-templates");
+const DEST = join(ROOT, "crates/oxidean-api-core/assets/workflow-templates");
 const CATALOG_PATH = join(DEST, "catalog.json");
 
 const REPO = "actions/starter-workflows";

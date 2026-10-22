@@ -26,7 +26,7 @@ const STATUSES: &[&str] = &[
 ];
 
 fn templates_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/workflow-templates")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../oxidean-api-core/assets/workflow-templates")
 }
 
 /// Every vendored `<dir>/<stem>.yml|yaml` → its ledger key.

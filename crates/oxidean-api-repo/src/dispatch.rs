@@ -1,0 +1,113 @@
+//! Per-domain dispatch — see `oxidean-api-issues` for the contract. `None`
+//! means the name is not this crate's; the shell tries the next dispatcher.
+
+use oxidean_api_core::rpc::RpcCtx;
+use oxidean_core::RpcResponse;
+use serde_json::Value;
+
+use crate::{
+    activity, branch_protection, collaborators, commit_status, file_templates, files, insights,
+    invites, lifecycle, rename_transfer, search, social_lists, sync_fork, tag_protection, units,
+};
+
+macro_rules! arm {
+    ($handler:expr) => {
+        match $handler.await {
+            Ok(v) => Some(RpcResponse::ok(v)),
+            Err(e) => Some(RpcResponse::err(e)),
+        }
+    };
+}
+
+pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option<RpcResponse> {
+    match procedure {
+        "repo.listMine" => arm!(lifecycle::list_mine(ctx)),
+        "repo.listByOwner" => arm!(lifecycle::list_by_owner(ctx, input)),
+        "repo.createDefaults" => arm!(lifecycle::create_defaults(ctx)),
+        "repo.create" => arm!(lifecycle::create(ctx, input)),
+        "repo.fork" => arm!(lifecycle::fork(ctx, input)),
+        "repo.migrate" => arm!(lifecycle::migrate(ctx, input)),
+        "repo.star" => arm!(lifecycle::star(ctx, input)),
+        "repo.unstar" => arm!(lifecycle::unstar(ctx, input)),
+        "repo.watch" => arm!(lifecycle::watch(ctx, input)),
+        "repo.unwatch" => arm!(lifecycle::unwatch(ctx, input)),
+        "repo.stargazers.list" => arm!(social_lists::stargazers_list(ctx, input)),
+        "repo.watchers.list" => arm!(social_lists::watchers_list(ctx, input)),
+        "repo.forks.list" => arm!(social_lists::forks_list(ctx, input)),
+        "repo.forkStatus" => arm!(sync_fork::fork_status(ctx, input)),
+        "repo.syncFork" => arm!(sync_fork::sync_fork(ctx, input)),
+        "repo.updateMetadata" => arm!(lifecycle::update_metadata(ctx, input)),
+        "repo.topicsSuggest" => arm!(lifecycle::topics_suggest(ctx, input)),
+        "repo.explore" => arm!(lifecycle::explore(ctx, input)),
+        "repo.get" => arm!(lifecycle::get(ctx, input)),
+        "repo.tree" => arm!(lifecycle::tree(ctx, input)),
+        "repo.blob" => arm!(lifecycle::blob(ctx, input)),
+        "repo.refs" => arm!(lifecycle::refs(ctx, input)),
+        "repo.commits" => arm!(lifecycle::commits(ctx, input)),
+        "repo.pathLastCommits" => arm!(lifecycle::path_last_commits(ctx, input)),
+        "repo.commitCount" => arm!(lifecycle::commit_count(ctx, input)),
+        "repo.contributors.list" => arm!(lifecycle::contributors_list(ctx, input)),
+        "repo.languages" => arm!(lifecycle::languages(ctx, input)),
+        "repo.activity.list" => arm!(activity::list(ctx, input)),
+        "repo.insights.contributors" => arm!(insights::contributors(ctx, input)),
+        "repo.insights.commitActivity" => arm!(insights::commit_activity(ctx, input)),
+        "repo.insights.forkNetwork" => arm!(insights::fork_network(ctx, input)),
+        "repo.commit" => arm!(lifecycle::commit(ctx, input)),
+        "repo.compare" => arm!(lifecycle::compare(ctx, input)),
+        "repo.blame" => arm!(lifecycle::blame(ctx, input)),
+        "repo.search" => arm!(search::search(ctx, input)),
+        "repo.branchCreate" => arm!(lifecycle::branch_create(ctx, input)),
+        "repo.branchRename" => arm!(lifecycle::branch_rename(ctx, input)),
+        "repo.branchDelete" => arm!(lifecycle::branch_delete(ctx, input)),
+        "repo.file.create" => arm!(oxidean_api_core::repo::file_create(ctx, input)),
+        "repo.file.update" => arm!(files::update(ctx, input)),
+        "repo.file.delete" => arm!(files::delete(ctx, input)),
+        "repo.file.rename" => arm!(files::rename(ctx, input)),
+        "repo.file.upload" => arm!(files::upload(ctx, input)),
+        "repo.file.mkdir" => arm!(files::mkdir(ctx, input)),
+        "repo.file.commitPolicy" => arm!(files::commit_policy(ctx, input)),
+        "repo.updateVisibility" => arm!(lifecycle::update_visibility(ctx, input)),
+        "repo.setArchived" => arm!(lifecycle::set_archived(ctx, input)),
+        "repo.lfs.setEnabled" => arm!(lifecycle::lfs_set_enabled(ctx, input)),
+        "repo.lfs.getEnabled" => arm!(lifecycle::lfs_get_enabled(ctx, input)),
+        "repo.templates.list" => arm!(file_templates::file_templates(ctx, input)),
+        "repo.lfs.getStatus" => arm!(lifecycle::lfs_get_status(ctx, input)),
+        "repo.lfs.getUsage" => arm!(lifecycle::lfs_get_usage(ctx, input)),
+        "repo.quota.get" => arm!(lifecycle::quota_get(ctx, input)),
+        "repo.quota.set" => arm!(lifecycle::quota_set(ctx, input)),
+        "repo.lfs.listObjects" => arm!(lifecycle::lfs_list_objects(ctx, input)),
+        "repo.lfs.download" => arm!(lifecycle::lfs_download(ctx, input)),
+        "repo.softDelete" => arm!(lifecycle::soft_delete(ctx, input)),
+        "repo.rename" => arm!(rename_transfer::rename(ctx, input)),
+        "repo.transfer" => arm!(rename_transfer::transfer(ctx, input)),
+        "repo.collaborators.list" => arm!(collaborators::list(ctx, input)),
+        "repo.collaborators.add" => arm!(collaborators::add(ctx, input)),
+        "repo.collaborators.update" => arm!(collaborators::update(ctx, input)),
+        "repo.collaborators.remove" => arm!(collaborators::remove(ctx, input)),
+        "repo.invites.create" => arm!(invites::create(ctx, input)),
+        "repo.invites.createLink" => arm!(invites::create_link(ctx, input)),
+        "repo.invites.list" => arm!(invites::list(ctx, input)),
+        "repo.invites.revoke" => arm!(invites::revoke(ctx, input)),
+        "repo.branchProtection.list" => arm!(branch_protection::list(ctx, input)),
+        "repo.branchProtection.create" => arm!(branch_protection::create(ctx, input)),
+        "repo.branchProtection.update" => arm!(branch_protection::update(ctx, input)),
+        "repo.branchProtection.delete" => arm!(branch_protection::delete(ctx, input)),
+        "repo.tagProtection.list" => arm!(tag_protection::list(ctx, input)),
+        "repo.tagProtection.create" => arm!(tag_protection::create(ctx, input)),
+        "repo.tagProtection.update" => arm!(tag_protection::update(ctx, input)),
+        "repo.tagProtection.delete" => arm!(tag_protection::delete(ctx, input)),
+        "repo.commitStatus.create" => arm!(commit_status::create(ctx, input)),
+        "repo.commitStatus.list" => arm!(commit_status::list(ctx, input)),
+        "repo.issues.getEnabled" => arm!(units::issues_get_enabled(ctx, input)),
+        "repo.issues.setEnabled" => arm!(units::issues_set_enabled(ctx, input)),
+        "repo.pulls.getEnabled" => arm!(units::pulls_get_enabled(ctx, input)),
+        "repo.pulls.setEnabled" => arm!(units::pulls_set_enabled(ctx, input)),
+        "repo.wiki.getEnabled" => arm!(units::wiki_get_enabled(ctx, input)),
+        "repo.wiki.setEnabled" => arm!(units::wiki_set_enabled(ctx, input)),
+        "repo.projects.getEnabled" => arm!(units::projects_get_enabled(ctx, input)),
+        "repo.projects.setEnabled" => arm!(units::projects_set_enabled(ctx, input)),
+        "repo.discussions.getEnabled" => arm!(units::discussions_get_enabled(ctx, input)),
+        "repo.discussions.setEnabled" => arm!(units::discussions_set_enabled(ctx, input)),
+        _ => None,
+    }
+}

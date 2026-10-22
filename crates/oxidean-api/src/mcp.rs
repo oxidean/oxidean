@@ -166,19 +166,8 @@ fn internal_error_response() -> Response {
 // Instance gate (AGT-03) — `instance_mcp_settings` override else env default.
 // ---------------------------------------------------------------------------
 
-/// `OXIDEAN_MCP_ENABLED` parse — same truthy semantics as
-/// `OXIDEAN_ACTIONS_ENABLED`: unset or anything but `0`/`false`/`no`/`off`/`""`
-/// means on. Default **on** so self-host/local dev needs zero configuration.
-fn mcp_env_truthy(raw: &str) -> bool {
-    let t = raw.trim().to_ascii_lowercase();
-    !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
-}
-
-pub(crate) fn env_mcp_enabled() -> bool {
-    std::env::var("OXIDEAN_MCP_ENABLED")
-        .map(|v| mcp_env_truthy(&v))
-        .unwrap_or(true)
-}
+// `env_mcp_enabled`/`mcp_env_truthy` moved to `oxidean_api_core::app` — the
+// env default is read into `AppState::mcp_enabled` at state build time (#162).
 
 /// Effective enable state: admin override row wins; env default otherwise.
 /// Fails closed when the settings row cannot be read (a DB-less instance has
@@ -1450,18 +1439,6 @@ async fn read_doc_resource(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // -- env flag parsing ---------------------------------------------------
-
-    #[test]
-    fn mcp_env_truthy_values() {
-        for v in ["", "0", "false", "no", "off", " FALSE ", "Off", "0 "] {
-            assert!(!mcp_env_truthy(v), "{v:?} must be falsy");
-        }
-        for v in ["1", "true", "yes", "on", "anything", " enabled "] {
-            assert!(mcp_env_truthy(v), "{v:?} must be truthy");
-        }
-    }
 
     // -- percent decoding ----------------------------------------------------
 

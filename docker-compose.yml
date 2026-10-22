@@ -4,7 +4,10 @@
 
 services:
   traefik:
-    image: traefik:v3.3
+    # ≥v3.5 required: its bundled docker client pins API 1.24, which Engine ≥29
+    # (Docker Desktop 4.96+) rejects outright — provider gets a 400 with an
+    # empty message and serves 404 on every route. v3.7 negotiates ≥1.40.
+    image: traefik:v3.7
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
