@@ -13,6 +13,7 @@
     "lint": "turbo run lint"
   },
   "devDependencies": {
+    "@tsrx/oxc": "^0.20.0",
     "knip": "^6.40.0",
     "turbo": "^2.11.7"
   }

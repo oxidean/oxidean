@@ -5,13 +5,14 @@
     "": {
       "name": "oxidean",
       "devDependencies": {
+        "@tsrx/oxc": "^0.20.0",
         "knip": "^6.40.0",
         "turbo": "^2.11.7",
       },
     },
     "apps/web": {
       "name": "@oxidean/web",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@octanejs/astro": "0.0.41",
         "@octanejs/base-ui": "^0.1.64",
@@ -65,7 +66,7 @@
     },
     "packages/api-client": {
       "name": "@oxidean/api-client",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "devDependencies": {
         "vitest": "^5.0.3",
       },
