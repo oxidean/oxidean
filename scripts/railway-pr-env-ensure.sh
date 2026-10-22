@@ -83,7 +83,7 @@ find_pr_environment() {
   local project_id="$1" pr="$2" timeout="$3"
   local deadline=$((SECONDS + timeout)) env_id=""
   while :; do
-    env_id="$(railway_find_pr_environment_id "$project_id" "$pr" 2>/dev/null || true)"
+    env_id="$(railway_find_pr_environment_id "$project_id" "$pr" 2>/dev/null)" || env_id=""
     if [[ -n "$env_id" && "$env_id" != "null" ]]; then
       printf '%s' "$env_id"
       return 0
@@ -162,7 +162,7 @@ ensure_support_services() {
   # -- volumes: mirror the source env's mounts --------------------------
   local src_id="${RAILWAY_PR_ENV_SOURCE_ID:-}"
   if [[ -z "$src_id" ]]; then
-    src_id="$(railway_resolve_environment_id "$project_id" "$SOURCE_ENVIRONMENT_NAME" 2>/dev/null || true)"
+    src_id="$(railway_resolve_environment_id "$project_id" "$SOURCE_ENVIRONMENT_NAME" 2>/dev/null)" || src_id=""
   fi
   src_id="${src_id:-$PREVIEW_ENVIRONMENT_ID}"
 
@@ -343,7 +343,7 @@ main() {
   local env_id=""
   if [[ "$have_credential" == "1" ]]; then
     if [[ "$DRY_RUN" == "1" ]]; then
-      env_id="$(railway_find_pr_environment_id "$project_id" "$pr" 2>/dev/null || true)"
+      env_id="$(railway_find_pr_environment_id "$project_id" "$pr" 2>/dev/null)" || env_id=""
     else
       env_id="$(find_pr_environment "$project_id" "$pr" "$FIND_TIMEOUT")"
     fi
@@ -359,8 +359,8 @@ main() {
   local source_id="${RAILWAY_PR_ENV_SOURCE_ID:-}"
   if [[ -z "$source_id" && "$have_credential" == "1" ]]; then
     source_id="$(
-      railway_resolve_environment_id "$project_id" "$SOURCE_ENVIRONMENT_NAME" 2>/dev/null || true
-    )"
+      railway_resolve_environment_id "$project_id" "$SOURCE_ENVIRONMENT_NAME" 2>/dev/null
+    )" || source_id=""
   fi
   if [[ -z "$source_id" ]]; then
     source_id="$PREVIEW_ENVIRONMENT_ID"
