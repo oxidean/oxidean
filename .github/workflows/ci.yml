@@ -320,6 +320,8 @@ jobs:
         run: bun run test
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
+      - name: rendered stray-semicolon scan (all prerendered pages, issue #165)
+        run: make web-render-check
 
   # Dead code must not ship: knip covers the TS/.tsrx/.astro graph (custom
   # compilers in knip.ts), cargo-machete covers unused Cargo deps, and rustc's
