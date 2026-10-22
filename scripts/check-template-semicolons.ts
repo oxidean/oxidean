@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
 /**
- * A bare `;` line in a .tsrx template is a literal semicolon text node in the
- * rendered page — Rivet treats `X;` inside @{ }/@if/@for arms as a statement
- * terminator, but the same `;` inside element children is emitted as text
- * ("Get started ; Explore" shipped on the landing page; the repo settings
- * page showed stray `;` between panels). In plain TS a bare `;` is a dead
- * empty statement — pointless either way, so there is no opt-out.
+ * A stray `;` in JSX children position is a literal semicolon text node in the
+ * rendered page — `</X>;` between siblings (or as a parent's last child) ships
+ * visible punctuation ("Get started ; Explore" on the landing page, stray `;`
+ * between repo settings panels). `;` after the root node of an `@{ }` template
+ * or inside `@if`/`@for` arms is the statement terminator and never renders —
+ * only JSXText children count.
  *
- * oxfmt normalizes `<X />;` in children position onto its own line, so
- * scanning for `;`-only lines catches the whole class after formatting.
- * Comments and string/template-literal contents are excluded.
+ * Line-level greps cannot tell the two apart (the shipped bug was
+ * `</AppLink>;` end-of-line, which oxfmt preserves or merges into `>;<`), so
+ * this check parses each file with @tsrx/oxc and flags `JSXText` nodes whose
+ * content is nothing but `;`. To render a literal semicolon on purpose, write
+ * it as an expression (`{";"}`) — that is the opt-out.
  */
+import { parseSync } from "@tsrx/oxc/parser";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -28,105 +31,68 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Strip comments/strings from a line (state carried across lines). */
-function codeOnly(
-  line: string,
-  st: { block: boolean; tmpl: boolean; tmplDepth: number[] },
-): string {
-  let out = "";
-  let quote: string | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    const n = line[i + 1] ?? "";
-    if (st.block) {
-      if (c === "*" && n === "/") {
-        st.block = false;
-        i++;
-      }
-      continue;
-    }
-    if (st.tmpl) {
-      if (c === "\\") {
-        i++;
-        continue;
-      }
-      if (c === "`") st.tmpl = false;
-      else if (c === "$" && n === "{") {
-        st.tmplDepth.push(0);
-        st.tmpl = false;
-        i++;
-      }
-      continue;
-    }
-    if (quote) {
-      if (c === "\\") {
-        i++;
-        continue;
-      }
-      if (c === quote) quote = null;
-      continue;
-    }
-    if (c === "/" && n === "/") break;
-    if (c === "/" && n === "*") {
-      st.block = true;
-      i++;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      quote = c;
-      continue;
-    }
-    if (c === "`") {
-      st.tmpl = true;
-      continue;
-    }
-    if (st.tmplDepth.length > 0) {
-      if (c === "{") st.tmplDepth[st.tmplDepth.length - 1]!++;
-      else if (c === "}") {
-        const d = st.tmplDepth[st.tmplDepth.length - 1]!;
-        if (d === 0) {
-          st.tmplDepth.pop();
-          st.tmpl = true;
-          continue;
-        }
-        st.tmplDepth[st.tmplDepth.length - 1] = d - 1;
-      }
-    }
-    out += c;
+const STRAY_SEMICOLON = /^\s*;+\s*$/;
+
+function lineOf(src: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset && i < src.length; i++) {
+    if (src.charCodeAt(i) === 10) line++;
   }
-  return out;
+  return line;
+}
+
+function visit(node: unknown, src: string, file: string, hits: Hit[]): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) visit(child, src, file, hits);
+    return;
+  }
+  const n = node as Record<string, unknown>;
+  if (n.type === "JSXText" && typeof n.value === "string" && STRAY_SEMICOLON.test(n.value)) {
+    const start = typeof n.start === "number" ? n.start : 0;
+    hits.push({ file, line: lineOf(src, start) });
+    return;
+  }
+  for (const [key, value] of Object.entries(n)) {
+    if (key === "start" || key === "end" || key === "loc" || key === "range") continue;
+    if (value && typeof value === "object") visit(value, src, file, hits);
+  }
 }
 
 const hits: Hit[] = [];
+const unparsed: string[] = [];
 for (const file of walk(ROOT)) {
   const rel = relative(ROOT, file);
-  const st = { block: false, tmpl: false, tmplDepth: [] as number[] };
-  const lines = readFileSync(file, "utf-8").split("\n");
-  // `;` on its own line is only rendered text when it follows a JSX tag close
-  // (`</X>` or `/>`) in children position. A `;` line after a string/`)`/`}`
-  // terminator is the tail of a multi-line JS statement — not a text node.
-  let prevTail = "";
-  for (let i = 0; i < lines.length; i++) {
-    const code = codeOnly(lines[i]!, st).trim();
-    if (code === ";") {
-      if (prevTail === ">") hits.push({ file: rel, line: i + 1 });
-      continue;
-    }
-    if (code !== "") prevTail = code[code.length - 1]!;
+  const src = readFileSync(file, "utf-8");
+  const lang = file.endsWith(".tsrx") ? "tsrx" : file.endsWith(".tsx") ? "tsx" : "ts";
+  const res = parseSync(file, src, { lang, sourceType: "module" });
+  // Oxlint (same parser, earlier in `make web-lint`) is the syntax gate — a
+  // file that fails to parse is reported there; here we just cannot scan it.
+  if (!res.program) {
+    unparsed.push(rel);
+    continue;
   }
+  visit(res.program, src, rel, hits);
 }
 
-if (hits.length === 0) {
+if (hits.length === 0 && unparsed.length === 0) {
   console.log("check-template-semicolons: ok");
   process.exit(0);
 }
 
-console.error("check-template-semicolons: bare `;` lines found:\n");
-for (const h of hits) {
-  console.error(`  ${h.file}:${h.line}`);
+if (hits.length > 0) {
+  console.error("check-template-semicolons: stray `;` in JSX children:\n");
+  for (const h of hits) {
+    console.error(`  ${h.file}:${h.line}`);
+  }
+  console.error(
+    '\nA `;` inside JSX children renders as a literal semicolon on the page. Remove it — ' +
+      'statement terminators only belong after a template\'s root node or inside @if/@for ' +
+      'arms. To render a literal semicolon deliberately, write it as an expression: `{";"}`.',
+  );
 }
-console.error(
-  "\nA bare `;` inside JSX children renders as a literal semicolon on the page. " +
-    "Remove it — statement terminators belong inside @{ }/@if/@for arms, not element children.",
-);
+if (unparsed.length > 0) {
+  console.error("\ncheck-template-semicolons: files that failed to parse (see oxlint output):\n");
+  for (const f of unparsed) console.error(`  ${f}`);
+}
 process.exit(1);

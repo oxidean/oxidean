@@ -79,7 +79,7 @@ wait_for_pr_environment() {
   local pr="$1" timeout="$2"
   local deadline=$((SECONDS + timeout)) env_id=""
   while (( SECONDS < deadline )); do
-    env_id="$(railway_find_pr_environment_id "$PROJECT_ID" "$pr" 2>/dev/null || true)"
+    env_id="$(railway_find_pr_environment_id "$PROJECT_ID" "$pr" 2>/dev/null)" || env_id=""
     if [[ -n "$env_id" && "$env_id" != "null" ]]; then
       printf '%s' "$env_id"
       return 0

@@ -3,9 +3,27 @@
  * Fails on Octane DOM races (insertBefore) and any other uncaught pageerror.
  */
 import { DOM_RACE_RE } from "../../src/test/dom-errors.ts";
+import { findStrayTemplateText } from "../../src/test/stray-template-text.ts";
 /**
- * Fail fast on Vite overlay, runtime ReferenceErrors, or Octane's default
- * error UI (`<strong style="font-size:1rem">Something went wrong!</strong>`).
+ * Fail fast on a `;`-only text node inside a layout element — the rendered
+ * signature of a `;` typed into JSX children position (issue #165). Runs on
+ * every page checkpoint via assertNoOctaneOverlay.
+ */
+export function assertNoStrayTemplateText(html: string, label: string): void {
+  const hits = findStrayTemplateText(html);
+  if (hits.length > 0) {
+    const where = hits.map((h) => `<${h.parent}>`).join(", ");
+    throw new Error(
+      `${label} leaked stray ";" text node(s) inside ${where} — a ` +
+        "`;` in JSX children renders literally (issue #165)",
+    );
+  }
+}
+
+/**
+ * Fail fast on Vite overlay, runtime ReferenceErrors, Octane's default
+ * error UI (`<strong style="font-size:1rem">Something went wrong!</strong>`),
+ * or leaked template text (`;` in JSX children — issue #165).
  */
 export function assertNoOctaneOverlay(html: string, label: string): void {
   if (
@@ -15,6 +33,7 @@ export function assertNoOctaneOverlay(html: string, label: string): void {
   ) {
     throw new Error(`${label} showed Vite/Octane render error. body=${html.slice(0, 1200)}`);
   }
+  assertNoStrayTemplateText(html, label);
 }
 
 /** Minimal page surface shared with commands.ts. */
