@@ -118,7 +118,7 @@ check-stack-presets:
 	@./scripts/check-stack-presets.sh
 
 api-domain-graph-check:
-	@./scripts/check-api-domain-graph.sh
+	@bun scripts/check-api-domain-graph.mjs
 
 check-workflow-templates:
 	@bun scripts/check-workflow-templates.mjs
