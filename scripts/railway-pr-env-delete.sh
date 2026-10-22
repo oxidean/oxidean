@@ -34,7 +34,11 @@ fi
 # tokens cannot list environments, and a PR env is never covered by one.
 unset RAILWAY_TOKEN
 
-env_ids="$(railway_find_pr_environment_ids "$PROJECT_ID" "$PR")"
+# A lookup failure (auth outage, API error) must not read as "no env" —
+# dying here leaves the env leaked but puts a red X on the run, which is
+# exactly what a broken credential deserves. Genuine absence still exits 0.
+env_ids="$(railway_find_pr_environment_ids "$PROJECT_ID" "$PR")" \
+  || die "environment lookup failed for PR #${PR} — refusing to report it cleaned"
 if [[ -z "$env_ids" ]]; then
   echo "No ephemeral environment for PR #${PR} — nothing to delete."
   exit 0

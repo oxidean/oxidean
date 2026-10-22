@@ -79,7 +79,9 @@ railway_gql() {
 }
 
 # Resolve an environment id by name within a project. Prints the id; dies when
-# no environment matches.
+# no environment matches. Returns non-zero when the lookup itself fails —
+# callers inside $( ) don't inherit errexit, so propagate explicitly or an
+# API error reads as "environment absent".
 railway_resolve_environment_id() {
   local project_id="$1" name="$2"
   local raw id
@@ -91,7 +93,7 @@ railway_resolve_environment_id() {
         }
       }
     ' "$(jq -n --arg id "$project_id" '{id:$id}')"
-  )"
+  )" || return 1
   id="$(echo "$raw" | jq -r --arg name "$name" '
     .data.project.environments.edges[]?
     | .node
@@ -107,6 +109,9 @@ railway_resolve_environment_id() {
 # repo's CI creates itself (scripts/railway-pr-env-ensure.sh) are found by
 # name — the public API offers no way to set meta.prNumber, so they carry
 # the conventional name oxidean-pr-<n> instead. Meta matches print first.
+# Returns non-zero when the lookup fails — inside $( ) a dying railway_gql
+# would otherwise leave raw empty and read as "no environment", turning an
+# auth/API outage into a silent skip (a leaked env that reports as cleaned).
 railway_find_pr_environment_ids() {
   local project_id="$1" pr_number="$2"
   local raw
@@ -120,7 +125,7 @@ railway_find_pr_environment_ids() {
         }
       }
     ' "$(jq -n --arg id "$project_id" '{id:$id}')"
-  )"
+  )" || return 1
   echo "$raw" | jq -r --argjson pr "$pr_number" --arg name "oxidean-pr-${pr_number}" '
     [.data.project.environments.edges[]?.node]
     | ([.[] | select(.isEphemeral == true and .meta.prNumber == $pr)]
@@ -130,7 +135,11 @@ railway_find_pr_environment_ids() {
 }
 
 # Singular form — prints the first matching id, or nothing when no PR
-# environment exists yet.
+# environment exists yet. Captures the full list first so a lookup failure
+# propagates even when the caller's pipefail is off (plain `ids | head`
+# would exit with head's status).
 railway_find_pr_environment_id() {
-  railway_find_pr_environment_ids "$1" "$2" | head -n1
+  local ids
+  ids="$(railway_find_pr_environment_ids "$1" "$2")" || return 1
+  echo "$ids" | head -n1
 }

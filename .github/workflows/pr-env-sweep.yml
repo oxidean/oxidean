@@ -1,0 +1,64 @@
+# Authoritative teardown for stale per-PR surfaces — oxidean-pr-<n>
+# Railway environments, "Oxidean / oxidean-pr-<n>" GitHub Environments,
+# and pr-<n> GHCR tags.
+#
+# Why a standalone workflow: images.yml's pull_request:closed cleanup-pr
+# run is routinely cancelled before jobs start — on merge GitHub removes
+# refs/pull/<n>/merge and the queued run goes with it — so cleanup-pr is
+# only a fast path. This sweep detects leaks on every surface and tears
+# down each closed PR's lane via scripts/pr-env-sweep.sh →
+# scripts/pr-env-teardown.sh. workflow_dispatch makes it manually
+# runnable (e.g. after rotating RAILWAY_API_TOKEN).
+#
+# Secrets/vars:
+#   RAILWAY_API_TOKEN  — account/workspace token; env-scoped project
+#     tokens cannot enumerate environments (Bearer rejects them).
+#   RELEASE_APP_ID (variable) + RELEASE_APP_PRIVATE_KEY (secret) — the
+#     release GitHub App; needs Environments (or Administration) write on
+#     the repo to delete environments, else the delete warns and
+#     deployments are marked inactive as fallback.
+#   RELEASE_TOKEN    — fallback maintainer PAT for the same purpose.
+
+name: PR env sweep
+
+on:
+  # Hourly backstop — leaked envs hold volumes until the 20/project cap
+  # breaks every later bind.
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: pr-env-sweep
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  packages: write # GHCR pr-<n> version deletes
+
+jobs:
+  sweep:
+    name: sweep stale pr environments
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: release app token (environment admin)
+        id: apptok
+        if: ${{ vars.RELEASE_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - name: tear down surfaces for closed PRs
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          GH_TOKEN: ${{ github.token }}
+          # Env admin token preference order: release App → maintainer PAT
+          # → GITHUB_TOKEN (never able to manage environments — last-ditch).
+          GH_ADMIN_TOKEN: ${{ steps.apptok.outputs.token || secrets.RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/pr-env-sweep.sh
