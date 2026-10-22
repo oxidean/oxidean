@@ -11275,6 +11275,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/issues/{number}/timeline:
+    get:
+      tags:
+      - issues
+      summary: 'Issue timeline (`issue.history` — title/body snapshots; partial GitHub coverage, issue #160)'
+      operationId: listIssueTimeline
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: number
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueHistoryResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/issues/{number}/comments:
     get:
       tags:
@@ -12762,10 +12797,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/pulls/{number}/merge:
-    post:
+    put:
       tags:
       - pulls
-      summary: Merge pull request (`pull.merge`)
+      summary: Merge pull request (`pull.merge`) — `merge_method` → `method`
       operationId: mergePull
       parameters:
       - name: owner
@@ -17612,6 +17647,41 @@ components:
       description: |-
         Public milestone shape (list/detail/issue embed). Counts follow GitHub's
         milestone list: `open_issues` + `closed_issues`.
+    IssueHistoryResponse:
+      type: object
+      properties:
+        revisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueRevisionPublic'
+      required:
+      - revisions
+    IssueRevisionPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        issue_id:
+          type: string
+        editor_id:
+          type: string
+        editor_username:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+      required:
+      - id
+      - issue_id
+      - editor_id
+      - editor_username
+      - title
+      - body
+      - created_at
+      description: One prior title/body snapshot (D-ISS-04).
     IssueCommentsListResponse:
       type: object
       properties:
