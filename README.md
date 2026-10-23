@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/oxidean/oxidean/actions/workflows/ci.yml"><img src="https://github.com/oxidean/oxidean/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
-  <a href="Cargo.toml"><img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="Version 0.1.0" /></a>
+  <a href="crates/oxidean-api/Cargo.toml"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Foxidean%2Foxidean%2Fmain%2Fcrates%2Foxidean-api%2FCargo.toml&amp;query=%24.package.version&amp;label=version&amp;color=informational" alt="Latest stable version" /></a>
 </p>
 
 ## What it is
