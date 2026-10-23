@@ -534,7 +534,7 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
       - uses: docker/setup-buildx-action@v3
       - name: build api image with tag release feed
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/oxidean-api/Dockerfile
