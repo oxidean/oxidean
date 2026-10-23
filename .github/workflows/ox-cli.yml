@@ -160,7 +160,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         shell: pwsh
         run: ./scripts/ox-smoke.ps1 ./dist/ox-${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ox-${{ matrix.target }}
           path: dist/
@@ -188,7 +188,7 @@ jobs:
           mkdir -p dist
           cp target/release/ox dist/ox-x86_64-unknown-freebsd
           (cd dist && sha256sum ox-x86_64-unknown-freebsd > ox-x86_64-unknown-freebsd.sha256)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ox-x86_64-unknown-freebsd
           path: dist/
@@ -424,7 +424,7 @@ jobs:
           docker run --rm ${PLATFORM:+--platform $PLATFORM} \
             -v "$PWD/pkg:/pkg:ro" "${{ matrix.test_image }}" \
             sh -c "${cmd//PKGFILE/$PKG_FILE} && ox --version && ox --help >/dev/null"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ox-pkg-${{ matrix.fmt }}-${{ matrix.arch }}
           path: pkg/
