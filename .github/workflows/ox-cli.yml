@@ -127,7 +127,7 @@ jobs:
           ls -lh dist/
       - name: qemu binfmt for foreign-arch exec
         if: matrix.os == 'ubuntu-latest' && matrix.method == 'cross' && matrix.target != 'x86_64-unknown-linux-musl'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: smoke (foreign arch inside a real userspace container)
         if: matrix.os == 'ubuntu-latest' && matrix.method == 'cross' && matrix.target != 'x86_64-unknown-linux-musl'
         run: |
@@ -218,7 +218,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: qemu for non-native arch legs
         if: matrix.platform
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: lay out fixture site (www/cli/*)
         run: |
           set -euo pipefail
@@ -414,7 +414,7 @@ jobs:
           ls -lh pkg/
       - name: qemu for non-native arch legs
         if: matrix.platform
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: install package inside ${{ matrix.test_image }} + smoke
         env:
           PLATFORM: ${{ matrix.platform }}
