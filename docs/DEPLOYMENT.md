@@ -164,7 +164,7 @@ For **Oxidean Cloud**, path priorities are mirrored in [`deploy/cloud/Caddyfile`
 ### Dialect overlays
 
 - **Postgres (default):** `DATABASE_URL=postgres://oxidean:oxidean@postgres:5432/oxidean`; volume `postgres_data`.
-- **MySQL:** profile `mysql`, image `mysql:8.4`; API gets `MYSQL_DATABASE_URL` (default `mysql://oxidean:oxidean@mysql:3306/oxidean`) and `OXIDEAN_DB_DIALECT=mysql`. Default Postgres still starts unless stopped.
+- **MySQL:** profile `mysql`, image `mysql:26.7`; API gets `MYSQL_DATABASE_URL` (default `mysql://oxidean:oxidean@mysql:3306/oxidean`) and `OXIDEAN_DB_DIALECT=mysql`. Default Postgres still starts unless stopped.
 - **SQLite:** `postgres` moved to profile `postgres` (so it does not start); `depends_on` reset; `DATABASE_URL=sqlite:/app/var/oxidean.db`; host dir via `OXIDEAN_SQLITE_HOST_DIR` (WSL + `docker.exe` may need a Windows-native path from `scripts/sqlite-host-dir.sh`).
 
 ## Build pipeline
