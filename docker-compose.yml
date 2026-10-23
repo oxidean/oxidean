@@ -25,13 +25,16 @@ services:
       - oxidean
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-oxidean}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oxidean}
       POSTGRES_DB: ${POSTGRES_DB:-oxidean}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # postgres:18+ stores data under /var/lib/postgresql/<major>/docker and
+      # requires the mount at the parent so pg_upgrade --link works across
+      # majors. The legacy /var/lib/postgresql/data mount point hard-fails.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oxidean} -d ${POSTGRES_DB:-oxidean}"]
       interval: 5s

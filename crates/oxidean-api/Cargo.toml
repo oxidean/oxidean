@@ -73,14 +73,14 @@ reqwest = { version = "0.13", default-features = false, features = [
   "http2",
   "system-proxy",
 ] }
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 crypto_box = { version = "0.9.1", features = ["salsa20", "seal", "getrandom"] }
-rand = "0.10.2"
-uuid = { version = "1.26.0", features = ["v4"] }
+rand = "0.10.3"
+uuid = { version = "1.29.0", features = ["v4"] }
 chrono = "0.4.45"
 flate2 = "1.1"
 tar = "0.4"
-workos = "3.4"
+workos = "3.5"
 url = "2.5.8"
 image = { version = "0.25", default-features = false, features = [
   "bmp",
@@ -102,7 +102,7 @@ tempfile = "3"
 ssh-key = { version = "=0.7.0-rc.11", features = ["std", "alloc"] }
 russh = { version = "0.64", features = ["aws-lc-rs"] }
 serde_yaml = "0.9"
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 base64 = "0.23"
 tokio-util = { version = "0.7.20", features = ["io"] }
 hex = "0.4.3"
@@ -112,13 +112,13 @@ oxidean-runner = { path = "../oxidean-runner" }
 prost = "0.14"
 prost-types = "0.14"
 http-body-util = "0.1"
-jsonwebtoken = "10.3.0"
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
 wiremock = "0.6.5"
-webauthn-authenticator-rs = { version = "0.5.0", default-features = false, features = ["softpasskey"] }
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softpasskey"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 

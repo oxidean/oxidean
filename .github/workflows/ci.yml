@@ -280,7 +280,7 @@ jobs:
       # produced by the same nextest that ran `cargo nextest archive`.
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.146
+          tool: nextest@0.9.149
       - name: download nextest archive
         uses: actions/download-artifact@v8
         with:
@@ -555,7 +555,7 @@ jobs:
           df -h /
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
@@ -815,7 +815,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: oxidean
           POSTGRES_PASSWORD: oxidean
@@ -824,7 +824,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U oxidean" --health-interval=5s --health-timeout=5s --health-retries=10
       mysql:
-        image: mysql:8.4
+        image: mysql:9.7
         env:
           MYSQL_USER: oxidean
           MYSQL_PASSWORD: oxidean
@@ -840,7 +840,7 @@ jobs:
       # produced by the same nextest that ran `cargo nextest archive`.
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.146
+          tool: nextest@0.9.149
       - name: download nextest archive
         uses: actions/download-artifact@v8
         with:
@@ -899,7 +899,7 @@ jobs:
       # produced by the same nextest that ran `cargo nextest archive`.
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.146
+          tool: nextest@0.9.149
       - name: download nextest archive
         uses: actions/download-artifact@v8
         with:

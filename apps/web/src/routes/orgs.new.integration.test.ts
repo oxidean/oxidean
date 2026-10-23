@@ -54,14 +54,24 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
     client.setQueryData(authMeQueryKey, { ...user, email_verified: true });
 
     const wallText = "Verify your email";
-    const commits: string[] = [];
+    const formText = "Create a new organization";
+    // octane ≥0.14 coalesces mount+update writes into one commit batch: the wall
+    // mounts inside a detached <!--comp--> range so it never shows in addedNodes,
+    // but it must still be committed (its subtree is removed) and cleanly swapped
+    // for the form — a hydration rollback would leave extra mount/remove cycles.
+    let wallRemoved = false;
+    let wallRemovals = 0;
+    let formAdded = false;
     const observer = new MutationObserver((records) => {
       for (const record of records) {
-        for (const node of record.addedNodes) {
-          if (node.textContent?.includes(wallText)) commits.push("wall-mounted");
-        }
         for (const node of record.removedNodes) {
-          if (node.textContent?.includes(wallText)) commits.push("wall-removed");
+          if (node.textContent?.includes(wallText)) {
+            wallRemoved = true;
+            wallRemovals += 1;
+          }
+        }
+        for (const node of record.addedNodes) {
+          if (node.textContent?.includes(formText)) formAdded = true;
         }
       }
     });
@@ -76,8 +86,9 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(commits[0]).toBe("wall-mounted");
-      expect(commits).toContain("wall-removed");
+      expect(wallRemoved).toBe(true);
+      expect(wallRemovals).toBe(1);
+      expect(formAdded).toBe(true);
     } finally {
       observer.disconnect();
       client.clear();

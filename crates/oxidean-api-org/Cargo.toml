@@ -14,7 +14,7 @@ oxidean-core = { path = "../oxidean-core" }
 oxidean-db = { path = "../oxidean-db" }
 serde_json = { workspace = true }
 tracing = "0.1"
-uuid = { version = "1.26.0", features = ["v4"] }
+uuid = { version = "1.29.0", features = ["v4"] }
 chrono = "0.4.45"
-sha2 = "0.11.0"
-rand = "0.10.2"
+sha2 = "0.11.1"
+rand = "0.10.3"

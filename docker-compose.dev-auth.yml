@@ -15,7 +15,7 @@
 services:
   mailpit:
     profiles: ["dev-auth"]
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.32
     ports:
       - "${OXIDEAN_MAILPIT_SMTP_PORT:-1025}:1025"
       - "${OXIDEAN_MAILPIT_UI_PORT:-8025}:8025"
@@ -24,7 +24,7 @@ services:
 
   oidc-mock:
     profiles: ["dev-auth"]
-    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    image: ghcr.io/navikt/mock-oauth2-server:6.1.2
     # Compose API + browser: issuer Host stays resolvable as host.docker.internal:9090.
     # Host `make dev` still discovers via 127.0.0.1:9090 (request Host drives issuer).
     hostname: host.docker.internal

@@ -12,5 +12,5 @@ path = "src/lib.rs"
 oxidean-api-core = { path = "../oxidean-api-core" }
 oxidean-core = { path = "../oxidean-core" }
 serde_json = { workspace = true }
-uuid = { version = "1.26.0", features = ["v4"] }
-rand = "0.9"
+uuid = { version = "1.29.0", features = ["v4"] }
+rand = "0.10"
