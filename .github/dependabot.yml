@@ -41,6 +41,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # @tsrx/oxc hard-pins oxlint-tsgolint for its lint protocol; bumping it
+      # alone breaks `make web-lint` (e.g. 7.0.2004 vs required 7.0.2002).
+      # Revisit when an @tsrx/oxc upgrade widens the pin.
+      - dependency-name: "oxlint-tsgolint"
 
   - package-ecosystem: github-actions
     directories:
