@@ -41,7 +41,7 @@ jobs:
     if: github.event_name == 'push' && !startsWith(github.ref_name, 'ox-v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: resolve semver
         id: tag
         run: |
@@ -78,7 +78,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           # RELEASE_TOKEN (a maintainer PAT) is required: tag pushes made with

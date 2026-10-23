@@ -87,7 +87,7 @@ jobs:
           - { target: x86_64-pc-windows-msvc,        os: windows-latest,   method: native }
           - { target: aarch64-pc-windows-msvc,       os: windows-11-arm,   method: native }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -172,7 +172,7 @@ jobs:
     name: ox x86_64-unknown-freebsd
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: build + smoke inside FreeBSD
         uses: vmactions/freebsd-vm@v1
         with:
@@ -215,7 +215,7 @@ jobs:
       FIXTURE_NAME: oxfix-${{ matrix.name }}
       NET_NAME: oxnet-${{ matrix.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: qemu for non-native arch legs
         if: matrix.platform
         uses: docker/setup-qemu-action@v4
@@ -265,7 +265,7 @@ jobs:
     needs: [build, build-freebsd]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: ox-*
@@ -294,7 +294,7 @@ jobs:
     needs: [build, build-freebsd]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: ox-*
@@ -368,7 +368,7 @@ jobs:
           # archlinux ships no arm64 image — archlinuxarm is the ARM port.
           - { fmt: archlinux, arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: pkg.tar.zst, test_image: menci/archlinuxarm:latest, test_cmd: "pacman -U --noconfirm /pkg/PKGFILE",             platform: linux/arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: package version (tag → semver, else dev)
         id: ver
         run: |
@@ -439,7 +439,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: assets
@@ -527,7 +527,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/ox-v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for api image build
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -574,7 +574,7 @@ jobs:
     env:
       FIXTURE_NAME: oxdist-pr
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for api image build
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
