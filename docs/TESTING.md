@@ -12,7 +12,7 @@ Oxidean uses two test stacks:
 **Prerequisites**
 
 - Rust toolchain + `cargo-nextest` recommended (`cargo install cargo-nextest --locked`). Without it, `make test` falls back to `cargo test --workspace`.
-- Bun `1.4.0` (workspace package manager) and `bun install`.
+- Bun `1.4.4` (workspace package manager) and `bun install`.
 - For `apps/web` browser projects: Playwright Chromium (`bunx playwright install --with-deps chromium`).
 - For full stack e2e: Docker (Mailpit, OIDC mock, Resend/WorkOS HTTP stubs via `docker-compose.dev-auth.yml`).
 
@@ -112,7 +112,7 @@ cargo test -p oxidean-db --test dialect_probe -- --nocapture
 The `oxidean-db` dialect suites and the Actions API suites run against real
 Postgres/MySQL when pointed at a reachable server (Compose services, CI
 service containers, or throwaway local containers — see `docker/` Compose
-overlays for the standard images `postgres:16-alpine` / `mysql:8.4`).
+overlays for the standard images `postgres:18-alpine` / `mysql:9.7`).
 
 ```bash
 # DB layer: dialect_probe + dialect_actions honor DATABASE_URL.

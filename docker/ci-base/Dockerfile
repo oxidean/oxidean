@@ -22,24 +22,24 @@
 #   release — rust + mold/protoc + /ci/target-release
 #   cov     — rust + llvm-cov + /ci/target-cov (instrumented)
 #
-# rustc is pinned exactly (rust:1.99.0-bookworm) — a toolchain bump is a
+# rustc is pinned exactly (rust:1.99.1-bookworm) — a toolchain bump is a
 # one-line PR against this ARG, and since this file is a hash input the bump
 # mints new content tags. The weekly ci-base.yml refresh still rebuilds so the
 # Debian base's patch drift and apt package pins stay current.
 
-ARG RUST_IMAGE=rust:1.99.0-bookworm
-ARG BUN_IMAGE=oven/bun:1.4.0-debian
+ARG RUST_IMAGE=rust:1.99.1-bookworm
+ARG BUN_IMAGE=oven/bun:1.4.4-debian
 ARG DEBIAN_IMAGE=debian:bookworm-slim
-ARG NODE_IMAGE=node:22.20.0-bookworm-slim
+ARG NODE_IMAGE=node:24.22.1-bookworm-slim
 
 # Pinned tool versions — bump deliberately; the content tag covers this file.
-ARG CARGO_NEXTEST_VERSION=0.9.146
+ARG CARGO_NEXTEST_VERSION=0.9.149
 ARG CARGO_LLVM_COV_VERSION=0.9.1
 ARG CARGO_MACHETE_VERSION=0.9.2
 ARG CARGO_CHEF_VERSION=0.1.78
-ARG DOCKER_CLI_VERSION=29.9.0
-ARG DOCKER_COMPOSE_VERSION=2.40.3
-ARG DOCKER_BUILDX_VERSION=0.30.1
+ARG DOCKER_CLI_VERSION=29.9.2
+ARG DOCKER_COMPOSE_VERSION=5.6.1
+ARG DOCKER_BUILDX_VERSION=0.38.1
 
 # Real Node for shebang'd CLIs (vitest coverage teardown misbehaves under the
 # bun runtime); copied as a bare binary — npm/npx are not needed (bun covers

@@ -6,7 +6,7 @@ Related: [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md
 
 ## Local setup
 
-1. **Prerequisites** — [Bun](https://bun.sh) matching `packageManager` in root `package.json` (`bun@1.4.0`), Rust/`cargo` (stable), **`protoc`** ([protobuf-compiler](https://grpc.io/docs/protoc-installation/) / `apt install protobuf-compiler`) for Actions runner proto codegen (`crates/oxidean-api-core/proto/runner.proto`), and Docker Compose for full-stack / overlay work. Optional: `cargo-nextest` (`cargo install cargo-nextest --locked`) so `make test` uses nextest instead of `cargo test`. Local builds also accept `PROTOC` or `~/.cache/protoc-*/bin/protoc` (see `crates/oxidean-api-core/build.rs`).
+1. **Prerequisites** — [Bun](https://bun.sh) matching `packageManager` in root `package.json` (`bun@1.4.4`), Rust/`cargo` (stable), **`protoc`** ([protobuf-compiler](https://grpc.io/docs/protoc-installation/) / `apt install protobuf-compiler`) for Actions runner proto codegen (`crates/oxidean-api-core/proto/runner.proto`), and Docker Compose for full-stack / overlay work. Optional: `cargo-nextest` (`cargo install cargo-nextest --locked`) so `make test` uses nextest instead of `cargo test`. Local builds also accept `PROTOC` or `~/.cache/protoc-*/bin/protoc` (see `crates/oxidean-api-core/build.rs`).
 2. **Clone and install**
 
 ```bash
