@@ -13,4 +13,4 @@ oxidean-api-core = { path = "../oxidean-api-core" }
 oxidean-core = { path = "../oxidean-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { version = "1.26.0", features = ["v4"] }
+uuid = { version = "1.29.0", features = ["v4"] }

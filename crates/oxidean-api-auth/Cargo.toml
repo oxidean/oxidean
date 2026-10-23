@@ -15,7 +15,7 @@ oxidean-db = { path = "../oxidean-db" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
-uuid = { version = "1.26.0", features = ["v4"] }
+uuid = { version = "1.29.0", features = ["v4"] }
 chrono = "0.4.45"
-webauthn-rs = "0.5.2"
+webauthn-rs = "0.5.5"
 url = "2"

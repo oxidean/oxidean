@@ -15,6 +15,6 @@ oxidean-db = { path = "../oxidean-db" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
-uuid = { version = "1.26.0", features = ["v4"] }
+uuid = { version = "1.29.0", features = ["v4"] }
 tokio = { workspace = true }
 ssh-key = { version = "=0.7.0-rc.11", features = ["std", "alloc"] }

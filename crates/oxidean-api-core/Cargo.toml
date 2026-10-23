@@ -32,14 +32,14 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 argon2 = "0.6"
 password-hash = { version = "0.6", features = ["alloc", "phc", "getrandom"] }
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 aes-gcm = "0.11"
 getrandom = "0.4"
-rand = "0.10.2"
-uuid = { version = "1.26.0", features = ["v4"] }
+rand = "0.10.3"
+uuid = { version = "1.29.0", features = ["v4"] }
 chrono = "0.4.45"
 cookie = "0.18.2"
-workos = "3.4"
+workos = "3.5"
 url = "2.5.8"
 openidconnect = { version = "4.0", features = ["reqwest"] }
 include_dir = "0.7.4"
@@ -54,11 +54,11 @@ aws-lc-rs = "1.18"
 serde_yaml = "0.9"
 prost = "0.14"
 prost-types = "0.14"
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 sha1 = "0.11"
 hmac = "0.13"
 data-encoding = "2"
-webauthn-rs = "0.5.2"
+webauthn-rs = "0.5.5"
 base64 = "0.23"
 
 [dev-dependencies]
