@@ -1,0 +1,75 @@
+# Dependency maintenance — weekly batch, grouped so majors stay reviewable.
+#
+# Covered:
+#   cargo           — workspace crates (Cargo.toml ranges + Cargo.lock)
+#   bun             — bun.lock across the Bun workspaces (root, apps/*, packages/*)
+#   github-actions  — workflow action refs
+#   docker-compose  — service image tags in the root Compose files
+#   docker          — FROM tags in service Dockerfiles
+#
+# Deliberately NOT covered:
+#   docker/ci-base/Dockerfile ARG pins — RUST_IMAGE/BUN_IMAGE/NODE_IMAGE and the
+#   CARGO_*/DOCKER_* tool ARGs are content-hash inputs bumped by hand so the
+#   content-tagged CI image mints exactly when intended.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: bun
+    directories:
+      - "/"
+      - "/apps/web"
+      - "/packages/api-client"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      js-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker-compose
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directories:
+      - "/apps/web"
+      - "/crates/oxidean-api"
+      - "/docker/oxidean-runner"
+      - "/scripts/dev-auth"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
