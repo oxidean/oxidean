@@ -311,6 +311,29 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 
 Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 
+### Required status checks (merge gate)
+
+The **`Main` branch ruleset** ([repo settings → rules](https://github.com/oxidean/oxidean/settings/rules/22764294)) requires named checks on a PR's head commit before it can be squash-merged. The required list is **every job in `ci.yml` plus `meta` from `images.yml`**, pinned to GitHub Actions (`integration_id: 15368`). Matrix legs are required by their expanded check names — `api-rust (1)`…`api-rust (5)`, `compose-smoke (postgres)` / `(sqlite)` / `(mysql)`. `strict_required_status_checks_policy` is off, so a green PR never needs the latest main merged in.
+
+Deliberately **not** required — a required check that never runs sits at "Pending" and blocks the PR forever:
+
+- `ox-cli.yml` and `ci-base.yml` jobs — both are `paths:`-filtered on `pull_request`, so a PR that does not touch those paths produces no checks at all.
+- `images.yml`'s `build`/`publish`/`deploy-staging`/`bind-pr-env` legs — the service matrix expands to `[]` on fork PRs, so no check exists. `ci.yml`'s `docker-ci-images` already gates image compilation on every PR.
+- Skip-only or hygiene jobs (`rust-artifacts-cleanup`, `repin staging cli feed`, `cleanup pr-*`) — no signal; a skipped conclusion already counts as passing.
+
+**Adding, renaming, or removing a job — or changing a matrix value set (`shard`, `dialect`, `svc`) — in a required workflow must update the ruleset's context list in the same change.** A renamed job leaves a stale context that blocks every PR; a new job left out is silently ungated. Cross-check the live list against `grep -n '^\s*name:' .github/workflows/ci.yml`.
+
+```bash
+# list required check names today
+gh api repos/oxidean/oxidean/rulesets/22764294 \
+  --jq '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
+
+# update: GET the ruleset, edit .rules[type==required_status_checks].parameters
+# .required_status_checks (entries are {context, integration_id: 15368}),
+# then PUT the object back:
+gh api -X PUT repos/oxidean/oxidean/rulesets/22764294 --input ruleset.json
+```
+
 ### CI base images (run-isolated, no cross-run Rust cache)
 
 Most jobs run inside self-owned images published to `ghcr.io/<owner>/oxidean-ci` by [`.github/workflows/ci-base.yml`](../.github/workflows/ci-base.yml) from [`docker/ci-base/Dockerfile`](../docker/ci-base/Dockerfile). The `ci-image` job resolves each flavor's content tag to an `@sha256` digest at run start, so every leg in a run executes on byte-identical bits — an immutable input, not a cache. There is deliberately **no `Swatinem/rust-cache`**: nothing a run writes ever feeds another run's inputs; the only retained cross-run cache is the `type=gha` BuildKit layer cache used to *build* images (layers are content-keyed).
