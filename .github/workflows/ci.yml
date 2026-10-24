@@ -382,7 +382,27 @@ jobs:
         # (re-downloads only if the lockfile moved past the image).
         run: cd apps/web && bunx playwright install chromium
       - name: vitest browser (Chromium component DOM races)
-        run: make test-web-browser
+        # One Chromium session serves the whole serial suite; on shared CI hardware
+        # it dies late in the run (VITEST_BROWSER_CONNECTION_CLOSED, ~file 37/39 on
+        # consecutive attempts). Five shards = five fresh sessions of ~8 files each,
+        # keeping every session far below the accumulated-state/lifetime cliff. The
+        # retry keys on the connection signature only — real DOM-race failures still
+        # fail fast; masking them would defeat the suite's purpose.
+        run: |
+          set -eo pipefail
+          for shard in 1 2 3 4 5; do
+            log="$(mktemp)"
+            if (cd apps/web && bunx vitest run --project browser --shard="${shard}/5") 2>&1 | tee "$log"; then
+              rm -f "$log"; continue
+            fi
+            if grep -q 'VITEST_BROWSER_CONNECTION_CLOSED' "$log"; then
+              rm -f "$log"
+              echo "::warning::Chromium session dropped on shard ${shard} — retrying once with playwright browser debug logs"
+              (cd apps/web && DEBUG=pw:browser bunx vitest run --project browser --shard="${shard}/5")
+            else
+              exit 1
+            fi
+          done
 
   # G-11.1-15 — every user-facing apps/web route page must declare happy-dom,
   # stack-browser, or documented skip evidence in the route coverage manifest.
