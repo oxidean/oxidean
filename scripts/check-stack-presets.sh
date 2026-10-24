@@ -14,17 +14,15 @@ if [[ ! -f "$CATALOG" ]]; then
   exit 1
 fi
 
-mapfile -t IDS < <(python3 - <<'PY' "$CATALOG"
-import json, sys
-path = sys.argv[1]
-data = json.load(open(path))
-for p in data["packs"]:
-    print(p["id"])
-    for key in ("source", "source_ref", "last_synced"):
-        if key not in p:
-            raise SystemExit(f"pack {p['id']} missing {key}")
-PY
-)
+# jq (not python3) — the ci tools image ships jq but no python.
+if ! ids_raw="$(jq -r '
+    .packs[] | .id as $id
+    | (has("source") and has("source_ref") and has("last_synced"))
+    | if . then $id else error("pack \($id) missing required catalog keys") end
+  ' "$CATALOG")"; then
+  exit 1
+fi
+mapfile -t IDS <<< "$ids_raw"
 
 TOTAL=0
 FAIL=0
@@ -43,6 +41,25 @@ for id in "${IDS[@]}"; do
     echo "error: pack '$id' is ${size} bytes (max ${MAX_PACK_BYTES})" >&2
     FAIL=1
   fi
+  # Packs ship manifests (package.json, requirements.txt ranges) — never
+  # frozen resolutions: locks pin stale versions that dependency-graph
+  # scans flag as security-patch noise (issue #186).
+  while IFS= read -r -d '' lock; do
+    echo "error: pack '$id' vendors lockfile '${lock#$dir/}' — presets ship dependency manifests, not frozen resolutions" >&2
+    FAIL=1
+  done < <(find "$dir" -type f \( \
+      -name 'Cargo.lock' -o -name 'package-lock.json' -o -name 'yarn.lock' \
+      -o -name 'pnpm-lock.yaml' -o -name 'bun.lock' -o -name 'bun.lockb' \
+      -o -name 'deno.lock' -o -name 'go.sum' -o -name 'Gemfile.lock' \
+      -o -name 'composer.lock' -o -name 'mix.lock' -o -name 'pubspec.lock' \
+      -o -name 'poetry.lock' -o -name 'Pipfile.lock' -o -name 'uv.lock' \
+      -o -name 'requirements.lock' -o -name 'flake.lock' \
+      -o -name 'packages.lock.json' -o -name 'project.assets.json' \
+      -o -name '.terraform.lock.hcl' -o -name 'gradle.lockfile' \
+      -o -name 'Package.resolved' -o -name 'Podfile.lock' \
+      -o -name 'Cartfile.resolved' -o -name 'stack.yaml.lock' \
+      -o -name 'cabal.project.freeze' -o -name 'rebar.lock' \
+      \) -print0)
   count=$(find "$dir" -type f | wc -l)
   if [[ "$count" -lt 1 ]]; then
     echo "error: pack '$id' has no files" >&2

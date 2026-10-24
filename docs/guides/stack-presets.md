@@ -35,14 +35,14 @@ Pack IDs are allowlisted from `catalog.json` only (no path traversal).
 
 1. Read `source_ref` for the pack in `catalog.json`.
 2. Run the CLI (or checkout the pinned tag) into a **temp** directory with non-interactive flags.
-3. Strip noise: `.git/`, `node_modules/`, `.env*`, OS junk, toolchain caches.
+3. Strip noise: `.git/`, `node_modules/`, `.env*`, OS junk, toolchain caches, and lockfiles (`Cargo.lock`, `package-lock.json`, `bun.lock`, `poetry.lock`, …).
 4. Copy the resulting tree into `stack-presets/<id>/` (replace files).
 5. Ensure a `README.md` documents the happy path (`npm run dev`, `cargo run`, …).
 6. Stamp metadata: `bun scripts/sync-stack-presets.mjs --pack <id> --stamp`
 7. Validate: `make check-stack-presets`
 8. Rebuild the API so `include_dir` picks up the new assets.
 
-Do **not** vendor `node_modules` or SDK binaries. Lockfiles are allowed when the pack stays under the size budget.
+Do **not** vendor `node_modules` or SDK binaries. Packs ship dependency **manifests** (`package.json`, `requirements.txt` ranges, `Cargo.toml`) — never lockfiles: a vendored lock pins stale versions that dependency-graph scans flag as security-patch noise, and the seeded project regenerates it on first install/build anyway.
 
 ### Size budget
 
