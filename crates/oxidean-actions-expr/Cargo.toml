@@ -3,7 +3,7 @@ name = "oxidean-actions-expr"
 description = "GitHub Actions ${{ }} expression engine — lexer, parser, evaluator"
 edition.workspace = true
 license.workspace = true
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 serde_json = { workspace = true }

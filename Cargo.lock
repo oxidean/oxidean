@@ -3680,14 +3680,14 @@ dependencies = [
 
 [[package]]
 name = "oxidean-actions-expr"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxidean-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -3762,7 +3762,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-actions"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -3776,7 +3776,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-admin"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-auth"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -3809,7 +3809,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-check"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3821,7 +3821,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3874,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-deployment"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3886,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-discussion"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3898,7 +3898,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-email"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3910,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-issues"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -3924,7 +3924,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-keys"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3939,7 +3939,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-merge-queue"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3950,7 +3950,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-mirror"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3962,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-notification"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -3974,7 +3974,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-oauth"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -3985,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-org"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-packages"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4011,7 +4011,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-pages"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-pat"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -4034,7 +4034,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-project"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4046,7 +4046,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-pulls"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "oxidean-api-core",
@@ -4059,7 +4059,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-release"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-repo"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "include_dir",
@@ -4092,7 +4092,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-rest"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-user"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-vcs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4136,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-webhook"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4148,7 +4148,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-wiki"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oxidean-api-core",
  "oxidean-core",
@@ -4160,7 +4160,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anstyle",
  "async-trait",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -4195,7 +4195,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-db"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "oxidean-core",
@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-git"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "tempfile",
@@ -4217,7 +4217,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-runner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "oxidean-actions-expr",
@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-vcs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4256,7 +4256,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "hyper",
