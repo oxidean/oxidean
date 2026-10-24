@@ -14,17 +14,15 @@ if [[ ! -f "$CATALOG" ]]; then
   exit 1
 fi
 
-mapfile -t IDS < <(python3 - <<'PY' "$CATALOG"
-import json, sys
-path = sys.argv[1]
-data = json.load(open(path))
-for p in data["packs"]:
-    print(p["id"])
-    for key in ("source", "source_ref", "last_synced"):
-        if key not in p:
-            raise SystemExit(f"pack {p['id']} missing {key}")
-PY
-)
+# jq (not python3) — the ci tools image ships jq but no python.
+if ! ids_raw="$(jq -r '
+    .packs[] | .id as $id
+    | (has("source") and has("source_ref") and has("last_synced"))
+    | if . then $id else error("pack \($id) missing required catalog keys") end
+  ' "$CATALOG")"; then
+  exit 1
+fi
+mapfile -t IDS <<< "$ids_raw"
 
 TOTAL=0
 FAIL=0
