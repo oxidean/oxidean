@@ -203,3 +203,26 @@ describe("production-deploy.yml stable cut", () => {
     expect(yml).toMatch(/wait.*ox|ox.*wait/i);
   });
 });
+
+describe("ci.yml web-browser suite", () => {
+  const yml = wf("ci.yml");
+
+  test("browser files shard across fresh Chromium sessions", () => {
+    // One long-lived Chromium session serves the whole serial suite; on
+    // shared CI hardware it drops the connection late in the run
+    // (VITEST_BROWSER_CONNECTION_CLOSED, ~file 37/39 on consecutive
+    // attempts). Sharding keeps every session far below the accumulated-
+    // state/lifetime cliff — never collapse this back to one invocation.
+    expect(yml).toContain("for shard in 1 2 3 4 5");
+    expect(yml).toContain('--shard="${shard}/5"');
+    expect(yml).not.toContain("run: make test-web-browser");
+  });
+
+  test("browser-session retry keys on the connection signature only", () => {
+    // Assertion failures exit immediately — retrying them would mask the
+    // DOM races this suite exists to catch. Only a dropped Chromium session
+    // retries, once, with playwright browser debug logs for forensics.
+    expect(yml).toContain("VITEST_BROWSER_CONNECTION_CLOSED");
+    expect(yml).toContain("DEBUG=pw:browser");
+  });
+});
