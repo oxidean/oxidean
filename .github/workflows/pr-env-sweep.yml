@@ -14,11 +14,12 @@
 #   RAILWAY_API_TOKEN  — account/workspace token; env-scoped project
 #     tokens cannot enumerate environments (Bearer rejects them).
 #   RELEASE_APP_ID (variable) + RELEASE_APP_PRIVATE_KEY (secret) — the
-#     release GitHub App; needs Environments write (or Administration) plus
-#     Deployments write on the repo — the mint below asks for both scopes,
-#     so a missing grant fails that step loudly instead of cascading 403s.
-#     Without Environments the delete warns and falls back to marking the
-#     env's deployments inactive (Deployments covers that path).
+#     release GitHub App. Real environment deletes need Administration write
+#     on the repo — Environments write only manages env secrets/variables
+#     and cannot delete. The mint below asks for it, so a missing grant
+#     fails that step loudly instead of cascading 403s; teardown then falls
+#     back to marking the env's deployments inactive (Deployments write
+#     covers that path — also granted to the job's GITHUB_TOKEN below).
 #   RELEASE_TOKEN    — fallback maintainer PAT for the same purpose.
 
 name: PR env sweep
@@ -38,6 +39,7 @@ permissions:
   contents: read
   pull-requests: read
   packages: write # GHCR pr-<n> version deletes
+  deployments: write # inactivate stale deployments when env delete is denied
 
 jobs:
   sweep:
@@ -54,11 +56,14 @@ jobs:
         # Scoped mint: ungranted scopes 422 the mint — loud in the run UI —
         # while continue-on-error lets teardown fall back to RELEASE_TOKEN /
         # github.token so the Railway + GHCR legs still run degraded.
+        # administration is what DELETE /environments actually checks; while
+        # the App lacks it the mint fails and teardown runs on the fallback
+        # tokens, degrading env deletes to deployment inactivation.
         continue-on-error: true
         with:
           client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-environments: write
+          permission-administration: write
           permission-deployments: write
       - name: tear down surfaces for closed PRs
         env:

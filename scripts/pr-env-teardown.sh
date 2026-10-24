@@ -88,9 +88,11 @@ elif env_probe="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${E
   # failure: the env object is cosmetic residue once nothing live points at
   # it, so only a fallback that itself cannot run fails this leg.
   echo "warn: could not delete github environment '${ENV_LABEL}' (token lacks environment admin) — marking its deployments inactive"
-  if ! dep_ids="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/deployments" \
+  # -X GET is load-bearing: gh api defaults to POST once -f params exist,
+  # which lands on create-deployment ("ref wasn't supplied"), not a list.
+  if ! dep_ids="$(GH_TOKEN="$admin_token" gh api -X GET "repos/${REPO}/deployments" \
     -f environment="$ENV_LABEL" -f per_page=100 --paginate --jq '.[].id' 2>/dev/null)"; then
-    echo "warn: could not list deployments for '${ENV_LABEL}' (token lacks deployments read)"
+    echo "warn: could not list deployments for '${ENV_LABEL}' — cannot retire them"
     status=1
   else
     dep_fail=0 inactivated=0

@@ -231,8 +231,10 @@ jobs:
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
           # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
           scripts/push-tags.sh $NEW
-          if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          ox_tag="$(echo "$NEW" | grep -oE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          if [[ -n "$ox_tag" ]]; then
             echo "wait_ox=true" >> "$GITHUB_OUTPUT"
+            echo "ox_tag=${ox_tag}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Stable cut — changelog + bump + tags on the bump commit
@@ -257,8 +259,10 @@ jobs:
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
           # shellcheck disable=SC2086 # tag names can't contain spaces — word-split intended
           scripts/push-tags.sh $NEW
-          if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          ox_tag="$(echo "$NEW" | grep -oE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          if [[ -n "$ox_tag" ]]; then
             echo "wait_ox=true" >> "$GITHUB_OUTPUT"
+            echo "ox_tag=${ox_tag}" >> "$GITHUB_OUTPUT"
           fi
           echo "deploy_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -280,29 +284,30 @@ jobs:
         if: inputs.action == 'promote' && steps.deploy.outputs.wait_ox == 'true' && !inputs.dry_run
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.deploy.outputs.sha }}
+          OX_TAG: ${{ steps.baseline.outputs.ox_tag || steps.bump.outputs.ox_tag }}
         run: |
           set -euo pipefail
           # A stable ox-v* tag was just pushed — its ox-cli.yml matrix must land
           # the release assets before the api container's boot-time
           # OXIDEAN_CLI_DIST_URL fetch runs, or the new replica fails closed.
+          # Gate on the artifact, not on runs: a same-sha branch-push run can
+          # conclude success without ever publishing (the publish job is
+          # refs/tags/ox-v-gated), and >3-tag pushes create no tag events at
+          # all — polling run status can never detect either case.
           for i in $(seq 1 90); do
-            status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=50" \
-              --jq '[.workflow_runs[] | select(.path | endswith("ox-cli.yml"))][0].status // "queued"')"
-            if [ "$status" = "completed" ]; then
-              concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=50" \
-                --jq '[.workflow_runs[] | select(.path | endswith("ox-cli.yml"))][0].conclusion // empty')"
-              if [ "$concl" = "success" ]; then
-                echo "ox-cli run succeeded — release assets are live"
-                exit 0
-              fi
-              echo "::error::ox-cli run concluded ${concl:-unknown} — refusing to deploy an api image that cannot fetch CLI assets"
-              exit 1
+            names="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${OX_TAG}" \
+              --jq '.assets[].name' 2>/dev/null || true)"
+            if [[ -n "$names" ]] \
+              && grep -qx 'ox-targets.txt' <<<"$names" \
+              && grep -qx 'SOURCE_COMMIT' <<<"$names" \
+              && grep -qx 'latest.json' <<<"$names"; then
+              echo "release ${OX_TAG} carries the ox feed — assets are live"
+              exit 0
             fi
-            echo "waiting for ox-cli asset matrix on ${SHA} (status: $status)"
+            echo "waiting for ${OX_TAG} release assets (attempt ${i}/90)"
             sleep 30
           done
-          echo "::error::timed out (45m) waiting for ox-cli release assets"
+          echo "::error::timed out (45m) waiting for ${OX_TAG} release assets — the tag push may have been suppressed (no events when >3 tags push at once). Recover: gh workflow run ox-cli.yml --ref ${OX_TAG}"
           exit 1
 
       - name: Wait for GHCR image tags

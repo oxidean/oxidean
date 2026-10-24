@@ -169,6 +169,17 @@ describe("release tag pushes", () => {
       expect(yml).not.toContain("for t in $NEW");
     });
   }
+
+  test("push-tags.sh sends at most three tags per push", () => {
+    // GitHub creates no push events when more than three tags are pushed at
+    // once — the 2026-10-24 stable cut pushed ~38 in one atomic transaction,
+    // so the ox-cli / release / images tag lanes never ran and production
+    // promoted against a release feed that did not exist. Atomicity stays
+    // per batch (the commit_refs race fix) but no batch may exceed 3.
+    const helper = readFileSync(join(ROOT, "scripts/push-tags.sh"), "utf-8");
+    expect(helper).toContain("--atomic");
+    expect(helper).toContain("${#batch[@]} < 3");
+  });
 });
 
 describe("production-deploy.yml stable cut", () => {
@@ -201,6 +212,45 @@ describe("production-deploy.yml stable cut", () => {
   test("fresh ox-v* tag waits for its asset matrix before deploys", () => {
     expect(yml).toContain("ox-cli");
     expect(yml).toMatch(/wait.*ox|ox.*wait/i);
+  });
+
+  test("the ox wait gate polls the release's assets, not workflow-run status", () => {
+    // Run 40127322081 false-passed: the newest ox-cli.yml run for the bump
+    // sha was a branch-push run that concludes success without ever
+    // publishing (the release job is refs/tags/ox-v gated). The gate must
+    // see ox-targets.txt + SOURCE_COMMIT + latest.json on the tag's release.
+    expect(yml).toContain("releases/tags/");
+    expect(yml).toContain("ox_tag");
+    expect(yml).toContain("ox-targets.txt");
+    expect(yml).toContain("latest.json");
+    // head_sha-keyed ox-cli run selection was the false-positive — the
+    // commit-level CI check keeps its own head_sha query (correct there).
+    expect(yml).not.toContain('endswith("ox-cli.yml")');
+  });
+
+  test("promote preflights the resolved CLI feed before touching Railway", () => {
+    // A resolved ox tag whose release was never published used to crash-loop
+    // the api entrypoint for ~5min after the upsert. The deploy script must
+    // refuse first — covers retries where the cut step is skipped.
+    const script = readFileSync(
+      join(ROOT, "scripts/railway-production-deploy.sh"),
+      "utf-8",
+    );
+    expect(script).toContain("curl -fsSI");
+    expect(script).toContain("ox-targets.txt");
+  });
+});
+
+describe("pr-env-teardown.sh GitHub legs", () => {
+  test("the deployments fallback lists with an explicit GET", () => {
+    // gh api defaults to POST once -f params exist — without -X GET the
+    // "list" hit create-deployment (403/422) and the sweep reported it as a
+    // missing read permission in run 40125953928.
+    const script = readFileSync(
+      join(ROOT, "scripts/pr-env-teardown.sh"),
+      "utf-8",
+    );
+    expect(script).toContain('gh api -X GET "repos/${REPO}/deployments"');
   });
 });
 
