@@ -14,9 +14,11 @@
 #   RAILWAY_API_TOKEN  — account/workspace token; env-scoped project
 #     tokens cannot enumerate environments (Bearer rejects them).
 #   RELEASE_APP_ID (variable) + RELEASE_APP_PRIVATE_KEY (secret) — the
-#     release GitHub App; needs Environments (or Administration) write on
-#     the repo to delete environments, else the delete warns and
-#     deployments are marked inactive as fallback.
+#     release GitHub App; needs Environments write (or Administration) plus
+#     Deployments write on the repo — the mint below asks for both scopes,
+#     so a missing grant fails that step loudly instead of cascading 403s.
+#     Without Environments the delete warns and falls back to marking the
+#     env's deployments inactive (Deployments covers that path).
 #   RELEASE_TOKEN    — fallback maintainer PAT for the same purpose.
 
 name: PR env sweep
@@ -49,9 +51,15 @@ jobs:
         id: apptok
         if: ${{ vars.RELEASE_APP_ID != '' }}
         uses: actions/create-github-app-token@v3
+        # Scoped mint: ungranted scopes 422 the mint — loud in the run UI —
+        # while continue-on-error lets teardown fall back to RELEASE_TOKEN /
+        # github.token so the Railway + GHCR legs still run degraded.
+        continue-on-error: true
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-environments: write
+          permission-deployments: write
       - name: tear down surfaces for closed PRs
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
