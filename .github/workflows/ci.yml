@@ -648,6 +648,8 @@ jobs:
         run: make check-workflow-templates
       - name: check-workflow-templates-upstream
         run: bun scripts/sync-workflow-templates.mjs --check
+      - name: check-stack-presets
+        run: make check-stack-presets
       - name: api-domain-graph
         run: make api-domain-graph-check
 

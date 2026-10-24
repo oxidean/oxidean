@@ -420,7 +420,7 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create tauri-app@latest (vite-ts)",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-24",
       "verify_commands": [
         "npm install && npm run tauri dev"
       ]
