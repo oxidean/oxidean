@@ -157,9 +157,14 @@ function RepoInsightsPageContent() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const layout = useRepoLayoutData();
-  const data = useQuery(repoInsightsQueryOptions(params, searchStr)).data;
+  const dataQ = useQuery(repoInsightsQueryOptions(params, searchStr));
+  const data = dataQ.data;
 
-  const showNotFound = !data || data.kind === "not_found" || layout?.status === "not_found";
+  // Pending must not fall into `showNotFound` (`!data` covers the in-flight
+  // window) — fall through to the sections, which render their skeleton rows
+  // until the loader resolves, instead of flashing RepoNotFound (#169).
+  const showNotFound =
+    (!dataQ.isPending && !data) || data?.kind === "not_found" || layout?.status === "not_found";
   const errorMessage = data?.kind === "error" ? data.message : "";
   const ready = data?.kind === "ready" ? data : null;
 

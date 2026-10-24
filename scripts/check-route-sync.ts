@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SHELLS_RS = join(REPO, "crates", "oxidean-web", "src", "shells.rs");
 const PAGES_DIR = join(REPO, "apps", "web", "src", "pages");
+const ROUTES_DIR = join(REPO, "apps", "web", "src", "routes");
 const ROUTE_PARAMS = join(REPO, "apps", "web", "src", "lib", "route-params.ts");
 
 type Seg = { kind: "lit" | "param" | "splat"; value: string };
@@ -178,6 +179,92 @@ const literalsTop = new Set(
 for (const seg of topReserved) {
   if (!literalsTop.has(seg) && !["dashboard", "api"].includes(seg)) {
     console.warn(`check-route-sync: warn — RESERVED_TOP_SEGMENTS "${seg}" has no route`);
+  }
+}
+
+// ── Invariant 4: every .tsrx route component's URL shape is served ────────
+//
+// Pages ↔ SHELLS parity (above) cannot see a route component that has no
+// .astro page at all: routes/$owner.$repo.issues.milestones.tsrx shipped
+// linked from the issues list while requests for its URL dispatched to
+// issues/{n} — `n="milestones"` NaN'd the issue-number loader and the page
+// rendered RepoNotFound permanently (#169).
+//
+// Shape source of truth: the component's `matchPath("…")` literal (what the
+// island actually binds). Files without one are static routes mounted
+// unconditionally by their Astro page — the filename-derived shape applies
+// (`.` joins segments, `$name` → param, bare `$` → splat, `index` drops).
+
+function walkTsrx(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walkTsrx(p, out);
+    else if (name.endsWith(".tsrx")) out.push(p);
+  }
+  return out;
+}
+
+function segsFromMatchPath(pattern: string): Seg[] {
+  return pattern
+    .split("/")
+    .filter(Boolean)
+    .map((seg) =>
+      seg === "$"
+        ? { kind: "splat", value: "" }
+        : seg.startsWith("$")
+          ? { kind: "param", value: seg.slice(1) }
+          : { kind: "lit", value: seg },
+    );
+}
+
+function segsFromFilename(rel: string): Seg[] {
+  const parts = rel
+    .replace(/\.tsrx$/, "")
+    .split("/")
+    .flatMap((p) => p.split("."))
+    .filter((s) => s !== "" && s !== "index");
+  return segsFromMatchPath(parts.join("/"));
+}
+
+function fmtShape(segs: Seg[]): string {
+  return `/${segs.map((s) => (s.kind === "lit" ? s.value : s.kind === "param" ? `{${s.value}}` : `{${s.value}...}`)).join("/")}`;
+}
+
+const servedShapes = new Map<string, ShellEntry[]>();
+for (const e of entries) {
+  const key = routeKey(e.pattern);
+  servedShapes.set(key, [...(servedShapes.get(key) ?? []), e]);
+}
+
+for (const abs of walkTsrx(ROUTES_DIR)) {
+  const rel = abs.slice(ROUTES_DIR.length + 1);
+  const src = readFileSync(abs, "utf8");
+  const literals = [...src.matchAll(/matchPath\(\s*"([^"]+)"/g)].map((m) => m[1]!);
+  const shapes = literals.length > 0 ? literals.map(segsFromMatchPath) : [segsFromFilename(rel)];
+  for (const shape of shapes) {
+    if (shape.length === 0) continue; // index.tsrx — `/` dispatches outside the table
+    const candidates = servedShapes.get(routeKey(shape));
+    if (!candidates || candidates.length === 0) {
+      problems.push(
+        `route component ${rel} binds ${fmtShape(shape)} but no SHELLS entry ` +
+          `serves that shape — requests dispatch to a different shell (or 404)`,
+      );
+      continue;
+    }
+    // Param names are the contract between the island's bindings and the
+    // entry's title/redirect interpolation — a rename on either side drifts.
+    for (const e of candidates) {
+      for (let i = 0; i < shape.length; i++) {
+        const s = shape[i]!;
+        const p = e.pattern[i]!;
+        if (s.kind === "param" && p.kind === "param" && s.value !== p.value) {
+          problems.push(
+            `route ${rel} ${fmtShape(shape)}: param "{${s.value}}" mismatches ` +
+              `SHELLS param "{${p.value}}" at segment ${i + 1}`,
+          );
+        }
+      }
+    }
   }
 }
 

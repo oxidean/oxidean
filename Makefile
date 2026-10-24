@@ -414,11 +414,14 @@ web-lint:
 	bun run scripts/check-internal-anchors.ts
 	bun run scripts/check-template-semicolons.ts
 	bun run scripts/check-route-sync.ts
+	bun run scripts/check-pending-before-notfound.ts
 
-# Post-build gate (issue #165): scans every prerendered page in apps/web/dist
-# for `;`-only text nodes inside layout elements. Needs a built dist.
+# Post-build gates (issues #165, #169): scan every prerendered page in
+# apps/web/dist for `;`-only text nodes inside layout elements and for
+# not-found copy baked into dynamic shells. Need a built dist.
 web-render-check:
 	bun run scripts/check-rendered-semicolons.ts
+	bun run scripts/check-rendered-notfound.ts
 
 web-format-check:
 	bun run --filter @oxidean/web format:check
