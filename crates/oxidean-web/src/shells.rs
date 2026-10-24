@@ -447,6 +447,13 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[P("owner"), P("repo"), L("issues"), L("milestones")],
+        file: "_/_/issues/milestones/index.html",
+        title: Some("Milestones · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
         pattern: &[P("owner"), P("repo"), L("issues"), L("new")],
         file: "_/_/issues/new/index.html",
         title: Some("New issue · {owner}/{repo} · Oxidean"),
@@ -849,6 +856,13 @@ mod tests {
         // Literal "new" beats the actions/{run} param.
         assert_eq!(file_of("/o/r/actions/new"), "_/_/actions/new/index.html");
         assert_eq!(file_of("/o/r/actions/123"), "_/_/actions/_/index.html");
+        // Literal "milestones" beats issues/{n} — `n="milestones"` would
+        // NaN the issue-number loader and 404 the page (#169).
+        assert_eq!(
+            file_of("/o/r/issues/milestones"),
+            "_/_/issues/milestones/index.html"
+        );
+        assert_eq!(file_of("/o/r/issues/42"), "_/_/issues/_/index.html");
     }
 
     #[test]
