@@ -43,7 +43,7 @@ jobs:
     # Forks have no RELEASE_TOKEN and should never cut releases.
     if: github.repository == 'oxidean/oxidean'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
