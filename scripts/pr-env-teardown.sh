@@ -82,20 +82,41 @@ elif [[ "$DRY_RUN" == "1" ]]; then
   fi
 elif GH_TOKEN="$admin_token" gh api -X DELETE "repos/${REPO}/environments/${ENV_NAME_ENC}" >/dev/null 2>&1; then
   echo "deleted github environment '${ENV_LABEL}'"
-elif ! GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${ENV_NAME_ENC}" >/dev/null 2>&1; then
-  echo "github environment '${ENV_LABEL}' already absent"
-else
+elif env_probe="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${ENV_NAME_ENC}" 2>&1)"; then
   # Exists but the token can't delete it — at least stop the deployments
-  # pointing at a dead preview URL.
+  # pointing at a dead preview URL. A denied delete alone is not a teardown
+  # failure: the env object is cosmetic residue once nothing live points at
+  # it, so only a fallback that itself cannot run fails this leg.
   echo "warn: could not delete github environment '${ENV_LABEL}' (token lacks environment admin) — marking its deployments inactive"
-  status=1
-  dep_ids="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/deployments" \
-    -f environment="$ENV_LABEL" -f per_page=100 --jq '.[].id' 2>/dev/null || true)"
-  for dep in $dep_ids; do
-    GH_TOKEN="$admin_token" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
-      -f state=inactive -f description="PR #${PR} closed — environment retired" >/dev/null 2>&1 \
-      || echo "warn: could not mark deployment ${dep} inactive"
-  done
+  if ! dep_ids="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/deployments" \
+    -f environment="$ENV_LABEL" -f per_page=100 --paginate --jq '.[].id' 2>/dev/null)"; then
+    echo "warn: could not list deployments for '${ENV_LABEL}' (token lacks deployments read)"
+    status=1
+  else
+    dep_fail=0 inactivated=0
+    while IFS= read -r dep; do
+      [[ "$dep" =~ ^[0-9]+$ ]] || continue
+      if GH_TOKEN="$admin_token" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
+        -f state=inactive -f description="PR #${PR} closed — environment retired" >/dev/null 2>&1; then
+        inactivated=$((inactivated + 1))
+      else
+        echo "warn: could not mark deployment ${dep} inactive"
+        dep_fail=$((dep_fail + 1))
+      fi
+    done <<< "$dep_ids"
+    if (( dep_fail > 0 )); then
+      status=1
+    else
+      echo "marked ${inactivated} deployment(s) inactive — env object remains (cosmetic residue)"
+    fi
+  fi
+else
+  if [[ "$env_probe" == *"404"* || "$env_probe" == *"Not Found"* ]]; then
+    echo "github environment '${ENV_LABEL}' already absent"
+  else
+    echo "warn: could not read github environment '${ENV_LABEL}' state — leaving its deployments alone"
+    status=1
+  fi
 fi
 
 # --- GHCR pr-<n> tags --------------------------------------------------------
@@ -107,16 +128,22 @@ elif [[ "$DRY_RUN" == "1" ]]; then
 else
   for svc in api web runner gateway; do
     pkg="oxidean-${svc}"
-    ids="$(gh api "orgs/${ORG}/packages/container/${pkg}/versions?per_page=100" \
-      --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>/dev/null || true)"
-    for id in $ids; do
+    if ! ids="$(gh api "orgs/${ORG}/packages/container/${pkg}/versions?per_page=100" \
+      --paginate \
+      --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>/dev/null)"; then
+      echo "warn: could not list versions for ${pkg} — skipping its tag cleanup"
+      status=1
+      continue
+    fi
+    while IFS= read -r id; do
+      [[ "$id" =~ ^[0-9]+$ ]] || continue
       if gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" >/dev/null 2>&1; then
         echo "deleted ${pkg} version ${id}"
       else
         echo "warn: delete failed for ${pkg} ${id}"
         status=1
       fi
-    done
+    done <<< "$ids"
   done
 fi
 

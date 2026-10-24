@@ -538,9 +538,15 @@ jobs:
         id: apptok
         if: ${{ vars.RELEASE_APP_ID != '' }}
         uses: actions/create-github-app-token@v3
+        # Scoped mint: ungranted scopes 422 the mint — loud in the run UI —
+        # while continue-on-error lets teardown fall back to RELEASE_TOKEN /
+        # github.token so the Railway + GHCR legs still run degraded.
+        continue-on-error: true
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-environments: write
+          permission-deployments: write
       - name: tear down PR surfaces
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
