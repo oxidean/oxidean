@@ -56,7 +56,8 @@ bump — live in [docs/VERSIONING.md](docs/VERSIONING.md).
 4. Do not commit secrets (`.env`, tokens, private keys). Use examples under `docs/` and `.env.example`.
 5. Keep UI in `.tsrx` Octane style; do not introduce a parallel React app or alias React to Octane.
 6. Before opening a PR that touches `apps/web`: `make web-lint` and `make web-format-check` must pass (CI `web-octane` gates them). Fix type-aware oxlint diagnostics; do not leave formatting drift.
-7. Run what CI runs locally when practical: `make test`, `make rpc-sync-check`, and stack e2e for auth/UI paths.
+7. If your PR adds, renames, or removes a job — or a matrix value set — in `.github/workflows/ci.yml` or `images.yml`, update the `Main` ruleset's required-status-checks list in the same change; a stale or missing context blocks every PR. See [docs/TESTING.md](docs/TESTING.md#required-status-checks-merge-gate).
+8. Run what CI runs locally when practical: `make test`, `make rpc-sync-check`, and stack e2e for auth/UI paths.
 
 CI workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Rust nextest, web lint/format, Vitest, stack e2e, RPC sync, Compose validate).
 

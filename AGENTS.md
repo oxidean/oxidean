@@ -92,6 +92,10 @@ See [docs/TESTING.md](docs/TESTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMEN
 
 PR CI lanes run inside self-owned images (`ghcr.io/<owner>/oxidean-ci:{dev,release,cov,tools}`) built from [`docker/ci-base/Dockerfile`](docker/ci-base/Dockerfile) by `.github/workflows/ci-base.yml`; `ci.yml`'s `ci-image` job pins each to `@sha256` per run via `scripts/ci-image-tag.sh`. There is no cross-run Rust cache — dep artifacts are cargo-chef-cooked into the image, and workspace crates always compile from the fresh checkout. Do not re-add `Swatinem/rust-cache` or per-job toolchain installs to `ci.yml`. Details and refresh procedure: [docs/TESTING.md](docs/TESTING.md#ci-base-images-run-isolated-no-cross-run-rust-cache).
 
+## Required status checks (merge gate)
+
+The `Main` branch ruleset requires every `ci.yml` job plus `images.yml`'s `meta` to pass on a PR's head commit; path-filtered workflows (`ox-cli.yml`, `ci-base.yml`) and fork-empty matrices are deliberately excluded (a required check that never runs blocks the PR forever). **When you add, rename, or remove a job — including matrix values (`shard`, `dialect`, `svc`) — in a required workflow, update the ruleset's check list in the same change.** Procedure and the `gh api` calls: [docs/TESTING.md](docs/TESTING.md#required-status-checks-merge-gate).
+
 ## Planning / AI-DLC
 
 Structured work runs through **AI-DLC**: invoke `/aidlc` (or `aidlc-*` skills) in the configured harnesses — Cursor and Claude Code. Devin-class agents discover the same skills via `.agents/skills/` (symlinks into `.cursor/skills/`). Shared workflow state, intents, and the audit trail live under `aidlc/` (commit it). The shipped v1.0 GSD-era milestone history is archived read-only at [`docs/archive/planning/`](docs/archive/planning/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `docs/archive/planning/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.

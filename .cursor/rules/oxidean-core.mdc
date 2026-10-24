@@ -17,3 +17,4 @@ alwaysApply: true
 - Prefer extending existing patterns (Query session helpers, auth gates, Make targets) over new frameworks.
 - No AI co-author / tooling attribution on commits or PRs — see [no-ai-attribution.mdc](no-ai-attribution.mdc).
 - Commit subjects are SemVer-prefixed (`type(scope): subject`) and enforced by the `commit-msg` hook (`make setup`) and CI `commit-lint` — see [`docs/VERSIONING.md`](../../docs/VERSIONING.md) and skill `semver-conventions`.
+- Adding/renaming/removing a job (or matrix values) in `.github/workflows/ci.yml` or `images.yml` requires updating the `Main` ruleset's required-status-checks list in the same change — see [`docs/TESTING.md`](../../docs/TESTING.md#required-status-checks-merge-gate).
