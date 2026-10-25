@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.3.1] - 2026-10-25
+
+### Fixes
+
+- fix(ci): mint teardown tokens per leg and degrade scope walls to warnings (#193) (79dcb41)
+
 ## [0.3.0] - 2026-10-24
 
 ### Features
