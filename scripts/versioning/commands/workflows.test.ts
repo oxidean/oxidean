@@ -263,16 +263,17 @@ describe("pr-env-teardown.sh GitHub legs", () => {
     );
   });
 
-  test("GHCR version deletes ride the package-token chain, never bare GITHUB_TOKEN", () => {
-    // GITHUB_TOKEN can publish packages but never delete them — deletes need
-    // a package-delete-capable token (release App Packages grant at the org
-    // installation or a PAT with delete:packages), falling back to the admin
-    // chain then the job token.
+  test("GHCR version deletes try the job token first, then the App/PAT chain", () => {
+    // Granular package permissions grant the repo admin on packages its own
+    // workflow published, so GITHUB_TOKEN + packages:write can delete these
+    // pr-* versions directly (run 40204467596: the org-scoped App mint 404'd
+    // — Packages needs an org-wide installation). The App/PAT chain is the
+    // fallback when the job token is denied.
     expect(script).toContain(
-      'pkg_token="${GH_PKG_TOKEN:-${GH_ADMIN_TOKEN:-}}"',
+      'for t in "${GH_TOKEN:-}" "${GH_PKG_TOKEN:-}" "${GH_ADMIN_TOKEN:-}"',
     );
     expect(script).toContain(
-      'GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages',
+      'GH_TOKEN="$tok" gh api -X DELETE "orgs/${ORG}/packages',
     );
   });
 
@@ -305,10 +306,11 @@ describe("pr-env-teardown.sh GitHub legs", () => {
     }
   });
 
-  test("privileged chains never fall back to the job token", () => {
-    // github.token can publish but never delete packages, and there is no
-    // `environments` job permission at all — so it only ever reproduced the
-    // 403 a leg already degrades. It stays for reads + deployments:write.
+  test("the environment chain never falls back to the job token", () => {
+    // There is no `environments` job permission at all — github.token can
+    // never delete (or even list) envs, so it only ever reproduced the 403
+    // a leg already degrades. It stays for reads + deployments:write, and
+    // for GHCR deletes where repo-published admin makes it the primary.
     expect(script).toContain('admin_token="${GH_ADMIN_TOKEN:-}"');
     for (const name of ["pr-env-sweep.yml", "images.yml"]) {
       expect(wf(name)).not.toContain("|| github.token }}");
