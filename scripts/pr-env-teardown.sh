@@ -98,7 +98,10 @@ elif env_probe="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${E
     dep_fail=0 inactivated=0
     while IFS= read -r dep; do
       [[ "$dep" =~ ^[0-9]+$ ]] || continue
-      if GH_TOKEN="$admin_token" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
+      # Statuses need only deployments:write — which the job's GITHUB_TOKEN
+      # is granted, while the admin-token chain may resolve to a PAT without
+      # that scope (runs 40147871008/40150179728). Prefer the job token.
+      if GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
         -f state=inactive -f description="PR #${PR} closed — environment retired" >/dev/null 2>&1; then
         inactivated=$((inactivated + 1))
       else
@@ -122,15 +125,19 @@ else
 fi
 
 # --- GHCR pr-<n> tags --------------------------------------------------------
-if [[ -z "${GH_TOKEN:-}" ]]; then
-  echo "warn: GH_TOKEN unset — skipping GHCR pr-${PR} tag cleanup"
+# GITHUB_TOKEN can never delete packages — packages:write covers publish,
+# not delete — so version deletes ride the admin-token chain (release App
+# or maintainer PAT), which needs a package-delete-capable scope.
+pkg_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"
+if [[ -z "$pkg_token" ]]; then
+  echo "warn: no GitHub token — skipping GHCR pr-${PR} tag cleanup"
   status=1
 elif [[ "$DRY_RUN" == "1" ]]; then
   echo "dry-run: would delete pr-${PR}*/pr-${PR}-sha-* tags on oxidean-{api,web,runner,gateway}"
 else
   for svc in api web runner gateway; do
     pkg="oxidean-${svc}"
-    if ! ids="$(gh api "orgs/${ORG}/packages/container/${pkg}/versions?per_page=100" \
+    if ! ids="$(GH_TOKEN="$pkg_token" gh api "orgs/${ORG}/packages/container/${pkg}/versions?per_page=100" \
       --paginate \
       --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>/dev/null)"; then
       echo "warn: could not list versions for ${pkg} — skipping its tag cleanup"
@@ -139,10 +146,10 @@ else
     fi
     while IFS= read -r id; do
       [[ "$id" =~ ^[0-9]+$ ]] || continue
-      if gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" >/dev/null 2>&1; then
+      if GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" >/dev/null 2>&1; then
         echo "deleted ${pkg} version ${id}"
       else
-        echo "warn: delete failed for ${pkg} ${id}"
+        echo "warn: delete failed for ${pkg} ${id} — token needs package delete scope (GITHUB_TOKEN cannot delete packages)"
         status=1
       fi
     done <<< "$ids"
