@@ -28,14 +28,16 @@
 #                        App Administration grant / admin PAT). No GH_TOKEN
 #                        fallback — the job token can never manage
 #                        environments, so it is not a useful last resort.
-#   GH_PKG_TOKEN         token able to delete GHCR package versions
-#                        (release App Packages grant at the org installation
-#                        / PAT with delete:packages). Falls back to
-#                        GH_ADMIN_TOKEN.
-#   GH_TOKEN             repo token for gh api — can read versions of the
-#                        repo-connected oxidean-* packages and carries
-#                        deployments:write for status inactivation, but is
-#                        never used for privileged deletes
+#   GH_PKG_TOKEN         extra token able to delete GHCR package versions
+#                        (release App org Packages grant / PAT with
+#                        delete:packages). Falls back to GH_ADMIN_TOKEN;
+#                        only tried after GH_TOKEN is denied.
+#   GH_TOKEN             repo token for gh api — deletes versions of the
+#                        repo-published oxidean-* packages (granular
+#                        permissions grant the publishing repo admin on the
+#                        package; job has packages:write), lists versions,
+#                        and carries deployments:write for inactivation —
+#                        but is never used for environment deletes
 #   GH_REPO              owner/repo (default: $GITHUB_REPOSITORY)
 #
 # Usage:
@@ -81,11 +83,12 @@ degrade() {
 }
 
 # Version ids on a package carrying pr-<PR> tags; caller captures combined
-# output so a failure's error text can be classified.
+# output so a failure's error text can be classified. any() keeps a version
+# tagged both pr-<N> and pr-<N>-sha-* from being emitted (and deleted) twice.
 pr_version_ids() { # $1=token $2=package
   GH_TOKEN="$1" gh api "orgs/${ORG}/packages/container/$2/versions?per_page=100" \
     --paginate \
-    --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>&1
+    --jq ".[] | select(any(.metadata.container.tags[]?; test(\"^pr-${PR}(-|\$)\"))) | .id" 2>&1
 }
 
 # Retire a PR environment's deployments when the env object itself can't be
@@ -176,16 +179,22 @@ fi
 # --- GHCR pr-<n> tags --------------------------------------------------------
 # Listing and deleting need different tokens. These packages are connected
 # to this repo (images.yml pushes them with GITHUB_TOKEN), so the job token
-# can READ their version lists even without package scopes — but
-# GITHUB_TOKEN can never delete: packages:write covers publish, not delete.
-# Deletes ride the package-token chain (release App Packages grant or a PAT
-# with delete:packages), then the admin token — never the job token, which
-# can never delete packages. A denied leg is a missing grant — it warns +
-# lands on the step summary instead of failing the run (run 40153046588:
-# RELEASE_TOKEN couldn't even list).
+# can READ their version lists even without package scopes.
+# Deletes try each credential in turn, job token first: granular package
+# permissions grant the repo admin on packages its own workflow published,
+# and the job already has packages:write (run 40204467596 proved the
+# org-scoped App mint 404s — Packages needs an org-wide installation). If
+# the job token is ever denied — e.g. packages disconnected from the repo —
+# the App/PAT chain gets its turn before the leg degrades. A denied leg is
+# a missing grant — it warns + lands on the step summary instead of
+# failing the run (run 40153046588: RELEASE_TOKEN couldn't even list).
 pkg_token="${GH_PKG_TOKEN:-${GH_ADMIN_TOKEN:-}}"
 list_token="${GH_TOKEN:-$pkg_token}"
-if [[ -z "$list_token" && -z "$pkg_token" ]]; then
+declare -a del_tokens=()
+for t in "${GH_TOKEN:-}" "${GH_PKG_TOKEN:-}" "${GH_ADMIN_TOKEN:-}"; do
+  [[ -n "$t" ]] && del_tokens+=("$t")
+done
+if [[ -z "$list_token" ]] && (( ${#del_tokens[@]} == 0 )); then
   echo "warn: no GitHub token — skipping GHCR pr-${PR} tag cleanup"
   status=1
 elif [[ "$DRY_RUN" == "1" ]]; then
@@ -199,27 +208,36 @@ else
       && ids="$(pr_version_ids "$pkg_token" "$pkg")"; then
       : # package chain listed where the job token couldn't
     elif is_scope_denial "$ids"; then
-      degrade "cannot list GHCR versions for ${pkg} — pr-${PR} tag state unknown (needs App Packages grant or PAT read:packages)"
+      degrade "cannot list GHCR versions for ${pkg} — pr-${PR} tag state unknown (needs App Packages grant or PAT read:packages): ${ids%%$'\n'*}"
       continue
     else
       echo "warn: could not list versions for ${pkg} — ${ids}"
       status=1
       continue
     fi
-    if [[ -z "$pkg_token" ]]; then
+    if (( ${#del_tokens[@]} == 0 )); then
       # No delete-capable credential at all — only worth degrading when
       # there are actually tags to remove.
       if [[ -n "${ids//[[:space:]]/}" ]]; then
-        degrade "no package-delete token for ${pkg} — pr-${PR} tags retained (needs App org Packages grant or PAT delete:packages)"
+        degrade "no package-delete token for ${pkg} — pr-${PR} tags retained (job token needs repo-published packages or a PAT delete:packages)"
       fi
       continue
     fi
     while IFS= read -r id; do
       [[ "$id" =~ ^[0-9]+$ ]] || continue
-      if del_err="$(GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" 2>&1)"; then
+      deleted=0 del_err=""
+      for tok in "${del_tokens[@]}"; do
+        if del_err="$(GH_TOKEN="$tok" gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" 2>&1)"; then
+          deleted=1
+          break
+        fi
+        # Scope wall → next credential gets its turn; a real error fails fast.
+        is_scope_denial "$del_err" || break
+      done
+      if (( deleted )); then
         echo "deleted ${pkg} version ${id}"
       elif is_scope_denial "$del_err"; then
-        degrade "delete denied for ${pkg} version ${id} — pr-${PR} tag retained (needs App Packages grant or PAT delete:packages)"
+        degrade "delete denied for ${pkg} version ${id} — pr-${PR} tag retained (needs package admin: repo-published packages grant the job token admin, else PAT delete:packages): ${del_err%%$'\n'*}"
       else
         echo "warn: delete failed for ${pkg} ${id} — ${del_err}"
         status=1
