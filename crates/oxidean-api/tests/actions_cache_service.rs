@@ -325,6 +325,7 @@ async fn cache_restore_key_prefix_fallback() {
         serde_json::json!({"key": "linux-node-abc123", "version": "v1"}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "reserve");
     let id = body_json(res).await["cacheId"]
         .as_str()
         .unwrap()
@@ -335,8 +336,9 @@ async fn cache_restore_key_prefix_fallback() {
         .header("authorization", format!("Bearer {tok}"))
         .body(Body::from("x"))
         .unwrap();
-    app.clone().oneshot(patch).await.unwrap();
-    json_req(
+    let res = app.clone().oneshot(patch).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "chunk upload");
+    let res = json_req(
         &app,
         "POST",
         &format!("{base}/caches/{id}"),
@@ -344,6 +346,7 @@ async fn cache_restore_key_prefix_fallback() {
         serde_json::json!({"size": 1}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "commit");
 
     // Primary key misses; restore-key prefix hits the saved entry.
     let res = json_req(
@@ -397,7 +400,8 @@ async fn cache_cross_repo_isolation() {
     let base_a = cache_path(&url_a);
     let base_b = cache_path(&url_b);
 
-    // Save under repo A.
+    // Save under repo A — all the way to committed, so B's probes test
+    // isolation of a real entry rather than an invisible reserved row.
     let res = json_req(
         &app,
         "POST",
@@ -406,10 +410,28 @@ async fn cache_cross_repo_isolation() {
         serde_json::json!({"key": "shared-name", "version": "v1"}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "reserve under repo A");
     let id = body_json(res).await["cacheId"]
         .as_str()
         .unwrap()
         .to_string();
+    let patch = Request::builder()
+        .method("PATCH")
+        .uri(format!("{base_a}/caches/{id}"))
+        .header("authorization", format!("Bearer {tok_a}"))
+        .body(Body::from("x"))
+        .unwrap();
+    let res = app.clone().oneshot(patch).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "chunk upload");
+    let res = json_req(
+        &app,
+        "POST",
+        &format!("{base_a}/caches/{id}"),
+        Some(&tok_a),
+        serde_json::json!({"size": 1}),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "commit under repo A");
 
     // Repo B's token can't read A's entry metadata (404, not 403 — the entry
     // must be indistinguishable from absent).
@@ -470,8 +492,9 @@ async fn cache_reserved_not_restorable() {
     let (_rt, _job, url, tok) = claim_with_cache(&app, &db, "cr", "refs/heads/main").await;
     let base = cache_path(&url);
 
-    // Reserved but never committed → invisible to restores.
-    json_req(
+    // Reserved but never committed → invisible to restores. The reserve
+    // must succeed first or the 204 below is a vacuous pass.
+    let res = json_req(
         &app,
         "POST",
         &format!("{base}/caches"),
@@ -479,6 +502,7 @@ async fn cache_reserved_not_restorable() {
         serde_json::json!({"key": "ghost", "version": "v1"}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "reserve");
     let res = json_req(
         &app,
         "GET",
@@ -530,7 +554,8 @@ async fn cache_lru_eviction_over_cap() {
             .header("authorization", format!("Bearer {tok}"))
             .body(Body::from(bytes.to_vec()))
             .unwrap();
-        app.clone().oneshot(patch).await.unwrap();
+        let res = app.clone().oneshot(patch).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT, "upload {key}");
         let res = json_req(
             app,
             "POST",
@@ -629,6 +654,7 @@ async fn cache_rpc_list_and_delete() {
         serde_json::json!({"key": "rpc-k", "version": "v1"}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "reserve");
     let id = body_json(res).await["cacheId"]
         .as_str()
         .unwrap()
@@ -639,8 +665,9 @@ async fn cache_rpc_list_and_delete() {
         .header("authorization", format!("Bearer {tok}"))
         .body(Body::from("rpc!"))
         .unwrap();
-    app.clone().oneshot(patch).await.unwrap();
-    json_req(
+    let res = app.clone().oneshot(patch).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "chunk upload");
+    let res = json_req(
         &app,
         "POST",
         &format!("{base}/caches/{id}"),
@@ -648,6 +675,7 @@ async fn cache_rpc_list_and_delete() {
         serde_json::json!({"size": 4}),
     )
     .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "commit");
 
     // listCaches — Read+, committed entry + usage rollup.
     let r = rpc_json(
