@@ -514,8 +514,8 @@ jobs:
   # and the GHCR pr-* tags — all via scripts/pr-env-teardown.sh. This run
   # is routinely cancelled before jobs start on merge (refs/pull/<n>/merge
   # goes away with the PR), so the hourly pr-env-sweep.yml is the
-  # authoritative backstop. Per-leg failures warn; a failed leg fails the
-  # job so the leak stays visible.
+  # authoritative backstop. Legs blocked by missing grants degrade to
+  # warnings + a step-summary leak report; real failures still fail the job.
   cleanup-pr:
     name: cleanup pr-${{ needs.meta.outputs.pr }}
     needs: meta
@@ -535,33 +535,49 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
       - name: release app token (environment admin)
-        id: apptok
+        id: apptok_env
         if: ${{ vars.RELEASE_APP_ID != '' }}
         uses: actions/create-github-app-token@v3
-        # Scoped mint: ungranted scopes 422 the mint — loud in the run UI —
-        # while continue-on-error lets teardown fall back to RELEASE_TOKEN /
-        # github.token so the Railway + GHCR legs still run degraded.
-        # administration is what DELETE /environments actually checks; while
-        # the App lacks it the mint fails and teardown runs on the fallback
-        # tokens, degrading env deletes to deployment inactivation. packages
-        # covers the GHCR pr-<n> version deletes — GITHUB_TOKEN can publish
-        # but never delete packages.
+        # Per-leg mints: an ungranted scope 422s its own mint — loud in the
+        # run UI — while continue-on-error lets that leg fall back to
+        # RELEASE_TOKEN degraded. Splitting the mints keeps one missing
+        # grant from poisoning every leg at once: administration is what
+        # DELETE /environments actually checks; deployments covers the
+        # status inactivation fallback.
         continue-on-error: true
         with:
           client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-administration: write
           permission-deployments: write
+      - name: release app token (package admin)
+        id: apptok_pkg
+        if: ${{ vars.RELEASE_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        # packages covers the GHCR pr-<n> version deletes — GITHUB_TOKEN can
+        # read versions of these repo-connected packages but never delete.
+        # Packages live on the org: minted against the org installation so a
+        # Packages grant there actually reaches the delete endpoint (a
+        # repo-installation token's packages grant does not).
+        continue-on-error: true
+        with:
+          client-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
           permission-packages: write
       - name: tear down PR surfaces
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
           GH_TOKEN: ${{ github.token }}
-          # Environment deletes need an admin-scoped token: release App →
-          # maintainer PAT → GITHUB_TOKEN (can never manage environments —
-          # teardown then marks the env's deployments inactive instead).
-          GH_ADMIN_TOKEN: ${{ steps.apptok.outputs.token || secrets.RELEASE_TOKEN || github.token }}
+          # Environment deletes: release App → maintainer PAT — no
+          # GITHUB_TOKEN tail, it can never manage environments (teardown
+          # falls back to marking deployments inactive on the job token).
+          GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token || secrets.RELEASE_TOKEN }}
+          # Package version deletes ride their own chain — same shape, a
+          # separate org-scoped App grant so a missing Administration grant
+          # doesn't take GHCR cleanup down with it.
+          GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token || secrets.RELEASE_TOKEN }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.meta.outputs.pr }}
         run: |

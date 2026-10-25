@@ -10,19 +10,32 @@
 #     environment itself cannot be deleted
 #   - GHCR pr-<n> / pr-<n>-sha-* tags on the four service images
 #
-# Every leg is best-effort — failures warn and the run continues — but the
-# script exits non-zero when any leg errored so a leak stays visible as a
-# red job instead of a clean log nobody reads.
+# Every leg is best-effort — failures warn and the run continues. Errors
+# split into two classes: a scope wall (401/403/404, "Resource not
+# accessible") is a missing grant — permanent until the release App or PAT
+# gains it — so it degrades to a `::warning` + step-summary leak report
+# instead of failing the run; anything else still exits non-zero, so a red
+# job means an unexpected failure, not a known missing grant. A permanently
+# red job trains everyone to ignore it — which is how the real leaks went
+# unnoticed across three fix PRs (runs 40147871008/40150179728/40153046588).
+# OXIDEAN_TEARDOWN_STRICT=1 restores the old policy (degraded legs fail).
 #
 # Credentials:
 #   RAILWAY_API_TOKEN    account/workspace token (Railway leg skipped when
 #                        unset; env-scoped project tokens cannot enumerate)
 #   RAILWAY_PROJECT_ID   project the PR env lives in (required for that leg)
-#   GH_ADMIN_TOKEN       token able to delete environments + post deployment
-#                        statuses (release GitHub App / admin PAT). Falls
-#                        back to GH_TOKEN — which usually fails soft here.
-#   GH_TOKEN             repo token for gh api — GHCR version deletes need
-#                        packages:write on the job
+#   GH_ADMIN_TOKEN       token able to delete environments (release GitHub
+#                        App Administration grant / admin PAT). No GH_TOKEN
+#                        fallback — the job token can never manage
+#                        environments, so it is not a useful last resort.
+#   GH_PKG_TOKEN         token able to delete GHCR package versions
+#                        (release App Packages grant at the org installation
+#                        / PAT with delete:packages). Falls back to
+#                        GH_ADMIN_TOKEN.
+#   GH_TOKEN             repo token for gh api — can read versions of the
+#                        repo-connected oxidean-* packages and carries
+#                        deployments:write for status inactivation, but is
+#                        never used for privileged deletes
 #   GH_REPO              owner/repo (default: $GITHUB_REPOSITORY)
 #
 # Usage:
@@ -32,6 +45,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/railway-gql.sh
 source scripts/railway-gql.sh
+# shellcheck source=scripts/gh-api-helpers.sh
+source scripts/gh-api-helpers.sh
 
 PR="" DRY_RUN="${OXIDEAN_TEARDOWN_DRY_RUN:-0}"
 for arg in "$@"; do
@@ -54,7 +69,53 @@ ENV_NAME_ENC="Oxidean%20%2F%20oxidean-pr-${PR}"
 need_jq
 command -v gh >/dev/null 2>&1 || die "gh is required"
 
-status=0
+status=0 degraded=0
+declare -a degraded_notes=()
+
+# A denied leg is a missing grant, not a runtime error — count it apart so
+# the run can warn + summarize without going red.
+degrade() {
+  degraded=$((degraded + 1))
+  degraded_notes+=("- $1")
+  echo "warn: $1"
+}
+
+# Version ids on a package carrying pr-<PR> tags; caller captures combined
+# output so a failure's error text can be classified.
+pr_version_ids() { # $1=token $2=package
+  GH_TOKEN="$1" gh api "orgs/${ORG}/packages/container/$2/versions?per_page=100" \
+    --paginate \
+    --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>&1
+}
+
+# Retire a PR environment's deployments when the env object itself can't be
+# deleted — the only move left that stops them pointing at a dead preview
+# URL. Returns non-zero when the list or any status POST failed.
+inactivate_env_deployments() {
+  local dep_ids dep dep_fail=0 inactivated=0
+  # -X GET is load-bearing: gh api defaults to POST once -f params exist,
+  # which lands on create-deployment ("ref wasn't supplied"), not a list.
+  # Listing and statuses ride the job's GITHUB_TOKEN — the workflow grants
+  # it exactly `deployments: write`, while the admin-token chain may
+  # resolve to a PAT without that scope (runs 40147871008/40150179728).
+  if ! dep_ids="$(GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X GET "repos/${REPO}/deployments" \
+    -f environment="$ENV_LABEL" -f per_page=100 --paginate --jq '.[].id' 2>/dev/null)"; then
+    echo "warn: could not list deployments for '${ENV_LABEL}' — cannot retire them"
+    return 1
+  fi
+  while IFS= read -r dep; do
+    [[ "$dep" =~ ^[0-9]+$ ]] || continue
+    if GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
+      -f state=inactive -f description="PR #${PR} closed — environment retired" >/dev/null 2>&1; then
+      inactivated=$((inactivated + 1))
+    else
+      echo "warn: could not mark deployment ${dep} inactive"
+      dep_fail=$((dep_fail + 1))
+    fi
+  done <<< "$dep_ids"
+  (( dep_fail == 0 )) || return 1
+  echo "marked ${inactivated} deployment(s) inactive for '${ENV_LABEL}'"
+}
 
 # --- Railway environment ----------------------------------------------------
 if [[ -z "${RAILWAY_API_TOKEN:-}" && ! -f "${HOME}/.railway/config.json" ]]; then
@@ -70,10 +131,17 @@ else
 fi
 
 # --- GitHub environment -----------------------------------------------------
-admin_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"
+# The job token is deliberately not a fallback here: it can never delete an
+# environment, so it would only reproduce the 403 this leg already knows
+# how to degrade.
+admin_token="${GH_ADMIN_TOKEN:-}"
 if [[ -z "$admin_token" ]]; then
-  echo "warn: no GitHub token — skipping environment + deployment cleanup"
-  status=1
+  # No env-capable credential — the env object is out of reach; the job
+  # token can still retire its deployments.
+  degrade "no env-delete token (release App Administration mint and RELEASE_TOKEN both unavailable) — env state unknown; attempting deployment inactivation anyway"
+  if ! inactivate_env_deployments; then
+    status=1
+  fi
 elif [[ "$DRY_RUN" == "1" ]]; then
   if GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${ENV_NAME_ENC}" >/dev/null 2>&1; then
     echo "dry-run: would delete github environment '${ENV_LABEL}'"
@@ -87,49 +155,37 @@ elif env_probe="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments/${E
   # pointing at a dead preview URL. A denied delete alone is not a teardown
   # failure: the env object is cosmetic residue once nothing live points at
   # it, so only a fallback that itself cannot run fails this leg.
-  echo "warn: could not delete github environment '${ENV_LABEL}' (token lacks environment admin) — marking its deployments inactive"
-  # -X GET is load-bearing: gh api defaults to POST once -f params exist,
-  # which lands on create-deployment ("ref wasn't supplied"), not a list.
-  if ! dep_ids="$(GH_TOKEN="$admin_token" gh api -X GET "repos/${REPO}/deployments" \
-    -f environment="$ENV_LABEL" -f per_page=100 --paginate --jq '.[].id' 2>/dev/null)"; then
-    echo "warn: could not list deployments for '${ENV_LABEL}' — cannot retire them"
+  degrade "could not delete github environment '${ENV_LABEL}' (token lacks environment admin) — env object remains"
+  if ! inactivate_env_deployments; then
     status=1
-  else
-    dep_fail=0 inactivated=0
-    while IFS= read -r dep; do
-      [[ "$dep" =~ ^[0-9]+$ ]] || continue
-      # Statuses need only deployments:write — which the job's GITHUB_TOKEN
-      # is granted, while the admin-token chain may resolve to a PAT without
-      # that scope (runs 40147871008/40150179728). Prefer the job token.
-      if GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses" \
-        -f state=inactive -f description="PR #${PR} closed — environment retired" >/dev/null 2>&1; then
-        inactivated=$((inactivated + 1))
-      else
-        echo "warn: could not mark deployment ${dep} inactive"
-        dep_fail=$((dep_fail + 1))
-      fi
-    done <<< "$dep_ids"
-    if (( dep_fail > 0 )); then
-      status=1
-    else
-      echo "marked ${inactivated} deployment(s) inactive — env object remains (cosmetic residue)"
-    fi
+  fi
+elif [[ "$env_probe" == *"404"* || "$env_probe" == *"Not Found"* ]]; then
+  echo "github environment '${ENV_LABEL}' already absent"
+elif is_scope_denial "$env_probe"; then
+  # The token can't even read the env — deployments may still exist, and
+  # the job token's deployments:write retires them regardless.
+  degrade "could not read github environment '${ENV_LABEL}' state (scope wall) — attempting deployment inactivation anyway"
+  if ! inactivate_env_deployments; then
+    status=1
   fi
 else
-  if [[ "$env_probe" == *"404"* || "$env_probe" == *"Not Found"* ]]; then
-    echo "github environment '${ENV_LABEL}' already absent"
-  else
-    echo "warn: could not read github environment '${ENV_LABEL}' state — leaving its deployments alone"
-    status=1
-  fi
+  echo "warn: could not read github environment '${ENV_LABEL}' state — ${env_probe}"
+  status=1
 fi
 
 # --- GHCR pr-<n> tags --------------------------------------------------------
-# GITHUB_TOKEN can never delete packages — packages:write covers publish,
-# not delete — so version deletes ride the admin-token chain (release App
-# or maintainer PAT), which needs a package-delete-capable scope.
-pkg_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"
-if [[ -z "$pkg_token" ]]; then
+# Listing and deleting need different tokens. These packages are connected
+# to this repo (images.yml pushes them with GITHUB_TOKEN), so the job token
+# can READ their version lists even without package scopes — but
+# GITHUB_TOKEN can never delete: packages:write covers publish, not delete.
+# Deletes ride the package-token chain (release App Packages grant or a PAT
+# with delete:packages), then the admin token — never the job token, which
+# can never delete packages. A denied leg is a missing grant — it warns +
+# lands on the step summary instead of failing the run (run 40153046588:
+# RELEASE_TOKEN couldn't even list).
+pkg_token="${GH_PKG_TOKEN:-${GH_ADMIN_TOKEN:-}}"
+list_token="${GH_TOKEN:-$pkg_token}"
+if [[ -z "$list_token" && -z "$pkg_token" ]]; then
   echo "warn: no GitHub token — skipping GHCR pr-${PR} tag cleanup"
   status=1
 elif [[ "$DRY_RUN" == "1" ]]; then
@@ -137,25 +193,59 @@ elif [[ "$DRY_RUN" == "1" ]]; then
 else
   for svc in api web runner gateway; do
     pkg="oxidean-${svc}"
-    if ! ids="$(GH_TOKEN="$pkg_token" gh api "orgs/${ORG}/packages/container/${pkg}/versions?per_page=100" \
-      --paginate \
-      --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>/dev/null)"; then
-      echo "warn: could not list versions for ${pkg} — skipping its tag cleanup"
+    if ids="$(pr_version_ids "$list_token" "$pkg")"; then
+      :
+    elif [[ "$list_token" != "$pkg_token" && -n "$pkg_token" ]] \
+      && ids="$(pr_version_ids "$pkg_token" "$pkg")"; then
+      : # package chain listed where the job token couldn't
+    elif is_scope_denial "$ids"; then
+      degrade "cannot list GHCR versions for ${pkg} — pr-${PR} tag state unknown (needs App Packages grant or PAT read:packages)"
+      continue
+    else
+      echo "warn: could not list versions for ${pkg} — ${ids}"
       status=1
+      continue
+    fi
+    if [[ -z "$pkg_token" ]]; then
+      # No delete-capable credential at all — only worth degrading when
+      # there are actually tags to remove.
+      if [[ -n "${ids//[[:space:]]/}" ]]; then
+        degrade "no package-delete token for ${pkg} — pr-${PR} tags retained (needs App org Packages grant or PAT delete:packages)"
+      fi
       continue
     fi
     while IFS= read -r id; do
       [[ "$id" =~ ^[0-9]+$ ]] || continue
-      if GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" >/dev/null 2>&1; then
+      if del_err="$(GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages/container/${pkg}/versions/${id}" 2>&1)"; then
         echo "deleted ${pkg} version ${id}"
+      elif is_scope_denial "$del_err"; then
+        degrade "delete denied for ${pkg} version ${id} — pr-${PR} tag retained (needs App Packages grant or PAT delete:packages)"
       else
-        echo "warn: delete failed for ${pkg} ${id} — token needs package delete scope (GITHUB_TOKEN cannot delete packages)"
+        echo "warn: delete failed for ${pkg} ${id} — ${del_err}"
         status=1
       fi
     done <<< "$ids"
   done
 fi
 
+# OXIDEAN_TEARDOWN_STRICT=1 restores the old policy: missing grants fail.
+if [[ "${OXIDEAN_TEARDOWN_STRICT:-0}" == "1" && $degraded -gt 0 ]]; then
+  status=1
+fi
+if (( degraded > 0 )); then
+  echo "::warning::teardown for PR #${PR} degraded — ${degraded} surface(s) retained behind missing grants (see the step summary)"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "### Teardown degraded for PR #${PR}"
+      echo
+      echo "${degraded} leg(s) left surfaces in place behind missing token grants:"
+      echo
+      printf '%s\n' "${degraded_notes[@]}"
+      echo
+      echo "To clear them: grant the release App **Administration: write** (env deletes) and **Packages: write** (GHCR deletes), or point \`RELEASE_TOKEN\` at a PAT with admin + read:packages + delete:packages."
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+fi
 if (( status == 0 )); then
   echo "teardown done: PR #${PR}"
 else

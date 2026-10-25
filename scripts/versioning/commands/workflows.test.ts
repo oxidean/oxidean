@@ -263,19 +263,65 @@ describe("pr-env-teardown.sh GitHub legs", () => {
     );
   });
 
-  test("GHCR version deletes ride the admin-token chain, never bare GITHUB_TOKEN", () => {
+  test("GHCR version deletes ride the package-token chain, never bare GITHUB_TOKEN", () => {
     // GITHUB_TOKEN can publish packages but never delete them — deletes need
-    // a package-delete-capable token (release App Packages grant or a PAT
-    // with delete:packages).
-    expect(script).toContain('pkg_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"');
+    // a package-delete-capable token (release App Packages grant at the org
+    // installation or a PAT with delete:packages), falling back to the admin
+    // chain then the job token.
+    expect(script).toContain(
+      'pkg_token="${GH_PKG_TOKEN:-${GH_ADMIN_TOKEN:-}}"',
+    );
     expect(script).toContain(
       'GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages',
     );
   });
 
-  test("the teardown mints request Packages for the GHCR delete leg", () => {
-    expect(wf("pr-env-sweep.yml")).toContain("permission-packages: write");
-    expect(wf("images.yml")).toContain("permission-packages: write");
+  test("GHCR version listing prefers the job token, not the delete chain", () => {
+    // These packages are connected to this repo (images.yml pushes them with
+    // GITHUB_TOKEN), so the job token reads their versions without package
+    // scopes — run 40153046588 failed this leg only because it listed via
+    // the admin chain (RELEASE_TOKEN can't read packages).
+    expect(script).toContain('list_token="${GH_TOKEN:-$pkg_token}"');
+    expect(script).toContain('pr_version_ids "$list_token" "$pkg"');
+  });
+
+  test("the teardown mints are per-leg, and Packages mints against the org", () => {
+    // A single atomic mint let one missing grant 422 every leg at once; the
+    // split keeps the env leg alive when Packages isn't granted — and org
+    // packages need an org-installation token (owner:), not a repo token.
+    for (const name of ["pr-env-sweep.yml", "images.yml"]) {
+      const yml = wf(name);
+      expect(yml).toContain("id: apptok_env");
+      expect(yml).toContain("id: apptok_pkg");
+      expect(yml).toContain("permission-administration: write");
+      expect(yml).toContain("permission-packages: write");
+      expect(yml).toContain("owner: ${{ github.repository_owner }}");
+      expect(yml).toContain(
+        "GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token || secrets.RELEASE_TOKEN }}",
+      );
+      expect(yml).toContain(
+        "GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token || secrets.RELEASE_TOKEN }}",
+      );
+    }
+  });
+
+  test("privileged chains never fall back to the job token", () => {
+    // github.token can publish but never delete packages, and there is no
+    // `environments` job permission at all — so it only ever reproduced the
+    // 403 a leg already degrades. It stays for reads + deployments:write.
+    expect(script).toContain('admin_token="${GH_ADMIN_TOKEN:-}"');
+    for (const name of ["pr-env-sweep.yml", "images.yml"]) {
+      expect(wf(name)).not.toContain("|| github.token }}");
+    }
+  });
+
+  test("scope walls degrade to warnings + a step-summary leak report", () => {
+    // Missing grants are permanent until the App/PAT gains them — failing
+    // the run every time trained everyone to ignore a permanently red job
+    // (runs 40147871008/40150179728/40153046588). Real errors still fail.
+    expect(script).toContain("is_scope_denial");
+    expect(script).toContain("GITHUB_STEP_SUMMARY");
+    expect(script).toContain("OXIDEAN_TEARDOWN_STRICT");
   });
 });
 

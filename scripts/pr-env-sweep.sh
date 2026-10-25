@@ -14,9 +14,11 @@
 # 20-volume cap and every subsequent PR env bind dies in volumeCreate.
 #
 # Never deletes on ambiguity: a PR whose state can't be resolved via
-# `gh pr view` is kept. Per-surface listing failures warn and mark the run
-# failed without aborting — a broken Railway token must not shield
-# GitHub-side leaks (and a red run is the only alert this job has).
+# `gh pr view` is kept. Per-surface listing failures split like teardown's:
+# a scope wall (missing grant) warns and counts as degraded — that surface
+# is invisible this run — while any other failure marks the run failed
+# without aborting, because a broken Railway token must not shield
+# GitHub-side leaks and a red run is the only alert this job has.
 #
 # Credentials:
 #   RAILWAY_API_TOKEN    account/workspace token (enumeration needs one;
@@ -24,10 +26,15 @@
 #                        or a `railway login` config
 #   RAILWAY_PROJECT_ID   project holding the PR envs (Railway surface only)
 #   GH_ADMIN_TOKEN       token able to list/delete GitHub environments
-#                        (release GitHub App / admin PAT; falls back to
-#                        GH_TOKEN which cannot delete environments at all)
-#   GH_TOKEN             gh api token — packages:write on the job to read
-#                        and delete GHCR package versions
+#                        (release GitHub App / admin PAT — no GH_TOKEN
+#                        fallback: environments isn't a job permission, so
+#                        the job token can never reach this surface)
+#   GH_PKG_TOKEN         token able to delete GHCR package versions —
+#                        forwarded to pr-env-teardown.sh (falls back to
+#                        GH_ADMIN_TOKEN)
+#   GH_TOKEN             gh api token — reads versions of the repo-connected
+#                        oxidean-* packages, PR state, and carries
+#                        deployments:write for inactivation
 #   GH_REPO              owner/repo (default: $GITHUB_REPOSITORY)
 #
 # Usage:
@@ -37,6 +44,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/railway-gql.sh
 source scripts/railway-gql.sh
+# shellcheck source=scripts/gh-api-helpers.sh
+source scripts/gh-api-helpers.sh
 
 DRY_RUN="${OXIDEAN_TEARDOWN_DRY_RUN:-0}"
 for arg in "$@"; do
@@ -54,7 +63,7 @@ need_jq
 command -v gh >/dev/null 2>&1 || die "gh is required"
 
 declare -A prs=()
-surface_err=0
+surface_err=0 surface_degraded=0
 
 add_prs() { # stdin: one PR number per line
   local n
@@ -92,15 +101,21 @@ fi
 
 # --- surface 2: GitHub environments named *oxidean-pr-<n> -------------------
 echo "== scanning GitHub environments =="
-admin_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"
+# The job token is deliberately not a fallback: `environments` is not a
+# GITHUB_TOKEN permission, so it can never list or delete envs — an empty
+# chain is just another missing grant, i.e. degraded, not a hard failure.
+admin_token="${GH_ADMIN_TOKEN:-}"
 if [[ -z "$admin_token" ]]; then
-  echo "warn: no GitHub token — skipping GitHub environment surface"
-  surface_err=1
+  echo "warn: no env-capable GitHub token — GitHub environment surface invisible this run" >&2
+  surface_degraded=$((surface_degraded + 1))
 elif gh_envs="$(GH_TOKEN="$admin_token" gh api "repos/${REPO}/environments?per_page=100" \
-    --jq '.environments[]?.name' 2>/dev/null)"; then
+    --jq '.environments[]?.name' 2>&1)"; then
   add_prs < <(echo "$gh_envs" | sed -n 's/^.*oxidean-pr-\([0-9][0-9]*\)$/\1/p')
+elif is_scope_denial "$gh_envs"; then
+  echo "warn: could not list GitHub environments (scope wall — missing grant) — that surface is invisible this run" >&2
+  surface_degraded=$((surface_degraded + 1))
 else
-  echo "warn: could not list GitHub environments — skipping that surface" >&2
+  echo "warn: could not list GitHub environments — ${gh_envs}" >&2
   surface_err=1
 fi
 
@@ -112,15 +127,21 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
 else
   for svc in api web runner gateway; do
     if tags="$(gh api "orgs/${ORG}/packages/container/oxidean-${svc}/versions?per_page=100" \
-        --paginate --jq '.[].metadata.container.tags[]?' 2>/dev/null)"; then
+        --paginate --jq '.[].metadata.container.tags[]?' 2>&1)"; then
       add_prs < <(echo "$tags" | sed -n 's/^pr-\([0-9][0-9]*\)\(-.*\)\?$/\1/p')
+    elif is_scope_denial "$tags"; then
+      echo "warn: could not list versions for oxidean-${svc} (scope wall — missing grant) — pr-* tags invisible this run" >&2
+      surface_degraded=$((surface_degraded + 1))
     else
-      echo "warn: could not list versions for oxidean-${svc} — skipping" >&2
+      echo "warn: could not list versions for oxidean-${svc} — ${tags}" >&2
       surface_err=1
     fi
   done
 fi
 
+if (( surface_degraded > 0 )); then
+  echo "::warning::sweep skipped ${surface_degraded} surface scan(s) behind missing token grants — leaks on those surfaces are invisible this run"
+fi
 if (( ${#prs[@]} == 0 )); then
   echo "no oxidean-pr-* surfaces found — nothing to sweep."
   exit "$surface_err"
