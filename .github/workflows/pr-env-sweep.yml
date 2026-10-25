@@ -58,13 +58,16 @@ jobs:
         # github.token so the Railway + GHCR legs still run degraded.
         # administration is what DELETE /environments actually checks; while
         # the App lacks it the mint fails and teardown runs on the fallback
-        # tokens, degrading env deletes to deployment inactivation.
+        # tokens, degrading env deletes to deployment inactivation. packages
+        # covers the GHCR pr-<n> version deletes — GITHUB_TOKEN can publish
+        # but never delete packages.
         continue-on-error: true
         with:
           client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-administration: write
           permission-deployments: write
+          permission-packages: write
       - name: tear down surfaces for closed PRs
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}

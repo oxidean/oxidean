@@ -242,15 +242,40 @@ describe("production-deploy.yml stable cut", () => {
 });
 
 describe("pr-env-teardown.sh GitHub legs", () => {
+  const script = readFileSync(
+    join(ROOT, "scripts/pr-env-teardown.sh"),
+    "utf-8",
+  );
+
   test("the deployments fallback lists with an explicit GET", () => {
     // gh api defaults to POST once -f params exist — without -X GET the
     // "list" hit create-deployment (403/422) and the sweep reported it as a
     // missing read permission in run 40125953928.
-    const script = readFileSync(
-      join(ROOT, "scripts/pr-env-teardown.sh"),
-      "utf-8",
-    );
     expect(script).toContain('gh api -X GET "repos/${REPO}/deployments"');
+  });
+
+  test("deployment inactivation prefers the job token's deployments:write", () => {
+    // GH_ADMIN_TOKEN resolves App → RELEASE_TOKEN → github.token; the PAT
+    // may lack deployments:write while the job's GITHUB_TOKEN is granted it
+    // (inactivate 403s in runs 40147871008/40150179728). Statuses prefer it.
+    expect(script).toContain(
+      'GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses"',
+    );
+  });
+
+  test("GHCR version deletes ride the admin-token chain, never bare GITHUB_TOKEN", () => {
+    // GITHUB_TOKEN can publish packages but never delete them — deletes need
+    // a package-delete-capable token (release App Packages grant or a PAT
+    // with delete:packages).
+    expect(script).toContain('pkg_token="${GH_ADMIN_TOKEN:-${GH_TOKEN:-}}"');
+    expect(script).toContain(
+      'GH_TOKEN="$pkg_token" gh api -X DELETE "orgs/${ORG}/packages',
+    );
+  });
+
+  test("the teardown mints request Packages for the GHCR delete leg", () => {
+    expect(wf("pr-env-sweep.yml")).toContain("permission-packages: write");
+    expect(wf("images.yml")).toContain("permission-packages: write");
   });
 });
 
