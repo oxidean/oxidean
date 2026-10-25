@@ -155,7 +155,26 @@ cmd_promote() {
 
   # Pin the api service's runtime CLI feed to the ox-v* tag on this commit
   # before deploying (empty URL on untagged commits = host-only ox in the image).
-  upsert_cli_dist_url "$(resolve_ox_dist_url "$sha")"
+  local dist_url
+  dist_url="$(resolve_ox_dist_url "$sha")"
+  # A resolved tag whose release never published crash-loops the api
+  # entrypoint's cli-dist fetch for ~5min before Railway marks the deploy
+  # failed — refuse early instead. (The 2026-10-24 stable cut hit this: a
+  # >3-tag atomic push creates no tag events, so ox-cli.yml never ran.)
+  if [[ -n "$dist_url" && "$DRY_RUN" != "1" ]]; then
+    local tries
+    for tries in 1 2 3 4 5 6; do
+      if curl -fsSI --max-time 15 "${dist_url}/ox-targets.txt" >/dev/null 2>&1; then
+        break
+      fi
+      if [[ "$tries" == "6" ]]; then
+        die "resolved CLI feed ${dist_url} serves no ox-targets.txt — publish the tag's release first (gh workflow run ox-cli.yml --ref ${dist_url##*/}) or resolve a live feed"
+      fi
+      echo "cli-dist feed not ready at ${dist_url} — retrying in 10s (${tries}/6)"
+      sleep 10
+    done
+  fi
+  upsert_cli_dist_url "$dist_url"
 
   # Atomic image deploy: the production services pin ghcr.io/oxidean/
   # oxidean-<svc>:sha-<sha>, then the :production channel tag follows the

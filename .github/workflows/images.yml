@@ -541,11 +541,14 @@ jobs:
         # Scoped mint: ungranted scopes 422 the mint — loud in the run UI —
         # while continue-on-error lets teardown fall back to RELEASE_TOKEN /
         # github.token so the Railway + GHCR legs still run degraded.
+        # administration is what DELETE /environments actually checks; while
+        # the App lacks it the mint fails and teardown runs on the fallback
+        # tokens, degrading env deletes to deployment inactivation.
         continue-on-error: true
         with:
           client-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-environments: write
+          permission-administration: write
           permission-deployments: write
       - name: tear down PR surfaces
         env:
