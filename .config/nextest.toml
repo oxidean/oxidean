@@ -10,6 +10,13 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 fail-fast = false
 slow-timeout = { period = "90s", terminate-after = 3 }
 test-threads = "num-cpus"
+# One retry so a transient I/O hiccup (e.g. the unasserted-leg cache flake
+# that red'd coverage run 40153046084) reports FLAKY instead of failing the
+# lane — the api-rust shards already self-heal this way via their whole-
+# suite `||` re-run; this covers coverage-weighted + db-dialects which have
+# no shell-level retry, and it bounds the retry per test instead of
+# re-running the entire archive.
+retries = 1
 
 # The db-dialects lane replays workflow_conformance against real Postgres AND
 # MySQL; the reusable-fanout cases expand 100+ callee legs, which is
