@@ -196,7 +196,7 @@
       "description": ".NET console app matching dotnet new console. Includes a Dockerfile.",
       "default_gitignore": "VisualStudio",
       "source": "cli",
-      "source_ref": "dotnet new console + hand Dockerfile",
+      "source_ref": "dotnet new console + hand Dockerfile + App.csproj Compile Remove",
       "last_synced": "2026-10-26",
       "verify_commands": [
         "dotnet run",

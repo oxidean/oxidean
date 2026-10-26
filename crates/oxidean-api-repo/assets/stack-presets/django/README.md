@@ -20,7 +20,7 @@ Open http://127.0.0.1:8000
 
 ```bash
 docker build -t app .
-docker run --rm -p 8000:8000 app
+docker run --rm -p 127.0.0.1:8000:8000 app
 ```
 
 Open http://localhost:8000

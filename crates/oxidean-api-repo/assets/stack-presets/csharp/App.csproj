@@ -6,4 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>App</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="App.Tests/**/*.cs" />
+  </ItemGroup>
 </Project>

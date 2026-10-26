@@ -3,3 +3,4 @@ obj
 .git
 .env
 .env.*
+App.Tests/
