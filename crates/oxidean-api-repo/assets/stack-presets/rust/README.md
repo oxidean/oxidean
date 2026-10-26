@@ -9,3 +9,10 @@ cargo run
 cargo test
 cargo check
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm app
+```

@@ -11,3 +11,10 @@ pip install -r requirements.txt
 python -m app.main
 pytest
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm app
+```

@@ -17,3 +17,12 @@ npm run dev
 | `npm run build` | Emit to `dist/` |
 | `npm start` | Run compiled JS |
 | `npm run typecheck` | `tsc --noEmit` |
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 3000:3000 app
+```
+
+Open http://localhost:3000

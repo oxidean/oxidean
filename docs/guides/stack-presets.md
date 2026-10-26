@@ -36,8 +36,8 @@ Pack IDs are allowlisted from `catalog.json` only (no path traversal).
 1. Read `source_ref` for the pack in `catalog.json`.
 2. Run the CLI (or checkout the pinned tag) into a **temp** directory with non-interactive flags.
 3. Strip noise: `.git/`, `node_modules/`, `.env*`, OS junk, toolchain caches, and lockfiles (`Cargo.lock`, `package-lock.json`, `bun.lock`, `poetry.lock`, …).
-4. Copy the resulting tree into `stack-presets/<id>/` (replace files).
-5. Ensure a `README.md` documents the happy path (`npm run dev`, `cargo run`, …).
+4. Copy the resulting tree into `stack-presets/<id>/` (replace files) — save and restore the hand-maintained additions `source_ref` names (`Dockerfile`, `.dockerignore`, csproj `Compile Remove`, …), since the generated tree doesn't carry them.
+5. Ensure a `README.md` documents the happy path (`npm run dev`, `cargo run`, …) — retain the `## Docker` section when the pack ships a Dockerfile.
 6. Stamp metadata: `bun scripts/sync-stack-presets.mjs --pack <id> --stamp`
 7. Validate: `make check-stack-presets`
 8. Rebuild the API so `include_dir` picks up the new assets.
@@ -52,6 +52,10 @@ Do **not** vendor `node_modules` or SDK binaries. Packs ship dependency **manife
 | All packs | ≤ 40 MiB total under `stack-presets/` |
 
 Enforced by `make check-stack-presets` / `scripts/check-stack-presets.sh`.
+
+### Container files
+
+Packs whose default output is a runnable server or binary ship a `Dockerfile` + `.dockerignore` so `docker build -t app .` works on the seeded tree (see `go`, `node-typescript`, `rails`, …); the pack's `verify_commands` records the build check and its README documents `docker run`. For `source: cli`/`repo` packs the Dockerfile is hand-maintained on top of the generated tree — `source_ref` notes it (`… + hand Dockerfile`) — so refreshing from the generator must not drop it. Packs that produce a static site or a non-app stub don't carry one.
 
 ## Adding or updating a built-in pack
 

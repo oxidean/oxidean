@@ -10,3 +10,10 @@ cmake --build build
 ./build/app
 ctest --test-dir build
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm app
+```

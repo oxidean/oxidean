@@ -14,3 +14,12 @@ python wsgi.py
 ```
 
 Open http://127.0.0.1:5000
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 5000:5000 app
+```
+
+Open http://localhost:5000

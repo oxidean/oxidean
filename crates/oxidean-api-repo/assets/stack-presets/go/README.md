@@ -8,3 +8,10 @@ Module with `main` + test (`go mod init` style).
 go run .
 go test ./...
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm app
+```

@@ -1,0 +1,8 @@
+vendor
+.bundle
+log/*
+tmp/*
+storage/*.sqlite3
+.git
+.env
+.env.*

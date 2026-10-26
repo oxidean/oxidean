@@ -20,3 +20,12 @@ php -S localhost:8000 -t public
 Open http://localhost:8000
 
 Copy `.env.example` to `.env` when you expand toward a full Laravel install.
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 8000:8000 app
+```
+
+Open http://localhost:8000
