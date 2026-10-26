@@ -9,3 +9,10 @@ mvn -q package
 mvn -q exec:java -Dexec.mainClass=com.example.app.Main
 mvn test
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm app
+```

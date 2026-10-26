@@ -17,3 +17,12 @@ Open http://localhost:8080
 ```bash
 mvn test
 ```
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 8080:8080 app
+```
+
+Open http://localhost:8080

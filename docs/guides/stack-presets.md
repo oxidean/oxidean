@@ -53,6 +53,10 @@ Do **not** vendor `node_modules` or SDK binaries. Packs ship dependency **manife
 
 Enforced by `make check-stack-presets` / `scripts/check-stack-presets.sh`.
 
+### Container files
+
+Packs whose default output is a runnable server or binary ship a `Dockerfile` + `.dockerignore` so `docker build -t app .` works on the seeded tree (see `go`, `node-typescript`, `rails`, …); the pack's `verify_commands` records the build check and its README documents `docker run`. For `source: cli`/`repo` packs the Dockerfile is hand-maintained on top of the generated tree — `source_ref` notes it (`… + hand Dockerfile`) — so refreshing from the generator must not drop it. Packs that produce a static site or a non-app stub don't carry one.
+
 ## Adding or updating a built-in pack
 
 1. Create or refresh `crates/oxidean-api/assets/stack-presets/<pack-id>/`.

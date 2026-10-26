@@ -19,3 +19,12 @@ Open http://localhost:3000
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run lint` | ESLint via `next lint` |
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 3000:3000 app
+```
+
+Open http://localhost:3000

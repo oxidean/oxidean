@@ -18,3 +18,12 @@ Open http://localhost:3000
 | `bun run dev` | Hot-reload server |
 | `bun run start` | Run without watch |
 | `bun test` | Bun test runner |
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 3000:3000 app
+```
+
+Open http://localhost:3000

@@ -19,3 +19,12 @@ Open http://localhost:5173
 | `npm run build` | Production build |
 | `npm start` | Serve production build |
 | `npm run typecheck` | TypeScript check |
+
+## Docker
+
+```bash
+docker build -t app .
+docker run --rm -p 3000:3000 app
+```
+
+Open http://localhost:3000

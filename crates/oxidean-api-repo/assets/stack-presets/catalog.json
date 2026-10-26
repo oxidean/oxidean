@@ -13,26 +13,28 @@
       "id": "rust",
       "label": "Rust",
       "group": "Systems",
-      "description": "Official-style Cargo binary crate \u2014 cargo run ready.",
+      "description": "Official-style Cargo binary crate \u2014 cargo run ready. Includes a Dockerfile.",
       "default_gitignore": "Rust",
       "source": "cli",
-      "source_ref": "cargo new app --bin && strip target/",
-      "last_synced": "2026-09-17",
+      "source_ref": "cargo new app --bin && strip target/ + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "cargo check"
+        "cargo check",
+        "docker build -t app ."
       ]
     },
     {
       "id": "cmake-cpp",
       "label": "C / C++ (CMake)",
       "group": "Systems",
-      "description": "CMake project with a hello main.cpp ready to configure and build.",
+      "description": "CMake project with a hello main.cpp ready to configure and build. Includes a Dockerfile.",
       "default_gitignore": "C++",
       "source": "manual",
-      "source_ref": "CMake hello matching cmake-init style",
-      "last_synced": "2026-09-17",
+      "source_ref": "CMake hello matching cmake-init style + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "cmake -B build && cmake --build build"
+        "cmake -B build && cmake --build build",
+        "docker build -t app ."
       ]
     },
     {
@@ -65,195 +67,210 @@
       "id": "go",
       "label": "Go",
       "group": "Backend",
-      "description": "Go module with main package \u2014 go run ready.",
+      "description": "Go module with main package \u2014 go run ready. Includes a Dockerfile.",
       "default_gitignore": "Go",
       "source": "cli",
-      "source_ref": "go mod init example.com/app",
-      "last_synced": "2026-09-17",
+      "source_ref": "go mod init example.com/app + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "go run ."
+        "go run .",
+        "docker build -t app ."
       ]
     },
     {
       "id": "node-typescript",
       "label": "Node + TypeScript",
       "group": "Backend",
-      "description": "package.json + tsconfig and a typed src/index.ts entry.",
+      "description": "package.json + tsconfig and a typed src/index.ts entry. Includes a Dockerfile.",
       "default_gitignore": "Node",
       "source": "cli",
-      "source_ref": "npm init + tsc --init (Node ESM TS)",
-      "last_synced": "2026-09-17",
+      "source_ref": "npm init + tsc --init (Node ESM TS) + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "npm install && npm run build"
+        "npm install && npm run build",
+        "docker build -t app ."
       ]
     },
     {
       "id": "bun",
       "label": "Bun",
       "group": "Backend",
-      "description": "Bun TypeScript starter matching bun init.",
+      "description": "Bun TypeScript starter matching bun init. Includes a Dockerfile.",
       "default_gitignore": "Bun",
       "source": "cli",
-      "source_ref": "bun init",
-      "last_synced": "2026-09-17",
+      "source_ref": "bun init + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "bun run index.ts"
+        "bun run index.ts",
+        "docker build -t app ."
       ]
     },
     {
       "id": "deno",
       "label": "Deno",
       "group": "Backend",
-      "description": "Deno starter matching deno init.",
+      "description": "Deno starter matching deno init. Includes a Dockerfile.",
       "default_gitignore": "Node",
       "source": "cli",
-      "source_ref": "deno init",
-      "last_synced": "2026-09-17",
+      "source_ref": "deno init + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "deno run main.ts"
+        "deno run main.ts",
+        "docker build -t app ."
       ]
     },
     {
       "id": "python",
       "label": "Python",
       "group": "Backend",
-      "description": "requirements.txt and main.py for scripts and small services.",
+      "description": "requirements.txt and main.py for scripts and small services. Includes a Dockerfile.",
       "default_gitignore": "Python",
       "source": "manual",
-      "source_ref": "requirements.txt + main.py",
-      "last_synced": "2026-09-17",
+      "source_ref": "requirements.txt + main.py + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "python main.py"
+        "python main.py",
+        "docker build -t app ."
       ]
     },
     {
       "id": "flask",
       "label": "Flask",
       "group": "Backend",
-      "description": "Minimal Flask app.py with a health route \u2014 Python web API starter.",
+      "description": "Minimal Flask app.py with a health route \u2014 Python web API starter. Includes a Dockerfile.",
       "default_gitignore": "Python",
       "source": "manual",
-      "source_ref": "Flask app factory starter",
-      "last_synced": "2026-09-17",
+      "source_ref": "Flask app factory starter + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "flask --app app run"
+        "flask --app app run",
+        "docker build -t app ."
       ]
     },
     {
       "id": "django",
       "label": "Django",
       "group": "Backend",
-      "description": "Django project skeleton matching django-admin startproject.",
+      "description": "Django project skeleton matching django-admin startproject. Includes a Dockerfile.",
       "default_gitignore": "Python",
       "source": "cli",
-      "source_ref": "django-admin startproject config .",
-      "last_synced": "2026-09-17",
+      "source_ref": "django-admin startproject config . + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "python manage.py runserver"
+        "python manage.py runserver",
+        "docker build -t app ."
       ]
     },
     {
       "id": "java",
       "label": "Java",
       "group": "Backend",
-      "description": "Maven-style src/main/java layout with a Main entry class.",
+      "description": "Maven-style src/main/java layout with a Main entry class. Includes a Dockerfile.",
       "default_gitignore": "Java",
       "source": "manual",
-      "source_ref": "Maven quickstart layout",
-      "last_synced": "2026-09-17",
+      "source_ref": "Maven quickstart layout + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "mvn -q package"
+        "mvn -q package",
+        "docker build -t app ."
       ]
     },
     {
       "id": "spring-boot",
       "label": "Spring Boot",
       "group": "Backend",
-      "description": "Spring Boot Maven web starter.",
+      "description": "Spring Boot Maven web starter. Includes a Dockerfile.",
       "default_gitignore": "Maven",
       "source": "repo",
-      "source_ref": "start.spring.io snapshot (web starter)",
-      "last_synced": "2026-09-17",
+      "source_ref": "start.spring.io snapshot (web starter) + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "./mvnw spring-boot:run"
+        "./mvnw spring-boot:run",
+        "docker build -t app ."
       ]
     },
     {
       "id": "csharp",
       "label": "C#",
       "group": "Backend",
-      "description": ".NET console app matching dotnet new console.",
+      "description": ".NET console app matching dotnet new console. Includes a Dockerfile.",
       "default_gitignore": "VisualStudio",
       "source": "cli",
-      "source_ref": "dotnet new console",
-      "last_synced": "2026-09-17",
+      "source_ref": "dotnet new console + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "dotnet run"
+        "dotnet run",
+        "docker build -t app ."
       ]
     },
     {
       "id": "ruby",
       "label": "Ruby",
       "group": "Backend",
-      "description": "Gemfile + main.rb for scripts and lightweight services.",
+      "description": "Gemfile + main.rb for scripts and lightweight services. Includes a Dockerfile.",
       "default_gitignore": "Ruby",
       "source": "manual",
-      "source_ref": "Gemfile + main.rb",
-      "last_synced": "2026-09-17",
+      "source_ref": "Gemfile + main.rb + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "bundle exec ruby main.rb"
+        "bundle exec ruby main.rb",
+        "docker build -t app ."
       ]
     },
     {
       "id": "rails",
       "label": "Rails",
       "group": "Backend",
-      "description": "Rails application skeleton.",
+      "description": "Rails application skeleton. Includes a Dockerfile.",
       "default_gitignore": "Ruby",
       "source": "cli",
-      "source_ref": "rails new . --skip-javascript --skip-hotwire (skeleton)",
-      "last_synced": "2026-09-17",
+      "source_ref": "rails new . --skip-javascript --skip-hotwire (skeleton) + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "bin/rails server"
+        "bin/rails server",
+        "docker build -t app ."
       ]
     },
     {
       "id": "php",
       "label": "PHP",
       "group": "Backend",
-      "description": "index.php hello endpoint \u2014 plain PHP without a framework.",
+      "description": "index.php hello endpoint \u2014 plain PHP without a framework. Includes a Dockerfile.",
       "default_gitignore": "PHP",
       "source": "manual",
-      "source_ref": "plain PHP index.php",
-      "last_synced": "2026-09-17",
+      "source_ref": "plain PHP index.php + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "php -S localhost:8000"
+        "php -S localhost:8000",
+        "docker build -t app ."
       ]
     },
     {
       "id": "laravel",
       "label": "Laravel",
       "group": "Backend",
-      "description": "Laravel-style Composer project skeleton (artisan serve happy path).",
+      "description": "Laravel-style Composer project skeleton (artisan serve happy path). Includes a Dockerfile.",
       "default_gitignore": "Composer",
       "source": "cli",
-      "source_ref": "composer create-project laravel/laravel (trimmed)",
-      "last_synced": "2026-09-17",
+      "source_ref": "composer create-project laravel/laravel (trimmed) + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "php artisan serve"
+        "php artisan serve",
+        "docker build -t app ."
       ]
     },
     {
       "id": "elixir",
       "label": "Elixir",
       "group": "Backend",
-      "description": "Elixir script entry for Mix-friendly backends and BEAM services.",
+      "description": "Elixir script entry for Mix-friendly backends and BEAM services. Includes a Dockerfile.",
       "default_gitignore": "Elixir",
       "source": "cli",
-      "source_ref": "mix new app",
-      "last_synced": "2026-09-17",
+      "source_ref": "mix new app + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "mix run"
+        "mix run",
+        "docker build -t app ."
       ]
     },
     {
@@ -273,13 +290,14 @@
       "id": "nextjs",
       "label": "Next.js",
       "group": "Frontend",
-      "description": "Next.js App Router TypeScript starter matching create-next-app.",
+      "description": "Next.js App Router TypeScript starter matching create-next-app. Includes a Dockerfile.",
       "default_gitignore": "Node",
       "source": "cli",
-      "source_ref": "npx create-next-app@latest --ts --app --eslint --no-src-dir --import-alias '@/*' --use-npm --turbopack false",
-      "last_synced": "2026-09-17",
+      "source_ref": "npx create-next-app@latest --ts --app --eslint --no-src-dir --import-alias '@/*' --use-npm --turbopack false + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "npm install && npm run dev"
+        "npm install && npm run dev",
+        "docker build -t app ."
       ]
     },
     {
@@ -403,13 +421,14 @@
       "id": "remix",
       "label": "Remix",
       "group": "Frontend",
-      "description": "Remix application starter.",
+      "description": "Remix application starter. Includes a Dockerfile.",
       "default_gitignore": "Node",
       "source": "cli",
-      "source_ref": "npx create-remix@latest --template remix-run/remix/templates/remix --no-git-init --no-install",
-      "last_synced": "2026-09-17",
+      "source_ref": "npx create-remix@latest --template remix-run/remix/templates/remix --no-git-init --no-install + hand Dockerfile",
+      "last_synced": "2026-10-26",
       "verify_commands": [
-        "npm install && npm run dev"
+        "npm install && npm run dev",
+        "docker build -t app ."
       ]
     },
     {
@@ -449,19 +468,6 @@
       "last_synced": "2026-09-17",
       "verify_commands": [
         "terraform init && terraform plan"
-      ]
-    },
-    {
-      "id": "docker",
-      "label": "Docker",
-      "group": "Infra",
-      "description": "Dockerfile + compose.yml skeleton for containerized apps.",
-      "default_gitignore": "Docker",
-      "source": "manual",
-      "source_ref": "Dockerfile + compose.yml app skeleton",
-      "last_synced": "2026-09-17",
-      "verify_commands": [
-        "docker compose up --build"
       ]
     },
     {
