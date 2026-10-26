@@ -180,8 +180,12 @@ services:
       - oxidean
 
   # Optional Actions runner — `docker compose --profile actions up -d`.
-  # Executes run: steps on the host (docker:// labels additionally need the
-  # Docker socket, which is root-equivalent — isolate the runner host).
+  # Runs host-mode jobs by default; `docker://` step labels additionally need
+  # the Docker socket, which is NOT mounted here — it is root-equivalent on
+  # the host. Opt in explicitly with the shipped override file:
+  #   docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml \
+  #     --profile actions up -d
+  # …and restrict that runner to trusted workflows.
   runner:
     profiles: ["actions"]
     image: ghcr.io/oxidean/oxidean-runner:${OXIDEAN_VERSION:-latest}
@@ -194,9 +198,6 @@ services:
       OXIDEAN_RUNNER_GIT_TOKEN: ${OXIDEAN_RUNNER_GIT_TOKEN:-}
     volumes:
       - runner_data:/data
-      # Required only for docker:// step labels — the socket grants
-      # root-equivalent host access; drop it to run host-mode jobs only.
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       api:
         condition: service_healthy

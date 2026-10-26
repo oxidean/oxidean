@@ -2,11 +2,12 @@
 
 A production-shaped Compose stack built from the published images
 (`ghcr.io/oxidean/oxidean-{api,web,runner}`). No repository checkout or
-source build required — copy this directory's three files anywhere.
+source build required — copy this directory's files anywhere.
 
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | postgres + api + web, plus `tls` (caddy) and `actions` (runner) profiles |
+| `docker-compose.docker-sock.yml` | opt-in override mounting `docker.sock` into the runner for `docker://` job labels — root-equivalent, trusted workflows only |
 | `Caddyfile` | TLS edge for the `tls` profile — `reverse_proxy web:3000`, auto-HTTPS for `$DOMAIN` |
 | `.env.example` | every supported knob, commented — copy to `.env` |
 
@@ -19,6 +20,8 @@ Environment variable reference: [`docs/CONFIGURATION.md`](../../docs/CONFIGURATI
 ```bash
 cp .env.example .env
 # fill POSTGRES_PASSWORD and OXIDEAN_ACTIONS_SECRETS_KEY
+# and set OXIDEAN_ENV=development  (eval mode: no Secure cookies,
+# auto-generates the web-flow signing key)
 docker compose up -d
 ```
 

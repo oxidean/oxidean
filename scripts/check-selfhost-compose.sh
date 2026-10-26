@@ -9,7 +9,7 @@
 #      (crates/**), documented (docs/CONFIGURATION.md), or an explicit
 #      compose-level allowlist entry — so renamed/dropped knobs fail here.
 #   4. The production-required set is actually present in the example.
-#   5. .env.example has no orphans: every key is wired into the compose file,
+#   5. .env.example has no orphans: every key is wired into a compose file,
 #      and every OXIDEAN_* it documents appears in CONFIGURATION.md.
 #
 # Usage: scripts/check-selfhost-compose.sh   (also: make selfhost-check)
@@ -19,8 +19,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 DIR=deploy/selfhost
 COMPOSE="$DIR/docker-compose.yml"
+OVERRIDE="$DIR/docker-compose.docker-sock.yml"
 ENVX="$DIR/.env.example"
 CONFIGMD=docs/CONFIGURATION.md
+COMPOSE_FILES=("$COMPOSE" "$OVERRIDE")
 
 fail() { echo "selfhost-check: FAIL: $*" >&2; exit 1; }
 info() { echo "selfhost-check: $*"; }
@@ -49,7 +51,7 @@ third_party_image_exists() {
     "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}")" = "200" ]
 }
 
-for f in "$COMPOSE" "$ENVX" "$CONFIGMD" scripts/ghcr-images.sh; do
+for f in "$COMPOSE" "$OVERRIDE" "$ENVX" "$CONFIGMD" scripts/ghcr-images.sh; do
   [ -f "$f" ] || fail "missing $f"
 done
 
@@ -62,10 +64,12 @@ for combo in "" "--profile tls" "--profile actions" "--profile tls --profile act
   docker compose -f "$COMPOSE" $combo config >/dev/null \
     || fail "docker compose config failed for: ${combo:-base}"
 done
-info "compose config parses (base, tls, actions, tls+actions)"
+docker compose -f "$COMPOSE" -f "$OVERRIDE" --profile actions config >/dev/null \
+  || fail "docker compose config failed for docker-sock override"
+info "compose config parses (base, tls, actions, tls+actions, docker-sock override)"
 
 # --- 2. image refs: allowlist + manifest existence ---------------------------
-mapfile -t imgs < <(grep -oE 'image:[[:space:]]*[^[:space:]]+' "$COMPOSE" | awk '{print $2}' | sort -u)
+mapfile -t imgs < <(grep -oE 'image:[[:space:]]*[^[:space:]]+' "${COMPOSE_FILES[@]}" | awk '{print $2}' | sort -u)
 [ "${#imgs[@]}" -gt 0 ] || fail "no image: refs found in $COMPOSE"
 
 allowed_oxidean="api web runner"
@@ -90,8 +94,13 @@ for img in "${imgs[@]}"; do
   esac
 done
 
-tag="$(grep -oE 'OXIDEAN_VERSION:-[a-zA-Z0-9._-]+' "$COMPOSE" | head -1 | sed 's/.*:-//')"
-[ -n "$tag" ] || fail "could not parse OXIDEAN_VERSION default tag"
+# Resolve the tag the way Compose resolves it for a copied .env: process env
+# wins, then the template's uncommented value, then the compose :- fallback —
+# so a stale OXIDEAN_VERSION in .env.example fails the manifest check too.
+tag="${OXIDEAN_VERSION:-}"
+[ -n "$tag" ] || tag="$(grep -oE '^OXIDEAN_VERSION=[^[:space:]#]+' "$ENVX" | head -1 | cut -d= -f2-)"
+[ -n "$tag" ] || tag="$(grep -oE 'OXIDEAN_VERSION:-[a-zA-Z0-9._-]+' "$COMPOSE" | head -1 | sed 's/.*:-//')"
+[ -n "$tag" ] || fail "could not resolve OXIDEAN_VERSION (env / .env.example / compose default)"
 svcs_csv="$(echo "$oxidean_svcs" | tr ' ' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')"
 scripts/ghcr-images.sh check "$tag" --services "$svcs_csv" >/dev/null \
   || fail "ghcr.io/oxidean/oxidean-{$svcs_csv}:$tag — manifest check failed (published?)"
@@ -105,10 +114,10 @@ MYSQL_DATABASE MYSQL_ROOT_PASSWORD MYSQL_DATABASE_URL DOMAIN OXIDEAN_VERSION \
 OXIDEAN_HTTP_BIND OXIDEAN_RUNNER_ORIGIN OXIDEAN_RUNNER_NAME OXIDEAN_RUNNER_LABELS \
 OXIDEAN_RUNNER_GIT_TOKEN RUST_LOG PORT API_BIND"
 
-# ${VAR} interpolation refs in the compose file
-mapfile -t vars_interp < <(grep -oE '\$\{[A-Z][A-Z0-9_]*' "$COMPOSE" | sed 's/^\${//' | sort -u)
+# ${VAR} interpolation refs in the compose files
+mapfile -t vars_interp < <(grep -oE '\$\{[A-Z][A-Z0-9_]*' "${COMPOSE_FILES[@]}" | sed 's/^\${//' | sort -u)
 # env-block keys ("      KEY:" under environment:)
-mapfile -t vars_env < <(grep -oE '^[[:space:]]+[A-Z][A-Z0-9_]*:' "$COMPOSE" | tr -d ' :' | sort -u)
+mapfile -t vars_env < <(grep -oE '^[[:space:]]+[A-Z][A-Z0-9_]*:' "${COMPOSE_FILES[@]}" | tr -d ' :' | sort -u)
 # uncommented keys in .env.example
 mapfile -t vars_envx < <(grep -oE '^[A-Z][A-Z0-9_]*=' "$ENVX" | tr -d '=' | sort -u)
 
@@ -152,7 +161,7 @@ info "required production knobs present in compose + .env.example"
 # --- 5. .env.example has no orphans -------------------------------------------
 orphans=""
 for v in "${vars_envx[@]}"; do
-  grep -qE "\\\$\{${v}[}:?]|^[[:space:]]+${v}:" "$COMPOSE" || orphans="$orphans $v"
+  grep -qE "\\\$\{${v}[}:?]|^[[:space:]]+${v}:" "${COMPOSE_FILES[@]}" || orphans="$orphans $v"
 done
 [ -z "$orphans" ] || fail ".env.example keys never wired into compose:${orphans}"
 

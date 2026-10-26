@@ -4,8 +4,10 @@ Run a complete Oxidean forge — web UI, API, database, Git-over-SSH, optional
 TLS edge and Actions runner — from published images. No repository checkout,
 no Rust or Bun toolchain, no build step.
 
-The bundle lives in [`deploy/selfhost/`](../deploy/selfhost/) and consists of
-three files you can drop into any empty directory:
+The bundle lives in [`deploy/selfhost/`](../deploy/selfhost/). Copy
+`docker-compose.yml`, `Caddyfile`, and `.env.example` into any empty
+directory (plus `docker-compose.docker-sock.yml` only if you plan to run
+`docker://` Actions jobs):
 
 ```bash
 mkdir oxidean && cd oxidean
@@ -48,7 +50,7 @@ SSH host-key dir.
 ```bash
 cp .env.example .env
 # set POSTGRES_PASSWORD and OXIDEAN_ACTIONS_SECRETS_KEY
-# (openssl rand -base64 24 / openssl rand -base64 32)
+# (openssl rand -hex 24 / openssl rand -base64 32)
 # for eval only, also set OXIDEAN_ENV=development
 docker compose up -d
 ```
@@ -70,7 +72,7 @@ cp .env.example .env
 Required edits in `.env`:
 
 ```bash
-POSTGRES_PASSWORD=<openssl rand -base64 24>
+POSTGRES_PASSWORD=<openssl rand -hex 24>
 OXIDEAN_ACTIONS_SECRETS_KEY=<openssl rand -base64 32>
 DOMAIN=git.example.com
 OXIDEAN_PUBLIC_ORIGIN=https://git.example.com
@@ -106,7 +108,7 @@ it, invite/verify links are shown once in the UI instead of emailed.
 
 | Variable | Generate | Purpose |
 |----------|----------|---------|
-| `POSTGRES_PASSWORD` | `openssl rand -base64 24` | Bundled DB credential (feeds `DATABASE_URL`) |
+| `POSTGRES_PASSWORD` | `openssl rand -hex 24` | Bundled DB credential — interpolated into `DATABASE_URL`, so it must stay URL-safe (hex avoids `/`); an external-DB `DATABASE_URL` needs percent-encoded credentials |
 | `OXIDEAN_ACTIONS_SECRETS_KEY` | `openssl rand -base64 32` | AES-256-GCM key: Actions/mirror/webhook secrets + TOTP at rest — encrypt fails closed without it |
 | `OXIDEAN_WEB_FLOW_PRIVATE_KEY` | `ssh-keygen -t ed25519 -N '' -f web-flow && base64 -w0 web-flow` | Signs UI-seeded initial commits. Required in `production`/`cloud` (fail closed); auto-generated elsewhere |
 
@@ -141,14 +143,17 @@ dialect: `postgres://`, `mysql://`, `sqlite:`.
 [`docker-compose.mysql.yml`](../docker-compose.mysql.yml) shows a bundled
 variant if you want one.
 
-**Your own reverse proxy** — publish the web port on a reachable bind
-(`OXIDEAN_HTTP_BIND=0.0.0.0:8080`), keep `OXIDEAN_WEB_BEHIND_PROXY=1`, and
-point your edge at it. Everything — UI, RPC, git clone, registries, badges,
-websockets — forwards correctly from the single port; just make sure your
-edge overwrites `X-Forwarded-*` (any mainstream proxy does). If you expose
-the web port to clients **without** a sanitizing edge, set
-`OXIDEAN_WEB_BEHIND_PROXY` empty so the tier scrubs spoofable forwarding
-headers itself.
+**Your own reverse proxy** — keep `OXIDEAN_WEB_BEHIND_PROXY=1` and point your
+edge at the web port; everything (UI, RPC, git clone, registries, badges,
+websockets) forwards from that one port, and your edge must overwrite
+`X-Forwarded-*` — any mainstream proxy does. With proxy trust enabled, **only
+the edge may reach the web port**: the tier trusts inbound `X-Forwarded-*`,
+so a client that can hit the port directly could spoof forwarding headers
+(forged client IPs, rate-limit bypass). Proxy on the same host → keep the
+loopback default. Proxy on another host → `OXIDEAN_HTTP_BIND=0.0.0.0:8080`
+*and* firewall the port to the proxy's address only. No sanitizing edge at
+all → set `OXIDEAN_WEB_BEHIND_PROXY` empty so the tier scrubs spoofable
+headers itself; the port may then face clients directly.
 
 **Disable git-over-SSH** — `OXIDEAN_SSH_ENABLED=false` (optionally remove
 the `ports:` entry under `api`).
@@ -167,9 +172,11 @@ docker compose --profile actions up -d
 - The env token is **reusable while set** — prefer one-time DB-minted tokens
   (`admin.actions.createRegistrationToken`, or Admin → Runners in the UI)
   on internet-facing instances and leave the env var unset.
-- The runner mounts `docker.sock` for `docker://` job labels — that socket
-  is root-equivalent on the host. Remove the mount to run host-mode jobs
-  only.
+- The default runner executes host-mode jobs only. `docker://` job labels
+  need the Docker socket — root-equivalent on the host — which ships as an
+  explicit opt-in override, not a default mount:
+  `docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml --profile actions up -d`.
+  Run it only on a dedicated runner host for trusted workflows.
 - `OXIDEAN_RUNNER_ORIGIN` defaults to `http://api:8080` (in-network); remote
   runners point it at the public origin instead.
 
@@ -182,19 +189,26 @@ docker compose up -d
 ```
 
 `OXIDEAN_AUTO_MIGRATE=true` (default) applies pending migrations on api
-boot — a failed migration exits before `/health` passes, so the previous
-container state is not lost. `latest` tracks the newest stable tag; pinning
-`OXIDEAN_VERSION=x.y.z` keeps upgrades deliberate. Check release notes
-before jumping.
+boot. A failed migration exits before `/health` passes, so the stack reports
+api unhealthy instead of silently serving the new version — but there is no
+automatic rollback: the API stays down until you resolve the failure, so
+take a backup before upgrading. `latest` tracks the newest stable tag;
+pinning `OXIDEAN_VERSION=x.y.z` keeps upgrades deliberate. Check release
+notes before jumping.
 
 ## Backup
 
-Two things hold state — the DB and the `oxidean_data` volume:
+Two things hold state — the DB and the `oxidean_data` volume. Capture them
+at one consistent point: a write between `pg_dump` and `tar` leaves the
+restored DB and volume describing different forge states, so stop the
+writers first:
 
 ```bash
+docker compose stop api   # quiesces all writes (web alone can't write)
 docker compose exec postgres pg_dump -U oxidean oxidean > oxidean-db.sql
 docker run --rm -v <project>_oxidean_data:/var:ro -v "$PWD:/backup" \
   alpine tar czf /backup/oxidean-data.tgz -C /var .
+docker compose start api
 ```
 
 (`<project>` is the directory name — `docker volume ls | grep oxidean_data`

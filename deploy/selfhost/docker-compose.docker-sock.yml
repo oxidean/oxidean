@@ -1,0 +1,15 @@
+# Opt-in override: mount the host Docker socket into the Actions runner so
+# `docker://` step labels can spawn job containers.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml \
+#     --profile actions up -d
+#
+# The socket grants root-equivalent access to the host — a workflow that runs
+# `docker` can read every file and every other container's secrets. Enable
+# this only on a dedicated, network-isolated runner host that executes
+# trusted workflows.
+
+services:
+  runner:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
