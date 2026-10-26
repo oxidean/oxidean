@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM elixir:alpine
+FROM elixir:1.20-alpine
 WORKDIR /app
 ENV MIX_ENV=prod
 COPY mix.exs ./

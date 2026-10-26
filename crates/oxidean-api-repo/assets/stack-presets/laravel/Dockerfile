@@ -5,7 +5,7 @@ WORKDIR /app
 COPY composer.json ./
 RUN composer install --no-dev --prefer-dist --no-interaction
 
-FROM php:cli-alpine
+FROM php:8.5-cli-alpine3.24
 WORKDIR /app
 COPY --from=deps /app/vendor ./vendor
 COPY . .

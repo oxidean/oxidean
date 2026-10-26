@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM denoland/deno:alpine
+FROM denoland/deno:alpine-2.9.8
 WORKDIR /app
 COPY . .
 EXPOSE 8000
