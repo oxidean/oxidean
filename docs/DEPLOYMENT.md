@@ -2,13 +2,16 @@
 
 Oxidean deploys as Docker images behind Traefik on a single HTTP origin. The supported path in-repo is Docker Compose (default Postgres, optional MySQL/SQLite overlays). Cloud hosting is intended to reuse the same images.
 
+**Operators self-hosting a real instance:** the root `docker-compose.yml` is the *contributor/dev* stack (builds from source, `Host(localhost)` Traefik rules, dev secrets). Use the image-based bundle in [`deploy/selfhost/`](../deploy/selfhost/) instead — guide: [SELF-HOSTING.md](SELF-HOSTING.md).
+
 Related docs: [CONFIGURATION.md](CONFIGURATION.md), [ARCHITECTURE.md](ARCHITECTURE.md), [database.md](database.md).
 
 ## Deployment targets
 
 | Target | Config | Notes |
 |--------|--------|-------|
-| Docker Compose (default) | `docker-compose.yml` | Traefik `:80` + `web` + `api` + Postgres 16 |
+| **Self-host Compose (operators)** | [`deploy/selfhost/`](../deploy/selfhost/) | Published GHCR images, no build — `web` is the single origin, optional `tls` (caddy) + `actions` (runner) profiles. Guide: [SELF-HOSTING.md](SELF-HOSTING.md) |
+| Docker Compose (dev, default) | `docker-compose.yml` | Traefik `:80` + `web` + `api` + Postgres — source builds, `Host(localhost)` |
 | MySQL overlay | `docker-compose.yml` + `docker-compose.mysql.yml` (`--profile mysql`) | Overrides API `DATABASE_URL` / dialect; Postgres service may still start |
 | SQLite overlay | `docker-compose.yml` + `docker-compose.sqlite.yml` | No DB container; file under `${OXIDEAN_SQLITE_HOST_DIR:-./var}` → `/app/var` (Compose v2.24+ for `!reset`) |
 | Dev-auth stubs (local only) | `docker-compose.dev-auth.yml` (`--profile dev-auth`) | Mailpit / OIDC mock / HTTP stubs — not a production stack |

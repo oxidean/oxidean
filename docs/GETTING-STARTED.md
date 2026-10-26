@@ -96,6 +96,7 @@ List all Make targets with `make help`.
 - [DEVELOPMENT.md](DEVELOPMENT.md) — day-to-day builds, lint, and contributor workflow
 - [TESTING.md](TESTING.md) — unit, integration, and e2e commands
 - [CONFIGURATION.md](CONFIGURATION.md) — environment variables and Compose overlays
+- [SELF-HOSTING.md](SELF-HOSTING.md) — self-host a real instance from published images (`deploy/selfhost/`)
 - [guides/administration.md](guides/administration.md) — administering users, sessions, and invites
 - [dev-auth.md](dev-auth.md) — Mailpit, OIDC mock, and Resend/WorkOS stubs (`make up-dev-auth`)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system layout and request path
