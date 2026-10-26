@@ -25,7 +25,7 @@ BASE_URL="${OXIDEAN_SMOKE_URL:-http://localhost}"
 
 smoke_require_docker
 # Fast skip when Compose API isn't up (avoid 2-minute health wait).
-if ! docker compose -f docker-compose.yml ps --status running 2>/dev/null | grep -qE 'api|oxidean-api'; then
+if ! smoke_compose_api_running; then
   smoke_require_or_skip "Compose API not running; skipping smoke-packages (run make up to exercise Traefik routing)"
 fi
 

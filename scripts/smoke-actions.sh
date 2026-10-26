@@ -49,7 +49,7 @@ else
   smoke_require_or_skip "Docker daemon not available; runner Dockerfile checks already passed"
 fi
 
-if ! docker compose -f docker-compose.yml ps --status running 2>/dev/null | grep -qE 'api|oxidean-api'; then
+if ! smoke_compose_api_running; then
   smoke_require_or_skip "Compose API not running; skipping live Actions health (run make up to exercise)"
 fi
 

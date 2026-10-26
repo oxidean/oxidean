@@ -22,3 +22,18 @@ smoke_require_docker() {
     smoke_require_or_skip "docker engine not reachable; skipping ${name}"
   fi
 }
+
+# Retries the `compose ps` fast-skip probe — a single invocation can return
+# empty on a transient daemon/CLI hiccup while the stack is serving, which
+# would fail CI closed for the wrong reason.
+smoke_compose_api_running() {
+  local file="${1:-docker-compose.yml}"
+  local i
+  for i in $(seq 1 10); do
+    if docker compose -f "$file" ps --status running 2>/dev/null | grep -qE 'api|oxidean-api'; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
