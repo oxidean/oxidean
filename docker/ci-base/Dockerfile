@@ -30,7 +30,7 @@
 ARG RUST_IMAGE=rust:1.99.1-bookworm
 ARG BUN_IMAGE=oven/bun:1.4.4-debian
 ARG DEBIAN_IMAGE=debian:bookworm-slim
-ARG NODE_IMAGE=node:26.12.1-bookworm-slim
+ARG NODE_IMAGE=node:24.22.1-bookworm-slim
 
 # Pinned tool versions — bump deliberately; the content tag covers this file.
 ARG CARGO_NEXTEST_VERSION=0.9.149
