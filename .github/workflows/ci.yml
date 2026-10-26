@@ -576,6 +576,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.4"
+      # Host job: astro runs under the runner's stock node otherwise, and
+      # astro's engines floor can sit above the runner image's patch level.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
