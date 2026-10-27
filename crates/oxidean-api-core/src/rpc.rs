@@ -102,11 +102,7 @@ impl ClientMeta {
             .and_then(|s| s.split(',').map(str::trim).rfind(|p| !p.is_empty()))
             .map(|s| s.to_string());
         let peer_s = peer.map(|ip| ip.to_string());
-        let ip_address = if trust_xff {
-            xff.or(peer_s)
-        } else {
-            peer_s
-        };
+        let ip_address = if trust_xff { xff.or(peer_s) } else { peer_s };
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
             .and_then(|v| v.to_str().ok())

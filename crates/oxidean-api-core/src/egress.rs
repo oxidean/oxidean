@@ -61,7 +61,8 @@ pub async fn resolve_egress_host(
         return Err(format!("egress target `{host}` is not publicly routable"));
     }
     let addrs: Vec<SocketAddr> =
-        match tokio::time::timeout(DNS_LOOKUP_TIMEOUT, tokio::net::lookup_host((host, port))).await {
+        match tokio::time::timeout(DNS_LOOKUP_TIMEOUT, tokio::net::lookup_host((host, port))).await
+        {
             Ok(Ok(iter)) => iter.collect(),
             Ok(Err(e)) => return Err(format!("egress host `{host}` does not resolve: {e}")),
             Err(_) => return Err(format!("egress host `{host}` DNS lookup timed out")),
@@ -152,35 +153,25 @@ mod tests {
     #[tokio::test]
     async fn private_targets_allowed_outside_hosted_envs() {
         // A literal private target resolves without DNS.
-        assert!(
-            resolve_egress_host("10.0.0.9", 443, "test")
-                .await
-                .is_ok()
-        );
-        assert!(
-            resolve_egress_host("10.0.0.9", 443, "production")
-                .await
-                .is_err()
-        );
+        assert!(resolve_egress_host("10.0.0.9", 443, "test").await.is_ok());
+        assert!(resolve_egress_host("10.0.0.9", 443, "production")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn hosted_env_rejects_loopback_dns_names() {
         // `localhost` always resolves loopback — the DNS path runs with
         // no external resolver needed.
-        assert!(
-            resolve_egress_host("localhost", 443, "production")
-                .await
-                .is_err()
-        );
+        assert!(resolve_egress_host("localhost", 443, "production")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn non_resolving_names_fail_closed() {
-        assert!(
-            resolve_egress_host("nonexistent.invalid.", 443, "test")
-                .await
-                .is_err()
-        );
+        assert!(resolve_egress_host("nonexistent.invalid.", 443, "test")
+            .await
+            .is_err());
     }
 }

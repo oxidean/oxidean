@@ -123,7 +123,10 @@ fn is_blocked_host(host: &str) -> bool {
 /// DNS answer. The returned addresses are pinned on the reqwest client
 /// so the connection cannot rebind to a different (unvalidated) answer
 /// between this check and connect.
-async fn resolve_webhook_target(url: &str, env_name: &str) -> Result<(bool, Vec<SocketAddr>), String> {
+async fn resolve_webhook_target(
+    url: &str,
+    env_name: &str,
+) -> Result<(bool, Vec<SocketAddr>), String> {
     let parsed = url::Url::parse(url).map_err(|_| "invalid webhook URL".to_string())?;
     let host = parsed.host_str().unwrap_or("");
     let port = parsed.port_or_known_default().unwrap_or(443);
@@ -374,7 +377,10 @@ mod tests {
         assert!(validate_webhook_url("https://10.0.0.1/hook", "development").is_ok());
         assert!(validate_webhook_url("https://192.168.1.1/hook", "development").is_ok());
         for env in ["production", "cloud"] {
-            assert!(validate_webhook_url("https://10.0.0.1/hook", env).is_err(), "{env}");
+            assert!(
+                validate_webhook_url("https://10.0.0.1/hook", env).is_err(),
+                "{env}"
+            );
             assert!(
                 validate_webhook_url("https://192.168.1.1/hook", env).is_err(),
                 "{env}"
@@ -387,8 +393,14 @@ mod tests {
                 validate_webhook_url("https://[::ffff:10.0.0.1]/hook", env).is_err(),
                 "{env}"
             );
-            assert!(validate_webhook_url("https://[fd00::1]/hook", env).is_err(), "{env}");
-            assert!(validate_webhook_url("https://[::1]/hook", env).is_err(), "{env}");
+            assert!(
+                validate_webhook_url("https://[fd00::1]/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://[::1]/hook", env).is_err(),
+                "{env}"
+            );
         }
     }
 

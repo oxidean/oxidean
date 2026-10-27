@@ -4,13 +4,13 @@ use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::middleware::{from_fn, Next};
-use std::net::{IpAddr, SocketAddr};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use oxidean_core::{AppError, RpcRequest, RpcResponse};
 use oxidean_db::Database;
+use std::net::{IpAddr, SocketAddr};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -249,7 +249,8 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
 /// `ConnectInfo` when the server was started with
 /// `into_make_service_with_connect_info`.
 async fn stamp_connect_ip(mut req: Request<axum::body::Body>, next: Next) -> Response {
-    req.headers_mut().remove(oxidean_api_core::rpc::CONNECT_IP_HEADER);
+    req.headers_mut()
+        .remove(oxidean_api_core::rpc::CONNECT_IP_HEADER);
     if let Some(ConnectInfo(addr)) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
         if let Ok(v) = HeaderValue::from_str(&addr.ip().to_string()) {
             req.headers_mut()

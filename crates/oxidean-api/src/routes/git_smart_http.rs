@@ -165,8 +165,6 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
     oxidean_api_core::rpc::ClientMeta::from_headers(headers).ip_address
 }
 
-
-
 fn pat_expired(expires_at: &Option<String>) -> bool {
     let Some(raw) = expires_at.as_deref() else {
         return false;
@@ -192,11 +190,7 @@ struct AuthedPat {
 }
 
 /// Record a failed Basic/PAT attempt against IP and optional username→user bucket.
-async fn record_failed_auth(
-    state: &AppState,
-    headers: &HeaderMap,
-    username: Option<&str>,
-) {
+async fn record_failed_auth(state: &AppState, headers: &HeaderMap, username: Option<&str>) {
     let ip = client_ip(headers).unwrap_or_else(|| "unknown".into());
     let mut user_id: Option<String> = None;
     if let Some(name) = username {

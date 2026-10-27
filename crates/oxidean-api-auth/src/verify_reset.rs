@@ -207,10 +207,7 @@ pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic
 /// When an OTP redeem can resolve the account but not a pending reset
 /// token yet (malformed code before lookup), still burn an attempt if a
 /// row exists — mirrors `bump_verify_attempt_on_miss`.
-async fn bump_reset_attempt_on_miss(
-    ctx: &RpcCtx,
-    email_raw: Option<&str>,
-) -> Result<(), AppError> {
+async fn bump_reset_attempt_on_miss(ctx: &RpcCtx, email_raw: Option<&str>) -> Result<(), AppError> {
     let Some(raw) = email_raw else {
         return Ok(());
     };
