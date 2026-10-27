@@ -458,45 +458,46 @@ pub async fn get_object(
         return not_found_lfs("Object does not exist");
     }
 
-    let bytes = match store::read_object(&state.lfs_dir, &oid).await {
-        Ok(b) => b,
+    let (mut file, len) = match store::open_object(&state.lfs_dir, &oid).await {
+        Ok(v) => v,
         Err(_) => return not_found_lfs("Object does not exist"),
     };
 
     // Range GET for resumable download within basic transfer (D-LFS-07 locked).
+    // Stream from disk — do not buffer the whole object (L-2).
     if let Some(range) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
-        if let Some((start, end)) = parse_bytes_range(range, bytes.len() as u64) {
-            let end_inclusive = end.min(bytes.len() as u64 - 1);
-            if start > end_inclusive || start >= bytes.len() as u64 {
+        if let Some((start, end)) = parse_bytes_range(range, len) {
+            let end_inclusive = end.min(len.saturating_sub(1));
+            if start > end_inclusive || start >= len {
                 return StatusCode::RANGE_NOT_SATISFIABLE.into_response();
             }
-            let slice = bytes[start as usize..=end_inclusive as usize].to_vec();
-            let content_range = format!("bytes {start}-{end_inclusive}/{}", bytes.len());
-            let mut res = (
-                StatusCode::PARTIAL_CONTENT,
-                [(header::CONTENT_TYPE, "application/octet-stream")],
-                slice,
-            )
-                .into_response();
-            res.headers_mut().insert(
-                header::CONTENT_RANGE,
-                HeaderValue::from_str(&content_range).unwrap(),
-            );
-            res.headers_mut()
-                .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-            return res;
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            let take_len = end_inclusive - start + 1;
+            let take = file.take(take_len);
+            let stream = tokio_util::io::ReaderStream::new(take);
+            let content_range = format!("bytes {start}-{end_inclusive}/{len}");
+            return Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .header(header::CONTENT_RANGE, content_range)
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(header::CONTENT_LENGTH, take_len)
+                .body(Body::from_stream(stream))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     }
 
-    let mut res = (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        bytes,
-    )
-        .into_response();
-    res.headers_mut()
-        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-    res
+    let stream = tokio_util::io::ReaderStream::new(file);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_LENGTH, len)
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 /// `POST /{owner}/{repo}.git/info/lfs/objects/verify` — optional basic verify (D-LFS-07).

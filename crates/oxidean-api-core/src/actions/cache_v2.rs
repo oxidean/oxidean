@@ -311,6 +311,11 @@ fn download_hit(row: &oxidean_db::actions_cache::ActionCacheRow, scope: &CacheSc
 
 /// `signed_{upload,download}_url` — self-authenticating `?t=` URL under the
 /// `/api/actions` mount (same proxy path family as the v1 surface).
+///
+/// The job runtime token rides in the query string (GitHub Actions cache
+/// SAS parity). It is job-scoped and short-lived (`OXIDEAN_ACTIONS_CACHE_TOKEN_HOURS`),
+/// but still lands in access/proxy logs (L-3). A per-URL HMAC opaque would
+/// shrink the blast radius further — tracked as follow-up hardening.
 fn blob_url(cache_id: &str, token: &str) -> String {
     let origin = crate::public_origin::resolve_public_origin();
     format!("{origin}/api/actions/_apis/artifactcache2/blobs/{cache_id}?t={token}")

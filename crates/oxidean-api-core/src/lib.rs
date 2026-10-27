@@ -15,6 +15,7 @@ pub mod auth;
 pub mod check;
 pub mod crypto;
 pub mod discussion;
+pub mod egress;
 pub mod email;
 pub mod git;
 pub mod invites;

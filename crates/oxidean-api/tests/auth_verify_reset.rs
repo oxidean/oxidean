@@ -668,6 +668,7 @@ async fn reset_password_token_revokes_others_and_signs_in() {
 
 #[tokio::test]
 async fn reset_password_otp_consume() {
+    // OTP redeem requires email alongside code (C-1 attempt-cap).
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("reset_otp.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -681,12 +682,40 @@ async fn reset_password_otp_consume() {
         .expect("issue_reset");
 
     let reset_body = format!(
-        r#"{{"procedure":"auth.reset_password","input":{{"code":"{}","password":"newpass99"}}}}"#,
+        r#"{{"procedure":"auth.reset_password","input":{{"email":"otp@ex.com","code":"{}","password":"newpass99"}}}}"#,
         secrets.otp
     );
     let reset = app.oneshot(rpc_req(&reset_body)).await.unwrap();
     assert_eq!(reset.status(), StatusCode::OK);
     let _cookie = session_cookie_from_response(&reset);
+}
+
+#[tokio::test]
+async fn reset_password_otp_wrong_code_bumps_and_caps() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("reset_otp_cap.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_cookie, user_id, _) = signup_user(&app, "cap@ex.com", "capreset").await;
+    let secrets = verify_reset::issue_reset(&db, &user_id)
+        .await
+        .expect("issue_reset");
+
+    for _ in 0..verify_reset::MAX_REDEEM_ATTEMPTS {
+        let body = r#"{"procedure":"auth.reset_password","input":{"email":"cap@ex.com","code":"00000000","password":"newpass99"}}"#;
+        let resp = app.clone().oneshot(rpc_req(body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+    // Cap reached — even the correct code must fail.
+    let body = format!(
+        r#"{{"procedure":"auth.reset_password","input":{{"email":"cap@ex.com","code":"{}","password":"newpass99"}}}}"#,
+        secrets.otp
+    );
+    let resp = app.oneshot(rpc_req(&body)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

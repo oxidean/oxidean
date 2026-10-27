@@ -107,6 +107,9 @@ pub async fn upsert(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirror
     let url = validate_remote_url(&req.remote_url)
         .map_err(|e| AppError::new("repo.mirror.invalid_url", e.to_string()))?
         .to_string();
+    crate::egress::validate_remote_egress(&url, &ctx.env_name)
+        .await
+        .map_err(|e| AppError::new("repo.mirror.invalid_url", e))?;
     let auth_kind = match req.auth_kind.as_str() {
         "https_token" | "ssh_key" => req.auth_kind.as_str(),
         _ => {

@@ -5,6 +5,8 @@ pub mod bearer;
 pub mod policy;
 pub mod rate_limit;
 
+pub use bearer::pat_expired;
+
 use crate::auth::session::{bytes_to_hex, sha256_hex};
 use crate::rpc::RpcCtx;
 use oxidean_core::{AppError, ClassicPatScope, FgPerms, PatKind, PatListItem, CLASSIC_PAT_PREFIX};

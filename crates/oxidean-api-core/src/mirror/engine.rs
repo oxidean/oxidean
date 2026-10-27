@@ -80,6 +80,9 @@ async fn run_mirror_sync_inner(
     let url = validate_remote_url(&mirror.remote_url)
         .map_err(|e| e.to_string())?
         .to_string();
+    crate::egress::validate_remote_egress(&url, &crate::egress::env_name())
+        .await
+        .map_err(|e| e.to_string())?;
 
     // GIT-25: `git fetch` lands objects without running hooks/update, so a repo
     // already over quota pauses mirror syncs here (same "block the next write

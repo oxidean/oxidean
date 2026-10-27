@@ -109,6 +109,9 @@ pub async fn authenticate_registry(
     if pat.revoked_at.is_some() {
         return Ok(None);
     }
+    if crate::pat::pat_expired(&pat.expires_at) {
+        return Ok(None);
+    }
 
     // Soft-ban: keep PAT rows; reject at resolve so unban restores access.
     match db.find_user_by_id(&pat.user_id).await? {

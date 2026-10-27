@@ -213,6 +213,13 @@ pub async fn link_or_create_user(
         .await
         .map_err(ExternalAuthError::from_db)?
     {
+        // Auto-link only when the IdP asserts a verified email — otherwise an
+        // attacker controlling an unverified claim could hijack the account.
+        if !identity.email_verified {
+            return Err(ExternalAuthError::Failed(
+                "email is not verified at the identity provider — verify it there, then sign in again".into(),
+            ));
+        }
         let incomplete = is_placeholder_username(&existing.username);
         (existing, incomplete)
     } else {
@@ -275,7 +282,11 @@ pub fn sanitize_return_to(raw: Option<&str>) -> String {
     let Some(s) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return "/".into();
     };
-    if !s.starts_with('/') || s.starts_with("//") || s.contains('\\') || s.contains('\n') {
+    if !s.starts_with('/')
+        || s.starts_with("//")
+        || s.contains('\\')
+        || s.chars().any(char::is_control)
+    {
         return "/".into();
     }
     if s == "/dashboard" || s.starts_with("/dashboard?") {
@@ -308,6 +319,47 @@ mod tests {
         assert_eq!(sanitize_return_to(Some("/")), "/");
         assert_eq!(sanitize_return_to(Some("/dashboard")), "/");
         assert_eq!(sanitize_return_to(None), "/");
+        assert_eq!(sanitize_return_to(Some("/ok\r\nX: 1")), "/");
+        assert_eq!(sanitize_return_to(Some("/ok\x00")), "/");
+    }
+
+    #[tokio::test]
+    async fn link_rejects_unverified_email_match_to_existing() {
+        let db = test_db().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        db.create_user(
+            &id,
+            "victim@ex.com",
+            "victim",
+            Some("unused-hash"),
+            "Victim",
+            "",
+            None,
+            oxidean_core::Role::User,
+        )
+        .await
+        .expect("create");
+        let identity = ExternalIdentity {
+            provider: "oidc".into(),
+            provider_subject: "attacker_sub".into(),
+            email: "victim@ex.com".into(),
+            display_name: Some("Attacker".into()),
+            email_verified: false,
+        };
+        let err = link_or_create_user(&db, &identity)
+            .await
+            .expect_err("must not auto-link");
+        assert!(
+            matches!(err, ExternalAuthError::Failed(ref m) if m.contains("not verified")),
+            "{err:?}"
+        );
+        assert!(
+            db.find_auth_identity("oidc", "attacker_sub")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "identity must not be linked"
+        );
     }
 
     #[test]

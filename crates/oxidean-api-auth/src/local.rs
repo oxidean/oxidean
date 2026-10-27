@@ -392,6 +392,23 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
     if identifier.is_empty() {
         return Err(invalid_credentials());
     }
+
+    // One-shot login had no rate limit (H-1) — apply the same IP+identifier
+    // budget as `login_begin` before verifying the password.
+    {
+        let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !lim.check_and_record(ip, &identifier.to_ascii_lowercase()) {
+            return Err(AppError::new(
+                "auth.rate_limited",
+                "too many sign-in attempts — try again later",
+            ));
+        }
+    }
+
     let user = resolve_login_identifier(&ctx.db, identifier).await?;
 
     let Some(user) = user else {

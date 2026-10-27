@@ -148,7 +148,7 @@ pub(crate) fn lock(
     limiter.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn pat_expired(expires_at: &Option<String>) -> bool {
+pub fn pat_expired(expires_at: &Option<String>) -> bool {
     let Some(raw) = expires_at.as_deref() else {
         return false;
     };

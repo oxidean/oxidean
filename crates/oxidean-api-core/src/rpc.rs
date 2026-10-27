@@ -59,19 +59,54 @@ pub fn core_dispatch() -> RpcDispatch {
 /// Client request metadata captured from the HTTP edge (session details, audit).
 #[derive(Debug, Clone, Default)]
 pub struct ClientMeta {
-    /// Rightmost `X-Forwarded-For` hop (trusted-proxy convention — see
-    /// `routes::git_smart_http::client_ip`).
+    /// Peer socket address, or — when `OXIDEAN_WEB_BEHIND_PROXY` is set — the
+    /// rightmost nonempty `X-Forwarded-For` hop. Direct exposure never trusts
+    /// client-supplied XFF (audit / rate-limit spoof).
     pub ip_address: Option<String>,
     pub user_agent: Option<String>,
 }
 
+/// Internal hop header stamped by the API edge from `ConnectInfo` (never
+/// trusted if a client sends it — the edge strips then re-sets).
+pub const CONNECT_IP_HEADER: &str = "x-oxidean-connect-ip";
+
 impl ClientMeta {
+    /// Build from headers. Prefer the edge-stamped [`CONNECT_IP_HEADER`] peer
+    /// when present; otherwise treat peer as unknown.
     pub fn from_headers(headers: &axum::http::HeaderMap) -> Self {
-        let ip_address = headers
+        let peer = headers
+            .get(CONNECT_IP_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok());
+        Self::from_headers_and_peer(headers, peer)
+    }
+
+    /// Resolve client IP.
+    ///
+    /// - Private/loopback peer (typical web→api hop): honor the rightmost
+    ///   nonempty `X-Forwarded-For` hop the upstream set, falling back to peer.
+    /// - Public peer (API directly exposed): ignore client-supplied XFF unless
+    ///   `OXIDEAN_WEB_BEHIND_PROXY` opts into trusting a sanitizing edge.
+    /// - No peer (legacy callers / oneshot tests): XFF only when the flag is set.
+    pub fn from_headers_and_peer(
+        headers: &axum::http::HeaderMap,
+        peer: Option<std::net::IpAddr>,
+    ) -> Self {
+        let trust_xff = match peer {
+            Some(ip) if !oxidean_core::net::is_public_ip(&ip) => true,
+            _ => crate::egress::env_flag("OXIDEAN_WEB_BEHIND_PROXY"),
+        };
+        let xff = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.split(',').map(str::trim).rfind(|p| !p.is_empty()))
             .map(|s| s.to_string());
+        let peer_s = peer.map(|ip| ip.to_string());
+        let ip_address = if trust_xff {
+            xff.or(peer_s)
+        } else {
+            peer_s
+        };
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
