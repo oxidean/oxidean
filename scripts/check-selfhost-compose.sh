@@ -69,7 +69,7 @@ docker compose -f "$COMPOSE" -f "$OVERRIDE" --profile actions config >/dev/null 
 info "compose config parses (base, tls, actions, tls+actions, docker-sock override)"
 
 # --- 2. image refs: allowlist + manifest existence ---------------------------
-mapfile -t imgs < <(grep -oE 'image:[[:space:]]*[^[:space:]]+' "${COMPOSE_FILES[@]}" | awk '{print $2}' | sort -u)
+mapfile -t imgs < <(grep -hoE 'image:[[:space:]]*[^[:space:]]+' "${COMPOSE_FILES[@]}" | awk '{print $2}' | sort -u)
 [ "${#imgs[@]}" -gt 0 ] || fail "no image: refs found in $COMPOSE"
 
 allowed_oxidean="api web runner"
@@ -115,9 +115,9 @@ OXIDEAN_HTTP_BIND OXIDEAN_RUNNER_ORIGIN OXIDEAN_RUNNER_NAME OXIDEAN_RUNNER_LABEL
 OXIDEAN_RUNNER_GIT_TOKEN RUST_LOG PORT API_BIND"
 
 # ${VAR} interpolation refs in the compose files
-mapfile -t vars_interp < <(grep -oE '\$\{[A-Z][A-Z0-9_]*' "${COMPOSE_FILES[@]}" | sed 's/^\${//' | sort -u)
+mapfile -t vars_interp < <(grep -hoE '\$\{[A-Z][A-Z0-9_]*' "${COMPOSE_FILES[@]}" | sed 's/^\${//' | sort -u)
 # env-block keys ("      KEY:" under environment:)
-mapfile -t vars_env < <(grep -oE '^[[:space:]]+[A-Z][A-Z0-9_]*:' "${COMPOSE_FILES[@]}" | tr -d ' :' | sort -u)
+mapfile -t vars_env < <(grep -hoE '^[[:space:]]+[A-Z][A-Z0-9_]*:' "${COMPOSE_FILES[@]}" | tr -d ' :' | sort -u)
 # uncommented keys in .env.example
 mapfile -t vars_envx < <(grep -oE '^[A-Z][A-Z0-9_]*=' "$ENVX" | tr -d '=' | sort -u)
 

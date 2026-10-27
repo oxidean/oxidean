@@ -182,10 +182,9 @@ services:
   # Optional Actions runner — `docker compose --profile actions up -d`.
   # Runs host-mode jobs by default; `docker://` step labels additionally need
   # the Docker socket, which is NOT mounted here — it is root-equivalent on
-  # the host. Opt in explicitly with the shipped override file:
-  #   docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml \
-  #     --profile actions up -d
-  # …and restrict that runner to trusted workflows.
+  # the host. Opt in explicitly with the shipped override file
+  # (docker-compose.docker-sock.yml — its header documents same-host vs
+  # dedicated-host `--no-deps` usage) and run it for trusted workflows only.
   runner:
     profiles: ["actions"]
     image: ghcr.io/oxidean/oxidean-runner:${OXIDEAN_VERSION:-latest}

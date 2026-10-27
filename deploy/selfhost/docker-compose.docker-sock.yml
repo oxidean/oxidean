@@ -1,13 +1,21 @@
 # Opt-in override: mount the host Docker socket into the Actions runner so
 # `docker://` step labels can spawn job containers.
 #
+# Same host as the forge — runner joins the in-stack network:
+#
 #   docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml \
 #     --profile actions up -d
 #
+# Dedicated runner host (recommended) — set OXIDEAN_RUNNER_ORIGIN to your
+# forge's public origin in .env, then start ONLY the runner (no deps, so the
+# forge services are not started here):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml \
+#     --profile actions up -d --no-deps runner
+#
 # The socket grants root-equivalent access to the host — a workflow that runs
 # `docker` can read every file and every other container's secrets. Enable
-# this only on a dedicated, network-isolated runner host that executes
-# trusted workflows.
+# this only for trusted workflows.
 
 services:
   runner:

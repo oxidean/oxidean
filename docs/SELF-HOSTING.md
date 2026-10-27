@@ -174,9 +174,13 @@ docker compose --profile actions up -d
   on internet-facing instances and leave the env var unset.
 - The default runner executes host-mode jobs only. `docker://` job labels
   need the Docker socket — root-equivalent on the host — which ships as an
-  explicit opt-in override, not a default mount:
+  explicit opt-in override, not a default mount. Same host as the forge:
   `docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml --profile actions up -d`.
-  Run it only on a dedicated runner host for trusted workflows.
+  On a dedicated runner host (recommended), set
+  `OXIDEAN_RUNNER_ORIGIN=https://<your-forge>` and start only the runner so
+  the forge services stay off that host:
+  `docker compose -f docker-compose.yml -f docker-compose.docker-sock.yml --profile actions up -d --no-deps runner`.
+  Trusted workflows only.
 - `OXIDEAN_RUNNER_ORIGIN` defaults to `http://api:8080` (in-network); remote
   runners point it at the public origin instead.
 
