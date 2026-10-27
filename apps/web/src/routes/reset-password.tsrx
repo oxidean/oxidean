@@ -332,46 +332,48 @@ function ResetPasswordContent() @{
             }}
           >
             @if (!viaToken) {
-              <redeemForm.Field name="email">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="reset-redeem-email">Email</Label>
-                    <Input
-                      id="reset-redeem-email"
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onInput={(ev) =>
-                        field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                      }
-                      required
-                    />
-                  </div>
-                )}
-              </redeemForm.Field>
-              <redeemForm.Field name="code">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="reset-code">Reset code</Label>
-                    <InputOtp
-                      id="reset-code"
-                      name="code"
-                      value={field.state.value}
-                      onChange={(next) => {
-                        field.handleChange(next);
-                        if (error) setError("");
-                      }}
-                      onComplete={(next) => {
-                        void redeemWithCode(next);
-                      }}
-                      aria-label="Reset code"
-                      aria-invalid={Boolean(error)}
-                    />
-                  </div>
-                )}
-              </redeemForm.Field>;
+              <>
+                <redeemForm.Field name="email">
+                  {(field) => (
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="reset-redeem-email">Email</Label>
+                      <Input
+                        id="reset-redeem-email"
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onInput={(ev) =>
+                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                        }
+                        required
+                      />
+                    </div>
+                  )}
+                </redeemForm.Field>
+                <redeemForm.Field name="code">
+                  {(field) => (
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="reset-code">Reset code</Label>
+                      <InputOtp
+                        id="reset-code"
+                        name="code"
+                        value={field.state.value}
+                        onChange={(next) => {
+                          field.handleChange(next);
+                          if (error) setError("");
+                        }}
+                        onComplete={(next) => {
+                          void redeemWithCode(next);
+                        }}
+                        aria-label="Reset code"
+                        aria-invalid={Boolean(error)}
+                      />
+                    </div>
+                  )}
+                </redeemForm.Field>
+              </>;
             }
 
             <redeemForm.Field name="password">
