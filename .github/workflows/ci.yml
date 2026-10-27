@@ -693,6 +693,20 @@ jobs:
       - name: docker compose dev-auth stubs config
         run: docker compose -f docker-compose.dev-auth.yml --profile dev-auth config
 
+  # Drift gate for the self-host operator example (deploy/selfhost/):
+  # compose parses on every profile combo, image refs stay in the published
+  # GHCR set with manifests present at the referenced tag, every referenced
+  # env var resolves in crates/** or docs/CONFIGURATION.md, the required
+  # production knob set is present, and .env.example has no orphans.
+  selfhost-example:
+    name: selfhost-example
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: check self-host compose example
+        run: scripts/check-selfhost-compose.sh
+
   # api+web image build for same-run consumers + cross-run gha layer cache.
   # Consumers download the artifact and bring the stack up without --build.
   docker-ci-images:

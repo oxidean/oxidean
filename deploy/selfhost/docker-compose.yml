@@ -1,0 +1,214 @@
+# Oxidean self-host stack — prebuilt GHCR images, no source build.
+#
+#   cp .env.example .env   # then edit — POSTGRES_PASSWORD and
+#                          # OXIDEAN_ACTIONS_SECRETS_KEY are required
+#   docker compose up -d                     # http://localhost:8080
+#   docker compose --profile tls up -d       # https://$DOMAIN (auto-HTTPS)
+#   docker compose --profile actions up -d   # + Actions runner
+#
+# The web tier is the single origin: it serves the UI and proxies every
+# API-owned path (RPC, Smart HTTP git, LFS, package registries, badges,
+# Pages, OAuth, websockets) to the api service. No Docker-socket proxy is
+# required — caddy is only a TLS terminator. Git-over-SSH is raw TCP on
+# OXIDEAN_SSH_PORT straight to api. Full guide: ../../docs/SELF-HOSTING.md
+
+# No `name:` — the project takes the directory name, so network/volume names
+# stay project-scoped and can never collide with the in-repo dev stack's
+# pinned `oxidean_oxidean` network when both are up.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oxidean}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-oxidean}
+    volumes:
+      # postgres:18+ stores data under /var/lib/postgresql/<major>/docker and
+      # requires the mount at the parent so pg_upgrade --link works across
+      # majors. The legacy /var/lib/postgresql/data mount point hard-fails.
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oxidean} -d ${POSTGRES_DB:-oxidean}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - oxidean
+
+  api:
+    image: ghcr.io/oxidean/oxidean-api:${OXIDEAN_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      # Defaults to the bundled postgres; point at an external DB to replace
+      # (postgres:// / mysql:// / sqlite: — then drop the postgres service).
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-oxidean}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oxidean}}
+      OXIDEAN_ENV: ${OXIDEAN_ENV:-production}
+      OXIDEAN_CORS_ORIGINS: ${OXIDEAN_CORS_ORIGINS:-${OXIDEAN_PUBLIC_ORIGIN:-http://localhost:8080}}
+      OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_PUBLIC_ORIGIN:-http://localhost:8080}
+      API_BIND: 0.0.0.0:8080
+      RUST_LOG: ${RUST_LOG:-info}
+      # AES-256-GCM key material for Actions/mirror/webhook secrets and TOTP
+      # at rest — REQUIRED, encrypt fails closed without it. Never reuse the
+      # dev-compose default.
+      OXIDEAN_ACTIONS_SECRETS_KEY: ${OXIDEAN_ACTIONS_SECRETS_KEY:?set OXIDEAN_ACTIONS_SECRETS_KEY in .env}
+      OXIDEAN_SECRETS_KEY: ${OXIDEAN_SECRETS_KEY:-}
+      # Branch-protection update-hook helper — shipped in the image; required
+      # in production (fail-closed if missing).
+      OXIDEAN_PROTECTION_HELPER: /usr/local/bin/oxidean-protection-hook
+      # Forge state — single /var volume covers every content root.
+      OXIDEAN_REPOS_DIR: /var/repos
+      OXIDEAN_LFS_DIR: /var/lfs
+      OXIDEAN_RELEASE_ASSETS_DIR: /var/release-assets
+      OXIDEAN_PACKAGES_DIR: /var/packages
+      OXIDEAN_TEMPLATE_PACKS_DIR: /var/template-packs
+      OXIDEAN_VCS_OBJECTS_DIR: /var/vcs-objects
+      OXIDEAN_ACTIONS_LOG_DIR: /var/actions-logs
+      OXIDEAN_ACTIONS_ARTIFACTS_DIR: /var/actions-artifacts
+      OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
+      OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
+      OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
+      # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
+      OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}
+      OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
+      OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
+      OXIDEAN_SSH_HOST_KEY_DIR: /var/ssh
+      # Web-flow commit signing (template/stack/license seed commits).
+      # Required when OXIDEAN_ENV=production: provision via env (base64 PEM)
+      # or drop web-flow/web-flow.pub into the volume under /var/ssh.
+      OXIDEAN_WEB_FLOW_PRIVATE_KEY: ${OXIDEAN_WEB_FLOW_PRIVATE_KEY:-}
+      # Optional first-boot sys-admin seed (empty users table only); without
+      # both set, the /setup wizard creates the first admin instead.
+      OXIDEAN_ADMIN_EMAIL: ${OXIDEAN_ADMIN_EMAIL:-}
+      OXIDEAN_ADMIN_PASSWORD: ${OXIDEAN_ADMIN_PASSWORD:-}
+      OXIDEAN_ALLOW_SIGNUP: ${OXIDEAN_ALLOW_SIGNUP:-false}
+      # Outbound mail: Resend wins over SMTP; neither set → log sink.
+      OXIDEAN_RESEND_API_KEY: ${OXIDEAN_RESEND_API_KEY:-}
+      OXIDEAN_SMTP_URL: ${OXIDEAN_SMTP_URL:-}
+      OXIDEAN_MAIL_FROM: ${OXIDEAN_MAIL_FROM:-}
+      # SSO (optional) — generic OIDC and WorkOS AuthKit.
+      OXIDEAN_OIDC_ISSUER: ${OXIDEAN_OIDC_ISSUER:-}
+      OXIDEAN_OIDC_CLIENT_ID: ${OXIDEAN_OIDC_CLIENT_ID:-}
+      OXIDEAN_OIDC_CLIENT_SECRET: ${OXIDEAN_OIDC_CLIENT_SECRET:-}
+      WORKOS_API_KEY: ${WORKOS_API_KEY:-}
+      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
+      # Bootstrap token for the actions runner profile. Reusable while set —
+      # prefer one-time DB tokens (admin.actions.createRegistrationToken) on
+      # internet-facing instances and leave this unset.
+      OXIDEAN_RUNNER_REGISTRATION_TOKEN: ${OXIDEAN_RUNNER_REGISTRATION_TOKEN:-}
+      OXIDEAN_AUTO_MIGRATE: ${OXIDEAN_AUTO_MIGRATE:-true}
+    ports:
+      # Git SSH — raw TCP; OXIDEAN_SSH_PORT is both listen and advertise port.
+      - "${OXIDEAN_SSH_PORT:-2222}:${OXIDEAN_SSH_PORT:-2222}"
+    volumes:
+      - oxidean_data:/var
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - oxidean
+
+  web:
+    image: ghcr.io/oxidean/oxidean-web:${OXIDEAN_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      # Internal api address — the proxy also serves Smart HTTP clone URLs.
+      OXIDEAN_API_ORIGIN: http://api:8080
+      # 1 = a sanitizing edge (the bundled caddy, or your own) is in front and
+      # its X-Forwarded-* chain is trusted. Set empty/0 if you expose this
+      # port directly to untrusted clients — the tier then strips and re-sets
+      # forwarded headers from observed truth.
+      OXIDEAN_WEB_BEHIND_PROXY: ${OXIDEAN_WEB_BEHIND_PROXY:-1}
+      OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_PUBLIC_ORIGIN:-http://localhost:8080}
+      # Advertised Git SSH endpoint — injected as <meta> for CloneBox URLs.
+      OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
+      OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
+    ports:
+      # Loopback-only by default: reach the app through caddy (tls profile)
+      # for real installs. For a LAN/HTTP-only install, set
+      # OXIDEAN_HTTP_BIND=0.0.0.0:8080 and OXIDEAN_WEB_BEHIND_PROXY= (empty).
+      - "${OXIDEAN_HTTP_BIND:-127.0.0.1:8080}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsS",
+          "-H",
+          "Oxidean-Health-Probe: 1",
+          "http://127.0.0.1:3000/health",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - oxidean
+
+  # TLS edge — `docker compose --profile tls up -d`. Caddy terminates TLS for
+  # $DOMAIN (Let's Encrypt, needs public DNS + ports 80/443) and forwards
+  # everything to the web tier, which owns API-path routing internally.
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env for the tls profile}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - oxidean
+
+  # Optional Actions runner — `docker compose --profile actions up -d`.
+  # Runs host-mode jobs by default; `docker://` step labels additionally need
+  # the Docker socket, which is NOT mounted here — it is root-equivalent on
+  # the host. Opt in explicitly with the shipped override file
+  # (docker-compose.docker-sock.yml — its header documents same-host vs
+  # dedicated-host `--no-deps` usage) and run it for trusted workflows only.
+  runner:
+    profiles: ["actions"]
+    image: ghcr.io/oxidean/oxidean-runner:${OXIDEAN_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_RUNNER_ORIGIN:-http://api:8080}
+      OXIDEAN_RUNNER_REGISTRATION_TOKEN: ${OXIDEAN_RUNNER_REGISTRATION_TOKEN:-}
+      OXIDEAN_RUNNER_NAME: ${OXIDEAN_RUNNER_NAME:-selfhost-runner}
+      OXIDEAN_RUNNER_LABELS: ${OXIDEAN_RUNNER_LABELS:-ubuntu-latest,self-hosted}
+      OXIDEAN_RUNNER_GIT_TOKEN: ${OXIDEAN_RUNNER_GIT_TOKEN:-}
+    volumes:
+      - runner_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - oxidean
+
+networks:
+  oxidean:
+
+volumes:
+  postgres_data:
+  oxidean_data:
+  caddy_data:
+  caddy_config:
+  runner_data:

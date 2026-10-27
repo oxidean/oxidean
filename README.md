@@ -22,7 +22,7 @@ Oxidean is a self-hostable code forge: git hosting, pull requests, issues, CI ac
 
 ## Cloud vs self-host
 
-**Oxidean Cloud** and **self-hosted Oxidean** share the same images and application. Self-host with Docker Compose today; Cloud is the hosted instance of that same stack. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**Oxidean Cloud** and **self-hosted Oxidean** share the same images and application. Self-host with Docker Compose today; Cloud is the hosted instance of that same stack. Self-hosters: start with [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) and the ready-to-run bundle in [`deploy/selfhost/`](deploy/selfhost/) — no source build. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Quick start
 
@@ -74,6 +74,7 @@ Canonical docs live under [`docs/`](docs/).
 **Run & operate**
 
 - [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md) — first run (Compose or host)
+- [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md) — production Compose install from published images
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose images, Traefik, volumes, production knobs
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — environment variables
 - [`docs/database.md`](docs/database.md) — Postgres / MySQL / SQLite, migrations, dialect switching

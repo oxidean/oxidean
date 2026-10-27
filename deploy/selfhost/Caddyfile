@@ -1,0 +1,29 @@
+# Oxidean self-host edge — Caddyfile (tls profile)
+#
+# One job: terminate TLS for $DOMAIN and forward everything to the web tier.
+# The web tier (oxidean-web) already routes every API-owned path — /api,
+# /v2, /npm, /generic, /cli, /uploads, /pages, /oauth/*, well-known OAuth
+# docs, /{owner}/{repo}.git Smart HTTP + LFS, workflow badge.svg, and the
+# /api/rpc/ws websocket — to the api service, so no path splitting lives
+# here. Caddy sets X-Forwarded-* on the way in and the web tier trusts that
+# chain (OXIDEAN_WEB_BEHIND_PROXY=1).
+#
+# Let's Encrypt issues automatically when $DOMAIN resolves publicly and
+# ports 80/443 reach this host. Set DOMAIN in .env.
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:3000
+}
+
+# Local evaluation without DNS — Caddy's internal CA signs https://localhost
+# (browser warning until you trust it), or serve plain HTTP instead:
+#
+#	localhost {
+#		encode gzip
+#		reverse_proxy web:3000
+#	}
+#
+#	http://localhost {
+#		reverse_proxy web:3000
+#	}
