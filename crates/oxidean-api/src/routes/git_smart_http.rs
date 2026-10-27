@@ -159,32 +159,12 @@ fn looks_like_token(password: &str) -> bool {
 /// Client IP for last-used / rate-limit. Same policy as
 /// [`oxidean_api_core::rpc::ClientMeta::from_headers_and_peer`]: trust XFF
 /// only from a private peer (web→api) or when `OXIDEAN_WEB_BEHIND_PROXY` is set.
-fn client_ip(headers: &HeaderMap, peer: Option<std::net::IpAddr>) -> Option<String> {
-    oxidean_api_core::rpc::ClientMeta::from_headers_and_peer(headers, peer).ip_address
+fn client_ip(headers: &HeaderMap) -> Option<String> {
+    // Peer comes from the edge `stamp_connect_ip` middleware via
+    // `x-oxidean-connect-ip` (see `ClientMeta::from_headers`).
+    oxidean_api_core::rpc::ClientMeta::from_headers(headers).ip_address
 }
 
-/// Optional peer — present when the server uses
-/// `into_make_service_with_connect_info`, absent under `Router::oneshot` tests.
-struct PeerIp(Option<std::net::IpAddr>);
-
-impl<S> axum::extract::FromRequestParts<S> for PeerIp
-where
-    S: Send + Sync,
-{
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        Ok(PeerIp(
-            parts
-                .extensions
-                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-                .map(|c| c.0.ip()),
-        ))
-    }
-}
 
 
 fn pat_expired(expires_at: &Option<String>) -> bool {
@@ -215,10 +195,9 @@ struct AuthedPat {
 async fn record_failed_auth(
     state: &AppState,
     headers: &HeaderMap,
-    peer: Option<std::net::IpAddr>,
     username: Option<&str>,
 ) {
-    let ip = client_ip(headers, peer).unwrap_or_else(|| "unknown".into());
+    let ip = client_ip(headers).unwrap_or_else(|| "unknown".into());
     let mut user_id: Option<String> = None;
     if let Some(name) = username {
         if !USERNAME_ALIASES
@@ -242,13 +221,12 @@ async fn record_failed_auth(
 async fn authenticate_pat(
     state: &AppState,
     headers: &HeaderMap,
-    peer: Option<std::net::IpAddr>,
 ) -> Result<Option<AuthedPat>, Response> {
     let Some((username, password)) = parse_basic(headers)? else {
         return Ok(None);
     };
     if username.is_empty() {
-        record_failed_auth(state, headers, peer, None).await;
+        record_failed_auth(state, headers, None).await;
         return Err(unauthorized_basic());
     }
 
@@ -265,7 +243,7 @@ async fn authenticate_pat(
     }
 
     if !looks_like_token(&password) {
-        record_failed_auth(state, headers, peer, Some(&username)).await;
+        record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint());
     }
     let (pat, is_oauth, is_job_token) = if password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
@@ -275,19 +253,19 @@ async fn authenticate_pat(
         match crate::oauth::authenticate_oauth_token_status(&state.db, &password).await {
             Ok(crate::oauth::OAuthAuthStatus::Ok(ident)) => (ident.synthetic_pat(), true, false),
             Ok(crate::oauth::OAuthAuthStatus::Revoked) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
             }
             Ok(crate::oauth::OAuthAuthStatus::Expired) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
             }
             Ok(crate::oauth::OAuthAuthStatus::Banned) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
             }
             Ok(crate::oauth::OAuthAuthStatus::Invalid) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint());
             }
             Err(e) => {
@@ -302,19 +280,19 @@ async fn authenticate_pat(
         match authenticate_job_token_status(&state.db, &password).await {
             Ok(JobTokenAuthStatus::Ok(ident)) => (ident.synthetic_pat(&password), false, true),
             Ok(JobTokenAuthStatus::Revoked) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
             }
             Ok(JobTokenAuthStatus::Expired) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
             }
             Ok(JobTokenAuthStatus::Banned) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
             }
             Ok(JobTokenAuthStatus::Invalid) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint());
             }
             Err(e) => {
@@ -333,7 +311,7 @@ async fn authenticate_pat(
         {
             Ok(Some(p)) => p,
             Ok(None) => {
-                record_failed_auth(state, headers, peer, Some(&username)).await;
+                record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint());
             }
             Err(e) => {
@@ -344,17 +322,17 @@ async fn authenticate_pat(
         (pat, false, false)
     };
     if pat.revoked_at.is_some() {
-        record_failed_auth(state, headers, peer, Some(&username)).await;
+        record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
     }
     if pat_expired(&pat.expires_at) {
-        record_failed_auth(state, headers, peer, Some(&username)).await;
+        record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
     }
     let owner = match state.db.find_user_by_id(&pat.user_id).await {
         Ok(Some(u)) => u,
         Ok(None) => {
-            record_failed_auth(state, headers, peer, Some(&username)).await;
+            record_failed_auth(state, headers, Some(&username)).await;
             return Err(unauthorized_pat_hint());
         }
         Err(e) => {
@@ -363,7 +341,7 @@ async fn authenticate_pat(
         }
     };
     if owner.banned_at.is_some() {
-        record_failed_auth(state, headers, peer, Some(&username)).await;
+        record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
     }
     let user_ok = USERNAME_ALIASES
@@ -371,7 +349,7 @@ async fn authenticate_pat(
         .any(|a| username.eq_ignore_ascii_case(a))
         || username.eq_ignore_ascii_case(&owner.username);
     if !user_ok {
-        record_failed_auth(state, headers, peer, Some(&username)).await;
+        record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_basic());
     }
     // Successful auth clears user bucket only (D-26).
@@ -509,18 +487,13 @@ fn strip_git_suffix(repo_git: &str) -> Option<&str> {
     repo_git.strip_suffix(".git").filter(|n| !n.is_empty())
 }
 
-async fn touch_last_used(
-    state: &AppState,
-    auth: &AuthedPat,
-    headers: &HeaderMap,
-    peer: Option<std::net::IpAddr>,
-) {
+async fn touch_last_used(state: &AppState, auth: &AuthedPat, headers: &HeaderMap) {
     // Job tokens live in `action_job_tokens` — no last_used bookkeeping there.
     if auth.is_job_token {
         return;
     }
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let ip = client_ip(headers, peer);
+    let ip = client_ip(headers);
     let pat_id = auth.pat.id.as_str();
     let res = if auth.is_oauth {
         state
@@ -542,7 +515,6 @@ async fn touch_last_used(
 async fn authorize_and_cgi(
     state: &AppState,
     headers: &HeaderMap,
-    peer: Option<std::net::IpAddr>,
     owner: &str,
     repo_git: &str,
     path_tail: &str,
@@ -572,12 +544,12 @@ async fn authorize_and_cgi(
     }
 
     // D-26: IP failed-auth gate before Basic/PAT work.
-    let ip = client_ip(headers, peer).unwrap_or_else(|| "unknown".into());
+    let ip = client_ip(headers).unwrap_or_else(|| "unknown".into());
     if let Err(retry) = limiter_lock(state).check_ip(&ip) {
         return too_many_requests(retry);
     }
 
-    let authed = match authenticate_pat(state, headers, peer).await {
+    let authed = match authenticate_pat(state, headers).await {
         Ok(a) => a,
         Err(r) => return r,
     };
@@ -645,7 +617,7 @@ async fn authorize_and_cgi(
             Ok(false) => return forbidden_insufficient_scope(),
             Err(r) => return r,
         }
-        touch_last_used(state, auth, headers, peer).await;
+        touch_last_used(state, auth, headers).await;
     }
 
     // Wiki requests authorize against the base repo (done above), then need
@@ -947,7 +919,6 @@ async fn authorize_and_cgi(
 /// `GET /{owner}/{repo}.git/info/refs?service=…`
 pub async fn info_refs(
     State(state): State<AppState>,
-    PeerIp(peer): PeerIp,
     headers: HeaderMap,
     AxumPath((owner, repo_git)): AxumPath<(String, String)>,
     Query(query): Query<InfoRefsQuery>,
@@ -959,7 +930,6 @@ pub async fn info_refs(
     authorize_and_cgi(
         &state,
         &headers,
-        peer,
         &owner,
         &repo_git,
         "info/refs",
@@ -974,7 +944,6 @@ pub async fn info_refs(
 /// `POST /{owner}/{repo}.git/git-upload-pack`
 pub async fn upload_pack(
     State(state): State<AppState>,
-    PeerIp(peer): PeerIp,
     headers: HeaderMap,
     AxumPath((owner, repo_git)): AxumPath<(String, String)>,
     body: Bytes,
@@ -982,7 +951,6 @@ pub async fn upload_pack(
     authorize_and_cgi(
         &state,
         &headers,
-        peer,
         &owner,
         &repo_git,
         "git-upload-pack",
@@ -997,7 +965,6 @@ pub async fn upload_pack(
 /// `POST /{owner}/{repo}.git/git-receive-pack`
 pub async fn receive_pack(
     State(state): State<AppState>,
-    PeerIp(peer): PeerIp,
     headers: HeaderMap,
     AxumPath((owner, repo_git)): AxumPath<(String, String)>,
     body: Bytes,
@@ -1005,7 +972,6 @@ pub async fn receive_pack(
     authorize_and_cgi(
         &state,
         &headers,
-        peer,
         &owner,
         &repo_git,
         "git-receive-pack",
