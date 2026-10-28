@@ -69,9 +69,8 @@ import { RepoSettingsPage } from "./$owner.$repo.settings";
 
 afterEach(cleanup);
 
-describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
+describe("/$owner/$repo/settings sub-pages (G-11.1-15)", () => {
   beforeEach(() => {
-    setLocation("/ada/hello/settings");
     collaboratorsListMock.mockReset();
     deployKeyListMock.mockReset();
     lfsGetUsageMock.mockReset();
@@ -104,7 +103,8 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
     });
   });
 
-  it("renders settings shell with Visibility section for can_admin repo", async () => {
+  it("general page renders details + Visibility sections with section nav", async () => {
+    setLocation("/ada/hello/settings/general");
     renderWithQueryClient(RepoSettingsPage);
 
     await waitFor(
@@ -113,19 +113,68 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
         expect(screen.getByText("Choose who can see this repository.")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Public" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Private" })).toBeTruthy();
-        // Section nav repeats the label — target the panel heading.
+      },
+      { timeout: 10_000 },
+    );
+
+    // Nav renders twice (mobile chips + desktop sidebar).
+    for (const access of screen.getAllByRole("link", { name: "Access" })) {
+      expect(access.getAttribute("href")).toBe("/ada/hello/settings/access");
+    }
+    for (const danger of screen.getAllByRole("link", { name: "Danger zone" })) {
+      expect(danger.getAttribute("href")).toBe("/ada/hello/settings/danger");
+    }
+    // Nav marks the current sub-page.
+    for (const general of screen.getAllByRole("link", { name: "General" })) {
+      expect(general.getAttribute("aria-current")).toBe("page");
+    }
+  });
+
+  it("bare /settings canonicalizes to the general sub-page", async () => {
+    setLocation("/ada/hello/settings");
+    renderWithQueryClient(RepoSettingsPage);
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole("heading", { name: "Visibility" })).toBeTruthy();
+        expect(window.location.pathname).toBe("/ada/hello/settings/general");
+      },
+      { timeout: 10_000 },
+    );
+  });
+
+  it("unknown section falls back to general and canonicalizes the URL", async () => {
+    setLocation("/ada/hello/settings/bogus");
+    renderWithQueryClient(RepoSettingsPage);
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole("heading", { name: "Visibility" })).toBeTruthy();
+        expect(window.location.pathname).toBe("/ada/hello/settings/general");
+      },
+      { timeout: 10_000 },
+    );
+  });
+
+  it("access page renders Collaborators + Deploy keys panels", async () => {
+    setLocation("/ada/hello/settings/access");
+    renderWithQueryClient(RepoSettingsPage);
+
+    await waitFor(
+      () => {
         expect(screen.getByRole("heading", { name: "Collaborators" })).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "Deploy keys" })).toBeTruthy();
       },
       { timeout: 10_000 },
     );
   });
 
   it("shows the archive toggle in the danger zone for admins (GIT-20)", async () => {
+    setLocation("/ada/hello/settings/danger");
     renderWithQueryClient(RepoSettingsPage);
 
     await waitFor(
       () => {
-        // Section nav repeats the label — target the panel heading.
         expect(screen.getByRole("heading", { name: "Danger zone" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Archive repository" })).toBeTruthy();
       },
@@ -134,6 +183,7 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
   });
 
   it("archives after typed confirm and calls repo.setArchived (GIT-20)", async () => {
+    setLocation("/ada/hello/settings/danger");
     setArchivedMock.mockReset();
     setArchivedMock.mockResolvedValue({
       ok: true,
@@ -165,6 +215,7 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
   });
 
   it("offers Unarchive for an archived repository (GIT-20)", async () => {
+    setLocation("/ada/hello/settings/danger");
     repoGetMock.mockResolvedValue({ ok: true, data: { ...adminRepo, archived: true } });
     renderWithQueryClient(RepoSettingsPage);
 

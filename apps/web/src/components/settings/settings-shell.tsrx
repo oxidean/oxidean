@@ -4,6 +4,7 @@ import {
   type AdminSettingsNavActive,
 } from "@/components/admin/admin-settings-nav";
 import { OrgSettingsNav, type OrgSettingsNavActive } from "@/components/org/org-settings-nav";
+import { RepoSettingsNav, type RepoSettingsNavActive } from "@/components/repo/repo-settings-nav";
 import { SettingsNav, type SettingsNavActive } from "@/components/settings/settings-nav";
 
 /** Shared fixed canvas for account + admin settings (prevents width shift between pages). */
@@ -100,4 +101,30 @@ export function OrgSettingsLayout(props: OrgSettingsLayoutProps) @{
       <div className="min-w-0">{props.children}</div>
     </div>
   </SettingsShell>;
+}
+
+type RepoSettingsLayoutProps = {
+  owner: string;
+  repo: string;
+  active: RepoSettingsNavActive;
+  children?: unknown;
+};
+
+/**
+ * Repo `/{owner}/{repo}/settings/*` sidebar layout. No {@link SettingsShell}
+ * canvas — repo pages render inside `RepoLayout` chrome, which already owns
+ * width and padding.
+ */
+export function RepoSettingsLayout(props: RepoSettingsLayoutProps) @{
+  <>
+    <div className="mb-6 lg:hidden">
+      <RepoSettingsNav owner={props.owner} repo={props.repo} active={props.active} mobile />
+    </div>
+    <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-10">
+      <aside className="hidden lg:sticky lg:top-24 lg:block lg:self-start">
+        <RepoSettingsNav owner={props.owner} repo={props.repo} active={props.active} />
+      </aside>
+      <div className="min-w-0 max-w-3xl">{props.children}</div>
+    </div>
+  </>;
 }

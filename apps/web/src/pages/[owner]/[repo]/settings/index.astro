@@ -1,14 +1,16 @@
 ---
-import AppShell from "@/layouts/AppShell.astro";
-import { RepoSettingsPage } from "@/routes/$owner.$repo.settings.tsrx";
-
-// Placeholder shell — the middleware maps every real path for this route
-// onto this page; params resolve client-side from `location.pathname`.
+// Canonical entry is `/{owner}/{repo}/settings/general` — the middleware
+// answers a real 302; this stub is the no-JS fallback document. The hash is
+// forwarded so `#repo-settings-*` legacy anchors reach the section map.
 export function getStaticPaths() {
 	return [{ params: { owner: "_", repo: "_" } }];
 }
 ---
 
-<AppShell title="Oxidean">
-	<RepoSettingsPage client:load />
-</AppShell>
+<script>
+	const to = window.location.pathname.replace(
+		/\/settings\/?$/,
+		"/settings/general",
+	);
+	window.location.replace(to + window.location.search + window.location.hash);
+</script>

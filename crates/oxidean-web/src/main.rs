@@ -704,22 +704,30 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    /// Legacy alias `/{o}/{r}/settings/actions` → real 302 with params
-    /// interpolated (anonymous still hits the protected gate first).
+    /// Repo `/{o}/{r}/settings` → real 302 to the `general` sub-page with
+    /// params interpolated (anonymous still hits the protected gate first).
+    /// `/{o}/{r}/settings/{section}` serves the shared sub-page shell.
     #[tokio::test]
-    async fn legacy_settings_actions_redirects() {
+    async fn settings_root_redirects_to_general() {
         let dist = dist_with(
-            "legacy-redirect",
-            &[("_/_/settings/actions/index.html", "<html>stub</html>")],
+            "settings-redirect",
+            &[("_/_/settings/_/index.html", "<html>subpage shell</html>")],
         )
         .await;
         let st = shared(dist);
 
-        let resp = get(&st, "/jesse/app/settings/actions", None).await;
+        let resp = get(&st, "/jesse/app/settings", None).await;
         assert_eq!(resp.status(), StatusCode::FOUND);
         assert_eq!(
             resp.headers().get(header::LOCATION).unwrap(),
-            "/login?returnTo=/jesse/app/settings/actions"
+            "/login?returnTo=/jesse/app/settings"
+        );
+
+        let resp = get(&st, "/jesse/app/settings", Some("oxidean_session=x")).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/jesse/app/settings/general"
         );
 
         let resp = get(
@@ -728,10 +736,14 @@ mod tests {
             Some("oxidean_session=x"),
         )
         .await;
-        assert_eq!(resp.status(), StatusCode::FOUND);
-        assert_eq!(
-            resp.headers().get(header::LOCATION).unwrap(),
-            "/jesse/app/settings#repo-settings-actions"
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("subpage shell"),
+            "settings sub-page must serve the shared shell: {body}"
         );
     }
 
