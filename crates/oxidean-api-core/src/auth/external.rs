@@ -208,18 +208,22 @@ pub async fn link_or_create_user(
         return Ok((user, incomplete));
     }
 
+    // Auto-link and create both require an IdP-verified email — otherwise an
+    // attacker controlling an unverified claim could hijack an existing
+    // account, or squat the address on a fresh account that absorbs the
+    // victim's later verified sign-in (H-2).
+    if !identity.email_verified {
+        return Err(ExternalAuthError::Failed(
+            "email is not verified at the identity provider — verify it there, then sign in again"
+                .into(),
+        ));
+    }
+
     let (user, incomplete) = if let Some(existing) = db
         .find_user_by_email(&email)
         .await
         .map_err(ExternalAuthError::from_db)?
     {
-        // Auto-link only when the IdP asserts a verified email — otherwise an
-        // attacker controlling an unverified claim could hijack the account.
-        if !identity.email_verified {
-            return Err(ExternalAuthError::Failed(
-                "email is not verified at the identity provider — verify it there, then sign in again".into(),
-            ));
-        }
         let incomplete = is_placeholder_username(&existing.username);
         (existing, incomplete)
     } else {
@@ -397,9 +401,12 @@ mod tests {
         );
     }
 
-    /// D-15 edge: absent/false IdP verification leaves local verify flows required.
+    /// H-2: unverified claims can neither link nor create — an IdP that
+    /// does not assert `email_verified` gets the same rejection on the
+    /// no-match branch as on an existing-account match, so an unverified
+    /// claim can never squat an address the victim later proves.
     #[tokio::test]
-    async fn link_or_create_leaves_unverified_when_idp_does_not_assert() {
+    async fn link_or_create_rejects_unverified_claim_create() {
         let db = test_db().await;
         let identity = ExternalIdentity {
             provider: "oidc".into(),
@@ -408,12 +415,26 @@ mod tests {
             display_name: None,
             email_verified: false,
         };
-        let (user, _) = link_or_create_user(&db, &identity)
+        let err = link_or_create_user(&db, &identity)
             .await
-            .expect("link_or_create");
+            .expect_err("unverified claim must not create an account");
         assert!(
-            user.email_verified_at.is_none(),
-            "IdP email_verified=false must leave email_verified_at null"
+            matches!(err, ExternalAuthError::Failed(ref m) if m.contains("not verified")),
+            "{err:?}"
+        );
+        assert!(
+            db.find_user_by_email("unverified-sso@ex.com")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "no account may be created from an unverified email claim"
+        );
+        assert!(
+            db.find_auth_identity("oidc", "sub_unverified_1")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "identity must not be linked"
         );
     }
 }
