@@ -287,11 +287,7 @@ async fn mint_session_and_redirect(
                 });
             let cookie =
                 crate::auth::two_factor::challenge_cookie_header(&state.env_name, &challenge);
-            let path = format!(
-                "/login/two-factor?return={}",
-                sanitize_return_to(Some(return_to))
-            );
-            return redirect_with_cookies(&path, &[cookie]);
+            return redirect_with_cookies(&two_factor_challenge_path(return_to), &[cookie]);
         }
         Ok(_) => {}
         Err(e) => {
@@ -336,4 +332,55 @@ async fn mint_session_and_redirect(
     debug_assert!(session_header.contains(SESSION_COOKIE_NAME));
     debug_assert!(presence.contains(SESSION_PRESENCE_COOKIE_NAME));
     redirect_with_cookies(&path, &[session_header, presence])
+}
+
+/// `return` rides inside the two-factor URL's query — percent-encode the whole
+/// sanitized path so an embedded `?`/`&` stays part of the value instead of
+/// splitting into extra params (the page decodes with `URLSearchParams`).
+fn two_factor_challenge_path(return_to: &str) -> String {
+    let safe = sanitize_return_to(Some(return_to));
+    format!(
+        "/login/two-factor?return={}",
+        url::form_urlencoded::byte_serialize(safe.as_bytes()).collect::<String>()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn return_param(path: &str) -> String {
+        url::Url::parse(&format!("http://localhost{path}"))
+            .expect("url")
+            .query_pairs()
+            .find(|(k, _)| k == "return")
+            .map(|(_, v)| v.into_owned())
+            .expect("return param")
+    }
+
+    #[test]
+    fn challenge_path_keeps_query_inside_return() {
+        let p = two_factor_challenge_path("/settings?notice=1&tab=mirror");
+        assert_eq!(
+            p,
+            "/login/two-factor?return=%2Fsettings%3Fnotice%3D1%26tab%3Dmirror"
+        );
+        assert_eq!(return_param(&p), "/settings?notice=1&tab=mirror");
+    }
+
+    #[test]
+    fn challenge_path_sanitizes_open_redirect() {
+        assert_eq!(
+            two_factor_challenge_path("https://evil.example"),
+            "/login/two-factor?return=%2F"
+        );
+        assert_eq!(
+            two_factor_challenge_path(""),
+            "/login/two-factor?return=%2F"
+        );
+        assert_eq!(
+            two_factor_challenge_path("/settings"),
+            "/login/two-factor?return=%2Fsettings"
+        );
+    }
 }
