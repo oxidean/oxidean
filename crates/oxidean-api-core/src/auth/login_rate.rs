@@ -94,6 +94,19 @@ impl LoginBeginLimiter {
         }
     }
 
+    /// Drop the newest recorded attempt from the IP bucket — refunds one
+    /// in-flight reservation after a successful credential check while
+    /// prior failures stay counted. The ident side is cleared by
+    /// `clear_ident`.
+    pub fn release_ip(&mut self, ip: &str) {
+        if let Some(q) = self.by_ip.get_mut(ip) {
+            q.pop_back();
+            if q.is_empty() {
+                self.by_ip.remove(ip);
+            }
+        }
+    }
+
     /// Successful credential check clears the identifier bucket only —
     /// `FailedAuthLimiter::clear_user` parity (a proven credential resets
     /// the per-account budget; the IP's failure history stays).
