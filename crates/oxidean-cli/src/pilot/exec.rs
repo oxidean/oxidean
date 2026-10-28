@@ -97,7 +97,7 @@ fn stripped_env_names() -> Vec<std::ffi::OsString> {
         .collect()
 }
 
-/// Secret VALUES replaced with `[redacted]` in every reported output:
+/// Secret VALUES replaced with `\[redacted\]` in every reported output:
 /// the verifier, any env value under a token/key/secret/pass-ish name,
 /// stored `config.json` instance tokens, and every value already in
 /// `pilot-secrets.json` (scrub set ≠ env-strip set — a generic
@@ -139,7 +139,7 @@ pub fn scrub_secrets(
     out
 }
 
-/// Replace every ≥8-char secret value with `[redacted]` (NFR5.4).
+/// Replace every ≥8-char secret value with `\[redacted\]` (NFR5.4).
 pub fn scrub(text: &str, secrets: &[String]) -> String {
     let mut out = text.to_string();
     for s in secrets {

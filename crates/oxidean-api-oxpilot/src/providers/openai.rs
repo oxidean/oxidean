@@ -239,7 +239,7 @@ fn openai_event(
 }
 
 /// Byte stream → SSE events → `ChatStreamItem`s. `usage` rides the final
-/// `data:` chunk (include_usage); `data: [DONE]` is the ONLY success
+/// `data:` chunk (include_usage); `data: \[DONE\]` is the ONLY success
 /// signal — a provider that closes without it ends on `provider_error`
 /// (C4 — a truncated stream is never an implicit completion).
 fn decode_stream(
