@@ -399,6 +399,7 @@ mod tests {
             search_max_matches: 100,
             search_max_files: 50,
             vcs: None,
+            oxpilot: None,
         }
     }
 

@@ -68,7 +68,7 @@ changelog_path = "crates/oxidean-api/CHANGELOG.md"
 # forward into this component (oxidean-core/db/git/vcs flow via api-core).
 globs = ["crates/oxidean-api/**"]
 scopes = ["api"]
-depends_on = ["wire", "oxidean-runner", "oxidean-api-actions", "oxidean-api-admin", "oxidean-api-auth", "oxidean-api-check", "oxidean-api-core", "oxidean-api-deployment", "oxidean-api-discussion", "oxidean-api-email", "oxidean-api-issues", "oxidean-api-keys", "oxidean-api-merge-queue", "oxidean-api-mirror", "oxidean-api-notification", "oxidean-api-oauth", "oxidean-api-org", "oxidean-api-packages", "oxidean-api-pages", "oxidean-api-pat", "oxidean-api-project", "oxidean-api-pulls", "oxidean-api-release", "oxidean-api-repo", "oxidean-api-rest", "oxidean-api-user", "oxidean-api-vcs", "oxidean-api-webhook", "oxidean-api-wiki"]
+depends_on = ["wire", "oxidean-runner", "oxidean-api-actions", "oxidean-api-admin", "oxidean-api-auth", "oxidean-api-check", "oxidean-api-core", "oxidean-api-deployment", "oxidean-api-discussion", "oxidean-api-email", "oxidean-api-issues", "oxidean-api-keys", "oxidean-api-merge-queue", "oxidean-api-mirror", "oxidean-api-notification", "oxidean-api-oauth", "oxidean-api-org", "oxidean-api-oxpilot", "oxidean-api-packages", "oxidean-api-pages", "oxidean-api-pat", "oxidean-api-project", "oxidean-api-pulls", "oxidean-api-release", "oxidean-api-repo", "oxidean-api-rest", "oxidean-api-user", "oxidean-api-vcs", "oxidean-api-webhook", "oxidean-api-wiki"]
 
 [[component]]
 id = "oxidean-api-actions"
@@ -218,6 +218,16 @@ tag_prefix = "oxidean-api-org-v"
 changelog_path = "crates/oxidean-api-org/CHANGELOG.md"
 globs = ["crates/oxidean-api-org/**"]
 scopes = ["api-org"]
+depends_on = ["oxidean-api-core"]
+
+[[component]]
+id = "oxidean-api-oxpilot"
+kind = "crate"
+manifest_path = "crates/oxidean-api-oxpilot/Cargo.toml"
+tag_prefix = "oxidean-api-oxpilot-v"
+changelog_path = "crates/oxidean-api-oxpilot/CHANGELOG.md"
+globs = ["crates/oxidean-api-oxpilot/**"]
+scopes = ["api-oxpilot"]
 depends_on = ["oxidean-api-core"]
 
 [[component]]

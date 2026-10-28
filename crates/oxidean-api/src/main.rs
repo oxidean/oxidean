@@ -114,6 +114,42 @@ async fn serve() {
         oxidean_api::email::build_email_sender_from_env()
     };
     let state = oxidean_api::AppState::new(db, email, env_name);
+    // Resolve the persisted oxpilot settings row over env — unconditional so
+    // a stored provider config installs at boot; bounded lookups keep listen
+    // startup fast.
+    oxidean_api_oxpilot::settings::rebuild(&state.db, &state.oxpilot).await;
+    // Boot sweep: orphaned `streaming` rows from a prior crash land `error`.
+    if let Err(e) = state.db.sweep_oxpilot_streaming_messages().await {
+        tracing::warn!(error = %e, "oxpilot streaming-message sweep failed; continuing listen");
+    }
+    // One session service, one gateway Arc — the same objects serve routes,
+    // procs, tool dispatch, and delete hooks. Delete-hook order is U3 abort
+    // then U6 connector cancel so teardown precedes the session cascade.
+    let oxpilot_sessions = std::sync::Arc::new(
+        oxidean_api_oxpilot::services::OxpilotSessionService::new(state.db.clone()),
+    );
+    oxpilot_sessions.register_delete_hook(std::sync::Arc::new(
+        oxidean_api_oxpilot::runtime::OxpilotTurnAbortHook::new(state.oxpilot.clone()),
+    ));
+    let oxpilot_gateway = std::sync::Arc::new(
+        oxidean_api_oxpilot::connector::OxpilotConnectorGateway::new(
+            state.db.clone(),
+            oxpilot_sessions.clone(),
+        ),
+    );
+    oxpilot_sessions.register_delete_hook(std::sync::Arc::new(
+        oxidean_api_oxpilot::connector::ConnectorDeleteHook::new(oxpilot_gateway.clone()),
+    ));
+    state.oxpilot.install_gateway(oxpilot_gateway);
+    state.oxpilot.install_sessions(oxpilot_sessions);
+    // U5 — the tool executor rides the runtime slot (carried across
+    // provider rebuilds); turns().get pin it per-turn via turn_parts.
+    state
+        .oxpilot
+        .install_tools(std::sync::Arc::new(
+            oxidean_api_oxpilot::tools::OxpilotTools::new(state.clone()),
+        ))
+        .await;
     // D-PKG-04: overwrite protection hooks on existing bares (upgrade safety net).
     let sweep = oxidean_api::protection::sweep_protection_hooks(&state.repos_dir).await;
     if sweep.errors > 0 {

@@ -88,6 +88,9 @@ pub struct AppState {
     /// or the objects dir refuses (`warn!` at boot); procedures then answer
     /// `vcs.disabled`, the same wire shape an unenabled repo produces.
     pub vcs: Option<crate::vcs::SharedVcs>,
+    /// Oxpilot runtime — always installed; flag-off state lives inside the
+    /// slot (`disabled_reason`), never as an absent handle.
+    pub oxpilot: crate::oxpilot::SharedOxpilot,
     /// The procedure dispatcher edge code resolves through — REST (`/api/v1`),
     /// MCP, and in-process callers run `ctx.rpc_dispatch(ctx, req)`. The
     /// shell installs its aggregated multi-crate dispatch in
@@ -251,6 +254,7 @@ impl AppState {
             search_max_matches,
             search_max_files,
             vcs,
+            oxpilot: crate::oxpilot::OxpilotRuntime::new(),
             rpc_dispatch: crate::rpc::core_dispatch(),
         }
     }
@@ -331,6 +335,15 @@ impl AppState {
         self.git = git;
         // Rebuild the VCS slot so interop rides the injected backend too.
         self.vcs = build_vcs_slot(&self.db, &self.git, &self.repos_dir);
+        self
+    }
+
+    /// Test/dev seam — install a prebuilt oxpilot runtime (the
+    /// `OxpilotRuntime::from_slot` counterpart), mirroring the `with_*`
+    /// builder convention. Shell assembly keeps using `state.oxpilot`'s
+    /// own install seams.
+    pub fn with_oxpilot(mut self, oxpilot: crate::oxpilot::SharedOxpilot) -> Self {
+        self.oxpilot = oxpilot;
         self
     }
 
@@ -486,7 +499,7 @@ fn build_vcs_slot(
 
 /// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
 /// Resolve the request's session cookie or PAT Bearer to `(user_id,
-/// pat_identity)`. Cookie session or `Authorization: Bearer <pat>` — asset
+/// pat_identity)`. Cookie session or `Authorization: Bearer *** — asset
 /// up/download is the CLI's path, so PATs (which never mint sessions) are
 /// honored alongside browser cookies. Returns the user id plus the
 /// `PatIdentity` (when bearer-authed) so callers can scope-gate the
@@ -566,12 +579,13 @@ pub fn build_rpc_ctx_with_session(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
         vcs: state.vcs.clone(),
+        oxpilot: Some(state.oxpilot.clone()),
         rpc_dispatch: state.rpc_dispatch.clone(),
     }
 }
 
 /// Edge credential for `/api/rpc` (API-02): the session cookie always wins;
-/// `Authorization: Bearer <pat>` is consulted only when no cookie is present.
+/// `Authorization: Bearer *** is consulted only when no cookie is present.
 #[derive(Debug, Clone)]
 pub enum RpcCredential {
     Cookie(String),
@@ -589,7 +603,7 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
-/// `Authorization: Basic <b64 user:token>` → the token when its password
+/// `Authorization: Basic *** user:token>` → the token when its password
 /// slot carries a PAT / job token (same pairs git Smart HTTP accepts —
 /// raw account passwords are never honored). Lets Gitea-style Basic
 /// clients authenticate the whole REST/RPC edge, e.g. `tea` CLI.
@@ -740,6 +754,7 @@ pub async fn build_rpc_ctx(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
         vcs: state.vcs.clone(),
+        oxpilot: Some(state.oxpilot.clone()),
         rpc_dispatch: state.rpc_dispatch.clone(),
     })
 }

@@ -159,6 +159,9 @@ pub struct RpcCtx {
     /// or the objects dir refused at boot; `vcs.*` procedures then answer
     /// `vcs.disabled` (same wire shape as an unenabled repo).
     pub vcs: Option<crate::vcs::SharedVcs>,
+    /// Oxpilot runtime slot — `Some` whenever the edge builds the ctx from
+    /// `AppState`; `None` only in tests that never touch `oxpilot.*`.
+    pub oxpilot: Option<crate::oxpilot::SharedOxpilot>,
     /// The dispatcher this request resolves through — copied from
     /// `AppState.rpc_dispatch` when the edge builds the ctx (issue #162).
     /// Every transport (REST, MCP, feeds, edge routes) calls the assembled
@@ -311,7 +314,7 @@ async fn dispatch_ungated_inner(
                     return RpcResponse::err(AppError::new(
                         "rpc.bad_input",
                         format!("invalid echo input: {e}"),
-                    ))
+                    ));
                 }
             };
             if echo.message.len() > ECHO_MAX_BYTES {

@@ -172,13 +172,13 @@ pub async fn authenticate_pat(
             Ok(JobTokenAuthStatus::Revoked) => {
                 return Err(unauthorized_lfs_reason(
                     "actions job token has been revoked",
-                ))
+                ));
             }
             Ok(JobTokenAuthStatus::Expired) => {
-                return Err(unauthorized_lfs_reason("actions job token has expired"))
+                return Err(unauthorized_lfs_reason("actions job token has expired"));
             }
             Ok(JobTokenAuthStatus::Banned) => {
-                return Err(unauthorized_lfs_reason("this account has been suspended"))
+                return Err(unauthorized_lfs_reason("this account has been suspended"));
             }
             Ok(JobTokenAuthStatus::Invalid) => return Err(unauthorized_lfs()),
             Err(e) => {

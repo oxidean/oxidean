@@ -73,6 +73,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         pages_dir: state.pages_dir.clone(),
         git: state.git.clone(),
         vcs: state.vcs.clone(),
+        oxpilot: Some(state.oxpilot.clone()),
         env_name: state.env_name.clone(),
         session,
         pat: None,

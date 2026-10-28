@@ -12,6 +12,7 @@ members = [
         "crates/oxidean-api-webhook",
         "crates/oxidean-api-user",
         "crates/oxidean-api-oauth",
+        "crates/oxidean-api-oxpilot",
         "crates/oxidean-api-packages",
         "crates/oxidean-api-mirror",
         "crates/oxidean-api-pat",

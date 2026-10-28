@@ -63,6 +63,10 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
         // OIDC issuer for `id-token: write` jobs — the request token itself
         // is the credential, so these paths carry no session middleware.
         .nest("/api/actions/oidc", crate::actions::oidc::router())
+        // Oxpilot SSE chat + C3 connector subtree — session-cookie auth on
+        // `sessions/*`, verifier-Bearer on `connector/*`; enablement fails
+        // closed inside each handler.
+        .nest("/api/oxpilot", oxidean_api_oxpilot::routes::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
             "/api/auth/workos/callback",

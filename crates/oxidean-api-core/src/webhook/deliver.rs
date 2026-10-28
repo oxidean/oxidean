@@ -80,7 +80,7 @@ pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
         "http" => {
             return Err(
                 "webhook URL must use https (http only allowed for localhost in dev/test)".into(),
-            )
+            );
         }
         _ => return Err("webhook URL scheme must be https".into()),
     }

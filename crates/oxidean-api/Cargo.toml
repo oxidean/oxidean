@@ -49,6 +49,7 @@ oxidean-api-vcs = { path = "../oxidean-api-vcs" }
 oxidean-api-core = { path = "../oxidean-api-core" }
 oxidean-api-issues = { path = "../oxidean-api-issues" }
 oxidean-api-org = { path = "../oxidean-api-org" }
+oxidean-api-oxpilot = { path = "../oxidean-api-oxpilot" }
 oxidean-api-pulls = { path = "../oxidean-api-pulls" }
 oxidean-api-repo = { path = "../oxidean-api-repo" }
 oxidean-api-rest = { path = "../oxidean-api-rest" }

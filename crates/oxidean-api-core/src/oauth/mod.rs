@@ -462,7 +462,7 @@ pub async fn token(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
                     "malformed JSON body",
-                )
+                );
             }
         },
         _ => {
@@ -521,7 +521,7 @@ pub async fn token(
                     StatusCode::UNAUTHORIZED,
                     "invalid_client",
                     "client authentication required (Basic or client_id + client_secret)",
-                )
+                );
             }
         },
     };
@@ -533,7 +533,7 @@ pub async fn token(
                 StatusCode::UNAUTHORIZED,
                 "invalid_client",
                 "unknown client_id",
-            )
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, "oauth token: app lookup failed");
@@ -565,7 +565,7 @@ pub async fn token(
                 StatusCode::BAD_REQUEST,
                 "invalid_grant",
                 "authorization code is invalid or already used",
-            )
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, "oauth token: consume_code failed");
@@ -1052,7 +1052,7 @@ async fn device_token_exchange(
                 StatusCode::BAD_REQUEST,
                 "invalid_grant",
                 "unknown device_code",
-            )
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, "oauth device poll: lookup failed");
@@ -1081,14 +1081,14 @@ async fn device_token_exchange(
                 StatusCode::BAD_REQUEST,
                 "access_denied",
                 "the user denied this sign-in",
-            )
+            );
         }
         "consumed" => {
             return token_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_grant",
                 "device code already exchanged",
-            )
+            );
         }
         "approved" => {
             // Single claim — a racing poll loses and must re-exchange → pending.
@@ -1099,7 +1099,7 @@ async fn device_token_exchange(
                         StatusCode::BAD_REQUEST,
                         "authorization_pending",
                         "authorization is being finalized",
-                    )
+                    );
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "oauth device poll: consume failed");
