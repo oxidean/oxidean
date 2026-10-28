@@ -4,9 +4,11 @@
 
 mod support;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::auth::hash_password_str;
@@ -825,6 +827,9 @@ fn mcp_req_auth(body: &serde_json::Value, authorization: &str) -> Request<Body> 
         .unwrap()
 }
 
+/// Simulate a request arriving via the private web→api hop: `ConnectInfo`
+/// stamps a non-public peer so the edge honors X-Forwarded-For (direct
+/// exposure ignores client-supplied XFF — M-1).
 fn mcp_req_bearer_xff(body: &serde_json::Value, token: &str, ip: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
@@ -832,6 +837,10 @@ fn mcp_req_bearer_xff(body: &serde_json::Value, token: &str, ip: &str) -> Reques
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .header("x-forwarded-for", ip.to_owned())
+        .extension(ConnectInfo(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            40000,
+        )))
         .body(Body::from(body.to_string()))
         .unwrap()
 }

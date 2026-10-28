@@ -707,15 +707,27 @@ async fn reset_password_otp_wrong_code_bumps_and_caps() {
     for _ in 0..verify_reset::MAX_REDEEM_ATTEMPTS {
         let body = r#"{"procedure":"auth.reset_password","input":{"email":"cap@ex.com","code":"00000000","password":"newpass99"}}"#;
         let resp = app.clone().oneshot(rpc_req(body)).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["code"], "auth.invalid_token", "{v}");
     }
-    // Cap reached — even the correct code must fail.
+    // Cap reached — even the correct code must fail. The loop also filled
+    // the `reset:<email>` churn bucket, so the denial can surface as
+    // `auth.invalid_token` or `auth.rate_limited` (both 400).
     let body = format!(
         r#"{{"procedure":"auth.reset_password","input":{{"email":"cap@ex.com","code":"{}","password":"newpass99"}}}}"#,
         secrets.otp
     );
     let resp = app.oneshot(rpc_req(&body)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        ["auth.invalid_token", "auth.rate_limited"]
+            .contains(&v["error"]["code"].as_str().unwrap_or("")),
+        "{v}"
+    );
 }
 
 #[tokio::test]

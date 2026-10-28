@@ -2,9 +2,11 @@
 
 mod support;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::ConnectInfo;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::auth::session::sha256_hex;
@@ -620,11 +622,17 @@ async fn git_smart_pat_push_fetch_happy_path() {
         .expect("pat id")
         .to_string();
 
+    // Private `ConnectInfo` peer stands in for the web→api hop so the edge
+    // honors X-Forwarded-For (direct exposure ignores client-supplied XFF — M-1).
     let req = Request::builder()
         .method("GET")
         .uri(info_refs_uri("patgit", "hello"))
         .header(header::AUTHORIZATION, basic_header("patgit", token))
         .header("x-forwarded-for", "203.0.113.50")
+        .extension(ConnectInfo(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            40000,
+        )))
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
