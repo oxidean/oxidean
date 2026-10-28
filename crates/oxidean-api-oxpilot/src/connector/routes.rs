@@ -16,11 +16,11 @@
 //!                    → 4xx {error: pairing_expired|pairing_used|forbidden}
 //!   POST /claim      {target_id, wait_seconds, capabilities}
 //!                    → 200 {actions:[{action_id,kind,args,grant_id}],
-//!                           cancel:[action_id], retry_after}
+//!                           cancel:[`action_id`], retry_after}
 //!                    → 204 + Retry-After (long-poll boundary)
 //!   POST /report     {action_id, status, exit_code, output}
 //!                    → 200 {ack:true} | 404 {error:"not_found"}
-//!   POST /heartbeat  {target_id} → 200 {revoked, cancel:[action_id]}
+//!   POST /heartbeat  {target_id} → 200 {revoked, cancel:[`action_id`]}
 #![allow(clippy::result_large_err)]
 
 use std::sync::Arc;

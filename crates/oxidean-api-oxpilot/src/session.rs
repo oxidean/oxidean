@@ -394,7 +394,7 @@ struct QueueDeleteRequest {
 }
 
 /// `oxpilot.queue_delete{session_id, queued_id}` — U8's inline
-/// queued-message cancel (the M8/[ix] affordance, amendment #3).
+/// queued-message cancel (the M8/ix affordance, amendment #3).
 /// The service takes the SAME owned-session read `queue_list` rides —
 /// a foreign/absent session answers `not_found` before any row is
 /// touched (BR3.3 anti-enumeration); an already-absent `queued_id`
