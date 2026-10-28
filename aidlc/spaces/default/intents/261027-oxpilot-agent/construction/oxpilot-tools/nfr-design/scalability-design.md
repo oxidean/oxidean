@@ -10,7 +10,8 @@ never touches).
 ## Concurrency model — one stateless executor (NFR-S1–S4)
 
 - ONE `OxpilotTools` instance — an `Arc<dyn ToolExecutor>` pinned
-  on `OxpilotRuntimeSlot.tools` (runtime.rs) — serves every
+  on `OxpilotRuntimeSlot.tools` (api-core `oxpilot.rs`, installed
+  post-`AppState::new`) — serves every
   session/provider. The SAME Arc rides provider/settings
   rebuilds: `turn_parts()` carries `tools` beside `turns`, it is
   not rebuilt with them. Concurrent `invoke`s share only

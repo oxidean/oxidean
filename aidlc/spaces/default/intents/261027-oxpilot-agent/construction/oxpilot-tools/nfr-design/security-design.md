@@ -59,7 +59,7 @@ Design points:
   BR6.2 six / `pull.comments.create` literals and each `Connector`
   entry binds `spec.name` verbatim — without executing a handler.
   The security mechanism for the ~30 control/mutation Actions procs
-  the registry exposes is ABSENCE from the table, never runtime
+  is ABSENCE from the registry's table, never runtime
   blocklisting (BR6.3/NFR1.4).
 - `handler`'s signature is a DELIBERATE DEVIATION from the READY
   upstream's pinned `fn(&OxpilotTools, ToolCtx, Value)
@@ -173,16 +173,26 @@ exec/fs trio:  session -> target resolution (explicit arg, or
                owner/caps/grant chain — U5 adds nothing)
 diff_apply:    (USER PROC — no catalog entry) require_enabled ->
                require_verified -> svc.proposal (user-scoped) ->
-               pending check -> apply-name precheck
-               ("oxpilot/proposal-<id8>" verified UNPROTECTED,
-               else apply_failed) -> caller-ctx rpc_dispatch
-               chain — branchCreate{owner, name, branch:
-               "oxpilot/proposal-<id8>", start: row.branch} ->
+               pending check -> apply-name prechecks on the
+               CALLER's ctx.rpc_dispatch —
+               repo.file.commitPolicy{owner,name,branch:
+               "oxpilot/proposal-<id8>"} must answer
+               direct_commit_allowed (a protected match fails
+               apply_failed:protected_branch, excluding the
+               RepoFileCommitOptions web-edit/* fallback) and
+               repo.refs{owner,name} must NOT list
+               refs/heads/oxpilot/proposal-<id8> (a hit fails
+               apply_failed:branch_exists — the shipped
+               branchCreate reports collisions only as
+               repo.git_failed, so the refs precheck is what
+               makes the code producible) -> then the chain —
+               branchCreate{owner, name, branch:
+               "oxpilot/proposal-<id8>", start: row.base} ->
                repo.file.*{owner, name, ..., message:
                <synthesized>, branch: "oxpilot/proposal-<id8>"}
                (upload files[] entries carry content_base64) ->
                pull.create{owner, name, title, body,
-               base_ref: row.branch, head_ref:
+               base_ref: row.base, head_ref:
                "oxpilot/proposal-<id8>"} -> svc.mark_applied ->
                audit
 ```
@@ -205,7 +215,7 @@ effect lands before its gate. Points:
   default/protected branch; `branchCreate` on an existing name
   fails closed (NFR1.14). The per-step wire payloads are pinned:
   `branchCreate{owner, name, branch:"oxpilot/proposal-<id8>",
-  start:row.branch}` — `start` is REQUIRED (omitted it defaults
+  start:row.base}` — `start` is REQUIRED (omitted it defaults
   to the repo DEFAULT branch, not the session's bound one);
   every `repo.file.*` op carries `{owner, name, ...,
   message:<synthesized>, branch:"oxpilot/proposal-<id8>"}` —
@@ -213,13 +223,14 @@ effect lands before its gate. Points:
   `branch` rides the flattened `RepoFileCommitOptions` wire
   field; upload `files[]` entries rename the op's `content_b64`
   to `content_base64`; `pull.create{owner, name, title, body,
-  base_ref:row.branch, head_ref:"oxpilot/proposal-<id8>"}`.
+  base_ref:row.base, head_ref:"oxpilot/proposal-<id8>"}`.
   The `RepoFileCommitOptions` protected-branch fallback
   (protected `branch` + absent `new_branch` ⇒ silent
   `web-edit/*` retarget + auto-opened PR) is EXCLUDED, not
   accepted: the apply verifies the `oxpilot/proposal-<id8>`
-  name is unprotected at apply start and fails `apply_failed`
-  otherwise — commits can never silently retarget onto a
+  name is unprotected at apply start via
+  `repo.file.commitPolicy` (`direct_commit_allowed` required)
+  and fails `apply_failed:protected_branch` otherwise — commits can never silently retarget onto a
   generated branch and `pull.create` can never open a
   wrong-base PR.
 - exec/fs pass `entry.spec.name` VERBATIM as the C7 kind — the
@@ -323,7 +334,7 @@ The `consent_required` output text is a correctness pin, not prose:
 | `pr_comment` body | the HANDLER, pre-dispatch | `pull.comments.create` only `validate_body`s; the body is public-artifact egress — redact before the write |
 | audit `detail` | the audit helper | every user-derived field bounded + redacted before `record_with` |
 | proposal `title`/`diff_body` | `save_proposal` internally (services.rs:637–638) | service boundary — the tool does NOT double-wrap |
-| exec/fs stored `args`/`args_summary` | the gateway | U5 hands the raw string to `dispatch_action` and never retains it (NFR2.2 — no independent U5 copy/log/summary) |
+| exec/fs stored `args`/`args_summary` | the gateway | U5 hands the reserialized validated string to `dispatch_action` and never retains it (NFR2.2 — no independent U5 copy/log/summary) |
 | `ActionView` | pass-through VERBATIM | gateway already bounded + redacted; U5 performs no un-redaction |
 | applied `pr_ref` → `pr_comment` scope | none needed | `owner/name#number` is a ref, not content (NFR2.3) |
 

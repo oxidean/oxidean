@@ -249,3 +249,56 @@ Consumes `inception/contract-design/contract-summary.md` C1
   this record dir.
 - Measurable targets (NFR1/NFR2/NFR5/NFR9, coverage floor, U3/U6 pins)
   are inputs, not suggestions; surface gaps rather than weakening them.
+
+## Review — iteration 1 (aidlc-architecture-reviewer-agent)
+
+**Verdict:** NOT-READY
+**Report:** `.aidlc-engine/reviews/code-generation/units/oxpilot-tools/6bc2091a791a039a/1.8585eed9b7bd857671bea0a0f8dd92fe.review.md`
+
+### Prior findings
+
+(none — first review iteration)
+
+### New findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|----|----------|----------|---------|-----------------|--------|
+| R-01 | Major | tools/mod.rs:185,200,207 | `String::truncate` at a fixed byte index panics mid-codepoint — non-ASCII payloads/messages over the bound panic inside `invoke`, killing the turn and leaving the tool-call card stuck `running` | Char-boundary truncation (`floor_char_boundary`/`char_indices`) at all three sites | Resolved |
+| R-02 | Minor | tools/mod.rs:196-215 | `bound_output` truncates content with no in-band `truncated` marker — the model receives silently-corrupt JSON | Carry an explicit truncation marker in the bounded payload | Resolved |
+| R-03 | Minor | tools/propose.rs:46-62 | `diff_header_paths` pushes `/dev/null` sides verbatim into the coherence set — valid create/delete diffs can never satisfy BR4.3 | Skip `dev/null`/`/dev/null` sides when building the coherence set, mirroring `derive_files` | Resolved |
+| R-04 | Minor | tools/propose.rs:181-242 | `files:[]` + headerless `diff_body` passes coherence (empty==empty) and commits a `pending` row that can never apply | Reject an empty `files` array | Resolved |
+| R-05 | Nit | tools/dispatch.rs:90-93 | `no_target` guidance names `oxpilot.target_list` — a user proc the model cannot invoke | Reword to user-directed guidance naming `targets_list` | Resolved |
+| R-06 | Nit | tools/registry.rs:139,301 | `pull_list` reuses `issue_list_schema` — `state` enum omits `merged` which `PullListRequest` supports | Extend the pull_list state enum with `merged` | Resolved |
+| R-07 | Nit | tools/read.rs:27-33 | `build_input` inserts session `{owner,name}` then lets arg keys overwrite — wrong defensive ordering if a schema ever loosens | Copy arg keys first, then insert `owner`/`name` | Resolved |
+| R-08 | Nit | tools/procs.rs:299-302 | `pr["number"].as_i64().unwrap_or_default()` silently mints corrupt `owner/name#0` pr_ref on response drift | Require `pr.number` with a hard error instead of defaulting | Resolved |
+| R-09 | Nit | tools/validate.rs:59 | No recursion depth cap — the pinned design wants `MAX_DEPTH` 16 | Thread a depth counter through `check()` capped at 16 | Resolved |
+| R-10 | Nit | tools/validate.rs:151-155 | Integers above `i64::MAX` pass schema then fail downstream as `rpc.bad_input` → `internal` instead of `invalid_args` | Reject u64 > i64::MAX at schema validation | Resolved |
+
+All findings applied in the same pass before verdict recording (fixes landed on `feat/oxpilot-agent` working tree, commit follows the review iteration).
+
+## Review — iteration 2 (aidlc-architecture-reviewer-agent, verification pass)
+
+**Verdict:** READY
+**Report:** `.aidlc-engine/reviews/code-generation/units/oxpilot-tools/6bc2091a791a039a/2.93855c831a0a1b5ddc25822d76fb69b8.review.md`
+
+### Prior findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|----|----------|----------|---------|-----------------|--------|
+| R-01 | Major | tools/mod.rs | byte-index truncate panic | truncate_charsafe at all three sites | Resolved |
+| R-02 | Minor | tools/mod.rs | no in-band truncated marker | `\n[output truncated]` marker | Resolved |
+| R-03 | Minor | tools/propose.rs | /dev/null coherence sides | map dev/null side to other path | Resolved |
+| R-04 | Minor | tools/propose.rs | empty-files degenerate proposal | reject empty files | Resolved |
+| R-05 | Nit | tools/dispatch.rs | no_target names user proc | name targets_list + user pair | Resolved |
+| R-06 | Nit | tools/registry.rs | pull_list missing merged | pull_list_schema with merged | Resolved |
+| R-07 | Nit | tools/read.rs | build_input overwrite order | binding inserted last | Resolved |
+| R-08 | Nit | tools/procs.rs | unwrap_or_default pr number | hard error on missing number | Resolved |
+| R-09 | Nit | tools/validate.rs | no depth cap | MAX_DEPTH 16 | Resolved |
+| R-10 | Nit | tools/validate.rs | u64 > i64::MAX passes | reject as invalid_args | Resolved |
+
+### New findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|----|----------|----------|---------|-----------------|--------|
+| N-01 | Minor | tools/comment.rs:36, tools/procs.rs:78 | raw db String error forwarded verbatim into the wire message — leaks detail the internal⇒generic contract hides | generic message + tracing::error (services.rs db_err convention) | Resolved |
+| N-02 | Nit | tools/registry.rs:285,221 | schema maxLength counts chars while handler bounds count bytes — over-advertises the pin for multibyte input, fails closed | informational only — fail-closed asymmetry accepted for v1 | Accepted |

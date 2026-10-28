@@ -114,11 +114,16 @@ the text pins no-re-issue inside the success surface.
   proc — NO automatic rollback (the partial branch is
   user-deletable via `repo.branchDelete`), NO auto-retry, the
   proposal stays `pending`, and a leftover branch surfaces as
-  `apply_failed:branch_exists` on retry (NFR4.11).
+  `apply_failed:branch_exists` on retry via the `repo.refs`
+  apply-name precheck (NFR4.11 — `repo.branchCreate` itself
+  reports a collision only as `repo.git_failed`, so the
+  precheck is what makes the code producible).
 - Double-materialization is impossible: the CONCURRENCY guard
   is the deterministic `oxpilot/proposal-<id8>` branch name —
   a second concurrent apply collides at `branchCreate` and its
-  chain dies `apply_failed:branch_exists` before ever reaching
+  chain dies `apply_failed:repo.branchCreate` (or, if the
+  `repo.refs` precheck observes the winner's branch first,
+  `apply_failed:branch_exists`) before ever reaching
   `mark_applied` (NFR4.12). `svc.mark_applied`'s ownership +
   `status != "pending"` ⇒ `diff_not_pending` recheck
   (services.rs:665–666) covers SEQUENTIAL retries only — it is

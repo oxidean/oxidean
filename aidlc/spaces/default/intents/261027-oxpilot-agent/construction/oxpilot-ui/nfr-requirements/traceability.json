@@ -1,0 +1,539 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "oxpilot-ui",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR7",
+  "NFR8",
+  "NFR9",
+  "FR2.2",
+  "FR2.5",
+  "FR5.2",
+  "AC1.3.3",
+  "AC1.4.1",
+  "AC1.4.2",
+  "AC1.6.1",
+  "AC1.8.1",
+  "AC4.1.4",
+  "AC4.2.1",
+  "AC4.3.2",
+  "AC5.1.1",
+  "AC5.2.2"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10, NFR1.11, NFR1.12",
+   "note": "security-requirements.md — render-injection boundary: plaintext-while-streaming + once-GFM on complete (sanitized toolchain only), tool/card fields verbatim <code>, escaped diff rendering, untrusted display strings as text, card content resolved via owner-checked reads not frame fields; auth.me gates + usePageRedirect, not_found anti-enumeration + fatal close, flag-off zero interactive controls, session-bound procs (no fabricated identity fields), consent-surface honesty (grant_get-resolved state, no always, no optimistic lie), AlertDialog-gated destructives incl. user-only diff_apply, pairing mint via pairing_create only. residual: NFR1's session-only-auth/PAT-classification clause binds U1; consent/grant enforcement binds U6; stored-secret custody binds U4/U6/U7"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "NFR2.1, NFR2.2, NFR2.3, NFR2.4, NFR2.5, NFR1.7, NFR1.9",
+   "note": "security-requirements.md privacy rows — pairing code shown once in read-only CopyCommand (never transcript/live-region/storage/log), zero secret-class render surface, server-redacted strings rendered verbatim with no un-redaction, clipboard copies exactly the displayed strings, no oxpilot state persisted to browser storage; per-user isolation via session-bound reads + not_found fatal close (foreign and absent indistinguishable). residual: NFR2's transcript-plaintext-after-redaction storage clause binds U2/U3; connector egress disclosure binds operator docs"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10, NFR3.11, NFR3.12, NFR3.13",
+   "note": "performance-requirements.md — O(delta) append path (dedupe + liveTail extend, never whole-transcript re-render), plaintext while streaming + renderGfm once on complete, typing-echo <~100ms @500 messages kept as the aspirational proxy, boundary-only announcements + bottom-only autoscroll, bounded dedupe set, <=4 mount/reseed reads, shipped staleTime pins + retry:false + zero refetchInterval, the pairing wait as sole client poll bounded by expires_at, one proc read per card frame, single-proc mutations + batched invalidation, zero new deps + lazy-diff-rows + on-demand <pre>, independent section resolution. residual: NFR3's first-token/provider-latency budget binds U3/U4; SSE emission cost binds U1/U3"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12, NFR4.13, NFR4.14, NFR4.15",
+   "note": "reliability-requirements.md — native EventSource reconnect → post-attach snapshot wholesale reseed (first skipped), (message_id,seq) dedupe satisfying the no-duplication-on-reconnect clause, one-shot session_get probe splitting fatal (not_found/disabled → close + banner) from transient, total cleanup on unmount (no dead-mount writes), chained-turn reattach via active_turn, every negative path typed + textual (never clears transcript, never dead spinner), frozen-card truthfulness via refetch, stale-refs-as-states incl. unknown card_kind fallback, complete-or-degraded mount recovery (refused grant_list{session_id} → Manage-expander path, recorded), send/queue honesty ({null,null} → no row; 409 → banner never auto-enqueue; session_active_turn_absent → banner), composer never disables + draft kept on error, terminal error/aborted surfaces + Retry, malformed-frame skip + verbatim type:tool_call discriminant pin, disabled mid-session swap, optional turn_cancel quiet no-op. residual: provider-failure emission binds U3; connector disconnect degrade binds U6/U7"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "NFR5.1, NFR5.2",
+   "note": "observability-requirements.md — the UI's auditability half is honesty: every mutation rides a real server-audited C1 proc (never fabricated state, no client-side audit vocabulary); success toasts are the user-visible completion record, one per confirmed mutation. residual: NFR5's audit_events vocabulary binds U5/U6; transcript storage binds U2/U3"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "NFR6.1, NFR6.2, NFR6.3, NFR6.4",
+   "note": "observability-requirements.md — zero UI-side telemetry (no analytics/beacons/error-reporting dep), typed-error surfaces as the diagnostic trail (budget_exceeded names env + doc), coverage manifests as behavior observability (dropped row = CI-visible regression), no console-only error paths. residual: metrics stay on existing route/proc surfaces"
+  },
+  {
+   "id": "NFR7",
+   "status": "OK",
+   "target": "NFR7.1, NFR7.2, NFR7.3, NFR7.4, NFR7.5",
+   "note": "tech-stack-decisions.md conformance section — U8 OWNS the a11y bar (other units deferred to it): landmark/heading discipline, boundary-only live-region choreography, labelled focus-trapped dialogs with Esc + focus restore + step re-announce, status never color-only + focus-within actions + Deny keyboard-reachable + contrast floors, the pinned Ctrl/⌘+Enter keydown backing the describedby hint + scroll contract. WCAG 2.1 AA per [a11y] is acceptance-checked (Q4-A), the BR10 set verbatim"
+  },
+  {
+   "id": "NFR8",
+   "status": "OK",
+   "target": "NFR8.1, NFR8.2, NFR6.2",
+   "note": "tech-stack-decisions.md conformance section — explanatory flag-off (reason + env vars + doc link + zero controls) and fix-naming typed errors (budget_exceeded names OXIDEAN_OXPILOT_* env + CONFIGURATION.md; per-code remedy text; never a dead page/spinner)"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "TS-9, TS-10, NFR6.3",
+   "note": "tech-stack-decisions.md + manifests — route-coverage happy-dom rows kept + integration test extended (targets, dialogs, card kinds, flag-off, queue path), browser-coverage subject-keyed rows per high-risk surface, oxpilot-stream.unit.test.ts covering new frame variants + dedupe; the flagged amendment's 0090 migration ships ×3 dialects in this unit's codegen. residual: collect-only coverage + procedures_list_matches_dispatch bind the U1-family crates; HTTP stack tests bind server units"
+  },
+  {
+   "id": "FR2.2",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.12, NFR4.13, NFR3.1, NFR3.2",
+   "note": "streamed reply + visible error without page reload — served by the reconnect/dedupe/terminal honesty and frame-path perf bars here; functional coverage (WF4/WF5/WF12) lives in functional-design/traceability.json"
+  },
+  {
+   "id": "FR2.5",
+   "status": "OK",
+   "target": "NFR7.2, NFR7.4, NFR7.5",
+   "note": "aria-live message boundaries + labelled composer + real controls in tab order — the WCAG conformance pins this unit owns"
+  },
+  {
+   "id": "FR5.2",
+   "status": "OK",
+   "target": "NFR1.10, NFR1.12, NFR2.1",
+   "note": "explicit consented connect + once/session grants with no always — consent-surface honesty + shown-once pairing custody"
+  },
+  {
+   "id": "AC1.3.3",
+   "status": "OK",
+   "target": "NFR4.9, NFR4.1",
+   "note": "reopening restores the transcript and still-actionable cards — mount seed + snapshot-replace reseed correctness"
+  },
+  {
+   "id": "AC1.4.1",
+   "status": "OK",
+   "target": "NFR4.12",
+   "note": "provider mid-reply failure surfaces an in-session notice + Retry — never silent"
+  },
+  {
+   "id": "AC1.4.2",
+   "status": "OK",
+   "target": "NFR4.11, NFR4.12",
+   "note": "composer stays usable after any error; draft clears only on success"
+  },
+  {
+   "id": "AC1.6.1",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.5",
+   "note": "reconnect resumes via snapshot reseed with (message_id,seq) dedupe — no duplicated messages"
+  },
+  {
+   "id": "AC1.8.1",
+   "status": "OK",
+   "target": "NFR4.10, NFR4.11",
+   "note": "composer never disables; mid-stream sends route to message_queue honestly — 409 surfaces typed, never auto-enqueued"
+  },
+  {
+   "id": "AC4.1.4",
+   "status": "OK",
+   "target": "NFR2.1, NFR2.4",
+   "note": "pairing code shown once in the dialog field only — never re-fetched, stored, logged, or rendered into transcript/live region"
+  },
+  {
+   "id": "AC4.2.1",
+   "status": "OK",
+   "target": "NFR1.10, NFR1.12",
+   "note": "named-caps consent dialog + consent applied through the pending-grant respond path — never a self-minted grant"
+  },
+  {
+   "id": "AC4.3.2",
+   "status": "OK",
+   "target": "NFR4.7, NFR4.9",
+   "note": "approve/deny and apply affordances survive remount — frozen cards re-read resolved state, no optimistic lie"
+  },
+  {
+   "id": "AC5.1.1",
+   "status": "OK",
+   "target": "NFR1.8, NFR8.1",
+   "note": "disabled/unconfigured renders the explanatory flag-off surface with zero interactive controls"
+  },
+  {
+   "id": "AC5.2.2",
+   "status": "OK",
+   "target": "NFR6.2, NFR8.2",
+   "note": "budget_exceeded renders the named-env budget notice pointing at CONFIGURATION.md"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "NFR1.1",
+   "status": "N/A",
+   "target": "BR5.2/FD Q8-A plaintext-while-streaming + once-GFM sanitize path — security-requirements.md"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "N/A",
+   "target": "BR5.1/Q8-A tool/card fields verbatim <code> — security-requirements.md"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "N/A",
+   "target": "BR5.3/WF10 escaped read-only diff render — security-requirements.md"
+  },
+  {
+   "id": "NFR1.4",
+   "status": "N/A",
+   "target": "BR1.3/WF6/WF7 untrusted display strings as text — security-requirements.md"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "N/A",
+   "target": "BR5.1/WF6/Q7-A card content via owner-checked ref reads — security-requirements.md"
+  },
+  {
+   "id": "NFR1.6",
+   "status": "N/A",
+   "target": "WF1.1/WF3.1/BR1.1 auth.me gate + usePageRedirect — security-requirements.md"
+  },
+  {
+   "id": "NFR1.7",
+   "status": "N/A",
+   "target": "BR9.3/WF12/AC5.5.4 not_found fatal close + anti-enumeration — security-requirements.md"
+  },
+  {
+   "id": "NFR1.8",
+   "status": "N/A",
+   "target": "WF1.3/AC5.1.1 flag-off zero interactive controls — security-requirements.md"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "N/A",
+   "target": "WF3.2/WF4.1/C1/C2 session-bound procs; randomUUID as key not identity — security-requirements.md"
+  },
+  {
+   "id": "NFR1.10",
+   "status": "N/A",
+   "target": "BR6.1/BR6.2/BR5.4/WF7 grant_get-resolved consent; no always; no optimistic lie — security-requirements.md"
+  },
+  {
+   "id": "NFR1.11",
+   "status": "N/A",
+   "target": "BR6.3/BR5.3/WF9/WF10.4 confirm-gated destructives; user-only diff_apply — security-requirements.md"
+  },
+  {
+   "id": "NFR1.12",
+   "status": "N/A",
+   "target": "BR7.2/WF8.3 pairing_create mint; consent via pending-grant respond — security-requirements.md"
+  },
+  {
+   "id": "NFR2.1",
+   "status": "N/A",
+   "target": "AC4.1.4/BR7.3/WF8.2 pairing code shown once, never transcript/storage/log — security-requirements.md"
+  },
+  {
+   "id": "NFR2.2",
+   "status": "N/A",
+   "target": "C1 notes/FR5.4 zero secret-class render surface — security-requirements.md"
+  },
+  {
+   "id": "NFR2.3",
+   "status": "N/A",
+   "target": "WF6/WF7 server-redacted strings verbatim; args_summary only — security-requirements.md"
+  },
+  {
+   "id": "NFR2.4",
+   "status": "N/A",
+   "target": "WF8.2/AC2.3.1/WF10.3 clipboard = displayed strings exactly — security-requirements.md"
+  },
+  {
+   "id": "NFR2.5",
+   "status": "N/A",
+   "target": "ds-map/BR3.2 no browser-storage persistence — security-requirements.md"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "N/A",
+   "target": "BR4.2/WF5.2/WF6 O(delta) append path — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.2",
+   "status": "N/A",
+   "target": "BR5.2/Q8-A plaintext streaming + once-GFM — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.3",
+   "status": "N/A",
+   "target": "NFR3/BR5.6/BR10.1 typing-echo proxy @500 messages — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.4",
+   "status": "N/A",
+   "target": "BR5.6/BR10.1 boundary-only announcements + bottom-only scroll — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.5",
+   "status": "N/A",
+   "target": "BR4.2/spec Pins bounded dedupe set — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.6",
+   "status": "N/A",
+   "target": "WF3.3/BR3.2/BR5.5 <=4 mount/reseed reads — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.7",
+   "status": "N/A",
+   "target": "BR8.1/spec Pins staleTime + retry:false + no refetchInterval — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.8",
+   "status": "N/A",
+   "target": "BR7.2/BR8.2 pairing wait sole client poll bounded by expires_at — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.9",
+   "status": "N/A",
+   "target": "WF6/BR5.5 one proc read per card frame — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "N/A",
+   "target": "WF4/WF7/WF9/WF10 single-proc mutations + batched invalidation — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.11",
+   "status": "N/A",
+   "target": "Q3-A zero new deps + shipped route splitting — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.12",
+   "status": "N/A",
+   "target": "WF10.2/10.3 lazy-diff-rows + on-demand <pre> — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.13",
+   "status": "N/A",
+   "target": "BR1.2/BR1.3 independent section resolution, server-order render — performance-requirements.md"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "N/A",
+   "target": "BR3.2/BR4.2/WF5.2/Q5-A reconnect → snapshot reseed keyed remount — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.2",
+   "status": "N/A",
+   "target": "BR4.2/C2 (message_id,seq) dedupe no-duplication — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.3",
+   "status": "N/A",
+   "target": "BR9.3/WF5.4/WF12 one-shot session_get probe fatal-vs-transient — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.4",
+   "status": "N/A",
+   "target": "BR4.3/WF5.5 total cleanup; no dead-mount writes — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.5",
+   "status": "N/A",
+   "target": "WF5.6/U3-WF6 chained-turn reattach via active_turn — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.6",
+   "status": "N/A",
+   "target": "BR9.1/WF12 every negative path typed + textual — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "N/A",
+   "target": "BR5.4/BR6.2/WF7.3 frozen-card truthfulness via refetch — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.8",
+   "status": "N/A",
+   "target": "WF6/BR5.1/Q7-A stale refs as states; unknown kind fallback — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.9",
+   "status": "N/A",
+   "target": "BR5.5/BR7.4 complete-or-degraded mount recovery — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "N/A",
+   "target": "WF4/BR4.1/C2 send/queue honesty; {null,null}; 409 never auto-enqueue — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.11",
+   "status": "N/A",
+   "target": "WF4.4/BR9.2/AC1.8.1/AC1.4.2 composer never disables; draft kept — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.12",
+   "status": "N/A",
+   "target": "WF12/AC1.4.1/AC1.4.2 terminal error/aborted surfaces + Retry — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.13",
+   "status": "N/A",
+   "target": "WF5.3/BR4.2/Contract deltas malformed skip + verbatim type:tool_call — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.14",
+   "status": "N/A",
+   "target": "WF12/NFR1.8 disabled mid-session swap — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.15",
+   "status": "N/A",
+   "target": "spec Negative paths/U3 optional turn_cancel quiet no-op — reliability-requirements.md"
+  },
+  {
+   "id": "NFR-S1",
+   "status": "N/A",
+   "target": "NFR3/BR5.6/spec Scope append-only transcript; virtualization recorded non-goal — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S2",
+   "status": "N/A",
+   "target": "BR1.3/BR7.4 server-order lists; bounded pending-grant expander — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S3",
+   "status": "N/A",
+   "target": "WF4/WF6/BR5.1 queue surface bounded by wire state — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S4",
+   "status": "N/A",
+   "target": "WF10/WF11 diff render bounded by proposal size + lazy rows — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S5",
+   "status": "N/A",
+   "target": "WF5.1/5.4/5.5/BR9.3 one EventSource per mount — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S6",
+   "status": "N/A",
+   "target": "BR4.2/WF5.2 per-attach bounded stream state — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S7",
+   "status": "N/A",
+   "target": "BR5.5/WF5 concurrent clients server-consistent — scalability-requirements.md"
+  },
+  {
+   "id": "NFR5.1",
+   "status": "N/A",
+   "target": "spec Observability/C1 mutations ride real server-audited procs — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.2",
+   "status": "N/A",
+   "target": "spec Observability/WF9/WF10.4 one toast per confirmed mutation — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "N/A",
+   "target": "spec Observability/NFR6 zero UI-side telemetry — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "N/A",
+   "target": "WF12/BR9.1/BR9.3/AC5.2.2 typed-error surfaces as diagnostic trail — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "N/A",
+   "target": "BR11.1/BR11.2/NFR9 coverage manifests as behavior observability — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "N/A",
+   "target": "BR9.1/WF12 no console-only error paths — observability-requirements.md"
+  },
+  {
+   "id": "NFR7.1",
+   "status": "N/A",
+   "target": "BR10.1 landmarks + one h1 + sequential headings — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR7.2",
+   "status": "N/A",
+   "target": "BR10.1/WF6/WF7 boundary-only live-region choreography — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR7.3",
+   "status": "N/A",
+   "target": "BR10.2/BR7.1/BR6.3 dialog labels/trap/Esc/focus rules — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR7.4",
+   "status": "N/A",
+   "target": "BR10.3/BR6.1/BR1.3 never color-only; keyboard-reachable; contrast — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR7.5",
+   "status": "N/A",
+   "target": "BR10.4/BR5.6 pinned keydown backing hint + focus/scroll contract — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR8.1",
+   "status": "N/A",
+   "target": "WF1.3/AC5.1.1/FR1.5 explanatory flag-off zero controls — tech-stack-decisions.md"
+  },
+  {
+   "id": "NFR8.2",
+   "status": "N/A",
+   "target": "BR9.1/BR9.2/AC5.2.2/WF12 typed errors name the fix — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-1",
+   "status": "N/A",
+   "target": "codekb octane ^0.11.0 + ds-map components/oxpilot — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-2",
+   "status": "N/A",
+   "target": "codekb tanstack-query + ds-map state ownership + BR8.1 — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-3",
+   "status": "N/A",
+   "target": "FD Q4-A/C2 EventSource + fetch-reader split — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-4",
+   "status": "N/A",
+   "target": "ds-map primitive mapping + shipped components/ui — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-5",
+   "status": "N/A",
+   "target": "Q3-A zero new deps; shipped libs only — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-6",
+   "status": "N/A",
+   "target": "C1/AGENTS rpc-gen generated apiClient verbatim — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-7",
+   "status": "N/A",
+   "target": "Q8-A/BR5.2/BR5.3 text render split; never HTML — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-8",
+   "status": "N/A",
+   "target": "WF4.1/C2 crypto.randomUUID client_msg_id — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-9",
+   "status": "N/A",
+   "target": "BR11/FD Q12-A/codekb test tooling shipped manifests extended — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-10",
+   "status": "N/A",
+   "target": "spec Contract deltas/FR6.6 0090 migration ×3 via oxidean-db — tech-stack-decisions.md"
+  }
+ ]
+}

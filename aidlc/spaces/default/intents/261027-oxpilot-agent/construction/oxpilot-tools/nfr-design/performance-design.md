@@ -33,7 +33,7 @@ well-formed call:
 | `pr_comment` | 1 session-scoped proposals query (ArtifactScope) + 1 `rpc_dispatch` |
 | exec/fs trio | ≤1 `list_targets` (ONLY on the no-arg fallback — NFR3.4) + 1 `dispatch_action` |
 | `targets_list`/`action_status` | 1 gateway read |
-| `diff_apply` (user proc) | ≤ ~53 sequential dispatches: 1 `repo.branchCreate{owner, name, branch:"oxpilot/proposal-<id8>", start:row.branch}` (`start` REQUIRED — omitted ⇒ repo default branch; the name is verified unprotected at apply start else `apply_failed`) + ≤1 batched `repo.file.upload` (≤50 ops, `files[].content_base64`) + ≤50 per-op `repo.file.{delete,rename}` — every `repo.file.*` op carries `{owner, name, ..., message:<synthesized>, branch:"oxpilot/proposal-<id8>"}` + 1 `pull.create{owner, name, title, body, base_ref:row.branch, head_ref:"oxpilot/proposal-<id8>"}` (NFR3.6) |
+| `diff_apply` (user proc) | ≤ ~55 sequential dispatches: 1 `repo.file.commitPolicy` + 1 `repo.refs` (apply-name prechecks — protected ⇒ `apply_failed:protected_branch`, exists ⇒ `apply_failed:branch_exists`) + 1 `repo.branchCreate{owner, name, branch:"oxpilot/proposal-<id8>", start:row.base}` (`start` REQUIRED — omitted ⇒ repo default branch) + ≤1 batched `repo.file.upload` (≤50 ops, `files[].content_base64`) + ≤50 per-op `repo.file.{delete,rename}` — every `repo.file.*` op carries `{owner, name, ..., message:<synthesized>, branch:"oxpilot/proposal-<id8>"}` + 1 `pull.create{owner, name, title, body, base_ref:row.base, head_ref:"oxpilot/proposal-<id8>"}` (NFR3.6) |
 
 `dispatch_action` returns when the gateway's INSERT returns — the
 tool NEVER blocks on a connector inside `invoke` (NFR3.3);

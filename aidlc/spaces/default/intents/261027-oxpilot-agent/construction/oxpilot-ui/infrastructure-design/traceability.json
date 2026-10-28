@@ -1,0 +1,488 @@
+{
+ "stage": "infrastructure-design",
+ "unit": "oxpilot-ui",
+ "upstream_ids": [
+  "NFR1.1","NFR1.2","NFR1.3","NFR1.4","NFR1.5","NFR1.6","NFR1.7","NFR1.8","NFR1.9","NFR1.10","NFR1.11","NFR1.12",
+  "NFR2.1","NFR2.2","NFR2.3","NFR2.4","NFR2.5",
+  "NFR3.1","NFR3.2","NFR3.3","NFR3.4","NFR3.5","NFR3.6","NFR3.7","NFR3.8","NFR3.9","NFR3.10","NFR3.11","NFR3.12","NFR3.13",
+  "NFR4.1","NFR4.2","NFR4.3","NFR4.4","NFR4.5","NFR4.6","NFR4.7","NFR4.8","NFR4.9","NFR4.10","NFR4.11","NFR4.12","NFR4.13","NFR4.14","NFR4.15",
+  "NFR5.1","NFR5.2",
+  "NFR6.1","NFR6.2","NFR6.3","NFR6.4",
+  "NFR7.1","NFR7.2","NFR7.3","NFR7.4","NFR7.5",
+  "NFR8.1","NFR8.2",
+  "NFR-S1","NFR-S2","NFR-S3","NFR-S4","NFR-S5","NFR-S6","NFR-S7",
+  "TS-1","TS-2","TS-3","TS-4","TS-5","TS-6","TS-7","TS-8","TS-9","TS-10"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1.1",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "two-sink XSS allowlist — the SEC-2 grep pin (dangerouslySetInnerHTML confined to the two enumerated sinks, zero other innerHTML-class APIs under components/oxpilot/** + both routes) rides the extended oxpilot.integration.test.ts in the web-octane vitest lane"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (verbatim <code>/text render in tool-call-card.tsrx)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.3",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (escaped highlighter + <pre> toggle in diff-card/context-drawer)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.4",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (SEC-5 text-node construction inventory)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.5",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (card refs-not-payloads; owner-checked C1 reads)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.6",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (auth.me gate + usePageRedirect, shipped pattern)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.7",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (not_found uniformity + es.close() on fatal)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.8",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "flag-off zero-controls swap — Environment section: the env VALUES live on U1/U4's server-side chain; the UI renders env NAMES as copy via the gate-exempt status probe"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (matchPath sessionId + generated apiClient + randomUUID-as-key)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.10",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (grantGet-resolved consent render + freeze-on-respond)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.11",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (single AlertDialog confirm path for diffApply + destructives)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.12",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (pairingCreate-only mint; pending-grant respond path)",
+   "note": ""
+  },
+  {
+   "id": "NFR2.1",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "pairing-code shown-once — the confinement grep pin (pairing_code/pairingCode confined to connect-dialog.tsrx + the CopyCommand call site) is asserted inside the coverage lane's integration test"
+  },
+  {
+   "id": "NFR2.2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (zero secret-class wire fields rendered)",
+   "note": ""
+  },
+  {
+   "id": "NFR2.3",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (redacted-verbatim summaries; no un-redaction)",
+   "note": ""
+  },
+  {
+   "id": "NFR2.4",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (clipboard = displayed string verbatim)",
+   "note": ""
+  },
+  {
+   "id": "NFR2.5",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "no browser-storage persistence — restart/reseed invariants: route-local memory only, remount reseeds from server"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (O(delta) append; keyed rows; snapshot sole wholesale replace)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (plaintext while streaming; renderGfm once on complete)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.3",
+   "status": "N/A",
+   "target": "No infra footprint — aspirational proxy held structurally; the CI leg is the happy-dom identity assertion (Q5-A), not instrumentation",
+   "note": ""
+  },
+  {
+   "id": "NFR3.4",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (boundary-only announcements; bottom-only autoscroll)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.5",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (per-attach dedupe Set rebuilt on reseed)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.6",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (enumerated 4-read mount/reseed set; refused grant_list amendment drops to 3)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.7",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (shipped staleTime/retry pins; zero refetchInterval)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.8",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (the pairing wait is the only client poll, expires_at-bounded)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.9",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (≤1 proc read per card frame from the resolution set)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.10",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (one proc per action; invalidateOxpilotQueries batches)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.11",
+   "status": "OK",
+   "target": "infrastructure-specification.md cicd-pipeline.md",
+   "note": "zero new deps + two-route split unchanged — deployable-surface deps row + supply-chain section"
+  },
+  {
+   "id": "NFR3.12",
+   "status": "N/A",
+   "target": "No infra footprint — shipped seam reuse (useLazyDiffRows viewport scaling + 200k soft max)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.13",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (independent section resolution; server-order render)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.1",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (reconnect → snapshot-reseed keyed remount)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin ({message_id}:{seq} dedupe across replay)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.3",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (readyState discriminator; one sessionGet per CLOSED episode — stream unit test asserts the split)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.4",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (effect-return close; readers cancel in finally/on terminal)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.5",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (chained-turn reattach via snapshot active_turn)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.6",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "typed textual notices ARE the user-visible failure surface — user-visible signals table"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (freeze-on-respond + grantGet re-read; no optimistic lie)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.8",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (stale refs render as states, never errors)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.9",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "refused grant_list{session_id} amendment degrades recovery to the Manage-expander path — recorded in the amendments table, never silent"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (randomUUID idempotency; 409 banner never auto-enqueue)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.11",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (composer never disables; draft clears only on send)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.12",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (terminal honesty: inline notice + Retry; Reply stopped)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.13",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "verbatim type:\"tool_call\" discriminant + malformed-frame skip pinned in oxpilot-stream.unit.test.ts — replays in the web-octane vitest unit project"
+  },
+  {
+   "id": "NFR4.14",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "mid-session oxpilot.disabled → total flag-off swap — distribution-surface flag posture"
+  },
+  {
+   "id": "NFR4.15",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (turnCancel optional affordance; quiet no-op)",
+   "note": ""
+  },
+  {
+   "id": "NFR5.1",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "every mutation rides a real server-audited C1 proc; no client audit vocabulary — mutation record section"
+  },
+  {
+   "id": "NFR5.2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "one toast per confirmed mutation, never on optimistic state — user-visible signals toast row"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "ZERO client-side telemetry — the posture statement + absent-by-design section"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "typed-error surfacing is the diagnostic trail — user-visible signals table (banners/notices/outcome lines/flag-off)"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "coverage manifests = behavior observability — the manifest-row table + discovery gate make dropped surfaces CI-visible"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "no console-only failure paths — absent-by-design section"
+  },
+  {
+   "id": "NFR7.1",
+   "status": "N/A",
+   "target": "No infra footprint — component-level pin (landmarks/headings); discovered surfaces carry browser rows, button-only surfaces ride happy-dom route rows via NFR6.3",
+   "note": ""
+  },
+  {
+   "id": "NFR7.2",
+   "status": "N/A",
+   "target": "No infra footprint — component-level pin (aria-live boundary announce machinery)",
+   "note": ""
+  },
+  {
+   "id": "NFR7.3",
+   "status": "N/A",
+   "target": "No infra footprint — component-level pin (dialog label/trap/Esc/initialFocus on shipped primitives)",
+   "note": ""
+  },
+  {
+   "id": "NFR7.4",
+   "status": "N/A",
+   "target": "No infra footprint — component-level pin (interactive honesty: text status, focus-within, reachable Deny)",
+   "note": ""
+  },
+  {
+   "id": "NFR7.5",
+   "status": "N/A",
+   "target": "No infra footprint — component-level pin (Ctrl/⌘+Enter contract, Esc→toggle, composer focus)",
+   "note": ""
+  },
+  {
+   "id": "NFR8.1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "flag-off EmptyState names reason + OXIDEAN_OXPILOT_ENABLED/_PROVIDER + CONFIGURATION.md link — Environment section"
+  },
+  {
+   "id": "NFR8.2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "errors name the fix — budget_exceeded banner names the env vars + doc; per-code remedy text in signals table"
+  },
+  {
+   "id": "NFR-S1",
+   "status": "N/A",
+   "target": "No infra footprint — recorded non-goal (append-only full render; no windowing lib in v1)",
+   "note": ""
+  },
+  {
+   "id": "NFR-S2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (server-order lists small by construction)",
+   "note": ""
+  },
+  {
+   "id": "NFR-S3",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (QueuedRows bound by queueList wire state)",
+   "note": ""
+  },
+  {
+   "id": "NFR-S4",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (diff render ≤ MAX_PROPOSAL_FILES + lazy rows)",
+   "note": ""
+  },
+  {
+   "id": "NFR-S5",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "one EventSource per mounted workspace; closes on switch/unmount — restart/reseed invariants"
+  },
+  {
+   "id": "NFR-S6",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "per-attach dedupe/liveTail/seed cleared on remount — restart/reseed invariants"
+  },
+  {
+   "id": "NFR-S7",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "server state is the single consistency source; independent client projections — restart/reseed invariants"
+  },
+  {
+   "id": "TS-1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "Octane .tsrx under apps/web/src/components/oxpilot/ kebab-case — deployable surface feature-dir row"
+  },
+  {
+   "id": "TS-2",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (TanStack Query owns proc state; useState owns local)",
+   "note": ""
+  },
+  {
+   "id": "TS-3",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (POST fetch-reader + EventSource attach; native reconnect; no Last-Event-ID)",
+   "note": ""
+  },
+  {
+   "id": "TS-4",
+   "status": "N/A",
+   "target": "No infra footprint — shipped primitive mapping (Dialog/AlertDialog/Checkbox/RadioGroup/Select/EmptyState/CopyCommand)",
+   "note": ""
+  },
+  {
+   "id": "TS-5",
+   "status": "OK",
+   "target": "infrastructure-specification.md cicd-pipeline.md",
+   "note": "zero new dependencies — deployable-surface deps row + supply-chain section; bun.lock untouched"
+  },
+  {
+   "id": "TS-6",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "generated apiClient verbatim; flagged amendment fields land via make rpc-gen — rpc-sync lane"
+  },
+  {
+   "id": "TS-7",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (plaintext/once-GFM split; verbatim <code>; escaped diffs)",
+   "note": ""
+  },
+  {
+   "id": "TS-8",
+   "status": "N/A",
+   "target": "No infra footprint — code-level pin (crypto.randomUUID per send/queue)",
+   "note": ""
+  },
+  {
+   "id": "TS-9",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "shipped test trio extended — vitest unit/integration lanes + Chromium shards + manifest rows table"
+  },
+  {
+   "id": "TS-10",
+   "status": "OK",
+   "target": "infrastructure-specification.md cicd-pipeline.md",
+   "note": "0090_oxpilot_session_target.sql ×3 dialects — U8-owned flagged amendment; amendments table cites the db-layer artifact; db-dialects dialect_oxpilot leg + filename-parity test cover it"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "infrastructure-specification.md",
+   "status": "OK",
+   "target": "NFR1.8 NFR2.5 NFR3.11 NFR4.9 NFR4.14 NFR-S5 NFR-S6 NFR-S7 NFR8.1 TS-1 TS-5 TS-10",
+   "note": "deployable surface, environment, distribution surface, operator provisioning, amendments-flagged table, restart/reseed invariants, resource shape"
+  },
+  {
+   "id": "monitoring-design.md",
+   "status": "OK",
+   "target": "NFR4.6 NFR5.1 NFR5.2 NFR6.1 NFR6.2 NFR6.4 NFR8.2",
+   "note": "user-visible signals, mutation record, server-owned concerns cited to U1/U3/U5/U6/U7, absent-by-design"
+  },
+  {
+   "id": "cicd-pipeline.md",
+   "status": "OK",
+   "target": "NFR1.1 NFR2.1 NFR3.11 NFR4.13 NFR6.3 TS-5 TS-6 TS-9 TS-10",
+   "note": "lane coverage, coverage manifest rows, supply chain, deployment/rollback, explicit non-changes"
+  }
+ ]
+}

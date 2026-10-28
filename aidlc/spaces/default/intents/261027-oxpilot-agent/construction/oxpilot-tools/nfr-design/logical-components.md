@@ -74,19 +74,23 @@ provider ─ToolCall─> invoke_call (U3, runtime.rs)
    diff_get  -> svc.proposal
    diff_apply -> svc.proposal -> pending check
                  -> "oxpilot/proposal-<id8>" verified
-                    UNPROTECTED else apply_failed (the
+                    UNPROTECTED via repo.file.commitPolicy
+                    (direct_commit_allowed required, else
+                    apply_failed:protected_branch) AND ABSENT
+                    via repo.refs (else
+                    apply_failed:branch_exists — the
                     RepoFileCommitOptions protected-branch
                     fallback is excluded)
                  -> CALLER's ctx.rpc_dispatch
                  (branchCreate{owner,name,
                     branch:"oxpilot/proposal-<id8>",
-                    start:row.branch} — start REQUIRED
+                    start:row.base} — start REQUIRED
                   -> repo.file.*{owner,name,...,
                     message:<synthesized>,
                     branch:"oxpilot/proposal-<id8>"}
                     (upload files[]: content_base64)
                   -> pull.create{owner,name,title,body,
-                    base_ref:row.branch,
+                    base_ref:row.base,
                     head_ref:"oxpilot/proposal-<id8>"})
                  -> svc.mark_applied
         │
