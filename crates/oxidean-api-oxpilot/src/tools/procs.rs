@@ -60,7 +60,7 @@ struct DiffListReq {
     session_id: String,
 }
 
-/// `oxpilot.diff_list{session_id}` → `{diffs: [ProposedDiff]}` —
+/// `oxpilot.diff_list{session_id}` → `{diffs: \[ProposedDiff\]}` —
 /// owned-session read, newest-first (the store verb's ordering).
 pub async fn diff_list(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
     require_enabled(ctx).await?;
