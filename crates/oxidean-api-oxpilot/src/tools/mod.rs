@@ -100,7 +100,7 @@ impl OxpilotTools {
         input: Value,
     ) -> Result<Value, ToolError> {
         let session = oxidean_api_core::auth::session::ResolvedSession {
-            session_id: format!("oxpilot-tool:{}", ctx.session_id),
+            session_id: format!("oxpilot:{}", ctx.session_id),
             user_id: ctx.user_id.clone(),
             remember_me: false,
             expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
@@ -172,43 +172,54 @@ impl OxpilotTools {
     }
 }
 
-/// AppError→ToolError map — proc codes pass through VERBATIM (BR3.4);
-/// internal/unknown codes collapse to `internal` with a generic
-/// message (no laundering, no stderr leakage).
+/// AppError→ToolError map — only the PINNED set {not_found,
+/// forbidden, invalid_args} passes through verbatim (BR3.4); every
+/// other code — internal/unknown, rpc.*, auth.*, db.*, repo.*,
+/// oxpilot.* — collapses to `internal` with a generic message so no
+/// resource-leaking implementation detail reaches the model surface.
 pub(crate) fn map_proc_error(e: &oxidean_core::AppError) -> ToolError {
-    let code = e.code.as_str();
-    let internal = code.is_empty()
-        || code == "internal"
-        || code.ends_with(".internal")
-        || code.starts_with("db.")
-        || code == "rpc.internal";
-    if internal {
-        tool_err("internal", "internal error")
-    } else {
-        let mut msg = oxidean_core::redact(&e.message);
-        if msg.len() > OUTPUT_SUMMARY_MAX {
-            msg.truncate(OUTPUT_SUMMARY_MAX);
+    match e.code.as_str() {
+        "not_found" | "forbidden" | "invalid_args" => {
+            let mut msg = oxidean_core::redact(&e.message);
+            truncate_charsafe(&mut msg, OUTPUT_SUMMARY_MAX);
+            tool_err(e.code.as_str(), msg)
         }
-        tool_err(code, msg)
+        _ => tool_err("internal", "internal error"),
     }
+}
+
+/// Char-boundary-safe truncation — `String::truncate` at a byte bound
+/// panics mid-codepoint (NFR4.x "never a panic"), so the cut walks
+/// back to the last char boundary instead.
+pub(crate) fn truncate_charsafe(s: &mut String, max: usize) {
+    if s.len() <= max {
+        return;
+    }
+    let mut cut = max;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    s.truncate(cut);
 }
 
 /// Bound a handler's serialized payload under TOOL_OUTPUT_MAX (BR9.4)
 /// with an explicit `truncated` marker, plus the ≤2 KiB redacted
 /// `output_summary`.
 pub(crate) fn bound_output(content: Value) -> ToolOutput {
+    const TRUNC_MARKER: &str = "\n[output truncated]";
     let mut text = serde_json::to_string(&content).unwrap_or_else(|_| "{}".to_string());
     let truncated = text.len() > TOOL_OUTPUT_MAX;
     if truncated {
-        text.truncate(TOOL_OUTPUT_MAX);
+        // Char-safe cut reserving room for the in-band marker BR9.4
+        // pins — silently-corrupt JSON must never reach the model.
+        truncate_charsafe(&mut text, TOOL_OUTPUT_MAX - TRUNC_MARKER.len());
+        text.push_str(TRUNC_MARKER);
     }
     let summary = if truncated {
         "output truncated".to_string()
     } else {
         let mut s = oxidean_core::redact(&text);
-        if s.len() > OUTPUT_SUMMARY_MAX {
-            s.truncate(OUTPUT_SUMMARY_MAX);
-        }
+        truncate_charsafe(&mut s, OUTPUT_SUMMARY_MAX);
         s
     };
     ToolOutput {
@@ -275,11 +286,27 @@ mod tests {
         assert_eq!(t.message, "no such issue");
         let e = oxidean_core::AppError::new("forbidden", "denied");
         assert_eq!(map_proc_error(&e).code, "forbidden");
+        let e = oxidean_core::AppError::new("invalid_args", "path required");
+        assert_eq!(map_proc_error(&e).code, "invalid_args");
     }
 
     #[test]
     fn internal_codes_collapse() {
-        for code in ["internal", "rpc.internal", "db.query_failed", ""] {
+        // The pinned verbatim set is exactly three — every other code,
+        // including domain-shaped ones (repo.*, auth.*, rpc.bad_input,
+        // oxpilot.*), collapses so no resource detail reaches the model.
+        for code in [
+            "internal",
+            "rpc.internal",
+            "rpc.bad_input",
+            "db.query_failed",
+            "repo.git_failed",
+            "auth.unauthenticated",
+            "oxpilot.action_denied",
+            "diff_not_pending",
+            "apply_failed:repo.branchCreate",
+            "",
+        ] {
             let e = oxidean_core::AppError::new(code, "secret detail");
             let t = map_proc_error(&e);
             assert_eq!(t.code, "internal", "{code} must collapse");

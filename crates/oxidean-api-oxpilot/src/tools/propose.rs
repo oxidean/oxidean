@@ -44,7 +44,9 @@ fn parse_ops(args: &Value) -> Vec<FileOp> {
 }
 
 /// `diff --git a/<old> b/<new>` header paths — both sides land in the
-/// coherence set (`/dev/null` sides for create/delete are skipped).
+/// coherence set. `/dev/null` sides (model-authored create/delete
+/// headers) map to the OTHER side's path — never a literal "dev/null"
+/// coherence entry a real op could never satisfy.
 fn diff_header_paths(diff_body: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in diff_body.lines() {
@@ -58,7 +60,14 @@ fn diff_header_paths(diff_body: &str) -> Vec<(String, String)> {
             continue;
         };
         let a = a.strip_prefix("a/").unwrap_or(a);
-        out.push((a.to_string(), b.to_string()));
+        let dev_null = |p: &str| p == "dev/null" || p == "/dev/null";
+        out.push(if dev_null(a) {
+            (b.to_string(), b.to_string())
+        } else if dev_null(b) {
+            (a.to_string(), a.to_string())
+        } else {
+            (a.to_string(), b.to_string())
+        });
     }
     out
 }
@@ -137,6 +146,12 @@ pub async fn propose_diff(
     }
     if diff_body.len() > DIFF_BODY_MAX {
         return Err(tool_err("invalid_args", "diff_body: exceeds 256 KiB"));
+    }
+    if ops.is_empty() {
+        return Err(tool_err(
+            "invalid_args",
+            "files: must have at least 1 item — an empty proposal can never apply",
+        ));
     }
     if ops.len() > MAX_PROPOSAL_FILES {
         return Err(tool_err(
@@ -252,7 +267,7 @@ pub async fn propose_diff(
         .audit(
             ctx,
             "oxpilot.proposal_created",
-            Some(("proposal", &row.id)),
+            Some(("oxpilot_proposal", &row.id)),
             json!({
                 "session_id": ctx.session_id,
                 "proposal_id": row.id,

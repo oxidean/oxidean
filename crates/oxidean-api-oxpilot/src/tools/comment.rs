@@ -33,7 +33,10 @@ pub async fn pr_comment(
         .db
         .find_oxpilot_proposals_by_session(&ctx.session_id)
         .await
-        .map_err(|e| tool_err("internal", e))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "oxpilot proposal scope lookup failed");
+            tool_err("internal", "internal error")
+        })?;
     let scope: BTreeSet<String> = proposals
         .iter()
         .filter(|p| p.status == "applied")
@@ -74,7 +77,7 @@ pub async fn pr_comment(
         .audit(
             ctx,
             "oxpilot.artifact_comment",
-            Some(("pull", &pr_ref)),
+            Some(("pull_request", &pr_ref)),
             json!({
                 "session_id": ctx.session_id,
                 "pr_ref": pr_ref,

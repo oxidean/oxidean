@@ -24,14 +24,16 @@ const REF_BEARING: &[&str] = &["repo_tree", "repo_file_read", "repo_log"];
 /// never treated as refs (WF3).
 fn build_input(entry_name: &str, args: &Value, session: &OxpilotSessionRow) -> Value {
     let mut input = Map::new();
-    input.insert("owner".to_string(), json!(session.repo_owner));
-    input.insert("name".to_string(), json!(session.repo_name));
-
     if let Some(obj) = args.as_object() {
         for (k, v) in obj {
             input.insert(k.clone(), v.clone());
         }
     }
+    // The session repo binding lands LAST so a stray arg key can never
+    // overwrite it (closed schemas make this unreachable today; the
+    // ordering is the defense if a schema ever loosens — BR2.3).
+    input.insert("owner".to_string(), json!(session.repo_owner));
+    input.insert("name".to_string(), json!(session.repo_name));
 
     // `ref` narrowing — absent means the session's bound branch.
     if REF_BEARING.contains(&entry_name) {

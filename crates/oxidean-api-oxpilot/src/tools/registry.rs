@@ -144,6 +144,20 @@ fn issue_list_schema() -> Value {
     )
 }
 
+/// `pull_list` shares the issue_list shape plus `merged` — the pull
+/// list proc accepts it (PullListRequest); issues do not.
+fn pull_list_schema() -> Value {
+    obj(
+        &[],
+        json!({
+            "state": {"enum": ["open", "closed", "merged", "all"]},
+            "q": {"type": "string", "maxLength": 256},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        }),
+    )
+}
+
 fn number_schema() -> Value {
     obj(
         &["number"],
@@ -298,7 +312,7 @@ pub static CATALOG: &[CatalogEntry] = &[
     entry!("repo_refs", "List refs (branches and tags) for the session-bound repo.", Read, EntryKind::Proc("repo.refs"), empty),
     entry!("issue_list", "List issues in the session-bound repo.", Read, EntryKind::Proc("issue.list"), issue_list_schema),
     entry!("issue_get", "Get one issue by number from the session-bound repo.", Read, EntryKind::Proc("issue.get"), number_schema),
-    entry!("pull_list", "List pull requests in the session-bound repo.", Read, EntryKind::Proc("pull.list"), issue_list_schema),
+    entry!("pull_list", "List pull requests in the session-bound repo.", Read, EntryKind::Proc("pull.list"), pull_list_schema),
     entry!("pull_get", "Get one pull request by number from the session-bound repo.", Read, EntryKind::Proc("pull.get"), number_schema),
     entry!("actions_list_runs", "List Actions workflow runs for the session-bound repo.", Read, EntryKind::Proc("repo.actions.listRuns"), actions_list_runs_schema),
     entry!("actions_get_run", "Get one Actions run by id.", Read, EntryKind::Proc("repo.actions.getRun"), run_id_schema),

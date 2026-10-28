@@ -54,9 +54,21 @@ fn match_pattern(name: &str, value: &str) -> Result<(), String> {
     }
 }
 
+/// Recursion floor — no catalog schema nests past ~3, so 16 is a
+/// generous hard cap that keeps a malformed future schema from
+/// recursing unboundedly rather than silently succeeding (NFR9).
+const MAX_DEPTH: u32 = 16;
+
 /// Validate `instance` against `schema` under the catalog's closed
 /// vocabulary. `field` is the path prefix recursion builds.
 fn check(schema: &Value, instance: &Value, field: &str) -> Result<(), String> {
+    check_at(schema, instance, field, 0)
+}
+
+fn check_at(schema: &Value, instance: &Value, field: &str, depth: u32) -> Result<(), String> {
+    if depth > MAX_DEPTH {
+        return Err(err(field, "nesting exceeds the schema depth cap"));
+    }
     // ---- enum ----
     if let Some(variants) = schema.get("enum").and_then(|v| v.as_array()) {
         if !variants.contains(instance) {
@@ -96,7 +108,7 @@ fn check(schema: &Value, instance: &Value, field: &str) -> Result<(), String> {
                         } else {
                             format!("{field}.{key}")
                         };
-                        check(sub, val, &child)?;
+                        check_at(sub, val, &child, depth + 1)?;
                     }
                     None if closed => {
                         let child = if field.is_empty() {
@@ -126,7 +138,7 @@ fn check(schema: &Value, instance: &Value, field: &str) -> Result<(), String> {
             }
             if let Some(item_schema) = schema.get("items") {
                 for (i, item) in arr.iter().enumerate() {
-                    check(item_schema, item, &format!("{field}[{i}]"))?;
+                    check_at(item_schema, item, &format!("{field}[{i}]"), depth + 1)?;
                 }
             }
         }
@@ -151,6 +163,12 @@ fn check(schema: &Value, instance: &Value, field: &str) -> Result<(), String> {
         "integer" => {
             if !instance.is_i64() && !instance.is_u64() {
                 return Err(err(field, "must be an integer"));
+            }
+            // A u64 beyond i64::MAX survives schema but fails the
+            // backing proc's serde — reject it here as invalid_args
+            // rather than leaking it downstream as an internal error.
+            if instance.as_u64().is_some_and(|u| u > i64::MAX as u64) {
+                return Err(err(field, "must fit in a signed 64-bit integer"));
             }
             check_numeric_bounds(schema, instance, field)?;
         }

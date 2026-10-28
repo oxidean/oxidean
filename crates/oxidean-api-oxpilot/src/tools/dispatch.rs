@@ -89,7 +89,7 @@ pub async fn dispatch_action(
                 0 => {
                     return Err(tool_err(
                         "no_target",
-                        "no connected connector target — pair one with oxpilot.target_list first",
+                        "no connected connector target — call targets_list to inspect paired targets, or ask the user to pair one",
                     ));
                 }
                 1 => connected[0].id.clone(),

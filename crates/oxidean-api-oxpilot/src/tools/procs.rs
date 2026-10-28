@@ -75,7 +75,10 @@ pub async fn diff_list(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
         .db
         .find_oxpilot_proposals_by_session(&req.session_id)
         .await
-        .map_err(|e| AppError::new("oxpilot.internal", e))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "oxpilot diff_list db error");
+            AppError::new("oxpilot.internal", "session operation failed")
+        })?;
     Ok(json!({ "diffs": rows.iter().map(diff_wire).collect::<Vec<_>>() }))
 }
 
@@ -106,8 +109,10 @@ struct DiffFileOp {
 }
 
 /// Dispatch one backing proc on the caller's own ctx; failures land as
-/// `apply_failed:<proc>` verbatim (BR5.7), with the single
-/// `apply_failed:branch_exists` carve-out the retry path distinguishes.
+/// `apply_failed:<proc>` verbatim (BR5.7). The `branch_exists` case is
+/// caught by the `repo.refs` precheck in `diff_apply` — the shipped
+/// `repo.branchCreate` reports a name collision as `repo.git_failed`,
+/// so no per-proc carve-out exists here.
 async fn apply_step(ctx: &mut RpcCtx, proc: &str, input: Value) -> Result<Value, AppError> {
     let dispatch = ctx.rpc_dispatch.clone();
     let resp = dispatch(
@@ -120,19 +125,10 @@ async fn apply_step(ctx: &mut RpcCtx, proc: &str, input: Value) -> Result<Value,
     .await;
     match resp {
         RpcResponse::Ok { data, .. } => Ok(data),
-        RpcResponse::Err { error, .. } => {
-            if proc == "repo.branchCreate" && error.code == "repo.branch_exists" {
-                Err(AppError::new(
-                    "apply_failed:branch_exists",
-                    "the apply branch already exists — delete it and retry",
-                ))
-            } else {
-                Err(AppError::new(
-                    format!("apply_failed:{proc}"),
-                    format!("{proc} failed: {}", error.message),
-                ))
-            }
-        }
+        RpcResponse::Err { error, .. } => Err(AppError::new(
+            format!("apply_failed:{proc}"),
+            format!("{proc} failed: {}", error.message),
+        )),
     }
 }
 
@@ -157,6 +153,44 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
     let (owner, name) = (session.repo_owner.clone(), session.repo_name.clone());
     let id8: String = row.id.chars().take(8).collect();
     let branch = format!("{APPLY_BRANCH_PREFIX}{id8}");
+
+    // a0. apply-name prechecks, both before any effect lands:
+    // - UNPROTECTED name: `repo.file.commitPolicy` answers whether a
+    //   direct commit to `oxpilot/proposal-<id8>` is allowed — a
+    //   protected match must fail here, else the `repo.file.*` ops
+    //   would silently detour to a generated `web-edit/*` fallback
+    //   branch (the RepoFileCommitOptions protected-branch fallback is
+    //   excluded) and the PR head_ref would dangle.
+    // - ABSENT name: `repo.branchCreate` reports a collision only as
+    //   `repo.git_failed`, so existence is checked via `repo.refs` —
+    //   a leftover/concurrent `oxpilot/proposal-<id8>` branch surfaces
+    //   as the retry-distinguishing `apply_failed:branch_exists`
+    //   (BR5.7/NFR4.11-4.12). A true check-then-create race still dies
+    //   fail-stop at `apply_failed:repo.branchCreate`.
+    let policy = apply_step(
+        ctx,
+        "repo.file.commitPolicy",
+        json!({ "owner": owner, "name": name, "branch": branch }),
+    )
+    .await?;
+    if policy["direct_commit_allowed"].as_bool() != Some(true) {
+        return Err(AppError::new(
+            "apply_failed:protected_branch",
+            "the generated apply branch name is covered by branch protection — apply cannot proceed",
+        ));
+    }
+    let refs = apply_step(ctx, "repo.refs", json!({ "owner": owner, "name": name })).await?;
+    let want = format!("refs/heads/{branch}");
+    if refs["refs"]
+        .as_array()
+        .map(|rs| rs.iter().any(|r| r["name"].as_str() == Some(want.as_str())))
+        .unwrap_or(false)
+    {
+        return Err(AppError::new(
+            "apply_failed:branch_exists",
+            "the apply branch already exists — delete it and retry",
+        ));
+    }
 
     // a. fresh namespaced branch at the proposal's base (BR5.3/BR5.6).
     apply_step(
@@ -265,10 +299,13 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
         }),
     )
     .await?;
-    let pr_ref = format!(
-        "{owner}/{name}#{}",
-        pr["number"].as_i64().unwrap_or_default()
-    );
+    let pr_number = pr["number"].as_i64().filter(|n| *n > 0).ok_or_else(|| {
+        AppError::new(
+            "oxpilot.internal",
+            "pull.create returned no positive number",
+        )
+    })?;
+    let pr_ref = format!("{owner}/{name}#{pr_number}");
 
     // BR5.5 — mark applied + audit + return the correlation ref.
     svc.mark_applied(&user.id, &req.proposal_id, &pr_ref)
@@ -277,7 +314,7 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
         ctx,
         Some((&user.id, &user.username)),
         "oxpilot.diff_applied",
-        Some(("proposal", &req.proposal_id)),
+        Some(("oxpilot_proposal", &req.proposal_id)),
         Some(
             json!({
                 "session_id": row.session_id,
