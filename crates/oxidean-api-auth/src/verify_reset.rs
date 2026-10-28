@@ -312,11 +312,16 @@ pub async fn reset_password(
         ));
     }
 
-    // Bound unauthenticated redeem churn per IP + identifier (email or
-    // "token" for magic-link path). Reuses the login_begin limiter shape.
+    // Bound unauthenticated redeem churn per IP + identifier (email, or a
+    // per-token key for the magic-link path — a shared literal would let a
+    // handful of bad guesses DoS every magic-link redeem).
     let rate_key = email_raw
         .map(|e| e.to_ascii_lowercase())
-        .unwrap_or_else(|| "token".into());
+        .unwrap_or_else(|| {
+            token
+                .map(|t| format!("tok:{}", sha256_hex(t.as_bytes())))
+                .unwrap_or_else(|| "token".into())
+        });
     {
         let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
         let mut lim = ctx
