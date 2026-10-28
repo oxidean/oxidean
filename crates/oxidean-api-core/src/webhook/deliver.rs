@@ -77,7 +77,7 @@ fn unbracket_host(host: &str) -> &str {
 /// deployments require publicly routable targets, other environments
 /// follow [`private_egress_allowed`]. The cloud metadata address is
 /// blocked everywhere. Domain hosts additionally get a resolved-IP
-/// check at connect time via [`resolve_webhook_target`].
+/// check at connect time via `resolve_webhook_target`.
 pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|_| "invalid webhook URL".to_string())?;
     let scheme = parsed.scheme();
