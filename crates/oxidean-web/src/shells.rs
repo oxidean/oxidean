@@ -899,16 +899,10 @@ mod tests {
     fn settings_redirect() {
         // `/settings` canonically lands on the `general` sub-page.
         let m = dispatch("/jesse/app/settings").unwrap();
-        assert_eq!(
-            m.redirect.as_deref(),
-            Some("/jesse/app/settings/general")
-        );
+        assert_eq!(m.redirect.as_deref(), Some("/jesse/app/settings/general"));
         // Percent-encoded segments survive verbatim into the target.
         let m = dispatch("/jesse/a%20b/settings").unwrap();
-        assert_eq!(
-            m.redirect.as_deref(),
-            Some("/jesse/a%20b/settings/general")
-        );
+        assert_eq!(m.redirect.as_deref(), Some("/jesse/a%20b/settings/general"));
     }
 
     #[test]
@@ -925,10 +919,7 @@ mod tests {
         let m = dispatch("/jesse/app/settings/integrations").unwrap();
         assert!(m.protected);
         assert!(m.redirect.is_none());
-        assert_eq!(
-            m.title.as_deref(),
-            Some("Settings · jesse/app · Oxidean")
-        );
+        assert_eq!(m.title.as_deref(), Some("Settings · jesse/app · Oxidean"));
     }
 
     #[test]
