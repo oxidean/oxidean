@@ -5219,3 +5219,502 @@
 **Summary Authorization Id**: c7cbe0cdc6e99b2c5aea99b06fe53565f13216bc7f894f905d2cc44b75893007
 
 ---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: 43fcd7a9
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_PASSED
+**Fire id**: 43fcd7a9
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+**Duration ms**: 67
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: 3b8df78d
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+
+---
+
+## Sensor Failed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FAILED
+**Fire id**: 3b8df78d
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+**Detail path**: aidlc/spaces/default/intents/261027-oxpilot-agent/.aidlc-engine/sensors/code-generation/upstream-coverage-3b8df78d.md
+**Findings count**: 1
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: df7dfb2f
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_PASSED
+**Fire id**: df7dfb2f
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+**Duration ms**: 66
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: fe66f3f6
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+
+---
+
+## Sensor Failed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FAILED
+**Fire id**: fe66f3f6
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+**Detail path**: aidlc/spaces/default/intents/261027-oxpilot-agent/.aidlc-engine/sensors/code-generation/upstream-coverage-fe66f3f6.md
+**Findings count**: 1
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: 42852d03
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_PASSED
+**Fire id**: 42852d03
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+**Duration ms**: 67
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: 8e031e59
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+
+---
+
+## Sensor Failed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FAILED
+**Fire id**: 8e031e59
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+**Detail path**: aidlc/spaces/default/intents/261027-oxpilot-agent/.aidlc-engine/sensors/code-generation/upstream-coverage-8e031e59.md
+**Findings count**: 1
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_FIRED
+**Fire id**: 8c7f905e
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:41Z
+**Event**: SENSOR_PASSED
+**Fire id**: 8c7f905e
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+**Duration ms**: 66
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FIRED
+**Fire id**: ebdab6c0
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+
+---
+
+## Sensor Failed
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FAILED
+**Fire id**: ebdab6c0
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+**Detail path**: aidlc/spaces/default/intents/261027-oxpilot-agent/.aidlc-engine/sensors/code-generation/upstream-coverage-ebdab6c0.md
+**Findings count**: 1
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FIRED
+**Fire id**: 5b611e81
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_PASSED
+**Fire id**: 5b611e81
+**Sensor ID**: required-sections
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+**Duration ms**: 72
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FIRED
+**Fire id**: 2bc4ff6e
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+
+---
+
+## Sensor Failed
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FAILED
+**Fire id**: 2bc4ff6e
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+**Detail path**: aidlc/spaces/default/intents/261027-oxpilot-agent/.aidlc-engine/sensors/code-generation/upstream-coverage-2bc4ff6e.md
+**Findings count**: 1
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_FIRED
+**Fire id**: 509e30e6
+**Sensor ID**: traceability
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/traceability.json
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:06:42Z
+**Event**: SENSOR_PASSED
+**Fire id**: 509e30e6
+**Sensor ID**: traceability
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/traceability.json
+**Duration ms**: 73
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_FIRED
+**Fire id**: d934ccf7
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_PASSED
+**Fire id**: d934ccf7
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-plan.md
+**Duration ms**: 70
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_FIRED
+**Fire id**: f0c5e6bd
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_PASSED
+**Fire id**: f0c5e6bd
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+**Duration ms**: 69
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_FIRED
+**Fire id**: 237be21c
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_PASSED
+**Fire id**: 237be21c
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/unit-test-instructions.md
+**Duration ms**: 68
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_FIRED
+**Fire id**: a77aee53
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_PASSED
+**Fire id**: a77aee53
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-summary.md
+**Duration ms**: 71
+
+---
+
+## Sensor Fired
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_FIRED
+**Fire id**: 829218a2
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+
+---
+
+## Sensor Passed
+**Timestamp**: 2026-10-28T22:07:04Z
+**Event**: SENSOR_PASSED
+**Fire id**: 829218a2
+**Sensor ID**: upstream-coverage
+**Stage slug**: code-generation
+**Unit**: oxpilot-ui
+**Output path**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/source-manifest.json
+**Duration ms**: 74
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: oxpilot-tools
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-core/src/oxpilot.rs, crates/oxidean-api-oxpilot/src/dispatch.rs, crates/oxidean-api-oxpilot/src/lib.rs, crates/oxidean-api-oxpilot/src/tools/comment.rs, crates/oxidean-api-oxpilot/src/tools/procs.rs, crates/oxidean-api-oxpilot/src/tools/read.rs, crates/oxidean-db/src/oxpilot.rs, crates/oxidean-db/tests/dialect_oxpilot.rs, packages/api-client/src/index.ts
+**Recorded**: sha256:6a76106ded7bc0f5e7ee5d5b33388f5ea2ac90d99c4b66df5b843c68e927537c
+**Current**: sha256:367e801ce38f8dcd172080402c4545b64d0aaba21eaf3ba5014fe4506dbb9e22
+**Details**: crates/oxidean-api-core/src/oxpilot.rs, crates/oxidean-api-oxpilot/src/dispatch.rs, crates/oxidean-api-oxpilot/src/lib.rs, crates/oxidean-api-oxpilot/src/tools/comment.rs, crates/oxidean-api-oxpilot/src/tools/procs.rs, crates/oxidean-api-oxpilot/src/tools/read.rs, crates/oxidean-db/src/oxpilot.rs, crates/oxidean-db/tests/dialect_oxpilot.rs, packages/api-client/src/index.ts changed after the oxpilot tools Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: connector-client
+**Checkpoint**: review-receipt
+**Changed**: .github/workflows/ci.yml, Cargo.lock, crates/oxidean-cli/Cargo.toml, crates/oxidean-cli/src/args.rs, crates/oxidean-cli/src/commands.rs, crates/oxidean-cli/src/completion.rs, crates/oxidean-cli/src/pilot/client.rs, crates/oxidean-cli/src/pilot/exec.rs, crates/oxidean-cli/src/pilot/mod.rs, crates/oxidean-cli/src/pilot/openapi.yaml (and 4 more)
+**Recorded**: sha256:aa13747649ea6e65d400044adc5880b07df174f1dfc972ed8a5621e6460550e4
+**Current**: sha256:0b938d34b1926e613e1cc47a9c9900730889e781c7755f8ea92e2279269ee923
+**Details**: .github/workflows/ci.yml, Cargo.lock, crates/oxidean-cli/Cargo.toml, crates/oxidean-cli/src/args.rs, crates/oxidean-cli/src/commands.rs, crates/oxidean-cli/src/completion.rs, crates/oxidean-cli/src/pilot/client.rs, crates/oxidean-cli/src/pilot/exec.rs, crates/oxidean-cli/src/pilot/mod.rs, crates/oxidean-cli/src/pilot/openapi.yaml (and 4 more) changed after the connector client Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: connector-gateway
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-oxpilot/src/connector/gateway.rs, crates/oxidean-api-oxpilot/src/connector/procs.rs, crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs, crates/oxidean-api/src/bin/rpc_gen.rs, crates/oxidean-db/src/lib.rs, docs/CONFIGURATION.md
+**Recorded**: sha256:560483f5b4ec897e217d93ccb192482cabdd70359e9cee9a4656499d985eef14
+**Current**: sha256:377ca6ad07d0f92f9f6e24b8c9cf6105294f92d82c9f3aa6a875e11a91d503ee
+**Details**: crates/oxidean-api-oxpilot/src/connector/gateway.rs, crates/oxidean-api-oxpilot/src/connector/procs.rs, crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs, crates/oxidean-api/src/bin/rpc_gen.rs, crates/oxidean-db/src/lib.rs, docs/CONFIGURATION.md changed after the connector gateway Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: agent-runtime
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-oxpilot/src/providers/anthropic.rs, crates/oxidean-api-oxpilot/src/providers/ollama.rs, crates/oxidean-api-oxpilot/src/providers/openai.rs, crates/oxidean-api-oxpilot/src/runtime.rs, crates/oxidean-api-oxpilot/src/services.rs, crates/oxidean-api-oxpilot/src/session.rs
+**Recorded**: sha256:9a07a3bd092d93fb01cc688f803719223cfb05bc303aefb5cbd983473601fe38
+**Current**: sha256:58bae35e6ef348700d87ccf2ebe7165724315d5071b05bb2f189117c07ad87e0
+**Details**: crates/oxidean-api-oxpilot/src/providers/anthropic.rs, crates/oxidean-api-oxpilot/src/providers/ollama.rs, crates/oxidean-api-oxpilot/src/providers/openai.rs, crates/oxidean-api-oxpilot/src/runtime.rs, crates/oxidean-api-oxpilot/src/services.rs, crates/oxidean-api-oxpilot/src/session.rs changed after the agent runtime Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: session-core
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-core/Cargo.toml, crates/oxidean-api-core/src/app.rs, crates/oxidean-api-core/src/lib.rs, crates/oxidean-api-core/src/rpc.rs, crates/oxidean-api-oxpilot/Cargo.toml, crates/oxidean-api/Cargo.toml, crates/oxidean-api/src/app.rs, crates/oxidean-api/src/rpc.rs, crates/oxidean-core/src/lib.rs, crates/oxidean-db/tests/dialect_actions.rs
+**Recorded**: sha256:6dab2cd07aaa0c05488f9e0661a089c271e6d72f607c4ed53c666b82696f6363
+**Current**: sha256:afc2da044ee53c3eeb33eb02919094e895769ee1dc7d97c59e7c631a2ca9f24a
+**Details**: crates/oxidean-api-core/Cargo.toml, crates/oxidean-api-core/src/app.rs, crates/oxidean-api-core/src/lib.rs, crates/oxidean-api-core/src/rpc.rs, crates/oxidean-api-oxpilot/Cargo.toml, crates/oxidean-api/Cargo.toml, crates/oxidean-api/src/app.rs, crates/oxidean-api/src/rpc.rs, crates/oxidean-core/src/lib.rs, crates/oxidean-db/tests/dialect_actions.rs changed after the session core Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: providers
+**Checkpoint**: review-receipt
+**Changed**: .env.example, .railway/railway.ts, Cargo.toml, crates/oxidean-api-oxpilot/src/providers/egress.rs, crates/oxidean-api-oxpilot/src/providers/key.rs, crates/oxidean-api-oxpilot/src/providers/mod.rs, crates/oxidean-api-oxpilot/src/providers/registry.rs, crates/oxidean-db/src/oxpilot_settings.rs
+**Recorded**: sha256:5f0379c5df63d4b4a3d4aab775dc1d34298fb66c3dc6547335de1ae04172e4c4
+**Current**: sha256:a70352f0c7b3b4614054f242d5ffe5984000d4b6b91f2c2e8db2c7001d8e1b27
+**Details**: .env.example, .railway/railway.ts, Cargo.toml, crates/oxidean-api-oxpilot/src/providers/egress.rs, crates/oxidean-api-oxpilot/src/providers/key.rs, crates/oxidean-api-oxpilot/src/providers/mod.rs, crates/oxidean-api-oxpilot/src/providers/registry.rs, crates/oxidean-db/src/oxpilot_settings.rs changed after the providers Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T22:07:07Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: skeleton-slice
+**Checkpoint**: review-receipt
+**Changed**: apps/web/e2e/stack/oxpilot.stack.test.ts, apps/web/package.json, apps/web/src/lib/oxpilot-chat.tsrx, apps/web/src/lib/oxpilot-queries.ts, apps/web/src/lib/oxpilot-stream.ts, apps/web/src/routes/oxpilot.$session.tsrx, apps/web/src/routes/oxpilot.integration.test.ts, apps/web/src/routes/oxpilot.tsrx, apps/web/src/test/browser-coverage.manifest.ts, apps/web/src/test/route-coverage.manifest.ts (and 4 more)
+**Recorded**: sha256:16c710c81c4d4c4187a91a6e0c5c4ecbb84e58b8c8f559b6390ca82eef842e22
+**Current**: sha256:f01a9b8485e1eb84fe42037ceba6eac1beb7b8c26c7017614d2e93ce1bcf51e7
+**Details**: apps/web/e2e/stack/oxpilot.stack.test.ts, apps/web/package.json, apps/web/src/lib/oxpilot-chat.tsrx, apps/web/src/lib/oxpilot-queries.ts, apps/web/src/lib/oxpilot-stream.ts, apps/web/src/routes/oxpilot.$session.tsrx, apps/web/src/routes/oxpilot.integration.test.ts, apps/web/src/routes/oxpilot.tsrx, apps/web/src/test/browser-coverage.manifest.ts, apps/web/src/test/route-coverage.manifest.ts (and 4 more) changed after the skeleton slice Unit was reviewed; carrying on.
+
+---
+
+## Review Requested
+**Timestamp**: 2026-10-28T22:07:08Z
+**Event**: REVIEW_REQUESTED
+**Stage**: code-generation
+**Reviewer**: aidlc-architecture-reviewer-agent
+**Unit**: oxpilot-ui
+**Iteration**: 1
+**Artifact Fingerprint**: sha256:d8d9a4addd8f017d9594cdf947037b330dd61315c583583da9a8411d09bac1e6
+**Request Id**: review:82a71145943fff091cf9202138fc0fe9
+**Source Fingerprint**: 270d87fd8fc5ceb646d6f052f379823913a2a2cf0f0ec036e3f0c9106e3d5b78
+**Unit Source Fingerprint**: sha256:058eedd7797e1a84cc04e4930bdd7bb7959945f13c0c2e61fea447f66cb464b0
+**Review File**: .aidlc-engine/reviews/code-generation/units/oxpilot-ui/6bc2091a791a039a/1.82a71145943fff091cf9202138fc0fe9.review.md
+
+---
+
+## Review Completed
+**Timestamp**: 2026-10-28T22:21:27Z
+**Event**: REVIEW_COMPLETED
+**Stage**: code-generation
+**Reviewer**: aidlc-architecture-reviewer-agent
+**Unit**: oxpilot-ui
+**Iteration**: 1
+**Verdict**: NOT-READY
+**Request Fingerprint**: sha256:d8d9a4addd8f017d9594cdf947037b330dd61315c583583da9a8411d09bac1e6
+**Artifact Fingerprint**: sha256:d8d9a4addd8f017d9594cdf947037b330dd61315c583583da9a8411d09bac1e6
+**Request Id**: review:82a71145943fff091cf9202138fc0fe9
+**Request Source Fingerprint**: 270d87fd8fc5ceb646d6f052f379823913a2a2cf0f0ec036e3f0c9106e3d5b78
+**Source Fingerprint**: 270d87fd8fc5ceb646d6f052f379823913a2a2cf0f0ec036e3f0c9106e3d5b78
+**Source Listing**: sha256:022808c5ef8ea2b5369473d487922e2b196aade546ad8e7584f19b397b43c407
+**Unit Source Fingerprint**: sha256:058eedd7797e1a84cc04e4930bdd7bb7959945f13c0c2e61fea447f66cb464b0
+**Review Record**: .aidlc-engine/reviews/code-generation/units/oxpilot-ui/6bc2091a791a039a/1.json
+**Review Record Digest**: sha256:1aa792b505884bba58cca9cd5630cce28adf862966051e10f6db461a13a46711
+
+---

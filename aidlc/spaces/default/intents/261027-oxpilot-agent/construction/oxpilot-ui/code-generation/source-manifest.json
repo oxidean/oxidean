@@ -1,0 +1,163 @@
+{
+  "stage": "code-generation",
+  "unit": "oxpilot-ui",
+  "version": 1,
+  "writes": [
+    {
+      "path": ".railway/railway.ts"
+    },
+    {
+      "path": "apps/web/astro.config.mjs"
+    },
+    {
+      "path": "apps/web/e2e/stack/oxpilot.stack.test.ts"
+    },
+    {
+      "path": "apps/web/package.json"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/composer.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/confirm-dialog.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/connect-dialog.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/consent-card.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/context-drawer.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/diff-card.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/flag-off.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/new-session-dialog.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/queued-row.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/session-row.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/sessions-rail.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/target-row.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/tool-call-card.tsrx"
+    },
+    {
+      "path": "apps/web/src/components/oxpilot/transcript.tsrx"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-chat.tsrx"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-queries.ts"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-stream.ts"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-stream.unit.test.ts"
+    },
+    {
+      "path": "apps/web/src/lib/route-params.ts"
+    },
+    {
+      "path": "apps/web/src/pages/oxpilot.astro"
+    },
+    {
+      "path": "apps/web/src/pages/oxpilot/[session].astro"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.$session.tsrx"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.browser.test.tsx"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.integration.test.ts"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.tsrx"
+    },
+    {
+      "path": "apps/web/src/routes/settings/ai.tsrx"
+    },
+    {
+      "path": "apps/web/src/test/browser-coverage.manifest.ts"
+    },
+    {
+      "path": "apps/web/src/test/route-coverage.manifest.ts"
+    },
+    {
+      "path": "apps/web/vite-plugins/tanstack-ai-octane.ts"
+    },
+    {
+      "path": "bun.lock"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/connector/gateway.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/connector/procs.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/dispatch.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/runtime.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/services.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/session.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/tools/read.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0090_oxpilot_session_target.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0090_oxpilot_session_target.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0090_oxpilot_session_target.sql"
+    },
+    {
+      "path": "crates/oxidean-db/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-db/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_oxpilot.rs"
+    },
+    {
+      "path": "packages/api-client/src/index.ts"
+    }
+  ]
+}

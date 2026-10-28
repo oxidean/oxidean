@@ -17,7 +17,7 @@ import { apiClient } from "@/lib/api-client";
  * frames, which carry `call_id`/`call_index` to disambiguate parallel
  * same-name calls (U3 additive fields).
  */
-export type OxpilotToolCallCard = {
+type OxpilotToolCallCard = {
   call_id: string;
   call_index?: number;
   tool: string;

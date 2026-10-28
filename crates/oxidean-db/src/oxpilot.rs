@@ -849,14 +849,14 @@ pub struct OxpilotProposalRow {
 }
 
 /// One UTC-day usage rollup row (US5.2) — standalone by design (no FK):
-/// counters survive session and user deletion. `(scope, scope_key, window)`
-/// is the identity; `scope` ∈ `user|instance`, `window` is `YYYY-MM-DD`.
+/// counters survive session and user deletion. `(scope, scope_key, window_day)`
+/// is the identity; `scope` ∈ `user|instance`, `window_day` is `YYYY-MM-DD`.
 #[derive(Debug, Clone)]
 pub struct OxpilotUsageCounterRow {
     pub id: String,
     pub scope: String,
     pub scope_key: String,
-    pub window: String,
+    pub window_day: String,
     pub requests: i64,
     pub tokens: i64,
     pub updated_at: String,
@@ -980,8 +980,8 @@ macro_rules! map_usage {
             scope_key: row
                 .try_get("scope_key")
                 .map_err(|e| format!("oxpilot usage row: {e}"))?,
-            window: row
-                .try_get("window")
+            window_day: row
+                .try_get("window_day")
                 .map_err(|e| format!("oxpilot usage row: {e}"))?,
             requests: row
                 .try_get::<i64, _>("requests")
@@ -1043,17 +1043,18 @@ const PROPOSAL_SELECT_SQLITE: &str = "SELECT p.id, p.session_id, p.title, p.base
        strftime('%Y-%m-%dT%H:%M:%SZ', p.created_at) AS created_at
 FROM oxpilot_proposals p";
 
-const USAGE_SELECT_PG: &str = "SELECT u.id, u.scope, u.scope_key, u.window, u.requests, u.tokens,
+const USAGE_SELECT_PG: &str =
+    "SELECT u.id, u.scope, u.scope_key, u.window_day, u.requests, u.tokens,
        to_char(u.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM oxpilot_usage_counters u";
 
 const USAGE_SELECT_MYSQL: &str =
-    "SELECT u.id, u.scope, u.scope_key, u.window, u.requests, u.tokens,
+    "SELECT u.id, u.scope, u.scope_key, u.window_day, u.requests, u.tokens,
        DATE_FORMAT(u.updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM oxpilot_usage_counters u";
 
 const USAGE_SELECT_SQLITE: &str =
-    "SELECT u.id, u.scope, u.scope_key, u.window, u.requests, u.tokens,
+    "SELECT u.id, u.scope, u.scope_key, u.window_day, u.requests, u.tokens,
        strftime('%Y-%m-%dT%H:%M:%SZ', u.updated_at) AS updated_at
 FROM oxpilot_usage_counters u";
 
@@ -2099,11 +2100,11 @@ pub const INSTANCE_SCOPE_KEY: &str = "__instance__";
 /// user_id)` + `(instance, '__instance__')` upsert-increment by the same
 /// delta. `id` derives deterministically from the unique key — the row's
 /// identity IS the key, so a deterministic pk can never collide. The
-/// service computes `window` (UTC `YYYY-MM-DD`) — this module owns no clock.
+/// service computes `window_day` (UTC `YYYY-MM-DD`) — this module owns no clock.
 pub async fn upsert_usage(
     pool: &DbPool,
     user_id: &str,
-    window: &str,
+    window_day: &str,
     requests: i64,
     tokens: i64,
 ) -> Result<(), String> {
@@ -2115,12 +2116,12 @@ pub async fn upsert_usage(
                 .await
                 .map_err(|e| format!("begin oxpilot usage upsert tx failed: {e}"))?;
             for (scope, scope_key) in keys {
-                let id = format!("{scope}|{scope_key}|{window}");
+                let id = format!("{scope}|{scope_key}|{window_day}");
                 sqlx::query(
                     "INSERT INTO oxpilot_usage_counters
-                         (id, scope, scope_key, window, requests, tokens)
+                         (id, scope, scope_key, window_day, requests, tokens)
                      VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT (scope, scope_key, window) DO UPDATE SET
+                     ON CONFLICT (scope, scope_key, window_day) DO UPDATE SET
                        requests = oxpilot_usage_counters.requests + EXCLUDED.requests,
                        tokens = oxpilot_usage_counters.tokens + EXCLUDED.tokens,
                        updated_at = now()",
@@ -2128,7 +2129,7 @@ pub async fn upsert_usage(
                 .bind(&id)
                 .bind(scope)
                 .bind(scope_key)
-                .bind(window)
+                .bind(window_day)
                 .bind(requests)
                 .bind(tokens)
                 .execute(&mut *tx)
@@ -2145,10 +2146,10 @@ pub async fn upsert_usage(
                 .await
                 .map_err(|e| format!("begin oxpilot usage upsert tx failed: {e}"))?;
             for (scope, scope_key) in keys {
-                let id = format!("{scope}|{scope_key}|{window}");
+                let id = format!("{scope}|{scope_key}|{window_day}");
                 sqlx::query(
                     "INSERT INTO oxpilot_usage_counters
-                         (id, scope, scope_key, window, requests, tokens)
+                         (id, scope, scope_key, window_day, requests, tokens)
                      VALUES (?, ?, ?, ?, ?, ?)
                      ON DUPLICATE KEY UPDATE
                        requests = requests + VALUES(requests),
@@ -2158,7 +2159,7 @@ pub async fn upsert_usage(
                 .bind(&id)
                 .bind(scope)
                 .bind(scope_key)
-                .bind(window)
+                .bind(window_day)
                 .bind(requests)
                 .bind(tokens)
                 .execute(&mut *tx)
@@ -2175,12 +2176,12 @@ pub async fn upsert_usage(
                 .await
                 .map_err(|e| format!("begin oxpilot usage upsert tx failed: {e}"))?;
             for (scope, scope_key) in keys {
-                let id = format!("{scope}|{scope_key}|{window}");
+                let id = format!("{scope}|{scope_key}|{window_day}");
                 sqlx::query(
                     "INSERT INTO oxpilot_usage_counters
-                         (id, scope, scope_key, window, requests, tokens)
+                         (id, scope, scope_key, window_day, requests, tokens)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                     ON CONFLICT (scope, scope_key, window) DO UPDATE SET
+                     ON CONFLICT (scope, scope_key, window_day) DO UPDATE SET
                        requests = oxpilot_usage_counters.requests + excluded.requests,
                        tokens = oxpilot_usage_counters.tokens + excluded.tokens,
                        updated_at = strftime('%Y-%m-%d %H:%M:%S','now')",
@@ -2188,7 +2189,7 @@ pub async fn upsert_usage(
                 .bind(&id)
                 .bind(scope)
                 .bind(scope_key)
-                .bind(window)
+                .bind(window_day)
                 .bind(requests)
                 .bind(tokens)
                 .execute(&mut *tx)
@@ -2208,7 +2209,7 @@ pub async fn upsert_usage(
 pub async fn read_counters(
     pool: &DbPool,
     user_id: &str,
-    window: &str,
+    window_day: &str,
 ) -> Result<
     (
         Option<OxpilotUsageCounterRow>,
@@ -2216,11 +2217,11 @@ pub async fn read_counters(
     ),
     String,
 > {
-    let suffix = " WHERE u.window = {w} AND u.scope = {s} AND u.scope_key = {k}";
+    let suffix = " WHERE u.window_day = {w} AND u.scope = {s} AND u.scope_key = {k}";
     async fn fetch(
         pool: &DbPool,
         suffix: &str,
-        window: &str,
+        window_day: &str,
         scope: &str,
         scope_key: &str,
     ) -> Result<Option<OxpilotUsageCounterRow>, String> {
@@ -2234,7 +2235,7 @@ pub async fn read_counters(
                         .replace("{k}", "$3")
                 );
                 match sqlx::query(sqlx::AssertSqlSafe(&*sql))
-                    .bind(window)
+                    .bind(window_day)
                     .bind(scope)
                     .bind(scope_key)
                     .fetch_optional(p)
@@ -2254,7 +2255,7 @@ pub async fn read_counters(
                         .replace("{k}", "?")
                 );
                 match sqlx::query(sqlx::AssertSqlSafe(&*sql))
-                    .bind(window)
+                    .bind(window_day)
                     .bind(scope)
                     .bind(scope_key)
                     .fetch_optional(p)
@@ -2274,7 +2275,7 @@ pub async fn read_counters(
                         .replace("{k}", "?3")
                 );
                 match sqlx::query(sqlx::AssertSqlSafe(&*sql))
-                    .bind(window)
+                    .bind(window_day)
                     .bind(scope)
                     .bind(scope_key)
                     .fetch_optional(p)
@@ -2287,8 +2288,8 @@ pub async fn read_counters(
             }
         }
     }
-    let user = fetch(pool, suffix, window, "user", user_id).await?;
-    let instance = fetch(pool, suffix, window, "instance", INSTANCE_SCOPE_KEY).await?;
+    let user = fetch(pool, suffix, window_day, "user", user_id).await?;
+    let instance = fetch(pool, suffix, window_day, "instance", INSTANCE_SCOPE_KEY).await?;
     Ok((user, instance))
 }
 

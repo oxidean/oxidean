@@ -18,7 +18,7 @@
 -- splitting on 'diff --git' headers at read time.
 --
 -- `oxpilot_usage_counters` is the standalone audit-grade rollup for
--- US5.2 — one row per (scope, scope_key, window), window the UTC ISO day.
+-- US5.2 — one row per (scope, scope_key, window_day), window_day the UTC ISO day.
 -- It carries NO session/user FK on purpose: counters survive session and
 -- user deletes.
 --
@@ -77,9 +77,9 @@ CREATE TABLE IF NOT EXISTS oxpilot_usage_counters (
   id         CHAR(36) PRIMARY KEY,
   scope      VARCHAR(32) NOT NULL,
   scope_key  VARCHAR(255) NOT NULL,
-  window     VARCHAR(16) NOT NULL,
+  window_day     VARCHAR(16) NOT NULL,
   requests   BIGINT NOT NULL DEFAULT 0,
   tokens     BIGINT NOT NULL DEFAULT 0,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_oxpilot_usage_counters_key (scope, scope_key, window)
+  UNIQUE KEY uq_oxpilot_usage_counters_key (scope, scope_key, window_day)
 );

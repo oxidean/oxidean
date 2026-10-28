@@ -96,10 +96,27 @@ describe("stack e2e: /oxpilot skeleton slice", () => {
       expect(firstFrameMs).toBeLessThan(250);
       const appends = frames.filter((f) => f.type === "append");
       const terminal = frames.at(-1);
-      expect(appends.length).toBeGreaterThan(0);
-      expect(appends.every((f) => typeof f.seq === "number" && f.role === "assistant")).toBe(true);
-      const seqs = appends.map((f) => Number(f.seq));
-      expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+      // C2 is `append*` — a fast stub turn completes inside the
+      // claim→attach window and delivers the reply through a re-snapshot
+      // instead of append frames. Both are contract-legal; assert the
+      // reply text arrived whichever carried it.
+      const appendedText = appends
+        .map((f) => (typeof f.delta === "string" ? f.delta : ""))
+        .join("");
+      const snapshotText = frames
+        .filter((f) => f.type === "snapshot")
+        .flatMap((f) => (f.messages as { role?: string; content?: string }[] | undefined) ?? [])
+        .filter((m) => m.role === "assistant")
+        .map((m) => m.content ?? "")
+        .join("");
+      expect(appendedText + snapshotText).toContain("Oxpilot (stub): received");
+      if (appends.length > 0) {
+        expect(appends.every((f) => typeof f.seq === "number" && f.role === "assistant")).toBe(
+          true,
+        );
+        const seqs = appends.map((f) => Number(f.seq));
+        expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+      }
       expect(terminal?.type).toBe("terminal");
       expect(terminal?.result).toBe("done");
 

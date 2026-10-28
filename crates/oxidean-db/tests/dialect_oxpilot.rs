@@ -671,7 +671,7 @@ async fn settings_store_bool_decode_from_int_storage() {
 
 /// Table presence + the pinned unique keys: `(session_id, client_msg_id)`
 /// and `(session_id, queue_seq)` on queued, `(session_id, call_id)` on
-/// tool_calls, `(scope, scope_key, window)` on usage_counters — each pair
+/// tool_calls, `(scope, scope_key, window_day)` on usage_counters — each pair
 /// must reject on every dialect.
 #[tokio::test]
 async fn session_core_tables_shape_and_unique_keys() {
@@ -785,11 +785,11 @@ async fn session_core_tables_shape_and_unique_keys() {
         .await;
     assert!(dup_call.is_err(), "(session_id, call_id) must reject");
 
-    // (scope, scope_key, window) on usage_counters — raw insert of the
+    // (scope, scope_key, window_day) on usage_counters — raw insert of the
     // same key triple under a different pk must violate the unique key.
     pool.exec(
         "INSERT INTO oxpilot_usage_counters \
-             (id, scope, scope_key, window, requests, tokens) \
+             (id, scope, scope_key, window_day, requests, tokens) \
          VALUES ('raw-usage-1', 'user', 'u-x', '2026-01-01', 1, 1)",
     )
     .await
@@ -797,22 +797,22 @@ async fn session_core_tables_shape_and_unique_keys() {
     let dup_scope = pool
         .exec(
             "INSERT INTO oxpilot_usage_counters \
-                 (id, scope, scope_key, window, requests, tokens) \
+                 (id, scope, scope_key, window_day, requests, tokens) \
              VALUES ('raw-usage-2', 'user', 'u-x', '2026-01-01', 1, 1)",
         )
         .await;
     assert!(
         dup_scope.is_err(),
-        "(scope, scope_key, window) must reject duplicates"
+        "(scope, scope_key, window_day) must reject duplicates"
     );
     let other_window = pool
         .exec(
             "INSERT INTO oxpilot_usage_counters \
-                 (id, scope, scope_key, window, requests, tokens) \
+                 (id, scope, scope_key, window_day, requests, tokens) \
              VALUES ('raw-usage-3', 'user', 'u-x', '2026-01-02', 1, 1)",
         )
         .await;
-    assert!(other_window.is_ok(), "a different window is a new row");
+    assert!(other_window.is_ok(), "a different window_day is a new row");
 }
 
 /// BR5.3/AC1.5.x — one session delete cascades messages, tool_calls,
@@ -1028,24 +1028,24 @@ async fn usage_upsert_dual_scope_and_shared_instance() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     let (uid, _repo) = seed(&db, "usage").await;
-    let window = "2026-01-04";
+    let window_day = "2026-01-04";
 
     // Absent rows read as None — the service treats that as zero.
     let (u0, i0) = db
-        .read_oxpilot_usage_counters(&uid, window)
+        .read_oxpilot_usage_counters(&uid, window_day)
         .await
         .expect("read");
     assert!(u0.is_none());
     assert!(i0.is_none());
 
-    db.upsert_oxpilot_usage(&uid, window, 1, 40)
+    db.upsert_oxpilot_usage(&uid, window_day, 1, 40)
         .await
         .expect("upsert 1");
-    db.upsert_oxpilot_usage(&uid, window, 1, 25)
+    db.upsert_oxpilot_usage(&uid, window_day, 1, 25)
         .await
         .expect("upsert 2");
     let (user, instance) = db
-        .read_oxpilot_usage_counters(&uid, window)
+        .read_oxpilot_usage_counters(&uid, window_day)
         .await
         .expect("read");
     let user = user.expect("user row");
@@ -1058,13 +1058,13 @@ async fn usage_upsert_dual_scope_and_shared_instance() {
     assert_eq!(instance.requests, 2);
     assert_eq!(instance.tokens, 65);
 
-    // Second user's window gets its own user row; the instance row is
+    // Second user's window_day gets its own user row; the instance row is
     // shared — its counters accumulate across users.
-    db.upsert_oxpilot_usage("u-oxp-usage-b", window, 3, 7)
+    db.upsert_oxpilot_usage("u-oxp-usage-b", window_day, 3, 7)
         .await
         .expect("other user upsert");
     let (u_b, i_b) = db
-        .read_oxpilot_usage_counters("u-oxp-usage-b", window)
+        .read_oxpilot_usage_counters("u-oxp-usage-b", window_day)
         .await
         .expect("read b");
     assert_eq!(u_b.unwrap().requests, 3);

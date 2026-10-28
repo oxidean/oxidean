@@ -809,8 +809,11 @@ mod tests {
     use crate::pilot::client::{ActionClaim, ConnectorClient};
 
     fn test_state(server_uri: &str) -> RunState {
-        let jail = tempfile::tempdir().unwrap();
-        let cfg = tempfile::tempdir().unwrap();
+        // `.keep()` — the RunState must outlive these dirs; a dropped
+        // TempDir deletes the canonical_root underneath every spawned
+        // child (spawn → ENOENT).
+        let jail = tempfile::tempdir().unwrap().keep();
+        let cfg = tempfile::tempdir().unwrap().keep();
         RunState::new(RunOpts {
             client: ConnectorClient::new(server_uri, false),
             verifier: SecretString::new("verifier-under-test-123".to_string()),
@@ -823,9 +826,9 @@ mod tests {
                 requested_caps: vec!["exec_shell".into()],
                 paired_at: "2026-01-01T00:00:00Z".to_string(),
             },
-            cfg_dir: cfg.path().to_path_buf(),
-            canonical_root: std::fs::canonicalize(jail.path()).unwrap(),
-            canonical_cfg: std::fs::canonicalize(cfg.path()).unwrap(),
+            cfg_dir: cfg.clone(),
+            canonical_root: std::fs::canonicalize(&jail).unwrap(),
+            canonical_cfg: std::fs::canonicalize(&cfg).unwrap(),
             secrets: vec![],
             wait_seconds: 1,
             exec_timeout_secs: 30,
