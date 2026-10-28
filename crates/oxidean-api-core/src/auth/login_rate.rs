@@ -61,6 +61,45 @@ impl LoginBeginLimiter {
         };
         ip_ok && ident_ok
     }
+
+    /// `true` when both buckets are under limit — no record, for credential
+    /// checks that consume budget only on failure (`auth.login`, H-1).
+    pub fn check(&mut self, ip: &str, identifier: &str) -> bool {
+        let now = Instant::now();
+        let ip_ok = {
+            let q = self.by_ip.entry(ip.to_string()).or_default();
+            Self::prune(q, now);
+            q.len() < IP_LIMIT
+        };
+        let ident_ok = {
+            let q = self.by_ident.entry(identifier.to_string()).or_default();
+            Self::prune(q, now);
+            q.len() < IDENT_LIMIT
+        };
+        ip_ok && ident_ok
+    }
+
+    /// Push a failed credential attempt into both buckets.
+    pub fn record_failure(&mut self, ip: &str, identifier: &str) {
+        let now = Instant::now();
+        {
+            let q = self.by_ip.entry(ip.to_string()).or_default();
+            Self::prune(q, now);
+            q.push_back(now);
+        }
+        {
+            let q = self.by_ident.entry(identifier.to_string()).or_default();
+            Self::prune(q, now);
+            q.push_back(now);
+        }
+    }
+
+    /// Successful credential check clears the identifier bucket only —
+    /// `FailedAuthLimiter::clear_user` parity (a proven credential resets
+    /// the per-account budget; the IP's failure history stays).
+    pub fn clear_ident(&mut self, identifier: &str) {
+        self.by_ident.remove(identifier);
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +124,25 @@ mod tests {
         }
         assert!(!lim.check_and_record("10.0.0.9", "one-more@b.c"));
         assert!(lim.check_and_record("10.0.0.10", "u0@b.c"));
+    }
+
+    /// `auth.login` semantics: checks are free, only failures consume budget,
+    /// and a proven credential resets the per-identifier bucket.
+    #[test]
+    fn failure_only_budget_and_clear() {
+        let mut lim = LoginBeginLimiter::new();
+        // Successful sign-ins (check only) never exhaust the budget.
+        for _ in 0..IP_LIMIT * 2 {
+            assert!(lim.check("10.0.0.1", "a@b.c"));
+        }
+        for _ in 0..IDENT_LIMIT {
+            lim.record_failure("10.0.0.1", "a@b.c");
+        }
+        assert!(!lim.check("10.0.0.1", "a@b.c"));
+        // A different identifier on the same IP is still under limit.
+        assert!(lim.check("10.0.0.1", "b@b.c"));
+        // Proven credentials reset the identifier bucket (IP stays warm).
+        lim.clear_ident("a@b.c");
+        assert!(lim.check("10.0.0.1", "a@b.c"));
     }
 }

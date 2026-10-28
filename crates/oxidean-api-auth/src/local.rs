@@ -393,40 +393,66 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         return Err(invalid_credentials());
     }
 
-    // One-shot login had no rate limit (H-1) — apply the same IP+identifier
-    // budget as `login_begin` before verifying the password.
+    // One-shot login had no rate limit (H-1) — bound failed credential
+    // checks per client IP and per identifier on the same budget as
+    // `login_begin`. Only failures consume; a proven credential clears the
+    // identifier bucket (`FailedAuthLimiter` parity), so legitimate logins
+    // behind shared egress never lock out.
+    let rate_ip = ctx
+        .client
+        .ip_address
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    let rate_ident = identifier.to_ascii_lowercase();
     {
-        let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
         let mut lim = ctx
             .login_begin_limiter
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if !lim.check_and_record(ip, &identifier.to_ascii_lowercase()) {
+        if !lim.check(&rate_ip, &rate_ident) {
             return Err(AppError::new(
                 "auth.rate_limited",
                 "too many sign-in attempts — try again later",
             ));
         }
     }
+    let record_failure = |ctx: &RpcCtx, ip: &str, ident: &str| {
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lim.record_failure(ip, ident);
+    };
 
     let user = resolve_login_identifier(&ctx.db, identifier).await?;
 
     let Some(user) = user else {
+        record_failure(ctx, &rate_ip, &rate_ident);
         return Err(invalid_credentials());
     };
 
     let Some(ref hash) = user.password_hash else {
+        record_failure(ctx, &rate_ip, &rate_ident);
         return Err(invalid_credentials());
     };
 
     if !verify_password(req.password.as_bytes(), hash) {
+        record_failure(ctx, &rate_ip, &rate_ident);
         return Err(invalid_credentials());
     }
 
     if user.banned_at.is_some() {
         // Same generic message as bad password (no ban-status leak).
+        record_failure(ctx, &rate_ip, &rate_ident);
         return Err(invalid_credentials());
     }
+
+    // Credentials verified — the identifier budget resets (the IP bucket
+    // keeps its failure history).
+    ctx.login_begin_limiter
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear_ident(&rate_ident);
 
     // Two-factor gate (issue #130): a confirmed factor requires proof, and
     // instance/org policy can require factor-less users to enroll — either way
