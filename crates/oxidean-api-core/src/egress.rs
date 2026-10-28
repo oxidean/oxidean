@@ -12,8 +12,10 @@
 //! `resolve_egress_host` resolves DNS once and returns the validated
 //! socket addresses so callers can pin the connection
 //! (`reqwest::ClientBuilder::resolve_to_addrs` for webhooks,
-//! `http.curloptResolve` for HTTP(S) git remotes), closing the TOCTOU
-//! rebind window between validation and connect. Git's SSH transport
+//! `http.curloptResolve` for HTTP(S) git remotes — git ≥ 2.37 required),
+//! closing the TOCTOU rebind window between validation and connect.
+//! Pinned transports also disable proxying: a proxy resolves the remote
+//! hostname itself and would bypass the checked answers. Git's SSH transport
 //! resolves inside OpenSSH on its own — the residual rebind bound for
 //! `ssh://`/`git@` remotes is documented in CONFIGURATION.md.
 

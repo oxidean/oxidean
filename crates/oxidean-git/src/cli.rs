@@ -511,6 +511,38 @@ fn looks_like_missing_ssh(combined: &str) -> bool {
         || (lower.contains("ssh:") && lower.contains("no such file or directory"))
 }
 
+/// `http.curloptResolve` exists only on git ≥ 2.37 (cc/http-curlopt-resolve)
+/// while the crate's floor is 2.5 — on an older git the DNS pin would be
+/// silently ignored and the remote could re-resolve to an unvalidated
+/// answer between egress validation and connect. Fail closed rather than
+/// run a pinned remote op on a git that cannot honor the pin.
+fn ensure_dns_pin_capable_git() -> Result<(), GitError> {
+    static GIT_VERSION: std::sync::OnceLock<Result<(u32, u32, u32), String>> =
+        std::sync::OnceLock::new();
+    let ver = GIT_VERSION.get_or_init(|| {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map_err(|e| format!("git missing or not executable: {e}"))
+            .and_then(|out| {
+                if !out.status.success() {
+                    return Err("git --version failed".into());
+                }
+                crate::version::parse_git_version(&String::from_utf8_lossy(&out.stdout))
+            })
+    });
+    match ver {
+        Ok(v) if *v >= (2, 37, 0) => Ok(()),
+        Ok(v) => Err(GitError::Process(format!(
+            "git {}.{}.{} cannot pin remote DNS — http.curloptResolve needs git ≥ 2.37",
+            v.0, v.1, v.2
+        ))),
+        Err(e) => Err(GitError::Process(format!(
+            "cannot verify git for DNS pinning: {e}"
+        ))),
+    }
+}
+
 /// Materialize askpass / SSH key / known_hosts for one outbound URL op.
 struct RemoteAuthFiles {
     _dir: tempfile::TempDir,
@@ -531,6 +563,7 @@ impl RemoteAuthFiles {
         let mut cfgs: Vec<(String, String)> = vec![("http.followRedirects".into(), "false".into())];
         if let Some(pin) = &credentials.dns_pin {
             if !pin.addrs.is_empty() {
+                ensure_dns_pin_capable_git()?;
                 let joined = pin
                     .addrs
                     .iter()
@@ -544,6 +577,24 @@ impl RemoteAuthFiles {
                     "http.curloptResolve".into(),
                     format!("{}:{}:{}", pin.host, pin.port, joined),
                 ));
+                // The pin binds only local resolution — a configured or
+                // environment HTTP(S) proxy resolves the hostname itself
+                // and would bypass the checked answers, so proxies are
+                // disabled for pinned remotes: empty `http.proxy` beats
+                // repo config and env, and the env vars are scrubbed too.
+                cfgs.push(("http.proxy".into(), String::new()));
+                for var in [
+                    "http_proxy",
+                    "https_proxy",
+                    "all_proxy",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "ALL_PROXY",
+                    "no_proxy",
+                    "NO_PROXY",
+                ] {
+                    env.push((var.into(), String::new()));
+                }
             }
         }
         // An empty HTTPS secret means anonymous access — injecting a
