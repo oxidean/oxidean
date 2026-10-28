@@ -92,6 +92,11 @@ export default defineRailway((ctx) => {
       // AES-256-GCM for Actions secrets, mirror credentials, webhook secrets (D-ACT-17).
       // Required — set a unique value per environment in the dashboard (never commit).
       OXIDEAN_ACTIONS_SECRETS_KEY: preserve(),
+      // Oxpilot flag + provider selection are per-environment choices —
+      // set in the dashboard (flag off by default in code).
+      OXIDEAN_OXPILOT_ENABLED: preserve(),
+      OXIDEAN_OXPILOT_PROVIDER: preserve(),
+      OXIDEAN_OXPILOT_MODEL: preserve(),
       // Reusable runner registration token — must equal the `runner` service's
       // OXIDEAN_RUNNER_REGISTRATION_TOKEN so the bundled runner can register.
       // Set per environment in the dashboard (never commit); production should

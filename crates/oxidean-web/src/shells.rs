@@ -143,6 +143,20 @@ static SHELLS: &[Shell] = &[
     },
     // ── Session-required statics ──────────────────────────────────────────
     Shell {
+        pattern: &[L("oxpilot")],
+        file: "oxpilot/index.html",
+        title: Some("Oxpilot · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("oxpilot"), P("session")],
+        file: "oxpilot/_/index.html",
+        title: Some("Oxpilot session · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[L("notifications")],
         file: "notifications/index.html",
         title: None,

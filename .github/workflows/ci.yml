@@ -669,6 +669,8 @@ jobs:
         run: make openapi-sync-check
       - name: check-skill-sync
         run: make skill-sync-check
+      - name: check-cli-parity
+        run: make cli-parity-check
       - name: check-workflow-templates
         run: make check-workflow-templates
       - name: check-workflow-templates-upstream
@@ -897,7 +899,7 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions) | binary_id(oxidean-db::dialect_oxpilot)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean

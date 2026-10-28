@@ -385,3 +385,22 @@ Oxidean Actions evaluates workflows from `.github/workflows/*.{yml,yaml}` on **p
 **Commit statuses (Phase 13):** Actions publishes contexts `{workflow_name} / {job_key}` — configure branch protection required checks to match. Query with `repo.commitStatus.list`.
 
 Bring-up: [DEPLOYMENT.md](DEPLOYMENT.md#actions-runner-optional). Protocol: [API.md](API.md#actions-phase-19).
+
+## Oxpilot (agentic chat + computer use)
+
+`/oxpilot` is the instance's agentic chat, builder, and optional computer-use
+surface. The flag is off by default; env values seed the boot configuration
+and the `admin.oxpilot.*` settings RPCs (or the persisted `oxpilot_settings`
+row) override them per instance.
+
+| Variable | Description |
+|----------|-------------|
+| `OXIDEAN_OXPILOT_ENABLED` | Instance-wide gate (default off). When off, `oxpilot.*` procs and `/api/oxpilot/*` routes answer `oxpilot.disabled`/`flag_off`; `oxpilot.status` stays callable so the UI can render the disabled state. |
+| `OXIDEAN_OXPILOT_PROVIDER` | Provider adapter id: `stub` (deterministic, for local dev + e2e), `openai`, `anthropic`, or `ollama`. Unset → `no_provider`; unrecognized → `misconfigured` until settings resolve. |
+| `OXIDEAN_OXPILOT_MODEL` | Default model for the env provider (`stub-1` pairs with `stub`). |
+| `OXIDEAN_OXPILOT_USER_BUDGET` | Per-user UTC-day request cap; unset = unbounded. Row-over-env resolution in `admin.oxpilot.settings_set`. |
+| `OXIDEAN_OXPILOT_INSTANCE_BUDGET` | Instance-wide UTC-day request cap; unset = unbounded. |
+
+**Provider keys:** the LLM API key is set through `admin.oxpilot.settings_set{api_key}` (AES-256-GCM at rest via `OXIDEAN_ACTIONS_SECRETS_KEY`) or the provider's env conventions — never returned by any RPC (`key_set`/`key_last4`/`key_source` only). Provider egress goes through the same SSRF guard as webhooks: private/loopback/literal-IP targets are refused, `OXIDEAN_EGRESS_ALLOW_PRIVATE` opts a self-host into private egress (e.g. a LAN Ollama), and DNS answers are pinned to the resolved address.
+
+**Computer-use connectors (`ox pilot …`):** pairing codes are minted in the UI, single-use, and shown once; the connector dials OUT to `/api/oxpilot/connector/*` with a verifier Bearer — no inbound listener and no extra env. Connector egress is the forge itself (the CLI resolves the same instance origin as every other `ox` command); exec/fs actions require an owner grant and run inside the connector's `--root` jail.
