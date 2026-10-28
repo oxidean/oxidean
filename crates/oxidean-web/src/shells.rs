@@ -563,17 +563,18 @@ static SHELLS: &[Shell] = &[
         file: "_/_/settings/index.html",
         title: Some("Settings · {owner}/{repo} · Oxidean"),
         protected: true,
-        redirect: None,
+        // Repo settings are sub-pages; `/settings` canonically lands on
+        // `general`. Real 302 (fragment-inherited, so `#repo-settings-*`
+        // legacy anchors survive for the client-side section map).
+        redirect: Some("/{owner}/{repo}/settings/general"),
     },
-    // Legacy alias — Actions settings moved to /{o}/{r}/settings#repo-settings-actions.
-    // Real 302 (param-interpolated) so bots/no-JS follow too; the emitted shell
-    // file remains as the no-JS fallback document.
+    // Settings sub-pages — one emitted shell, `{section}` resolved client-side.
     Shell {
-        pattern: &[P("owner"), P("repo"), L("settings"), L("actions")],
-        file: "_/_/settings/actions/index.html",
+        pattern: &[P("owner"), P("repo"), L("settings"), P("section")],
+        file: "_/_/settings/_/index.html",
         title: Some("Settings · {owner}/{repo} · Oxidean"),
         protected: true,
-        redirect: Some("/{owner}/{repo}/settings#repo-settings-actions"),
+        redirect: None,
     },
     // Auth-gated mutating leaves (splat tails are file paths, not params).
     Shell {
@@ -895,19 +896,30 @@ mod tests {
     }
 
     #[test]
-    fn legacy_redirect() {
-        let m = dispatch("/jesse/app/settings/actions").unwrap();
-        assert_eq!(
-            m.redirect.as_deref(),
-            Some("/jesse/app/settings#repo-settings-actions")
-        );
+    fn settings_redirect() {
+        // `/settings` canonically lands on the `general` sub-page.
+        let m = dispatch("/jesse/app/settings").unwrap();
+        assert_eq!(m.redirect.as_deref(), Some("/jesse/app/settings/general"));
         // Percent-encoded segments survive verbatim into the target.
-        let m = dispatch("/jesse/a%20b/settings/actions").unwrap();
+        let m = dispatch("/jesse/a%20b/settings").unwrap();
+        assert_eq!(m.redirect.as_deref(), Some("/jesse/a%20b/settings/general"));
+    }
+
+    #[test]
+    fn settings_subpages() {
+        // Any single `{section}` segment serves the shared settings shell.
         assert_eq!(
-            m.redirect.as_deref(),
-            Some("/jesse/a%20b/settings#repo-settings-actions")
+            file_of("/jesse/app/settings/actions"),
+            "_/_/settings/_/index.html"
         );
-        assert!(dispatch("/o/r/settings").unwrap().redirect.is_none());
+        assert_eq!(
+            file_of("/jesse/app/settings/danger"),
+            "_/_/settings/_/index.html"
+        );
+        let m = dispatch("/jesse/app/settings/integrations").unwrap();
+        assert!(m.protected);
+        assert!(m.redirect.is_none());
+        assert_eq!(m.title.as_deref(), Some("Settings · jesse/app · Oxidean"));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import type { RepoMirrorPublic } from "@oxidean/api-client";
+import { ChevronDown } from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useEffect, useState } from "octane";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
+import { formatRelative } from "@/lib/relative-time";
 import { toastSuccess } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -121,6 +124,125 @@ function WebhookSecretReveal(props: { secret: string; onDone: () => void }) @{
     <Button type="button" className="mt-4 w-full sm:w-auto" onClick={props.onDone}>
       Done
     </Button>
+  </div>;
+}
+
+type RefResult = RepoMirrorPublic["ref_results"][number];
+
+type RefGroup = {
+  key: string;
+  label: string;
+  tone: "error" | "warn" | "ok" | "muted";
+  /** error/conflict groups start expanded — they need attention. */
+  attention: boolean;
+  rows: RefResult[];
+};
+
+const OUTCOME_META: Record<string, { label: string; tone: RefGroup["tone"]; rank: number }> = {
+  error: { label: "Failed", tone: "error", rank: 0 },
+  conflict: { label: "Conflicts", tone: "warn", rank: 1 },
+  merged: { label: "Merged", tone: "ok", rank: 2 },
+  ff_in: { label: "Fast-forwarded in", tone: "muted", rank: 3 },
+  ff_out: { label: "Pushed to remote", tone: "muted", rank: 4 },
+  skipped: { label: "Skipped", tone: "muted", rank: 5 },
+};
+
+const TONE_BADGE: Record<RefGroup["tone"], string> = {
+  error: "bg-destructive/10 text-destructive",
+  warn: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  ok: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  muted: "bg-muted text-muted-foreground",
+};
+
+const REF_PAGE = 8;
+
+function groupRefResults(results: RefResult[]): RefGroup[] {
+  const byKey = new Map<string, RefResult[]>();
+  for (const r of results) {
+    const list = byKey.get(r.outcome) ?? [];
+    list.push(r);
+    byKey.set(r.outcome, list);
+  }
+  return [...byKey.entries()]
+    .map(([key, rows]) => {
+      const meta = OUTCOME_META[key] ?? { label: key, tone: "muted" as const, rank: 90 };
+      return { key, label: meta.label, tone: meta.tone, attention: meta.rank <= 1, rows };
+    })
+    .sort((a, b) => (OUTCOME_META[a.key]?.rank ?? 90) - (OUTCOME_META[b.key]?.rank ?? 90));
+}
+
+function RefResultGroup(props: { group: RefGroup }) @{
+  const [showAll, setShowAll] = useState(false);
+  const g = props.group;
+  const rows = showAll ? g.rows : g.rows.slice(0, REF_PAGE);
+
+  // `open` is prop-driven: error/conflict groups re-expand on refetch so new
+  // failures surface instead of staying dismissed.
+  <details
+    className="group border-t border-border first:border-t-0"
+    open={g.attention}
+    data-testid={`mirror-ref-group-${g.key}`}
+  >
+    <summary className="flex cursor-pointer select-none list-none items-center gap-2 px-3 py-2 text-[13px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
+      <ChevronDown
+        aria-hidden
+        size={13}
+        className="-rotate-90 text-muted-foreground transition-transform group-open:rotate-0"
+      />
+      {g.label as string}
+      <span
+        className={cn(
+          "rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums",
+          TONE_BADGE[g.tone],
+        )}
+      >
+        {String(g.rows.length) as string}
+      </span>
+    </summary>
+    <ul>
+      @for (const r of rows; key r.refname) {
+        <li className="flex items-baseline gap-3 border-t border-border/60 px-3 py-1.5 text-[13px]">
+          <code className="shrink-0 font-mono text-[12px] text-foreground">
+            {r.refname as string}
+          </code>
+          @if (r.detail) {
+            <span
+              className="min-w-0 flex-1 truncate text-muted-foreground"
+              title={r.detail}
+            >
+              {r.detail as string}
+            </span>;
+          } @else {
+            <span className="flex-1" />;
+          }
+          <span className="shrink-0 text-[12px] text-muted-foreground">
+            {formatRelative(r.updated_at) as string}
+          </span>
+        </li>;
+      }
+    </ul>
+    @if (g.rows.length > rows.length) {
+      <button
+        type="button"
+        className="w-full border-t border-border/60 px-3 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+        onClick={() => setShowAll(true)}
+      >
+        {`Show ${g.rows.length - rows.length} more` as string}
+      </button>;
+    }
+  </details>;
+}
+
+/** Latest sync outcome per ref, grouped by result — failures and conflicts first. */
+function MirrorRefResults(props: { results: RefResult[] }) @{
+  const groups = groupRefResults(props.results);
+  <div className="flex flex-col gap-2" data-testid="mirror-ref-results">
+    <p className="text-[14px] font-medium text-foreground">Sync activity</p>
+    <div className="overflow-hidden rounded-md border border-border">
+      @for (const g of groups; key g.key) {
+        <RefResultGroup group={g} />;
+      }
+    </div>
   </div>;
 }
 
@@ -426,16 +548,7 @@ export function MirrorSettingsPanel(props: {
             </Button>
           </div>
           @if (existing.ref_results.length > 0) {
-            <ul className="list-inside list-disc text-[13px] text-muted-foreground">
-              @for (const r of existing.ref_results; key r.refname) {
-                <li>
-                  {r.refname as string}: {r.outcome as string}
-                  @if (r.detail) {
-                    <span> — {r.detail as string}</span>;
-                  }
-                </li>;
-              }
-            </ul>;
+            <MirrorRefResults results={existing.ref_results} />;
           }
         </>;
       }

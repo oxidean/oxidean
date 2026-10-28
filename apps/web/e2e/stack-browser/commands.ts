@@ -706,7 +706,7 @@ export const expectMirrorAuthToggleFlow: BrowserCommand<[]> = async (ctx) => {
   const pageGuard = await newGuardedPage(context);
   const page = pageGuard.page;
   try {
-    await page.goto(`${webOrigin()}/${seed.owner}/${seed.repo}/settings`, {
+    await page.goto(`${webOrigin()}/${seed.owner}/${seed.repo}/settings/integrations`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
@@ -1162,7 +1162,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
     );
   try {
     // --- Rename via the Danger zone form ---
-    await page.goto(`${webOrigin()}/${seed.owner}/${oldRepo}/settings`, {
+    await page.goto(`${webOrigin()}/${seed.owner}/${oldRepo}/settings/danger`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
@@ -1183,7 +1183,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
       await renameInput.fill(newRepo).catch(() => {});
       await renameBtn.click({ force: true }).catch(() => {});
       try {
-        await waitForPath(`/${seed.owner}/${newRepo}/settings`);
+        await waitForPath(`/${seed.owner}/${newRepo}/settings/danger`);
         renamedUi = true;
       } catch {
         renamedUi = false;
@@ -1204,7 +1204,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
           );
         }
       }
-      await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings`, {
+      await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings/danger`, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });
@@ -1226,7 +1226,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
     pageGuard.assertNoPageErrors("rename + old-URL redirect");
 
     // --- Transfer to org via OwnerLookup + type-to-confirm dialog ---
-    await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings`, {
+    await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings/danger`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
@@ -1292,7 +1292,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
         await confirmInput.waitFor({ state: "visible", timeout: 5_000 });
         await confirmInput.fill(newRepo);
         await confirmBtn.click({ force: true });
-        await waitForPath(`/${orgSlug}/${newRepo}/settings`);
+        await waitForPath(`/${orgSlug}/${newRepo}/settings/danger`);
         transferredUi = true;
       } catch {
         // Dialog may have closed via nav/remount — re-open before retrying.
@@ -1326,7 +1326,7 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
           );
         }
       }
-      await page.goto(`${webOrigin()}/${orgSlug}/${newRepo}/settings`, {
+      await page.goto(`${webOrigin()}/${orgSlug}/${newRepo}/settings/danger`, {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });

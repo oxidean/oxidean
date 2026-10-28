@@ -89,6 +89,17 @@ fn log_sso_err(err: &ExternalAuthError) {
     tracing::error!(code = err.code(), error = %err, "external auth failed");
 }
 
+/// `/login/two-factor` challenge redirect. The return URL is one encoded
+/// query value — a raw `&challenge=`/`&tab=` inside `return_to` would leak
+/// out as a top-level param of the challenge page (`?challenge=` overrides
+/// the cookie).
+fn two_factor_path(return_to: &str) -> String {
+    let encoded: String =
+        url::form_urlencoded::byte_serialize(sanitize_return_to(Some(return_to)).as_bytes())
+            .collect();
+    format!("/login/two-factor?return={encoded}")
+}
+
 /// GET `/api/auth/workos/start`
 pub async fn workos_start(
     State(state): State<AppState>,
@@ -287,11 +298,7 @@ async fn mint_session_and_redirect(
                 });
             let cookie =
                 crate::auth::two_factor::challenge_cookie_header(&state.env_name, &challenge);
-            let path = format!(
-                "/login/two-factor?return={}",
-                sanitize_return_to(Some(return_to))
-            );
-            return redirect_with_cookies(&path, &[cookie]);
+            return redirect_with_cookies(&two_factor_path(return_to), &[cookie]);
         }
         Ok(_) => {}
         Err(e) => {
@@ -336,4 +343,39 @@ async fn mint_session_and_redirect(
     debug_assert!(session_header.contains(SESSION_COOKIE_NAME));
     debug_assert!(presence.contains(SESSION_PRESENCE_COOKIE_NAME));
     redirect_with_cookies(&path, &[session_header, presence])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_factor_path_encodes_nested_query() {
+        // `&challenge=` inside return_to must stay inside the `return` value,
+        // not escape to a top-level param that overrides the challenge cookie.
+        let p = two_factor_path("/jesse/app/settings?notice=1&challenge=evil");
+        assert!(p.starts_with("/login/two-factor?return="), "{p}");
+        assert_eq!(p.matches('&').count(), 0, "{p}");
+    }
+
+    #[test]
+    fn two_factor_path_round_trips() {
+        // URLSearchParams.get("return") on the challenge page decodes once.
+        let p = two_factor_path("/jesse/app/settings?notice=1&tab=mirror");
+        let raw = p.strip_prefix("/login/two-factor?return=").unwrap();
+        let decoded: String = url::form_urlencoded::parse(format!("v={raw}").as_bytes())
+            .find(|(k, _)| k == "v")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        assert_eq!(decoded, "/jesse/app/settings?notice=1&tab=mirror");
+        assert_eq!(two_factor_path("/x"), "/login/two-factor?return=%2Fx");
+    }
+
+    #[test]
+    fn two_factor_path_sanitizes_open_redirect() {
+        assert_eq!(
+            two_factor_path("https://evil.example"),
+            "/login/two-factor?return=%2F"
+        );
+    }
 }

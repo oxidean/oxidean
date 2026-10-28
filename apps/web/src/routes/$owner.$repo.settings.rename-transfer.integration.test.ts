@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 describe("repo settings rename/transfer danger zone (GIT-16/17)", () => {
   it("Danger zone exposes rename + transfer with type-confirm", async () => {
-    const settingsSrc = await import("./$owner.$repo.settings.tsrx?raw").then((m) =>
+    const settingsSrc = await import("../components/repo/danger-zone-panel.tsrx?raw").then((m) =>
       String((m as { default: string }).default),
     );
     expect(settingsSrc, "Wave 0: settings must expose rename (GIT-16 / D-REL-07)").toMatch(

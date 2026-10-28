@@ -199,6 +199,7 @@ async fn spa(
     req: axum::extract::Request,
 ) -> Response {
     let path = uri.path();
+    let query = uri.query();
 
     // Dot segments (literal or %-encoded) normalize before reaching the
     // upstream URL parser or the filesystem join — `/api/../x` would escape
@@ -248,11 +249,11 @@ async fn spa(
             // real owner never shares a name with asset space.
             let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
             if segs.len() == 2 && !st.dist.join(segs[0]).exists() {
-                return serve_shell(&st, m, &headers, req.method().clone(), path).await;
+                return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
             }
             return not_found(&st.dist, &headers, &st.meta).await;
         }
-        return serve_shell(&st, m, &headers, req.method().clone(), path).await;
+        return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
     }
 
     // Non-routed path — asset or 404.
@@ -271,7 +272,7 @@ fn static_file_present(dist: &std::path::Path, path: &str) -> bool {
 }
 
 /// Serve a dispatched shell: method gate → session signal → protected gate →
-/// pattern redirect → file → Astro stub → inject. Takes `method`/`path`
+/// pattern redirect → file → Astro stub → inject. Takes `method`/`path`/`query`
 /// rather than `&Request` — `Body` is `!Sync` (UnsyncBoxBody), so borrowing
 /// the request across an `.await` would make this future `!Send`.
 async fn serve_shell(
@@ -280,6 +281,7 @@ async fn serve_shell(
     headers: &HeaderMap,
     method: Method,
     path: &str,
+    query: Option<&str>,
 ) -> Response {
     // Shells are documents: GET/HEAD only. POST to a route path is almost
     // always a stray form/action or a confused crawler — 405 it rather
@@ -302,13 +304,23 @@ async fn serve_shell(
         session::SessionSignal::Unknown => inject::signed_in(cookie),
     };
     if m.protected && !passes_gate {
-        let target = format!("/login?returnTo={}", urlencoding(path));
+        // Keep the query inside `returnTo` so login lands back on the full URL.
+        let return_to = match query {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_string(),
+        };
+        let target = format!("/login?returnTo={}", urlencoding(&return_to));
         return (StatusCode::FOUND, [(header::LOCATION, target)]).into_response();
     }
-    // Legacy-alias redirect (e.g. `/{o}/{r}/settings/actions`) — a real 302 so
-    // bots/no-JS follow too. Params are already interpolated by dispatch.
+    // Legacy-alias redirect (e.g. `/{o}/{r}/settings`) — a real 302 so
+    // bots/no-JS follow too. Params are already interpolated by dispatch;
+    // the request query rides along so `?notice=1`-style state survives.
     if let Some(target) = &m.redirect {
-        return (StatusCode::FOUND, [(header::LOCATION, target.clone())]).into_response();
+        let location = match query {
+            Some(q) => format!("{target}?{q}"),
+            None => target.clone(),
+        };
+        return (StatusCode::FOUND, [(header::LOCATION, location)]).into_response();
     }
     match tokio::fs::read_to_string(st.dist.join(m.file)).await {
         Ok(html) => {
@@ -704,22 +716,52 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    /// Legacy alias `/{o}/{r}/settings/actions` → real 302 with params
-    /// interpolated (anonymous still hits the protected gate first).
+    /// Repo `/{o}/{r}/settings` → real 302 to the `general` sub-page with
+    /// params interpolated (anonymous still hits the protected gate first).
+    /// `/{o}/{r}/settings/{section}` serves the shared sub-page shell.
     #[tokio::test]
-    async fn legacy_settings_actions_redirects() {
+    async fn settings_root_redirects_to_general() {
         let dist = dist_with(
-            "legacy-redirect",
-            &[("_/_/settings/actions/index.html", "<html>stub</html>")],
+            "settings-redirect",
+            &[("_/_/settings/_/index.html", "<html>subpage shell</html>")],
         )
         .await;
         let st = shared(dist);
 
-        let resp = get(&st, "/jesse/app/settings/actions", None).await;
+        let resp = get(&st, "/jesse/app/settings", None).await;
         assert_eq!(resp.status(), StatusCode::FOUND);
         assert_eq!(
             resp.headers().get(header::LOCATION).unwrap(),
-            "/login?returnTo=/jesse/app/settings/actions"
+            "/login?returnTo=/jesse/app/settings"
+        );
+
+        // Anonymous + query: `returnTo` carries the full URL so post-login
+        // lands back on `/settings?notice=1` (which then 302s to /general).
+        let resp = get(&st, "/jesse/app/settings?notice=1", None).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/login?returnTo=/jesse/app/settings%3Fnotice%3D1"
+        );
+
+        let resp = get(&st, "/jesse/app/settings", Some("oxidean_session=x")).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/jesse/app/settings/general"
+        );
+
+        // The request query rides along on the redirect.
+        let resp = get(
+            &st,
+            "/jesse/app/settings?notice=1",
+            Some("oxidean_session=x"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/jesse/app/settings/general?notice=1"
         );
 
         let resp = get(
@@ -728,10 +770,14 @@ mod tests {
             Some("oxidean_session=x"),
         )
         .await;
-        assert_eq!(resp.status(), StatusCode::FOUND);
-        assert_eq!(
-            resp.headers().get(header::LOCATION).unwrap(),
-            "/jesse/app/settings#repo-settings-actions"
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("subpage shell"),
+            "settings sub-page must serve the shared shell: {body}"
         );
     }
 

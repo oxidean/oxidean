@@ -70,7 +70,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const packagesHref = `${base}/packages`;
   const actionsHref = `${base}/actions`;
   const insightsHref = `${base}/insights`;
-  const settingsHref = `${base}/settings`;
+  const settingsHref = `${base}/settings/general`;
   const forkHref = `${base}/fork`;
   // SSR emits the anon /login links; a warm auth.me cache (persisted chrome
   // resolves it before this island hydrates) would otherwise render the
