@@ -1,0 +1,17 @@
+{
+  "name": "api",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "type": "module",
+  "dependencies": {
+    "@platformatic/globals": "^3.75.0",
+    "@platformatic/node": "^3.75.0"
+  },
+  "devDependencies": {
+    "@platformatic/tsconfig": "^0.1.0",
+    "@types/node": "^26.6.6"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

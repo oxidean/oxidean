@@ -1,0 +1,33 @@
+{
+  "name": "frontend",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "dev": "react-router dev",
+    "start": "react-router-serve ./build/server/index.js",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@react-router/node": "^7.6.0",
+    "@react-router/serve": "^7.6.0",
+    "isbot": "^5.1.28",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router": "^7.6.0",
+    "@platformatic/react-router": "^3.75.0"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.6.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-tsconfig-paths": "^5.1.4"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

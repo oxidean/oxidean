@@ -4,7 +4,7 @@
       "id": "empty",
       "label": "Empty with README",
       "group": "General",
-      "description": "Bare README only \u2014 start from a blank tree and push your own layout.",
+      "description": "Bare README only — start from a blank tree and push your own layout.",
       "source": "manual",
       "source_ref": "hand-maintained README-only",
       "last_synced": "2026-09-17"
@@ -13,7 +13,7 @@
       "id": "rust",
       "label": "Rust",
       "group": "Systems",
-      "description": "Official-style Cargo binary crate \u2014 cargo run ready. Includes a Dockerfile.",
+      "description": "Official-style Cargo binary crate — cargo run ready. Includes a Dockerfile.",
       "default_gitignore": "Rust",
       "source": "cli",
       "source_ref": "cargo new app --bin && strip target/ + hand Dockerfile",
@@ -54,7 +54,7 @@
       "id": "wasm",
       "label": "WebAssembly (Rust)",
       "group": "Systems",
-      "description": "Rust lib crate aimed at wasm32 \u2014 stub for browser or WASI targets.",
+      "description": "Rust lib crate aimed at wasm32 — stub for browser or WASI targets.",
       "default_gitignore": "Rust",
       "source": "manual",
       "source_ref": "Rust cdylib wasm32 starter (wasm-pack style)",
@@ -67,7 +67,7 @@
       "id": "go",
       "label": "Go",
       "group": "Backend",
-      "description": "Go module with main package \u2014 go run ready. Includes a Dockerfile.",
+      "description": "Go module with main package — go run ready. Includes a Dockerfile.",
       "default_gitignore": "Go",
       "source": "cli",
       "source_ref": "go mod init example.com/app + hand Dockerfile",
@@ -85,9 +85,23 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm init + tsc --init (Node ESM TS) + hand Dockerfile",
-      "last_synced": "2026-10-26",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run build",
+        "docker build -t app ."
+      ]
+    },
+    {
+      "id": "node-typescript-watt",
+      "label": "Node + TypeScript (Watt)",
+      "group": "Backend",
+      "description": "Watt (Platformatic) with a TypeScript @platformatic/node app. Includes a Dockerfile.",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npx wattpm@3.75.0 create (@platformatic/node, TypeScript) + hand Dockerfile",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build",
         "docker build -t app ."
       ]
     },
@@ -137,7 +151,7 @@
       "id": "flask",
       "label": "Flask",
       "group": "Backend",
-      "description": "Minimal Flask app.py with a health route \u2014 Python web API starter. Includes a Dockerfile.",
+      "description": "Minimal Flask app.py with a health route — Python web API starter. Includes a Dockerfile.",
       "default_gitignore": "Python",
       "source": "manual",
       "source_ref": "Flask app factory starter + hand Dockerfile",
@@ -235,7 +249,7 @@
       "id": "php",
       "label": "PHP",
       "group": "Backend",
-      "description": "index.php hello endpoint \u2014 plain PHP without a framework. Includes a Dockerfile.",
+      "description": "index.php hello endpoint — plain PHP without a framework. Includes a Dockerfile.",
       "default_gitignore": "PHP",
       "source": "manual",
       "source_ref": "plain PHP index.php + hand Dockerfile",
@@ -281,9 +295,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template react-ts",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "react-watt",
+      "label": "React (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite + React + TypeScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template react-ts + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -294,9 +321,23 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npx create-next-app@latest --ts --app --eslint --no-src-dir --import-alias '@/*' --use-npm --turbopack false + hand Dockerfile",
-      "last_synced": "2026-10-26",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev",
+        "docker build -t app ."
+      ]
+    },
+    {
+      "id": "nextjs-watt",
+      "label": "Next.js (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Next.js App Router TypeScript (@platformatic/next). Includes a Dockerfile.",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npx create-next-app@latest + npx wattpm@3.75.0 create (@platformatic/next, copy) + hand Dockerfile",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build",
         "docker build -t app ."
       ]
     },
@@ -308,9 +349,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template vue-ts",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "vue-watt",
+      "label": "Vue (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite + Vue + TypeScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template vue-ts + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -321,9 +375,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template svelte-ts",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "svelte-watt",
+      "label": "Svelte (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite + Svelte + TypeScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template svelte-ts + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -334,9 +401,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template vanilla-ts",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "vite-vanilla-ts-watt",
+      "label": "Vanilla TS + Vite (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite vanilla TypeScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template vanilla-ts + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -347,9 +427,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template vanilla",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "vite-vanilla-js-watt",
+      "label": "Vanilla JS + Vite (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite vanilla JavaScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template vanilla + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -360,7 +453,7 @@
       "default_gitignore": "Node",
       "source": "oxidean",
       "source_ref": "Oxidean Ripple + Vite .tsrx starter",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
       ]
@@ -373,7 +466,7 @@
       "default_gitignore": "Node",
       "source": "oxidean",
       "source_ref": "Oxidean Octane + Vite .tsrx starter",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
       ]
@@ -386,9 +479,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create vite@latest -- --template solid-ts",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "solid-watt",
+      "label": "Solid (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Vite + Solid + TypeScript (@platformatic/vite).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create vite@latest -- --template solid-ts + npx wattpm@3.75.0 create (@platformatic/vite, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -399,9 +505,22 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create astro@latest -- --template basics --typescript strict --no-install --no-git",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev"
+      ]
+    },
+    {
+      "id": "astro-watt",
+      "label": "Astro (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping Astro basics (@platformatic/astro).",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "npm create astro@latest + npx wattpm@3.75.0 create (@platformatic/astro, copy)",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build"
       ]
     },
     {
@@ -412,7 +531,7 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "ng new app --defaults --routing --style=css --ssr=false",
-      "last_synced": "2026-09-17",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm start"
       ]
@@ -425,9 +544,23 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npx create-remix@latest --template remix-run/remix/templates/remix --no-git-init --no-install + hand Dockerfile",
-      "last_synced": "2026-10-26",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run dev",
+        "docker build -t app ."
+      ]
+    },
+    {
+      "id": "remix-watt",
+      "label": "Remix (Watt)",
+      "group": "Frontend",
+      "description": "Watt (Platformatic) wrapping the Remix/React Router starter (@platformatic/react-router). Includes a Dockerfile.",
+      "default_gitignore": "Node",
+      "source": "cli",
+      "source_ref": "copy stack-presets/remix + watt root with @platformatic/react-router + hand Dockerfile",
+      "last_synced": "2026-10-28",
+      "verify_commands": [
+        "cp .env.sample .env && npm install && npm run build",
         "docker build -t app ."
       ]
     },
@@ -439,7 +572,7 @@
       "default_gitignore": "Node",
       "source": "cli",
       "source_ref": "npm create tauri-app@latest (vite-ts)",
-      "last_synced": "2026-10-24",
+      "last_synced": "2026-10-28",
       "verify_commands": [
         "npm install && npm run tauri dev"
       ]

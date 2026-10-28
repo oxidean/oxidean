@@ -15,11 +15,14 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
-    "@types/node": "^22.15.21",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "eslint": "^9.27.0",
     "eslint-config-next": "^15.3.2",
     "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=26.0.0"
   }
 }
