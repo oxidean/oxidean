@@ -409,7 +409,11 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         .ip_address
         .clone()
         .unwrap_or_else(|| "unknown".into());
-    let rate_ident = identifier.to_ascii_lowercase();
+    // The `login:` namespace keeps the caller-supplied identifier from
+    // minting `begin:`/`reset:` keys in this shared limiter — an attacker
+    // could otherwise spend a victim's login-begin or reset-redeem budget
+    // through this path.
+    let rate_ident = format!("login:{}", identifier.to_ascii_lowercase());
     {
         let mut lim = ctx
             .login_begin_limiter
