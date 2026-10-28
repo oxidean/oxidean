@@ -334,7 +334,7 @@
       "description": "Watt (Platformatic) wrapping Next.js App Router TypeScript (@platformatic/next). Includes a Dockerfile.",
       "default_gitignore": "Node",
       "source": "cli",
-      "source_ref": "npx create-next-app@latest + npx wattpm@3.75.0 create (@platformatic/next, copy) + hand Dockerfile",
+      "source_ref": "npx create-next-app@latest + npx wattpm@3.75.0 create (@platformatic/next, copy) + next.config.mjs turbopack.root + hand Dockerfile",
       "last_synced": "2026-10-28",
       "verify_commands": [
         "cp .env.sample .env && npm install && npm run build",
