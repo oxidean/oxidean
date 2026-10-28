@@ -189,9 +189,13 @@ pub async fn deliver_once(
         }
     };
 
+    // `resolve_to_addrs` pins only local resolution — a system/env proxy
+    // resolves the hostname itself, so proxies are disabled outright to
+    // keep the request on the validated destination.
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(delivery_timeout_secs()))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     if is_domain {
         if let Some(domain) = url::Url::parse(&hook.url)
             .ok()
