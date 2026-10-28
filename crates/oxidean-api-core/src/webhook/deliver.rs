@@ -1,6 +1,6 @@
 //! Outbound webhook HTTP delivery — HMAC, Hookshot headers, SSRF (D-HOOK-04/12/18).
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
 
 use oxidean_core::net::{is_loopback_ip, is_public_ip};
@@ -8,11 +8,7 @@ use oxidean_db::{Database, WebhookDeliveryRow, WebhookRow};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::egress::{private_egress_allowed, resolve_egress_host};
-
-/// Cloud metadata endpoint — blocked in every environment, including
-/// dev/test where private egress is otherwise allowed.
-const METADATA_IP: Ipv4Addr = Ipv4Addr::new(169, 254, 169, 254);
+use crate::egress::{is_metadata_ip, private_egress_allowed, resolve_egress_host, unbracket_host};
 
 /// Default max delivery attempts (D-HOOK-14 discretion).
 pub fn max_attempts() -> i64 {
@@ -65,12 +61,6 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Strip the brackets `url::Url::host_str` keeps around IPv6 literals
-/// so the host parses as `IpAddr`. Domains are unaffected.
-fn unbracket_host(host: &str) -> &str {
-    host.trim_start_matches('[').trim_end_matches(']')
-}
-
 /// Validate webhook URL: https required except loopback http in non-production (D-HOOK-04).
 ///
 /// Literal-IP and host-name rules share `oxidean_core::net`: hosted
@@ -98,7 +88,7 @@ pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
         return Err("webhook URL host is not allowed".into());
     }
     if let Ok(ip) = bare.parse::<IpAddr>() {
-        if ip == IpAddr::V4(METADATA_IP) {
+        if is_metadata_ip(&ip) {
             return Err("webhook URL host is not allowed".into());
         }
         if !private_egress_allowed(env_name) && !is_public_ip(&ip) {
@@ -365,6 +355,11 @@ mod tests {
         for env in ["development", "production", "cloud"] {
             assert!(
                 validate_webhook_url("https://169.254.169.254/", env).is_err(),
+                "{env}"
+            );
+            // IPv4-mapped IPv6 form of the same endpoint.
+            assert!(
+                validate_webhook_url("https://[::ffff:169.254.169.254]/", env).is_err(),
                 "{env}"
             );
         }

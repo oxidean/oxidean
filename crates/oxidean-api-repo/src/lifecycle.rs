@@ -2347,7 +2347,7 @@ pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPubli
     };
     validate_repo_name(&name).map_err(|msg| AppError::new("repo.invalid_name", msg))?;
 
-    let credentials = RemoteCredentials {
+    let mut credentials = RemoteCredentials {
         kind: RemoteAuthKind::HttpsToken,
         username: req
             .auth_username
@@ -2360,6 +2360,7 @@ pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPubli
             .or(req.auth_password.clone())
             .unwrap_or_default(),
         known_hosts: None,
+        dns_pin: None,
     };
 
     let mut repo = create(
@@ -2374,6 +2375,13 @@ pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPubli
     .await?;
 
     let bare = bare_repo_path(&ctx.repos_dir, &repo.owner_username, &repo.name)?;
+    // Same egress bound as mirror upsert: validate the remote and pin the
+    // checked DNS answers into the git transport so ls-remote/fetch cannot
+    // re-resolve to an unvalidated answer (DNS-rebind TOCTOU).
+    credentials.dns_pin =
+        oxidean_api_core::egress::resolve_remote_egress(&clone_addr, &ctx.env_name)
+            .await
+            .map_err(|e| AppError::new("repo.migrate.invalid_url", e))?;
     let remote_refs = match ctx.git.ls_remote_url(&clone_addr, &credentials).await {
         Ok(r) => r,
         Err(e) => {

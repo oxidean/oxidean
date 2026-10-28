@@ -14,8 +14,8 @@ pub use backend::{
     ssh_host_from_remote_url, validate_remote_url, ArchiveFormat, BlameFile, BlameLine,
     CommitDetail, CommitSummary, ContributorSummary, DiffFile, DiffResult, FileChange, FilesCommit,
     FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit, GrepResult, NameStatusKind,
-    NameStatusRow, PushEventCommit, RawCommit, RemoteAuthKind, RemoteCredentials, RevList,
-    SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry, ARCHIVE_TIMEOUT,
+    NameStatusRow, PushEventCommit, RawCommit, RemoteAuthKind, RemoteCredentials, RemoteDnsPin,
+    RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry, ARCHIVE_TIMEOUT,
     BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 pub use cli::{

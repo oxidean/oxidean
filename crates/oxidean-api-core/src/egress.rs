@@ -6,17 +6,18 @@
 //! environments allow private targets so Compose/dev stacks can reach
 //! sibling services by name. `OXIDEAN_EGRESS_ALLOW_PRIVATE` relaxes the
 //! bound on any environment (documented self-host escape hatch; never
-//! set on a hosted deployment).
+//! set on a hosted deployment). Cloud metadata endpoints stay blocked in
+//! every environment — private egress never reaches them.
 //!
 //! `resolve_egress_host` resolves DNS once and returns the validated
-//! socket addresses so HTTP callers can pin the connection
-//! (`reqwest::ClientBuilder::resolve_to_addrs`), closing the TOCTOU
-//! rebind window between validation and connect. Git transports shell
-//! out to `git`, which re-resolves on its own — the create/update/sync
-//! checks still reject statically-private targets, and the residual
-//! rebind bound is documented in CONFIGURATION.md.
+//! socket addresses so callers can pin the connection
+//! (`reqwest::ClientBuilder::resolve_to_addrs` for webhooks,
+//! `http.curloptResolve` for HTTP(S) git remotes), closing the TOCTOU
+//! rebind window between validation and connect. Git's SSH transport
+//! resolves inside OpenSSH on its own — the residual rebind bound for
+//! `ssh://`/`git@` remotes is documented in CONFIGURATION.md.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use oxidean_core::net::is_public_ip;
@@ -28,6 +29,35 @@ const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// `1`/`true` env-var parser shared by egress and trusted-proxy flags.
 pub fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+/// `1`/`true`/`yes` parser for `OXIDEAN_WEB_BEHIND_PROXY` — the documented
+/// flag set is wider than [`env_flag`] accepts; the stricter parser stays
+/// for `OXIDEAN_EGRESS_ALLOW_PRIVATE`.
+pub(crate) fn proxy_env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| {
+        let v = v.trim();
+        v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+    })
+}
+
+/// Strip the brackets `url::Url::host_str` keeps around IPv6 literals
+/// so the host parses as `IpAddr`. Domains are unaffected.
+pub(crate) fn unbracket_host(host: &str) -> &str {
+    host.trim_start_matches('[').trim_end_matches(']')
+}
+
+/// Cloud metadata endpoints — blocked in every environment, including
+/// dev/test where private egress is otherwise allowed. Normalizes
+/// IPv4-mapped IPv6 (`::ffff:169.254.169.254`) and covers the AWS IPv6
+/// metadata address.
+pub(crate) fn is_metadata_ip(ip: &IpAddr) -> bool {
+    const V4: Ipv4Addr = Ipv4Addr::new(169, 254, 169, 254);
+    const AWS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x0254);
+    match ip {
+        IpAddr::V4(v4) => *v4 == V4,
+        IpAddr::V6(v6) => v6.to_ipv4_mapped() == Some(V4) || *v6 == AWS_V6,
+    }
 }
 
 /// `OXIDEAN_ENV` value — mirrors how `AppState.env_name` is seeded at
@@ -55,6 +85,9 @@ pub async fn resolve_egress_host(
     env_name: &str,
 ) -> Result<Vec<SocketAddr>, String> {
     if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_metadata_ip(&ip) {
+            return Err(format!("egress target `{host}` is not allowed"));
+        }
         if private_egress_allowed(env_name) || is_public_ip(&ip) {
             return Ok(vec![SocketAddr::new(ip, port)]);
         }
@@ -69,6 +102,12 @@ pub async fn resolve_egress_host(
         };
     if addrs.is_empty() {
         return Err(format!("egress host `{host}` resolves to no addresses"));
+    }
+    // Metadata stays blocked even where private egress is allowed.
+    if addrs.iter().any(|a| is_metadata_ip(&a.ip())) {
+        return Err(format!(
+            "egress host `{host}` resolves to a blocked address"
+        ));
     }
     if !private_egress_allowed(env_name) {
         for addr in &addrs {
@@ -87,12 +126,16 @@ pub async fn resolve_egress_host(
 /// `oxidean_git::validate_remote_url` — `http(s)://` and `ssh://` parse
 /// through `url::Url` (which also normalizes exotic literal notations),
 /// SCP-style `git@host:path` through `oxidean_git::ssh_host_from_remote_url`.
+/// `host_str` keeps brackets on IPv6 literals — stripped here so the host
+/// parses as `IpAddr`.
 pub fn git_remote_host_port(remote: &str) -> Result<(String, u16), String> {
     if let Ok(parsed) = url::Url::parse(remote) {
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| format!("remote `{remote}` has no host"))?
-            .to_string();
+        let host = unbracket_host(
+            parsed
+                .host_str()
+                .ok_or_else(|| format!("remote `{remote}` has no host"))?,
+        )
+        .to_string();
         let port = parsed
             .port()
             .or_else(|| match parsed.scheme() {
@@ -113,6 +156,28 @@ pub fn git_remote_host_port(remote: &str) -> Result<(String, u16), String> {
 pub async fn validate_remote_egress(remote: &str, env_name: &str) -> Result<(), String> {
     let (host, port) = git_remote_host_port(remote)?;
     resolve_egress_host(&host, port, env_name).await.map(|_| ())
+}
+
+/// Egress check + DNS pin for a git remote: validates the host and every
+/// DNS answer, and for HTTP(S) remotes with a domain host returns the
+/// [`oxidean_git::RemoteDnsPin`] git transports must apply
+/// (`http.curloptResolve`) so they cannot re-resolve to an unvalidated
+/// answer between this check and connect. Literal-IP targets have no DNS
+/// answer to pin; SSH remotes resolve inside OpenSSH (residual bound).
+pub async fn resolve_remote_egress(
+    remote: &str,
+    env_name: &str,
+) -> Result<Option<oxidean_git::RemoteDnsPin>, String> {
+    let (host, port) = git_remote_host_port(remote)?;
+    let addrs = resolve_egress_host(&host, port, env_name).await?;
+    if !remote.to_ascii_lowercase().starts_with("http") || host.parse::<IpAddr>().is_ok() {
+        return Ok(None);
+    }
+    Ok(Some(oxidean_git::RemoteDnsPin {
+        host,
+        port,
+        addrs: addrs.iter().map(|a| a.ip()).collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -144,10 +209,31 @@ mod tests {
     }
 
     #[test]
+    fn remote_host_port_unbrackets_ipv6_literals() {
+        assert_eq!(
+            git_remote_host_port("https://[::1]/x.git").unwrap(),
+            ("::1".to_string(), 443)
+        );
+        assert_eq!(
+            git_remote_host_port("https://[2606:4700:4700::1111]/o/r.git").unwrap(),
+            ("2606:4700:4700::1111".to_string(), 443)
+        );
+    }
+
+    #[test]
     fn remote_host_port_rejects_garbage() {
         assert!(git_remote_host_port("").is_err());
         assert!(git_remote_host_port("file:///etc/passwd").is_err());
         assert!(git_remote_host_port("/abs/path").is_err());
+    }
+
+    #[test]
+    fn metadata_ip_normalized_across_families() {
+        assert!(is_metadata_ip(&"169.254.169.254".parse().unwrap()));
+        assert!(is_metadata_ip(&"::ffff:169.254.169.254".parse().unwrap()));
+        assert!(is_metadata_ip(&"fd00:ec2::254".parse().unwrap()));
+        assert!(!is_metadata_ip(&"169.254.169.253".parse().unwrap()));
+        assert!(!is_metadata_ip(&"10.0.0.9".parse().unwrap()));
     }
 
     #[tokio::test]
@@ -155,6 +241,23 @@ mod tests {
         // A literal private target resolves without DNS.
         assert!(resolve_egress_host("10.0.0.9", 443, "test").await.is_ok());
         assert!(resolve_egress_host("10.0.0.9", 443, "production")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn metadata_blocked_even_with_private_egress() {
+        // dev/test allows private egress — metadata stays blocked anyway.
+        assert!(resolve_egress_host("169.254.169.254", 443, "test")
+            .await
+            .is_err());
+        assert!(resolve_egress_host("::ffff:169.254.169.254", 443, "test")
+            .await
+            .is_err());
+        // A DNS answer that resolves to metadata is blocked too (GCP
+        // serves this name publicly; a DNS failure also errors, so the
+        // assertion holds without external resolution).
+        assert!(resolve_egress_host("metadata.google.internal", 443, "test")
             .await
             .is_err());
     }

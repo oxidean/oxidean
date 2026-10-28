@@ -521,11 +521,36 @@ impl RemoteAuthFiles {
     fn prepare(credentials: &RemoteCredentials) -> Result<Self, GitError> {
         let dir = tempfile::tempdir().map_err(GitError::Io)?;
         let mut env = Vec::new();
+        // Transport policy on every outbound remote op: never follow HTTP
+        // redirects — a redirect could re-point the validated remote at an
+        // unvalidated host — and when the caller already resolved and
+        // egress-validated the remote's DNS answers, pin the HTTP transport
+        // to them so git cannot re-resolve to an unvalidated answer between
+        // validation and connect (DNS-rebind TOCTOU). SSH remotes resolve
+        // inside OpenSSH and cannot be pinned from here.
+        let mut cfgs: Vec<(String, String)> = vec![("http.followRedirects".into(), "false".into())];
+        if let Some(pin) = &credentials.dns_pin {
+            if !pin.addrs.is_empty() {
+                let joined = pin
+                    .addrs
+                    .iter()
+                    .map(|ip| match ip {
+                        std::net::IpAddr::V4(v4) => v4.to_string(),
+                        std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                cfgs.push((
+                    "http.curloptResolve".into(),
+                    format!("{}:{}:{}", pin.host, pin.port, joined),
+                ));
+            }
+        }
         // An empty HTTPS secret means anonymous access — injecting a
         // `Basic <user>:` header makes strict servers 401 instead of serving
         // the public repo, so skip auth materialization entirely.
         if credentials.kind == RemoteAuthKind::HttpsToken && credentials.secret.is_empty() {
-            return Ok(Self { _dir: dir, env });
+            return Self::finish(dir, env, cfgs);
         }
         match credentials.kind {
             RemoteAuthKind::HttpsToken => {
@@ -598,10 +623,8 @@ impl RemoteAuthFiles {
                     }
                     out
                 };
-                env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
-                env.push(("GIT_CONFIG_KEY_0".into(), "http.extraHeader".into()));
-                env.push((
-                    "GIT_CONFIG_VALUE_0".into(),
+                cfgs.push((
+                    "http.extraHeader".into(),
                     format!("Authorization: Basic {auth_b64}"),
                 ));
                 let _ = askpass; // reserved if we switch to ASKPASS later
@@ -646,6 +669,25 @@ impl RemoteAuthFiles {
                 env.push(("GIT_SSH_COMMAND".into(), ssh_cmd));
             }
         }
+        Self::finish(dir, env, cfgs)
+    }
+
+    /// Emit `cfgs` as `GIT_CONFIG_*` pairs and lock the transport protocol
+    /// set — shared by the anonymous-HTTPS early return and the authed path.
+    /// `GIT_ALLOW_PROTOCOL` is defense in depth: it refuses the helper
+    /// transports `validate_remote_url` already rejects (file/ext/fd) for any
+    /// remote that reaches git without that pre-check.
+    fn finish(
+        dir: tempfile::TempDir,
+        mut env: Vec<(String, String)>,
+        cfgs: Vec<(String, String)>,
+    ) -> Result<Self, GitError> {
+        env.push(("GIT_CONFIG_COUNT".into(), cfgs.len().to_string()));
+        for (i, (k, v)) in cfgs.into_iter().enumerate() {
+            env.push((format!("GIT_CONFIG_KEY_{i}"), k));
+            env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+        }
+        env.push(("GIT_ALLOW_PROTOCOL".into(), "http:https:ssh".into()));
         Ok(Self { _dir: dir, env })
     }
 
@@ -5412,6 +5454,7 @@ mod tests {
             username: Some("git".into()),
             secret: "token".into(),
             known_hosts: None,
+            dns_pin: None,
         }
     }
 

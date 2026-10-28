@@ -94,7 +94,7 @@ impl ClientMeta {
     ) -> Self {
         let trust_xff = match peer {
             Some(ip) if !oxidean_core::net::is_public_ip(&ip) => true,
-            _ => crate::egress::env_flag("OXIDEAN_WEB_BEHIND_PROXY"),
+            _ => crate::egress::proxy_env_flag("OXIDEAN_WEB_BEHIND_PROXY"),
         };
         let xff = headers
             .get("x-forwarded-for")
