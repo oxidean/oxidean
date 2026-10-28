@@ -2151,3 +2151,134 @@ async fn find_proposals_by_session_newest_first_and_scoped() {
     let want: Vec<&str> = expected.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(got, want, "must be (created_at DESC, id DESC) ordered");
 }
+
+/// The id-keyed read shares the same `PROPOSAL_SELECT_*` column list —
+/// `ops_json` must surface there too, `pr_ref` starts NULL and the
+/// `mark_oxpilot_proposal_applied` verb lands `status='applied'` + the
+/// pull reference on every dialect.
+#[tokio::test]
+async fn proposal_id_keyed_read_and_apply_transition() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "idkey").await;
+    let sid = "oxps-idkey-1";
+    db.insert_oxpilot_session(&session(sid, &uid, &repo, "s"))
+        .await
+        .expect("session");
+
+    let ops = r#"[{"path":"a.rs","op":"delete","new_path":null,"content_b64":null}]"#;
+    db.insert_oxpilot_proposal(&oxidean_db::NewOxpilotProposal {
+        id: "oxpp-idkey-1",
+        session_id: sid,
+        title: "t",
+        base: "main",
+        diff_body: "diff --git a/a.rs b/a.rs\n",
+        ops_json: ops,
+    })
+    .await
+    .expect("insert");
+
+    let row = db
+        .find_oxpilot_proposal("oxpp-idkey-1")
+        .await
+        .expect("find")
+        .expect("row");
+    assert_eq!(row.ops_json, ops, "id-keyed read must carry ops_json");
+    assert_eq!(row.status, "pending");
+    assert_eq!(row.pr_ref, None);
+
+    let n = db
+        .mark_oxpilot_proposal_applied("oxpp-idkey-1", "oxpilot/repo-idkey#7")
+        .await
+        .expect("mark applied");
+    assert_eq!(n, 1);
+    let row = db
+        .find_oxpilot_proposal("oxpp-idkey-1")
+        .await
+        .expect("find applied")
+        .expect("row");
+    assert_eq!(row.status, "applied");
+    assert_eq!(row.pr_ref.as_deref(), Some("oxpilot/repo-idkey#7"));
+
+    // Unknown id reads resolve None (the service's not_found source).
+    assert!(db
+        .find_oxpilot_proposal("oxpp-idkey-missing")
+        .await
+        .expect("find missing")
+        .is_none());
+}
+
+/// `find_oxpilot_proposals_by_session` on a session that exists but has
+/// no proposals — and on a dead id — is an empty list, never an error:
+/// the ArtifactScope rebuild treats both identically.
+#[tokio::test]
+async fn find_proposals_by_session_empty_is_not_an_error() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "emptysess").await;
+    db.insert_oxpilot_session(&session("oxps-empty-1", &uid, &repo, "s"))
+        .await
+        .expect("session");
+
+    assert!(db
+        .find_oxpilot_proposals_by_session("oxps-empty-1")
+        .await
+        .expect("empty session")
+        .is_empty());
+    assert!(db
+        .find_oxpilot_proposals_by_session("oxps-no-such")
+        .await
+        .expect("dead session")
+        .is_empty());
+}
+
+/// `ops_json` is stored verbatim at the db layer — the redaction
+/// boundary is the service above it, not the store. Payloads carrying
+/// unicode and nested quotes must round-trip untouched so apply
+/// executes the exact op list the reviewer saw.
+#[tokio::test]
+async fn proposal_ops_json_stored_verbatim_no_redaction() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "verbatim").await;
+    let sid = "oxps-verbatim-1";
+    db.insert_oxpilot_session(&session(sid, &uid, &repo, "s"))
+        .await
+        .expect("session");
+
+    let ops = r#"[{"path":"src/üñí.rs","op":"create","new_path":null,"content_b64":"eyJ0b2...zIn0="},{"path":"a.rs","op":"update","new_path":null,"content_b64":"Yj0="}]"#;
+    db.insert_oxpilot_proposal(&oxidean_db::NewOxpilotProposal {
+        id: "oxpp-verbatim-1",
+        session_id: sid,
+        title: "t",
+        base: "main",
+        diff_body: "diff --git a/src/x.rs b/src/x.rs\n",
+        ops_json: ops,
+    })
+    .await
+    .expect("insert");
+    let row = db
+        .find_oxpilot_proposal("oxpp-verbatim-1")
+        .await
+        .expect("find")
+        .expect("row");
+    assert_eq!(
+        row.ops_json, ops,
+        "store must not redact or mangle ops_json"
+    );
+}
