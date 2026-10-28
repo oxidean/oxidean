@@ -1,0 +1,487 @@
+{
+  "stage": "code-generation",
+  "unit": "oxpilot-tools",
+  "upstream_ids": [
+    "AC2.1.1", "AC2.1.2", "AC2.2.1", "AC2.2.2", "AC2.2.3", "AC2.2.4",
+    "AC2.3.1", "AC3.1.1", "AC3.1.2", "AC3.1.3", "AC3.2.1", "AC4.3.1",
+    "AC4.3.2", "AC4.3.3", "AC4.3.4", "AC4.3.5", "AC5.3.1", "AC5.3.2",
+    "AC5.3.3", "AC5.5.1", "AC5.5.2", "AC5.5.3", "AC5.5.4",
+    "FR2.3", "FR3.1", "FR3.2", "FR3.3", "FR4.1", "FR4.2", "FR4.3",
+    "FR5.2", "FR5.3", "FR5.5", "FR7.1", "FR7.2", "FR7.3", "FR7.4",
+    "FR7.5",
+    "NFR1", "NFR2", "NFR5", "NFR9",
+    "C1", "C6", "C7",
+    "US2.1", "US2.2", "US2.3", "US3.1", "US3.2", "US4.3", "US5.3",
+    "US5.5"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "CATALOG is a closed &'static [CatalogEntry]; the 23-name allowlist pin-tested in order"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "invoke() runs name lookup before arg parse, session resolve, or dispatch — unknown_tool first"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "validate_args gate runs before any handler; invalid_args carries the schema violation"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "EntryKind literals bind each row; control/mutation procs are absent by construction, not blocklisted"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "catalog() projects static rows to ToolSpec; callers cannot add or reorder entries"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "ToolCtx is sole identity authority; additionalProperties:false schemas reject injected identity; target_id is a selector only"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/read.rs",
+      "note": "session row re-resolved per call; {owner,name} injected from the resolved row, model args cannot override"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/validate.rs",
+      "note": "hand-authored closed-vocabulary walker validates args before any dispatch"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "proposal_get compares row.session_id to ctx.session_id after fetch — mismatch is not_found"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "dispatch_proc synthesizes a per-call RpcCtx (oxpilot:-namespaced id, ClientMeta::default()); proc-level authz intact"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "ladder ordering: name → args → session → handler; no write effect can precede its gate"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "propose_diff only inserts status='pending' with ops_json — model cannot set applied/pr_ref or touch git"
+    },
+    {
+      "id": "NFR1.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "diff_apply chain rides ctx.rpc_dispatch — per-proc authz enforced on branch/upload/PR steps"
+    },
+    {
+      "id": "NFR1.14",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "apply head is always fresh oxpilot/proposal-<id8>; branchCreate collision fails closed"
+    },
+    {
+      "id": "NFR1.15",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/comment.rs",
+      "note": "ArtifactScope membership (owner/name#number from applied proposals' pr_ref) checked before pull.comments.create; miss is forbidden"
+    },
+    {
+      "id": "NFR1.16",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "exec/fs action kind bound to spec.name verbatim — model never supplies a kind"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "schema rejection precedes every dispatch — the gateway never sees unvalidated args"
+    },
+    {
+      "id": "NFR1.18",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "internal class/kind metadata lives on CatalogEntry, never on the wire ToolSpec (D-01)"
+    },
+    {
+      "id": "NFR1.19",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "denial decode is structural on data.denied; missing/malformed/unknown marker fails closed to internal"
+    },
+    {
+      "id": "NFR1.20",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "consent_required returns success-shaped output pinning do-not-re-issue with grant_id"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "audit detail carries ids/counts/refs only — never diff bodies, args, or payloads"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "exec/fs args serialize straight into dispatch_action; U5 retains/logs no independent copy"
+    },
+    {
+      "id": "NFR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/comment.rs",
+      "note": "pr_ref stored/compared as a ref string; redaction applied at the comment egress call-site"
+    },
+    {
+      "id": "NFR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/comment.rs",
+      "note": "body runs through the shared secret-redact helper before pull.comments.create (heuristic, stated)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "invoke is constant work plus bounded awaits — no unbounded loops inside the turn race"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/read.rs",
+      "note": "each read handler is exactly one dispatch_proc — no retry, no auto-pagination"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "dispatch_action returns on gateway insert ({action_id,state}) — never blocks on a connector"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "list_targets is consulted only when target_id is absent; explicit ids skip the lookup"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "per-class awaited-call bounds held: reads 1 dispatch, exec/fs 1 action (+1 list_targets fallback)"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "diff_apply dispatches are bounded by ops_json length (≤50 files) + branch + PR create"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "handler-side truncate+marker at TOOL_OUTPUT_MAX/OUTPUT_SUMMARY_MAX; runtime clamp remains second line"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/read.rs",
+      "note": "log reads are tail-bound and return {content,next_offset,done} paging tuples"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "action_status returns the gateway ActionView verbatim — SUMMARY_MAX/RESULT_MAX already applied downstream"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "arg bounds live in schemas where expressible; serialized-args ACTION_ARGS_MAX enforced handler-side"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "per-call boundedness is the U5 contract; round pacing stays MAX_TOOL_ROUNDS in the runtime"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/validate.rs",
+      "note": "validator is O(schema x args), depth-capped, closed keyword set, no regex dependency"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "catalog() is a pure lock-free projection over static rows — O(entries) once per turn"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "every failure path lands on a typed ToolError arm — the taxonomy is total"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "fail-closed ladder ordering keeps the taxonomy disjoint — first gate wins"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "missing/malformed data.denied or unknown reason maps to internal — fail closed"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "denied/ambiguous outputs carry model-actionable guidance (target_id, reason, pairing hints)"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "AppError code maps verbatim to ToolError where specified; internal/unknown collapse to internal + generic message"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "consent_required is success-shaped progress — never an error arm, no poll hint"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "queued return on insert; ActionView.state is open-vocabulary pass-through"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "card emit silently drops on absent turn/post-terminal frame — durable row is authoritative"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "record_with is swallowed — audit failure never fails a committed effect"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "propose_diff does no dedupe — supersede-by-new only; idempotency not claimed"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "diff_apply is fail-stop: apply_failed:<step>, no rollback, no retry, proposal stays pending"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "deterministic oxpilot/proposal-<id8> branch name collides at branchCreate ⇒ apply_failed:branch_exists"
+    },
+    {
+      "id": "NFR4.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "terminals state only what happened — consent/denied/apply_failed/not_found carry no fabricated detail"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "three write-class events emitted: proposal_created (propose.rs), diff_applied (procs.rs), artifact_comment (comment.rs)"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "audit detail builders carry ids/counts/refs + bounded redacted fields only"
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "record_with fires post-commit fire-and-forget — never fails the mutation"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "actor resolved via find_user_by_id → Some((id,username)) else None; the event still emits"
+    },
+    {
+      "id": "NFR5.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/read.rs",
+      "note": "read handlers emit no audit rows — the durable tool-call card is the read trail"
+    },
+    {
+      "id": "NFR5.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "audit detail is constructed data — never bodies/args/payloads"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "record_with uses the verbatim audit shape + ClientMeta::default() — no fabricated meta"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "card{diff|consent} emission flows through one emit helper — diff card in propose.rs, consent card in dispatch.rs"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "emit path is turns().get → emit_frame pub(crate) — the TS-1 same-crate seam"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/propose.rs",
+      "note": "cards are best-effort render cues — proposal/grant rows remain the record"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "seam layers carry tracing spans; ids flow as join keys only"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "no new metrics surface — counts derivable from durable rows"
+    },
+    {
+      "id": "NFR-S1",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "one Arc<dyn ToolExecutor> on the runtime slot (install_tools) serves all sessions"
+    },
+    {
+      "id": "NFR-S2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "OxpilotTools holds only Arc<AppState> — no mutable executor state; Sync by construction"
+    },
+    {
+      "id": "NFR-S3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs",
+      "note": "U5 adds no lock — target serialization stays in the gateway's lock_for"
+    },
+    {
+      "id": "NFR-S4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "synthesized RpcCtx is per-call and dropped with it — no identity leakage across invokes"
+    },
+    {
+      "id": "NFR-S5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/procs.rs",
+      "note": "worst-case fan-out is diff_apply's ~53 sequential dispatches — bounded by ops_json"
+    },
+    {
+      "id": "NFR-S6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/comment.rs",
+      "note": "ArtifactScope is rebuilt per call from applied proposals and dropped — nothing accumulates process-wide"
+    },
+    {
+      "id": "NFR-S7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "catalog growth is a code-review event — static row plus the 23-name order pin test"
+    },
+    {
+      "id": "TS-1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "emit_frame reached through the pub(crate) same-crate seam; module map under tools/ as designed"
+    },
+    {
+      "id": "TS-2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "ToolExecutor implemented on AppState-holding OxpilotTools reusing shipped seams only"
+    },
+    {
+      "id": "TS-3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/registry.rs",
+      "note": "parameters_json built by serde_json fn() rows — serde_json only"
+    },
+    {
+      "id": "TS-4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "invoke satisfies the shipped async-trait Send+Sync ToolExecutor shape"
+    },
+    {
+      "id": "TS-5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/validate.rs",
+      "note": "closed-vocabulary validator; conditionals handled in handlers, not schema"
+    },
+    {
+      "id": "TS-6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/lib.rs",
+      "note": "oxpilot.diff_{list,get,apply} registered on PROCEDURES with dispatch match arms in dispatch.rs"
+    },
+    {
+      "id": "TS-7",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "ops_json additive chain: 0089 migration ×3 dialects + ProposalWrite/NewOxpilotProposal + select-list parity"
+    },
+    {
+      "id": "TS-8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/tools/mod.rs",
+      "note": "tools/* depends downward on shipped api-core seams only — no lateral crate reach"
+    },
+    {
+      "id": "TS-9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/Cargo.toml",
+      "note": "zero new deps — hand-authored pattern matchers; no jsonschema/regex added"
+    }
+  ]
+}

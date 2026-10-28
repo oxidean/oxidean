@@ -109,7 +109,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
 
 ## Plan steps (test-after ordering)
 
-- [ ] **Step 1 — Module skeleton + wiring points.** Create
+- [x] **Step 1 — Module skeleton + wiring points.** Create
   `crates/oxidean-api-oxpilot/src/tools/` with the eight files from the
   NFR module map (`mod.rs`, `registry.rs`, `validate.rs`, `read.rs`,
   `propose.rs`, `dispatch.rs`, `comment.rs`, `procs.rs`) as compilable
@@ -117,12 +117,12 @@ Consumes `inception/contract-design/contract-summary.md` C1
   beside `install_gateway` setting `OxpilotRuntimeSlot.tools =
   Some(Arc::new(OxpilotTools::new(state.clone())))` at shell assembly
   in `crates/oxidean-api/src/main.rs`. No new dependencies (TS-9).
-- [ ] **Step 2 — Verify test runner.** Confirm the unit-scoped commands
+- [x] **Step 2 — Verify test runner.** Confirm the unit-scoped commands
   in `unit-test-instructions.md` run green on the unmodified tree
   (`cargo nextest run -p oxidean-api-oxpilot`,
   `cargo nextest run -p oxidean-db -E 'binary_id(oxidean-db::dialect_oxpilot)' -j 1`
   with a file `DATABASE_URL`, `cargo nextest run -p oxidean-api --test oxpilot`).
-- [ ] **Step 3 — Data model: `ops_json` additive chain (implements
+- [x] **Step 3 — Data model: `ops_json` additive chain (implements
   US2.1 persistence).** New migration `0089_oxpilot_proposals_ops.sql`
   in all three dialects (`sqlite`, `postgres`, `mysql`) —
   `ALTER TABLE oxpilot_proposals ADD COLUMN ops_json ... NOT NULL
@@ -134,12 +134,12 @@ Consumes `inception/contract-design/contract-summary.md` C1
   first); core `ProposalWrite.ops_json` + `save_proposal` signature/
   impl pass-through in `services.rs` (redaction of `title`/`diff_body`
   stays inside the service).
-- [ ] **Step 4 — Data model tests.** Extend
+- [x] **Step 4 — Data model tests.** Extend
   `crates/oxidean-db/tests/dialect_oxpilot.rs`: ops_json round-trip on
   insert/select for all three dialect shapes, `find_oxpilot_proposals_
   by_session` ordering + session scoping, backfill default on a row
   inserted pre-column shape if the dialect allows. 5-8 tests.
-- [ ] **Step 5 — Business logic A: `registry.rs` + `validate.rs`.**
+- [x] **Step 5 — Business logic A: `registry.rs` + `validate.rs`.**
   `CatalogEntry{spec, class, handler}` + `EntryKind` + static
   `CATALOG: &[CatalogEntry]` — the 23 pinned names in fixed order
   (BR1.1/BR1.2, write class = {propose_diff, pr_comment, exec_shell,
@@ -150,7 +150,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
   `maximum`, `pattern` via the closed matcher table, `items`) — no
   `jsonschema`/`regex` deps; violations yield `FieldErr` naming the
   field.
-- [ ] **Step 6 — Business logic B: `mod.rs` dispatch ladder.**
+- [x] **Step 6 — Business logic B: `mod.rs` dispatch ladder.**
   `OxpilotTools{state: Arc<AppState>}`; `impl ToolExecutor`: `catalog()`
   returns spec halves verbatim in registry order; `invoke(call, ctx)`:
   registry lookup ⇒ `unknown_tool` → `validate` ⇒ `invalid_args`
@@ -162,7 +162,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
   `oxidean_core::redact`), `dispatch_proc` (synthesize RpcCtx via
   `build_rpc_ctx_with_session` + `ClientMeta::default()`, verbatim
   AppError→ToolError code map, internal ⇒ `internal`).
-- [ ] **Step 7 — Business logic C: `read.rs` (15 read handlers).**
+- [x] **Step 7 — Business logic C: `read.rs` (15 read handlers).**
   `repo_tree`/`repo_file_read`/`repo_log`/`repo_commit_get`/`repo_refs`,
   `issue_list`/`issue_get`, `pull_list`/`pull_get`, six Actions reads —
   each an `EntryKind::Proc` literal binding through `dispatch_proc`
@@ -172,7 +172,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
   `{content(tail-bounded), next_offset, done}` and never sends
   `wait_ms`. No `repo_get` catalog entry (BR3.2's `repo.get` is
   allowlisted-but-undispatched in v1).
-- [ ] **Step 8 — Business logic D: `propose.rs`.** `propose_diff`:
+- [x] **Step 8 — Business logic D: `propose.rs`.** `propose_diff`:
   bounds check (title ≤200, files ≤50, diff_body ≤256 KiB, summed
   decoded content_b64 ≤256 KiB), per-op rules (rename⇒new_path,
   create/update⇒content_b64), diff↔ops path-set coherence ⇒
@@ -182,7 +182,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
   "proposal <id> created — pending review". `proposal_get`:
   `svc.proposal` + post-fetch `row.session_id == ctx.session_id` pin ⇒
   `not_found`; `files[]` derived from `diff --git` headers.
-- [ ] **Step 9 — Business logic E: `dispatch.rs`.**
+- [x] **Step 9 — Business logic E: `dispatch.rs`.**
   `exec_shell`/`fs_read`/`fs_write`: schema-gated args (≤2 KiB
   serialized), target resolution (arg ⇒ verbatim; absent ⇒
   `list_targets` filter `lifecycle == "connected"`: 0⇒`no_target`,
@@ -196,14 +196,14 @@ Consumes `inception/contract-design/contract-summary.md` C1
   malformed marker ⇒ `ToolError{internal}` fail-closed; other AppError
   ⇒ verbatim code. `targets_list`, `action_status` read-class over the
   same client-first gateway verbs. No raw-arg retention (BR7.7).
-- [ ] **Step 10 — Business logic F: `comment.rs`.** `pr_comment`:
+- [x] **Step 10 — Business logic F: `comment.rs`.** `pr_comment`:
   ArtifactScope rebuild via `find_oxpilot_proposals_by_session` →
   applied rows' `pr_ref` set; `owner/name#<number>` ∉ scope ⇒
   `ToolError{forbidden}`; `body` non-empty ≤4 KiB + `redact` pre-
   dispatch; `pull.comments.create{owner, name, number, body}` through
   `dispatch_proc` unanchored; `oxpilot.artifact_comment` audit post-
   commit.
-- [ ] **Step 11 — API layer: `procs.rs` + registration.** USER-only
+- [x] **Step 11 — API layer: `procs.rs` + registration.** USER-only
   `oxpilot.diff_list` (owned session → `find_oxpilot_proposals_by_
   session` → `{diffs:[ProposedDiff]}` newest-first), `oxpilot.diff_get`
   (`svc.proposal` → wire shape + `pr_ref`), `oxpilot.diff_apply`
@@ -220,7 +220,7 @@ Consumes `inception/contract-design/contract-summary.md` C1
   `dispatch.rs` (SessionOnly, `require_enabled`, `require_verified` on
   the apply write — the U6 `oxpilot.connector.*` precedent); `make
   rpc-gen` + verify `make rpc-sync-check`.
-- [ ] **Step 12 — API/business tests (5-8/component).** Registry/
+- [x] **Step 12 — API/business tests (5-8/component).** Registry/
   validate pin tests (catalog closed+ordered, name charset, schema
   rejection per bound, `additionalProperties` on identity fields);
   invoke ladder (unknown_tool/invalid_args/not_found ordering);
@@ -234,10 +234,10 @@ Consumes `inception/contract-design/contract-summary.md` C1
   `crates/oxidean-api/tests/oxpilot.rs` + `procedures_list_matches_
   dispatch` extension to the three new names; dialect tests from
   Step 4.
-- [ ] **Step 13 — Env/build config.** Cargo.toml unchanged (zero new
+- [x] **Step 13 — Env/build config.** Cargo.toml unchanged (zero new
   deps — serde_json/oxidean_core/audit already reachable); confirm
   `cargo check -p oxidean-api-oxpilot --tests` clean; `cargo fmt`.
-- [ ] **Step 14 — Documentation + traceability.** `code-summary.md`,
+- [x] **Step 14 — Documentation + traceability.** `code-summary.md`,
   `source-manifest.json` (every touched path incl. migrations, PROCEDURES,
   main.rs, generated api-client), `traceability.json` (all AC/NFR/BR
   ids → implementation or test file). Frontend layer omitted — U8 owns
