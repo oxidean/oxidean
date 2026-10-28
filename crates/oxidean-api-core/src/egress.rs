@@ -50,13 +50,18 @@ pub(crate) fn unbracket_host(host: &str) -> &str {
 /// Cloud metadata endpoints — blocked in every environment, including
 /// dev/test where private egress is otherwise allowed. Normalizes
 /// IPv4-mapped IPv6 (`::ffff:169.254.169.254`) and covers the AWS IPv6
-/// metadata address.
+/// and Alibaba metadata addresses.
 pub(crate) fn is_metadata_ip(ip: &IpAddr) -> bool {
     const V4: Ipv4Addr = Ipv4Addr::new(169, 254, 169, 254);
+    const ALIBABA_V4: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
     const AWS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x0254);
     match ip {
-        IpAddr::V4(v4) => *v4 == V4,
-        IpAddr::V6(v6) => v6.to_ipv4_mapped() == Some(V4) || *v6 == AWS_V6,
+        IpAddr::V4(v4) => *v4 == V4 || *v4 == ALIBABA_V4,
+        IpAddr::V6(v6) => {
+            v6.to_ipv4_mapped() == Some(V4)
+                || v6.to_ipv4_mapped() == Some(ALIBABA_V4)
+                || *v6 == AWS_V6
+        }
     }
 }
 
@@ -232,6 +237,8 @@ mod tests {
         assert!(is_metadata_ip(&"169.254.169.254".parse().unwrap()));
         assert!(is_metadata_ip(&"::ffff:169.254.169.254".parse().unwrap()));
         assert!(is_metadata_ip(&"fd00:ec2::254".parse().unwrap()));
+        assert!(is_metadata_ip(&"100.100.100.200".parse().unwrap()));
+        assert!(is_metadata_ip(&"::ffff:100.100.100.200".parse().unwrap()));
         assert!(!is_metadata_ip(&"169.254.169.253".parse().unwrap()));
         assert!(!is_metadata_ip(&"10.0.0.9".parse().unwrap()));
     }
