@@ -1,0 +1,17 @@
+{
+  "name": "astro-watt",
+  "scripts": {
+    "dev": "wattpm dev",
+    "build": "wattpm build",
+    "start": "wattpm start"
+  },
+  "dependencies": {
+    "wattpm": "^3.75.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "workspaces": [
+    "web/*"
+  ]
+}

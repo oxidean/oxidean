@@ -7,18 +7,19 @@ Instance admins can also upload custom packs (see Admin → Templates). Users ca
 ## Pack location
 
 ```text
-crates/oxidean-api/assets/stack-presets/
+crates/oxidean-api-repo/assets/stack-presets/
 ```
 
 - `catalog.json` — ordered list of packs. Required fields: `id`, `label`, `group`, `description`, `source`, `source_ref`, `last_synced`. Optional: `default_gitignore`, `verify_commands`.
 - `{pack-id}/` — files copied into the initial commit when that pack is selected.
+- Watt alternatives — Node-based packs that Platformatic Watt supports also ship a `*-watt` sibling (single app under `web/`, root `wattpm` scripts). Node.js-based non-Watt packs declare `engines.node` for the current Node.js LTS.
 
 Related catalogs (also vendored):
 
 | Catalog | Path |
 |---------|------|
-| `.gitignore` templates | `crates/oxidean-api/assets/gitignore/` |
-| Common SPDX license texts | `crates/oxidean-api/assets/licenses/` |
+| `.gitignore` templates | `crates/oxidean-api-repo/assets/gitignore/` |
+| Common SPDX license texts | `crates/oxidean-api-repo/assets/licenses/` |
 
 Pack IDs are allowlisted from `catalog.json` only (no path traversal).
 
@@ -59,7 +60,7 @@ Packs whose default output is a runnable server or binary ship a `Dockerfile` + 
 
 ## Adding or updating a built-in pack
 
-1. Create or refresh `crates/oxidean-api/assets/stack-presets/<pack-id>/`.
+1. Create or refresh `crates/oxidean-api-repo/assets/stack-presets/<pack-id>/`.
 2. Add or update the `catalog.json` entry (`source` / `source_ref` / `last_synced` required).
 3. Prefer official-style starters that are runnable after install — not one-file Hello World stubs.
 4. Open a PR describing the stack and license notes for included snippets.

@@ -1,5 +1,7 @@
 _build
 deps
 .git
-.env
-.env.*
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
