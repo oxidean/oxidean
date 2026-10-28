@@ -243,6 +243,8 @@ function OxpilotContent() @{
                     @for (const t of targets; key t.id) {
                       <OxpilotTargetRow
                         target={t}
+                        onManage={refresh}
+                        onConnect={refresh}
                         onDisconnect={() =>
                           setConfirm({ kind: "disconnect", target: t })
                         }

@@ -8,7 +8,7 @@
  * `RUN_ERROR`). Server-side `client_msg_id` idempotency rides the
  * `sendMessage` `body` channel through to `input.data`.
  */
-import { useMemo } from "octane";
+import { useMemo, useRef } from "octane";
 import { useChat } from "@tanstack/ai-octane";
 import type { ChatFetcher, ChatFetcherInput, UIMessage } from "@tanstack/ai-client";
 import { parseSseBuffer } from "@/lib/oxpilot-stream";
@@ -125,10 +125,31 @@ async function* oxpilotFetcher(
  * messages/loading/error; the fetcher keeps the C2 wire. `initialMessages`
  * is read at client construction, so callers seed it from the snapshot
  * before first mount (remount on reseed).
+ *
+ * `hooks.onFetchError` fires synchronously inside the run when the fetcher
+ * throws (HTTP denial / stream failure) — the `chat.error` surface is a
+ * render-time snapshot, so callers that need the failure inside the same
+ * `sendMessage` tick (the composer's draft-preservation check) read this
+ * instead of the stale snapshot value.
  */
-export function useOxpilotChat(sessionId: string, initialMessages: UIMessage[]) {
+export function useOxpilotChat(
+  sessionId: string,
+  initialMessages: UIMessage[],
+  hooks?: { onFetchError?: (error: Error) => void },
+) {
+  const hooksRef = useRef(hooks);
+  hooksRef.current = hooks;
   const fetcher = useMemo(
-    () => ((input: ChatFetcherInput) => oxpilotFetcher(sessionId, input)) as unknown as ChatFetcher,
+    () =>
+      ((input: ChatFetcherInput) =>
+        (async function* () {
+          try {
+            yield* oxpilotFetcher(sessionId, input);
+          } catch (e) {
+            hooksRef.current?.onFetchError?.(e instanceof Error ? e : new Error(String(e)));
+            throw e;
+          }
+        })()) as unknown as ChatFetcher,
     [sessionId],
   );
   return useChat({ threadId: sessionId, fetcher, initialMessages });

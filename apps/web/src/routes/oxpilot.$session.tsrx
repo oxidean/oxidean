@@ -205,7 +205,7 @@ function OxpilotSessionContent() @{
       // unamended server that silently ignores `{session_id}` returns
       // other sessions' grants; those cards never render here.
       for (const g of grants ?? []) {
-        if (g.session_id == null || g.session_id === props.sessionId) {
+        if (g.session_id == null || g.session_id === sessionId) {
           pushCard("consent", g.id);
         }
       }
@@ -323,7 +323,15 @@ function OxpilotChatSurface(props: {
   disabledReason: string | null | undefined;
 }) @{
   const qc = useQueryClient();
-  const chat = useOxpilotChat(props.sessionId, props.seed.messages);
+  // The fetcher reports an HTTP/stream denial synchronously — `chat.error`
+  // is a render-time snapshot that only lands on the NEXT render, so the
+  // composer's draft-preservation check reads this ref instead.
+  const sendFailRef = useRef<Error | null>(null);
+  const chat = useOxpilotChat(props.sessionId, props.seed.messages, {
+    onFetchError: (e) => {
+      sendFailRef.current = e;
+    },
+  });
   const sessionsQ = useQuery(oxpilotSessionListQueryOptions(true));
   const targetsQ = useQuery(oxpilotTargetListQuery(true));
   const diffsQ = useQuery(oxpilotDiffListQuery(props.sessionId, true));
@@ -485,6 +493,7 @@ function OxpilotChatSurface(props: {
   async function sendIdle(content: string): Promise<boolean> {
     setSendError(null);
     setLiveTail({});
+    sendFailRef.current = null;
     try {
       await chat.sendMessage(content, {
         body: { client_msg_id: crypto.randomUUID() },
@@ -495,7 +504,14 @@ function OxpilotChatSurface(props: {
       setSendError(e instanceof Error ? e.message : "Could not send the message.");
       return false;
     }
-    return chat.error == null;
+    // The fetcher's synchronous report — `chat.error` is still the stale
+    // pre-send snapshot here. `false` keeps the draft on a refused send.
+    const failed = sendFailRef.current;
+    if (failed) {
+      setSendError(failed.message);
+      return false;
+    }
+    return true;
   }
 
   /** Live-turn send — `oxpilot.message_queue` with a fresh idempotency key. */
