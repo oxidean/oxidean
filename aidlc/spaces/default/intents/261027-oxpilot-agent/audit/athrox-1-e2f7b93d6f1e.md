@@ -5889,3 +5889,111 @@
 **Review Record Digest**: sha256:56f0c9a45d80e249860df0f47f12ada104553f3c1604efa38f32912e833a5d80
 
 ---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: oxpilot-tools
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-oxpilot/src/tools/comment.rs, crates/oxidean-api-oxpilot/src/tools/procs.rs, crates/oxidean-api-oxpilot/src/tools/propose.rs, crates/oxidean-api-oxpilot/src/tools/validate.rs, crates/oxidean-api/tests/oxpilot.rs
+**Recorded**: sha256:6a76106ded7bc0f5e7ee5d5b33388f5ea2ac90d99c4b66df5b843c68e927537c
+**Current**: sha256:bc433401a01a574cf42421e56a9a4e7c988bbf5f6151a91b76cfe9bb5e0fa1e3
+**Details**: crates/oxidean-api-oxpilot/src/tools/comment.rs, crates/oxidean-api-oxpilot/src/tools/procs.rs, crates/oxidean-api-oxpilot/src/tools/propose.rs, crates/oxidean-api-oxpilot/src/tools/validate.rs, crates/oxidean-api/tests/oxpilot.rs changed after the oxpilot tools Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: connector-client
+**Checkpoint**: review-receipt
+**Changed**: .github/workflows/ci.yml, Cargo.lock, crates/oxidean-cli/Cargo.toml, crates/oxidean-cli/src/args.rs, crates/oxidean-cli/src/commands.rs, crates/oxidean-cli/src/completion.rs, crates/oxidean-cli/src/pilot/client.rs, crates/oxidean-cli/src/pilot/exec.rs, crates/oxidean-cli/src/pilot/mod.rs, crates/oxidean-cli/src/pilot/openapi.yaml (and 4 more)
+**Recorded**: sha256:aa13747649ea6e65d400044adc5880b07df174f1dfc972ed8a5621e6460550e4
+**Current**: sha256:1bffa308ec72738f19b9c93c3eef1eb5db929cce64d94a17b4cdd4fde5e22c60
+**Details**: .github/workflows/ci.yml, Cargo.lock, crates/oxidean-cli/Cargo.toml, crates/oxidean-cli/src/args.rs, crates/oxidean-cli/src/commands.rs, crates/oxidean-cli/src/completion.rs, crates/oxidean-cli/src/pilot/client.rs, crates/oxidean-cli/src/pilot/exec.rs, crates/oxidean-cli/src/pilot/mod.rs, crates/oxidean-cli/src/pilot/openapi.yaml (and 4 more) changed after the connector client Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: connector-gateway
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-oxpilot/src/connector/routes.rs, docs/CONFIGURATION.md
+**Recorded**: sha256:560483f5b4ec897e217d93ccb192482cabdd70359e9cee9a4656499d985eef14
+**Current**: sha256:fc039c63badea1d6adbd3f3234b212d8f3ed425b9779aa00ffa95fc70be5826a
+**Details**: crates/oxidean-api-oxpilot/src/connector/routes.rs, docs/CONFIGURATION.md changed after the connector gateway Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: agent-runtime
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-oxpilot/src/providers/anthropic.rs, crates/oxidean-api-oxpilot/src/providers/ollama.rs, crates/oxidean-api-oxpilot/src/providers/openai.rs
+**Recorded**: sha256:9a07a3bd092d93fb01cc688f803719223cfb05bc303aefb5cbd983473601fe38
+**Current**: sha256:378691eab94e32dcf18cff5af2a78a7a41215ecb880c9ef6dffdf3903eaa08b8
+**Details**: crates/oxidean-api-oxpilot/src/providers/anthropic.rs, crates/oxidean-api-oxpilot/src/providers/ollama.rs, crates/oxidean-api-oxpilot/src/providers/openai.rs changed after the agent runtime Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: session-core
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api-core/Cargo.toml, crates/oxidean-api-core/src/app.rs, crates/oxidean-api-core/src/lib.rs, crates/oxidean-api-core/src/rpc.rs, crates/oxidean-api-oxpilot/Cargo.toml, crates/oxidean-api/Cargo.toml, crates/oxidean-api/src/app.rs, crates/oxidean-api/src/rpc.rs, crates/oxidean-core/src/lib.rs, crates/oxidean-db/migrations/mysql/0087_oxpilot_session_core.sql (and 3 more)
+**Recorded**: sha256:6dab2cd07aaa0c05488f9e0661a089c271e6d72f607c4ed53c666b82696f6363
+**Current**: sha256:446ef0fc5c1264885edd18ade80a598a00a97d5049583dd58fbe12e6263970ea
+**Details**: crates/oxidean-api-core/Cargo.toml, crates/oxidean-api-core/src/app.rs, crates/oxidean-api-core/src/lib.rs, crates/oxidean-api-core/src/rpc.rs, crates/oxidean-api-oxpilot/Cargo.toml, crates/oxidean-api/Cargo.toml, crates/oxidean-api/src/app.rs, crates/oxidean-api/src/rpc.rs, crates/oxidean-core/src/lib.rs, crates/oxidean-db/migrations/mysql/0087_oxpilot_session_core.sql (and 3 more) changed after the session core Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: providers
+**Checkpoint**: review-receipt
+**Changed**: .env.example, Cargo.toml, crates/oxidean-api-oxpilot/src/providers/egress.rs, crates/oxidean-api-oxpilot/src/providers/key.rs, crates/oxidean-api-oxpilot/src/providers/mod.rs, crates/oxidean-api-oxpilot/src/providers/registry.rs, crates/oxidean-db/src/oxpilot_settings.rs
+**Recorded**: sha256:5f0379c5df63d4b4a3d4aab775dc1d34298fb66c3dc6547335de1ae04172e4c4
+**Current**: sha256:d9da5986525ae017c78f785d9a337e09523bc9a1f634a2d6e6feb4415b78c6d5
+**Details**: .env.example, Cargo.toml, crates/oxidean-api-oxpilot/src/providers/egress.rs, crates/oxidean-api-oxpilot/src/providers/key.rs, crates/oxidean-api-oxpilot/src/providers/mod.rs, crates/oxidean-api-oxpilot/src/providers/registry.rs, crates/oxidean-db/src/oxpilot_settings.rs changed after the providers Unit was reviewed; carrying on.
+
+---
+
+## Change Accepted
+**Timestamp**: 2026-10-28T23:43:27Z
+**Event**: CHANGE_ACCEPTED
+**Stage**: code-generation
+**Unit**: skeleton-slice
+**Checkpoint**: review-receipt
+**Changed**: crates/oxidean-api/src/routes/repo_raw.rs, crates/oxidean-web/src/shells.rs, scripts/dev-auth/run-stack-e2e.sh
+**Recorded**: sha256:16c710c81c4d4c4187a91a6e0c5c4ecbb84e58b8c8f559b6390ca82eef842e22
+**Current**: sha256:dac287523e568bceeb9d5bd6b6920d32fbe96e641aff35c5fbfe8e572480b00b
+**Details**: crates/oxidean-api/src/routes/repo_raw.rs, crates/oxidean-web/src/shells.rs, scripts/dev-auth/run-stack-e2e.sh changed after the skeleton slice Unit was reviewed; carrying on.
+
+---
+
+## Review Requested
+**Timestamp**: 2026-10-28T23:43:28Z
+**Event**: REVIEW_REQUESTED
+**Stage**: code-generation
+**Reviewer**: aidlc-architecture-reviewer-agent
+**Unit**: oxpilot-ui
+**Iteration**: 3
+**Recovery**: stale-receipt
+**Recovery Cause**: artifact
+**Artifact Fingerprint**: sha256:c126f9450ea838a7eaadf65a4bc9c022c6ec25499f24a665e5f3d95ed51f6c19
+**Request Id**: review:e3e46454b567c7823db3ef5b4ac2e73e
+**Source Fingerprint**: 82369c497f4339d929816fcbe22db71f70c7b5525d31e618f19b2901280ac7a0
+**Unit Source Fingerprint**: sha256:3d01b9c564606758843dc658a669591fae5788882415af1aa75bc1da0358211e
+**Review File**: .aidlc-engine/reviews/code-generation/units/oxpilot-ui/6bc2091a791a039a/3.e3e46454b567c7823db3ef5b4ac2e73e.review.md
+
+---

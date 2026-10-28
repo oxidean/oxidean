@@ -347,6 +347,12 @@ function OxpilotChatSurface(props: {
   const [queuedRows, setQueuedRows] = useState<OxpilotQueuedMessage[]>(
     () => props.seed.pendingQueue,
   );
+  // Locally-cancelled queued ids — a stale in-flight `queueList` resolve
+  // must not resurrect a row the server already dropped (N-09). Only the
+  // mount seed bypasses the filter (initial server truth).
+  const deletedQueued = useRef<Set<string>>(new Set());
+  const applyQueued = (rows: OxpilotQueuedMessage[]) =>
+    setQueuedRows(rows.filter((q) => !deletedQueued.current.has(q.id)));
   const [fatal, setFatal] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -444,7 +450,7 @@ function OxpilotChatSurface(props: {
             void qc
               .fetchQuery(oxpilotQueueListQuery(props.sessionId, true))
               .then((queued) => {
-                if (!dead) setQueuedRows(queued);
+                if (!dead) applyQueued(queued);
               })
               .catch(() => {
                 // A failed queue read stays silent — the next card or the
@@ -541,7 +547,7 @@ function OxpilotChatSurface(props: {
         void qc
           .fetchQuery(oxpilotQueueListQuery(props.sessionId, true))
           .then((queued) => {
-            if (mountedRef.current) setQueuedRows(queued);
+            if (mountedRef.current) applyQueued(queued);
           })
           .catch(() => {});
       }
@@ -696,9 +702,10 @@ function OxpilotChatSurface(props: {
               cards={surfaceCards}
               queued={queuedRows}
               turnFailed={sendBanner != null}
-              onQueuedDelete={(queuedId) =>
-                setQueuedRows((prev) => prev.filter((q) => q.id !== queuedId))
-              }
+              onQueuedDelete={(queuedId) => {
+                deletedQueued.current.add(queuedId);
+                setQueuedRows((prev) => prev.filter((q) => q.id !== queuedId));
+              }}
             />
             <OxpilotComposer
               busy={busy}
@@ -727,6 +734,7 @@ function OxpilotChatSurface(props: {
             session={props.seed.session}
             diff={latestDiff}
             target={boundTarget}
+            targetBusy={boundTargetId !== null && busyTargets.has(boundTargetId)}
           />
         </div>;
       }

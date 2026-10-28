@@ -675,6 +675,44 @@ describe("/oxpilot/{session} workspace", () => {
     expect(screen.getAllByText("exec_shell")).toHaveLength(1);
   });
 
+  it("running exec/fs tool card flips the bound target's rail chip to connected·busy", async () => {
+    mountWorkspaceOk([snapshotFrame()], () => {
+      sessionGetMock.mockResolvedValue({
+        ok: true,
+        data: { ...session, computer_use_target_id: "t-1" },
+      });
+      targetListMock.mockResolvedValue({
+        ok: true,
+        data: { targets: [makeTarget()] },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("connected·idle")).toBeInTheDocument();
+    });
+    emitFrame({
+      type: "tool_call",
+      call_id: "c-busy",
+      call_index: 0,
+      tool: "fs_read",
+      status: "running",
+      args_summary: "README.md",
+    });
+    await waitFor(() => {
+      expect(screen.getByText("connected·busy")).toBeInTheDocument();
+    });
+    emitFrame({
+      type: "tool_call",
+      call_id: "c-busy",
+      call_index: 0,
+      tool: "fs_read",
+      status: "done",
+      output_summary: "contents",
+    });
+    await waitFor(() => {
+      expect(screen.getByText("connected·idle")).toBeInTheDocument();
+    });
+  });
+
   it("card{consent} resolves via grant_get and the three buttons respond verbatim", async () => {
     mountWorkspaceOk([snapshotFrame()], () => {
       grantGetMock.mockResolvedValue({ ok: true, data: makeGrant() });
@@ -980,7 +1018,7 @@ describe("/oxpilot/{session} workspace", () => {
     expect((composer.querySelector("textarea") as HTMLTextAreaElement).value).toBe("still mine");
   });
 
-  it("inline cancel rides queue_delete then the row drops on the queue_list drain", async () => {
+  it("inline cancel rides queue_delete then the row drops locally", async () => {
     mountWorkspaceOk([snapshotFrame()], () => {
       queueListMock
         .mockResolvedValueOnce({

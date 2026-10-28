@@ -1,23 +1,8 @@
 import type { OxpilotProposedDiff, OxpilotSession, OxpilotTargetView } from "@oxidean/api-client";
 import { Monitor, X } from "@octanejs/lucide";
 import { OxpilotDiffFileRows } from "@/components/oxpilot/diff-card";
+import { lifecycleLabel } from "@/components/oxpilot/target-row";
 import { Button } from "@/components/ui/button";
-
-/** Same lifecycle → text map as the target row / rail footer. */
-function targetStatusLabel(t: OxpilotTargetView): string {
-  switch (t.lifecycle) {
-    case "pending_consent":
-      return "needs consent";
-    case "connected":
-      return "connected";
-    case "disconnected":
-      return "offline";
-    case "revoked":
-      return "revoked";
-    default:
-      return t.status;
-  }
-}
 
 /** Return focus to the workspace's `[Context]` toggle after Esc. */
 function focusContextToggle() {
@@ -39,6 +24,8 @@ export function ContextDrawer(props: {
   session: OxpilotSession | null;
   diff: OxpilotProposedDiff | null;
   target: OxpilotTargetView | null;
+  /** Caller-derived `connected·busy` flag for the bound target. */
+  targetBusy?: boolean;
 }) @{
   const s = props.session;
   const d = props.diff;
@@ -118,7 +105,7 @@ export function ContextDrawer(props: {
                 <Monitor size={14} aria-hidden className="shrink-0 text-muted-foreground" />
                 <p className="truncate text-[14px] text-foreground">{t.label as string}</p>
                 <span role="status" className="shrink-0 text-[12px] text-muted-foreground">
-                  {targetStatusLabel(t) as string}
+                  {lifecycleLabel(t, props.targetBusy === true) as string}
                 </span>
               </div>
               @if (t.granted_caps.length > 0) {
