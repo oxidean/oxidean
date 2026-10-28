@@ -53,8 +53,9 @@ const TARGET_NONE = "__none__";
  * `Textarea` (autofocus, optional), optional computer-use target
  * `RadioGroup` ("No target" default + `connected`-lifecycle rows only —
  * the client refuses a non-connected pick). Submit ⇒ `session_create`
- * (+ `target_id` per the flagged additive amendment — extra field is
- * ignored by today's server) → invalidate + `onCreated`. Errors render
+ * (+ `target_id` — the landed amendment binds the session to the target
+ * atomically; the server validates owner + `connected` lifecycle) →
+ * invalidate + `onCreated`. Errors render
  * inline above the actions; Esc/Cancel closes with no call.
  */
 export function NewSessionDialog(props: {

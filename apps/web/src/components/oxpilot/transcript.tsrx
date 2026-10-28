@@ -173,7 +173,7 @@ export function OxpilotTranscript(props: {
     props.cards.length === 0 &&
     props.queued.length === 0;
 
-  <main aria-label="Transcript" className="relative mt-4 min-w-0 flex-1">
+  <section aria-label="Transcript" className="relative mt-4 min-w-0 flex-1">
     <div aria-live="polite" aria-atomic="false" className="sr-only">
       {announce as string}
     </div>
@@ -301,5 +301,5 @@ export function OxpilotTranscript(props: {
       }}
       onClose={() => setConfirmDiff(null)}
     />
-  </main>;
+  </section>;
 }

@@ -660,6 +660,10 @@ pub struct GrantView {
     pub capability: String,
     /// The bounded redacted consent-card excerpt (action grants only).
     pub args_summary: Option<String>,
+    /// The grant's bound session — NULL on connect grants (target-scoped,
+    /// BR6.6). Lets a session-scoped reader verify the response's scope
+    /// instead of trusting an unamended server to refuse `{session_id}`.
+    pub session_id: Option<String>,
     /// `pending | allowed | denied | expired | cancelled | revoked`.
     pub state: String,
     pub expires_at: String,

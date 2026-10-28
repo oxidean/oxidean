@@ -5514,6 +5514,8 @@ export interface OxpilotGrantView {
   kind: string;
   capability: string;
   args_summary: string | null;
+  /** The grant's bound session — `null` on connect grants (target-scoped). */
+  session_id: string | null;
   state: string;
   expires_at: string;
 }

@@ -38,7 +38,17 @@ export function SessionsRail(props: {
 }) @{
   const expanded = !props.collapsed;
 
-  <nav aria-label="Sessions" className="w-60 shrink-0 max-md:w-full">
+  /**
+   * BR10.2 — Esc inside the pane returns focus to its toggle, same
+   * contract the context drawer holds on `oxpilot-context-toggle`.
+   */
+  function escToToggle(e: KeyboardEvent) {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    (document.querySelector('[data-testid="oxpilot-rail-toggle"]') as HTMLElement | null)?.focus();
+  }
+
+  <nav aria-label="Sessions" className="w-60 shrink-0 max-md:w-full" onKeydown={escToToggle}>
     <Button
       type="button"
       variant="outline"

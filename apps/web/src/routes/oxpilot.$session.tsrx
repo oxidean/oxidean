@@ -99,7 +99,9 @@ function isGrantAmendmentRefusal(e: unknown): boolean {
     code === "forbidden" ||
     code === "oxpilot.forbidden" ||
     code === "invalid_argument" ||
-    code === "oxpilot.invalid_argument"
+    code === "oxpilot.invalid_argument" ||
+    code === "bad_input" ||
+    code === "oxpilot.bad_input"
   );
 }
 
@@ -199,8 +201,14 @@ function OxpilotSessionContent() @{
       };
       // Pending consent/diff cards are recovered from the authoritative
       // reads (they outlive their turn's frames); any replayed wire refs
-      // merge dedup'd.
-      for (const g of grants ?? []) pushCard("consent", g.id);
+      // merge dedup'd. `g.session_id` verifies the response's scope — an
+      // unamended server that silently ignores `{session_id}` returns
+      // other sessions' grants; those cards never render here.
+      for (const g of grants ?? []) {
+        if (g.session_id == null || g.session_id === props.sessionId) {
+          pushCard("consent", g.id);
+        }
+      }
       for (const d of diffs ?? []) pushCard("diff", d.id);
       // `queued` refs render through the `queued` prop (`queueList`/
       // `pendingQueue`), never the card dispatch — same split as the
@@ -469,17 +477,29 @@ function OxpilotChatSurface(props: {
     };
   }, [props.sessionId]);
 
-  /** Idle send — POST `…/chat` through `useChat` (fetch-reader stream). */
-  async function sendIdle(content: string) {
+  /**
+   * Idle send — POST `…/chat` through `useChat` (fetch-reader stream).
+   * `useChat` surfaces send failures through `chat.error`, never a
+   * rejection — the boolean tells the composer whether the draft clears.
+   */
+  async function sendIdle(content: string): Promise<boolean> {
     setSendError(null);
     setLiveTail({});
-    await chat.sendMessage(content, {
-      body: { client_msg_id: crypto.randomUUID() },
-    });
+    try {
+      await chat.sendMessage(content, {
+        body: { client_msg_id: crypto.randomUUID() },
+      });
+    } catch (e) {
+      // Defensive — useChat surfaces failures through `chat.error`, but a
+      // reject must not reach the composer's uncaught submit arm.
+      setSendError(e instanceof Error ? e.message : "Could not send the message.");
+      return false;
+    }
+    return chat.error == null;
   }
 
   /** Live-turn send — `oxpilot.message_queue` with a fresh idempotency key. */
-  async function sendQueued(content: string) {
+  async function sendQueued(content: string): Promise<boolean> {
     setSendError(null);
     try {
       const receipt = await queueM.mutateAsync({
@@ -508,10 +528,12 @@ function OxpilotChatSurface(props: {
       }
       // `{queued_id:null, position:null}` — the transcript-merge resend
       // guard (U3-WF5): NO queued row renders.
+      return true;
     } catch (e) {
       // `session_active_turn_absent`/`turn_active`/`budget_exceeded` —
       // a typed banner, never silent enqueue (C2's forbidden pair).
       setSendError(e instanceof Error ? e.message : "Could not queue the message.");
+      return false;
     }
   }
 
@@ -546,6 +568,10 @@ function OxpilotChatSurface(props: {
       : String(chat.error)
     : null;
   const sendBanner = sendError ?? chatError;
+  const sendCode = sendBanner ? codeOf(sendBanner) : null;
+  // WF4.3 — `oxpilot.disabled` on send/queue swaps to the flag-off
+  // state, same surface as the mount/`fatal` path.
+  const effectiveFatal = fatal ?? (sendCode === "oxpilot.disabled" ? sendCode : null);
   const turnLive = busy || liveTurns.size > 0;
 
   const targets = targetsQ.data ?? [];
@@ -557,10 +583,10 @@ function OxpilotChatSurface(props: {
   const latestDiff = diffs.length ? diffs[diffs.length - 1]! : null;
 
   <>
-    @if (fatal === "oxpilot.disabled") {
+    @if (effectiveFatal === "oxpilot.disabled") {
       <OxpilotFlagOff reason={props.disabledReason} />;
     } @else {
-      @if (fatal === "not_found") {
+      @if (effectiveFatal === "not_found") {
         <SessionNotFound />;
       } @else {
         <div className="mt-4 flex items-start gap-4">
@@ -638,8 +664,18 @@ function OxpilotChatSurface(props: {
               onSend={sendIdle}
               onQueue={sendQueued}
             >
-              @if (sendBanner) {
-                <AuthErrorBanner message={sendBanner} />;
+              @if (sendCode === "budget_exceeded") {
+                <AuthErrorBanner
+                  message={
+                    (`Daily budget reached — send paused. Ask an admin to raise ` +
+                      `OXIDEAN_OXPILOT_USER_BUDGET or OXIDEAN_OXPILOT_INSTANCE_BUDGET ` +
+                      `(see docs/CONFIGURATION.md). ${sendBanner}`) as string
+                  }
+                />;
+              } @else {
+                @if (sendBanner && sendCode !== "oxpilot.disabled") {
+                  <AuthErrorBanner message={sendBanner} />;
+                }
               }
             </OxpilotComposer>
           </div>

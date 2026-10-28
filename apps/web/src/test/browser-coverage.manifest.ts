@@ -566,17 +566,7 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "browser",
         test: OXPILOT_BROWSER,
-        subject: "oxpilot-repo-trigger",
-      },
-    ],
-  },
-  {
-    surface: "components/oxpilot/new-session-dialog.tsrx",
-    coverage: [
-      {
-        kind: "browser",
-        test: OXPILOT_BROWSER,
-        subject: "oxpilot-new-session",
+        subject: "new-session-dialog",
       },
     ],
   },
@@ -586,7 +576,7 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "browser",
         test: OXPILOT_BROWSER,
-        subject: "oxpilot-connect",
+        subject: "connect-dialog",
       },
     ],
   },

@@ -97,22 +97,26 @@ function OxpilotContent() @{
   async function confirmTargetAction() {
     if (!confirm) return;
     const m = confirm.kind === "disconnect" ? disconnectM : revokeM;
-    await m.mutateAsync({ target_id: confirm.target.id });
+    // The typed `targetError` surface is the record — swallow the
+    // rejection so `void confirm()` never logs an unhandled rejection.
+    await m.mutateAsync({ target_id: confirm.target.id }).catch(() => {});
   }
 
-  <main className="mx-auto w-full max-w-4xl px-4 py-8" data-testid="oxpilot-page">
+  <div className="mx-auto w-full max-w-4xl px-4 py-8" data-testid="oxpilot-page">
     <PageHeader
       title="OxPilot"
       description="Agentic chat, builder, and debugger sessions bound to your repositories."
       actions={
-        <Button
-          type="button"
-          onClick={() => setNewOpen(true)}
-          data-testid="oxpilot-new-session-open"
-        >
-          <MessageSquarePlus size={14} aria-hidden />
-          New session
-        </Button>
+        enabled ? (
+          <Button
+            type="button"
+            onClick={() => setNewOpen(true)}
+            data-testid="oxpilot-new-session-open"
+          >
+            <MessageSquarePlus size={14} aria-hidden />
+            New session
+          </Button>
+        ) : null
       }
     />
     @if (statusQ.isPending || meQ.isPending) {
@@ -288,5 +292,5 @@ function OxpilotContent() @{
         </>;
       }
     }
-  </main>;
+  </div>;
 }

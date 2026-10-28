@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Plugin } from "vite";
 
 const PKG = "@tanstack/ai-octane";
@@ -77,9 +78,25 @@ export function tanstackAiOctaneSource(projectRoot: string): Plugin {
           if (real === null) return null;
           return /\.(tsrx|tsx)$/.test(real) ? virtualId(real) : real;
         }
-        return this.resolve(spec, importerReal, { skipSelf: true }).then(
-          (resolved) => resolved?.id ?? null,
-        );
+        // Bare imports (e.g. `@tanstack/ai-client/devtools`) must resolve
+        // from the real package directory — the virtual id has no dirname
+        // for node-resolution to walk. `this.resolve` can throw/return
+        // null under rolldown; node's own resolver honors the exports map.
+        return this.resolve(spec, importerReal, { skipSelf: true })
+          .then((resolved) => resolved?.id ?? null)
+          .catch(() => null)
+          .then((id) => {
+            // A resolved id that still equals the bare specifier was
+            // externalized, not resolved — fall through to ESM
+            // resolution, which honors `import`-condition exports maps
+            // (`require.resolve` cannot read them).
+            if (id && id !== spec) return id;
+            try {
+              return fileURLToPath(import.meta.resolve(spec, pathToFileURL(importerReal).href));
+            } catch {
+              return null;
+            }
+          });
       }
 
       // Relative imports inside the real package (reached via its `.ts`

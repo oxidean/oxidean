@@ -285,6 +285,7 @@ impl OxpilotConnectorGateway {
             kind,
             capability,
             args_summary: g.action_summary.clone(),
+            session_id: g.session_id.clone(),
             state: g.state.clone(),
             expires_at: g.expires_at.clone(),
         }

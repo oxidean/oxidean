@@ -22,8 +22,8 @@ import { Textarea } from "@/components/ui/textarea";
 export function OxpilotComposer(props: {
   busy: boolean;
   turnLive: boolean;
-  onSend: (content: string) => void | Promise<void>;
-  onQueue: (content: string) => void | Promise<void>;
+  onSend: (content: string) => void | Promise<void | boolean>;
+  onQueue: (content: string) => void | Promise<void | boolean>;
   children?: unknown;
 }) @{
   const [text, setText] = useState("");
@@ -35,12 +35,10 @@ export function OxpilotComposer(props: {
     if (!content || sending) return;
     setSending(true);
     try {
-      if (props.turnLive) {
-        await props.onQueue(content);
-      } else {
-        await props.onSend(content);
-      }
-      setText("");
+      // `false` is the senders' typed-failure signal — the draft stays.
+      // `void`/`true` mean delivered (or queued) — the draft clears.
+      const ok = props.turnLive ? await props.onQueue(content) : await props.onSend(content);
+      if (ok !== false) setText("");
     } finally {
       setSending(false);
     }
