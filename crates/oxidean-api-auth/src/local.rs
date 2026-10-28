@@ -222,14 +222,17 @@ pub async fn login_begin(
     }
 
     // Each challenge resets the factor-attempt budget and can trigger OTP
-    // mail — bound challenge churn per client IP and per identifier.
+    // mail — bound challenge churn per client IP and per identifier. The
+    // `begin:` key namespace keeps unauthenticated churn off the
+    // credential-failure bucket `auth.login` checks, so challenge spam
+    // cannot lock a victim out of password sign-in.
     {
         let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
         let mut lim = ctx
             .login_begin_limiter
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if !lim.check_and_record(ip, &identifier.to_ascii_lowercase()) {
+        if !lim.check_and_record(ip, &format!("begin:{}", identifier.to_ascii_lowercase())) {
             return Err(AppError::new(
                 "auth.rate_limited",
                 "too many sign-in attempts — try again later",
@@ -392,6 +395,38 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
     if identifier.is_empty() {
         return Err(invalid_credentials());
     }
+
+    // One-shot login had no rate limit (H-1) — bound failed credential
+    // checks per client IP and per identifier on the same budget as
+    // `login_begin`. Each attempt reserves budget atomically under the
+    // limiter lock before the credential lookup so concurrent requests
+    // cannot all pass a non-recording check first; the reservation is the
+    // failure record, released only on a proven credential
+    // (`FailedAuthLimiter` parity — legitimate logins behind shared egress
+    // never lock out).
+    let rate_ip = ctx
+        .client
+        .ip_address
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    // The `login:` namespace keeps the caller-supplied identifier from
+    // minting `begin:`/`reset:` keys in this shared limiter — an attacker
+    // could otherwise spend a victim's login-begin or reset-redeem budget
+    // through this path.
+    let rate_ident = format!("login:{}", identifier.to_ascii_lowercase());
+    {
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !lim.check_and_record(&rate_ip, &rate_ident) {
+            return Err(AppError::new(
+                "auth.rate_limited",
+                "too many sign-in attempts — try again later",
+            ));
+        }
+    }
+
     let user = resolve_login_identifier(&ctx.db, identifier).await?;
 
     let Some(user) = user else {
@@ -409,6 +444,17 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
     if user.banned_at.is_some() {
         // Same generic message as bad password (no ban-status leak).
         return Err(invalid_credentials());
+    }
+
+    // Credentials verified — refund the reserved attempt and reset the
+    // identifier budget (prior IP failure history stays).
+    {
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lim.release_ip(&rate_ip);
+        lim.clear_ident(&rate_ident);
     }
 
     // Two-factor gate (issue #130): a confirmed factor requires proof, and

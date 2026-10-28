@@ -461,6 +461,8 @@ export type RequestPasswordResetRequest = {
 export type ResetPasswordRequest = {
   token?: string | null;
   code?: string | null;
+  /** Required with `code` so OTP misses can bump redeem attempts. */
+  email?: string | null;
   password: string;
 };
 

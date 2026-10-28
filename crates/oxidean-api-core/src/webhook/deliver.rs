@@ -1,11 +1,14 @@
 //! Outbound webhook HTTP delivery — HMAC, Hookshot headers, SSRF (D-HOOK-04/12/18).
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
 
+use oxidean_core::net::{is_loopback_ip, is_public_ip};
 use oxidean_db::{Database, WebhookDeliveryRow, WebhookRow};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use crate::egress::{is_metadata_ip, private_egress_allowed, resolve_egress_host, unbracket_host};
 
 /// Default max delivery attempts (D-HOOK-14 discretion).
 pub fn max_attempts() -> i64 {
@@ -59,10 +62,17 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 /// Validate webhook URL: https required except loopback http in non-production (D-HOOK-04).
+///
+/// Literal-IP and host-name rules share `oxidean_core::net`: hosted
+/// deployments require publicly routable targets, other environments
+/// follow [`private_egress_allowed`]. The cloud metadata address is
+/// blocked everywhere. Domain hosts additionally get a resolved-IP
+/// check at connect time via `resolve_webhook_target`.
 pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|_| "invalid webhook URL".to_string())?;
     let scheme = parsed.scheme();
     let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let bare = unbracket_host(&host);
     let allow_loopback_http = env_name != "production" && env_name != "cloud";
     match scheme {
         "https" => {}
@@ -77,9 +87,11 @@ pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
     if is_blocked_host(&host) {
         return Err("webhook URL host is not allowed".into());
     }
-    // Literal IP hosts
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_blocked_ip(ip) && !(allow_loopback_http && ip.is_loopback()) {
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        if is_metadata_ip(&ip) {
+            return Err("webhook URL host is not allowed".into());
+        }
+        if !private_egress_allowed(env_name) && !is_public_ip(&ip) {
             return Err("webhook URL host is not allowed".into());
         }
     }
@@ -87,54 +99,30 @@ pub fn validate_webhook_url(url: &str, env_name: &str) -> Result<(), String> {
 }
 
 fn is_loopback_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
-}
-
-fn is_blocked_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_unspecified()
-                || v4.octets()[0] == 169 && v4.octets()[1] == 254
-        }
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unspecified(),
-    }
+    host == "localhost"
+        || unbracket_host(host)
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| is_loopback_ip(&ip))
 }
 
 fn is_blocked_host(host: &str) -> bool {
-    if host.is_empty() {
-        return true;
-    }
-    let blocked = [
-        "169.254.169.254",
-        "metadata.google.internal",
-        "metadata",
-        "0.0.0.0",
-    ];
-    if blocked.contains(&host) {
-        return true;
-    }
-    if host.starts_with("169.254.") || host.starts_with("10.") {
-        return true;
-    }
-    if let Some(rest) = host.strip_prefix("192.168.") {
-        if !rest.is_empty() {
-            return true;
-        }
-    }
-    if let Some(rest) = host.strip_prefix("172.") {
-        if let Some((octet, _)) = rest.split_once('.') {
-            if let Ok(n) = octet.parse::<u8>() {
-                if (16..=31).contains(&n) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    host.is_empty() || host == "metadata" || host == "metadata.google.internal"
+}
+
+/// Resolve the webhook host once and enforce the egress bound on every
+/// DNS answer. The returned addresses are pinned on the reqwest client
+/// so the connection cannot rebind to a different (unvalidated) answer
+/// between this check and connect.
+async fn resolve_webhook_target(
+    url: &str,
+    env_name: &str,
+) -> Result<(bool, Vec<SocketAddr>), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "invalid webhook URL".to_string())?;
+    let host = parsed.host_str().unwrap_or("");
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs = resolve_egress_host(unbracket_host(host), port, env_name).await?;
+    let is_domain = matches!(parsed.host(), Some(url::Host::Domain(_)));
+    Ok((is_domain, addrs))
 }
 
 pub struct DeliveryOutcome {
@@ -176,29 +164,47 @@ pub async fn deliver_once(
     let attempt_number = delivery.attempt_count + 1;
     let max = max_attempts();
 
-    if let Err(e) = validate_webhook_url(&hook.url, env_name) {
-        return record_and_finish(
-            db,
-            delivery,
-            attempt_number,
-            max,
-            DeliveryOutcome {
-                http_status: None,
-                error_message: Some(e),
-                duration_ms: started.elapsed().as_millis() as i64,
-                response_snippet: None,
-                success: false,
-                transient: false,
-            },
-        )
-        .await;
-    }
+    let target = match validate_webhook_url(&hook.url, env_name) {
+        Ok(()) => resolve_webhook_target(&hook.url, env_name).await,
+        Err(e) => Err(e),
+    };
+    let (is_domain, resolved_addrs) = match target {
+        Ok(t) => t,
+        Err(e) => {
+            return record_and_finish(
+                db,
+                delivery,
+                attempt_number,
+                max,
+                DeliveryOutcome {
+                    http_status: None,
+                    error_message: Some(e),
+                    duration_ms: started.elapsed().as_millis() as i64,
+                    response_snippet: None,
+                    success: false,
+                    transient: false,
+                },
+            )
+            .await;
+        }
+    };
 
-    let client = match reqwest::Client::builder()
+    // `resolve_to_addrs` pins only local resolution — a system/env proxy
+    // resolves the hostname itself, so proxies are disabled outright to
+    // keep the request on the validated destination.
+    let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(delivery_timeout_secs()))
         .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+        .no_proxy();
+    if is_domain {
+        if let Some(domain) = url::Url::parse(&hook.url)
+            .ok()
+            .and_then(|u| u.domain().map(str::to_owned))
+        {
+            builder = builder.resolve_to_addrs(&domain, &resolved_addrs);
+        }
+    }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
             return record_and_finish(
@@ -349,9 +355,59 @@ mod tests {
     }
 
     #[test]
-    fn url_policy_blocks_metadata() {
-        assert!(validate_webhook_url("https://169.254.169.254/", "development").is_err());
-        assert!(validate_webhook_url("https://10.0.0.1/hook", "development").is_err());
-        assert!(validate_webhook_url("https://192.168.1.1/hook", "development").is_err());
+    fn url_policy_blocks_metadata_everywhere() {
+        for env in ["development", "production", "cloud"] {
+            assert!(
+                validate_webhook_url("https://169.254.169.254/", env).is_err(),
+                "{env}"
+            );
+            // IPv4-mapped IPv6 form of the same endpoint.
+            assert!(
+                validate_webhook_url("https://[::ffff:169.254.169.254]/", env).is_err(),
+                "{env}"
+            );
+        }
+    }
+
+    #[test]
+    fn url_policy_private_literals_env_gated() {
+        // Dev/test allows private egress so local services can receive
+        // hooks; hosted deployments reject every non-public literal.
+        assert!(validate_webhook_url("https://10.0.0.1/hook", "development").is_ok());
+        assert!(validate_webhook_url("https://192.168.1.1/hook", "development").is_ok());
+        for env in ["production", "cloud"] {
+            assert!(
+                validate_webhook_url("https://10.0.0.1/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://192.168.1.1/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://169.254.1.1/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://[::ffff:10.0.0.1]/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://[fd00::1]/hook", env).is_err(),
+                "{env}"
+            );
+            assert!(
+                validate_webhook_url("https://[::1]/hook", env).is_err(),
+                "{env}"
+            );
+        }
+    }
+
+    #[test]
+    fn url_policy_blocks_metadata_names() {
+        assert!(validate_webhook_url("https://metadata/hook", "production").is_err());
+        assert!(
+            validate_webhook_url("https://metadata.google.internal/hook", "production").is_err()
+        );
     }
 }

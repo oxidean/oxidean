@@ -341,7 +341,7 @@ pub async fn serve_archive(
     let filename = format!(
         "{}-{}.{}",
         accessible.row.name,
-        treeish.replace('/', "-"),
+        treeish.replace('/', "-").replace('"', "_"),
         format.extension()
     );
     let disposition = format!("attachment; filename=\"{filename}\"");

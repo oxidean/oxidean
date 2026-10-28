@@ -32,6 +32,10 @@ pub struct ResetPasswordRequest {
     pub token: Option<String>,
     #[serde(default)]
     pub code: Option<String>,
+    /// Required with `code` so a wrong OTP can bump `redeem_attempts` on a
+    /// stable row (lookup-by-otp-hash alone cannot — a miss finds nothing).
+    #[serde(default)]
+    pub email: Option<String>,
     pub password: String,
 }
 
@@ -200,6 +204,39 @@ pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic
     Ok(user_to_public(&ctx.db, &user).await)
 }
 
+/// When an OTP redeem can resolve the account but not a pending reset
+/// token yet (malformed code before lookup), still burn an attempt if a
+/// row exists — mirrors `bump_verify_attempt_on_miss`.
+async fn bump_reset_attempt_on_miss(ctx: &RpcCtx, email_raw: Option<&str>) -> Result<(), AppError> {
+    let Some(raw) = email_raw else {
+        return Ok(());
+    };
+    let email = match normalize_email(raw) {
+        Ok(e) => e,
+        Err(_) => return Ok(()),
+    };
+    let Some(user) = ctx.db.find_user_by_email(&email).await.map_err(db_err)? else {
+        return Ok(());
+    };
+    let Some(row) = ctx
+        .db
+        .find_email_token_by_user_purpose_target(&user.id, PURPOSE_RESET, "")
+        .await
+        .map_err(db_err)?
+    else {
+        return Ok(());
+    };
+    let attempts = ctx
+        .db
+        .increment_email_token_attempts(&row.id)
+        .await
+        .map_err(db_err)?;
+    if attempts >= MAX_REDEEM_ATTEMPTS {
+        let _ = ctx.db.delete_email_token(&row.id).await;
+    }
+    Ok(())
+}
+
 /// On OTP/magic miss, increment attempts on the session user's primary verify
 /// token (or legacy empty-target row) and invalidate at the cap.
 async fn bump_verify_attempt_on_miss(ctx: &RpcCtx, user_id: &str) -> Result<(), AppError> {
@@ -258,9 +295,45 @@ pub async fn reset_password(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    let email_raw = req
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     if code.is_none() && token.is_none() {
         return Err(AppError::new("rpc.bad_input", "provide token or code"));
+    }
+    // OTP redeem needs a stable account key so misses can bump attempts.
+    if code.is_some() && email_raw.is_none() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "email is required when redeeming with code",
+        ));
+    }
+
+    // Bound unauthenticated redeem churn per IP + identifier (email, or a
+    // per-token key for the magic-link path — a shared literal would let a
+    // handful of bad guesses DoS every magic-link redeem).
+    let rate_key = email_raw
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_else(|| {
+            token
+                .map(|t| format!("tok:{}", sha256_hex(t.as_bytes())))
+                .unwrap_or_else(|| "token".into())
+        });
+    {
+        let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !lim.check_and_record(ip, &format!("reset:{rate_key}")) {
+            return Err(AppError::new(
+                "auth.rate_limited",
+                "too many password reset attempts — try again later",
+            ));
+        }
     }
 
     let password_hash = hash_password_str(&req.password).map_err(|e| match e {
@@ -274,7 +347,8 @@ pub async fn reset_password(
         }
     })?;
 
-    // Resolve by token_hash or otp_hash (logged-out; no session scope — D-27).
+    // Magic-link: resolve by token_hash. OTP: resolve by user+purpose so a
+    // wrong code still finds the pending row and bumps redeem_attempts.
     let row = if let Some(token) = token {
         ctx.db
             .find_email_token_by_token_hash(&sha256_hex(token.as_bytes()))
@@ -282,10 +356,16 @@ pub async fn reset_password(
             .map_err(db_err)?
     } else if let Some(code) = code {
         if code.len() != 8 || !code.chars().all(|c| c.is_ascii_digit()) {
+            // Still attempt a miss-bump when we can resolve the account.
+            bump_reset_attempt_on_miss(ctx, email_raw).await?;
             return Err(invalid_reset_token());
         }
+        let email = normalize_email(email_raw.unwrap())?;
+        let Some(user) = ctx.db.find_user_by_email(&email).await.map_err(db_err)? else {
+            return Err(invalid_reset_token());
+        };
         ctx.db
-            .find_email_token_by_otp_hash(&sha256_hex(code.as_bytes()))
+            .find_email_token_by_user_purpose_target(&user.id, PURPOSE_RESET, "")
             .await
             .map_err(db_err)?
     } else {
@@ -293,10 +373,17 @@ pub async fn reset_password(
     };
 
     let Some(row) = row else {
+        // OTP path with known email but no pending token — already
+        // indistinguishable; magic-link miss has nothing to bump.
         return Err(invalid_reset_token());
     };
 
     if row.purpose != PURPOSE_RESET {
+        return Err(invalid_reset_token());
+    }
+
+    if row.attempt_count >= MAX_REDEEM_ATTEMPTS {
+        let _ = ctx.db.delete_email_token(&row.id).await;
         return Err(invalid_reset_token());
     }
 
@@ -308,7 +395,8 @@ pub async fn reset_password(
         return Err(invalid_reset_token());
     }
 
-    // Re-check credential against row (defense in depth) + attempt cap on mismatch.
+    // Credential check + attempt cap on mismatch (OTP path now reaches here
+    // with a row resolved independently of the guessed code).
     let matches = if let Some(code) = code {
         sha256_hex(code.as_bytes()) == row.otp_hash
     } else if let Some(token) = token {

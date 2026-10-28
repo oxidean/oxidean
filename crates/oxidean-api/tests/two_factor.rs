@@ -1079,3 +1079,25 @@ async fn login_begin_is_rate_limited_per_identifier() {
     let (_, v, _) = rpc(&app, &login_begin_body("other@example.com"), None).await;
     assert_eq!(v["ok"], true, "other identifier {v}");
 }
+
+#[tokio::test]
+async fn login_identifier_cannot_mint_begin_bucket_keys() {
+    let db = test_db("two_factor_login_ns_isolation").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "victim@example.com", "victim").await;
+
+    // Failed one-shot logins whose identifier collides with the victim's
+    // `begin:` bucket key — without the `login:` namespace these ten
+    // attempts would exhaust the victim's login-begin budget.
+    for i in 0..10 {
+        let (_, v, _) = rpc(&app, &login_body("begin:victim@example.com"), None).await;
+        assert_eq!(v["ok"], false, "bad login {i} {v}");
+        assert_eq!(v["error"]["code"], "auth.invalid_credentials", "{v}");
+    }
+
+    // The victim's own login-begin is unaffected.
+    let (_, v, _) = rpc(&app, &login_begin_body("victim@example.com"), None).await;
+    assert_eq!(v["ok"], true, "victim begin {v}");
+}

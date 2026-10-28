@@ -39,8 +39,8 @@ type View =
   | { kind: "loading" }
   | { kind: "sso"; mode: "workos" | "oidc" }
   | { kind: "request" }
-  | { kind: "request-sent" }
-  | { kind: "redeem"; token: string | null };
+  | { kind: "request-sent"; email: string }
+  | { kind: "redeem"; token: string | null; email: string | null };
 
 /** `/reset-password` — request + redeem flow (title/meta via shell). */
 export function ResetPasswordPage() @{
@@ -72,7 +72,7 @@ function ResetPasswordContent() @{
           }
           return;
         }
-        setView({ kind: "request-sent" });
+        setView({ kind: "request-sent", email: trimmed });
       } catch {
         setError(NETWORK_ERROR);
       }
@@ -80,7 +80,7 @@ function ResetPasswordContent() @{
   });
 
   const redeemForm = useForm({
-    defaultValues: { code: "", password: "", confirm: "" },
+    defaultValues: { email: "", code: "", password: "", confirm: "" },
     onSubmit: async ({ value }) => {
       if (submitLock.current || view.kind !== "redeem") return;
       const pwd = value.password;
@@ -97,7 +97,12 @@ function ResetPasswordContent() @{
       }
       const token = view.token;
       const nextCode = value.code.trim();
+      const email = value.email.trim() || view.email?.trim() || "";
       if (!token && (nextCode.length !== 8 || !/^\d{8}$/.test(nextCode))) {
+        setError(INVALID_EXPIRED_CODE);
+        return;
+      }
+      if (!token && !email) {
         setError(INVALID_EXPIRED_CODE);
         return;
       }
@@ -109,6 +114,7 @@ function ResetPasswordContent() @{
         const res = await apiClient.auth.resetPassword({
           token: token || null,
           code: token ? null : nextCode.length === 8 ? nextCode : null,
+          email: token ? null : email,
           password: pwd,
         });
         if (!res.ok) {
@@ -147,7 +153,7 @@ function ResetPasswordContent() @{
         if (cancelled) return;
         if (!cfg.ok) {
           setError(NETWORK_ERROR);
-          setView(token ? { kind: "redeem", token } : { kind: "request" });
+          setView(token ? { kind: "redeem", token, email: null } : { kind: "request" });
           return;
         }
         const mode: ProviderMode = cfg.data.mode;
@@ -155,11 +161,11 @@ function ResetPasswordContent() @{
           setView({ kind: "sso", mode });
           return;
         }
-        setView(token ? { kind: "redeem", token } : { kind: "request" });
+        setView(token ? { kind: "redeem", token, email: null } : { kind: "request" });
       } catch {
         if (cancelled) return;
         setError(NETWORK_ERROR);
-        setView(token ? { kind: "redeem", token } : { kind: "request" });
+        setView(token ? { kind: "redeem", token, email: null } : { kind: "request" });
       }
     })();
     return () => {
@@ -232,7 +238,9 @@ function ResetPasswordContent() @{
                 className="mt-2 w-full"
                 onClick={() => {
                   setError("");
-                  setView({ kind: "redeem", token: null });
+                  const email = view.kind === "request-sent" ? view.email : "";
+                  redeemForm.setFieldValue("email", email);
+                  setView({ kind: "redeem", token: null, email });
                 }}
               >
                 Enter reset code
@@ -285,7 +293,9 @@ function ResetPasswordContent() @{
                 className="font-normal text-foreground underline-offset-4 hover:underline"
                 onClick={() => {
                   setError("");
-                  setView({ kind: "redeem", token: null });
+                  const email = requestForm.state.values.email.trim();
+                  redeemForm.setFieldValue("email", email);
+                  setView({ kind: "redeem", token: null, email: email || null });
                 }}
               >
                 Enter it here
@@ -322,27 +332,48 @@ function ResetPasswordContent() @{
             }}
           >
             @if (!viaToken) {
-              <redeemForm.Field name="code">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="reset-code">Reset code</Label>
-                    <InputOtp
-                      id="reset-code"
-                      name="code"
-                      value={field.state.value}
-                      onChange={(next) => {
-                        field.handleChange(next);
-                        if (error) setError("");
-                      }}
-                      onComplete={(next) => {
-                        void redeemWithCode(next);
-                      }}
-                      aria-label="Reset code"
-                      aria-invalid={Boolean(error)}
-                    />
-                  </div>
-                )}
-              </redeemForm.Field>;
+              <>
+                <redeemForm.Field name="email">
+                  {(field) => (
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="reset-redeem-email">Email</Label>
+                      <Input
+                        id="reset-redeem-email"
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onInput={(ev) =>
+                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                        }
+                        required
+                      />
+                    </div>
+                  )}
+                </redeemForm.Field>
+                <redeemForm.Field name="code">
+                  {(field) => (
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="reset-code">Reset code</Label>
+                      <InputOtp
+                        id="reset-code"
+                        name="code"
+                        value={field.state.value}
+                        onChange={(next) => {
+                          field.handleChange(next);
+                          if (error) setError("");
+                        }}
+                        onComplete={(next) => {
+                          void redeemWithCode(next);
+                        }}
+                        aria-label="Reset code"
+                        aria-invalid={Boolean(error)}
+                      />
+                    </div>
+                  )}
+                </redeemForm.Field>
+              </>;
             }
 
             <redeemForm.Field name="password">

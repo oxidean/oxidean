@@ -156,16 +156,13 @@ fn looks_like_token(password: &str) -> bool {
         || password.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }
 
-/// Client IP for last-used / rate-limit — rightmost `X-Forwarded-For` hop
-/// (appended by a trusted proxy such as Traefik). Do not expose the API without
-/// a proxy that overwrites/sanitizes forwarded headers; leftmost hops are
-/// client-controlled and must not drive the failed-auth IP bucket.
+/// Client IP for last-used / rate-limit. Same policy as
+/// [`oxidean_api_core::rpc::ClientMeta::from_headers_and_peer`]: trust XFF
+/// only from a private peer (web→api) or when `OXIDEAN_WEB_BEHIND_PROXY` is set.
 fn client_ip(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').map(str::trim).rfind(|p| !p.is_empty()))
-        .map(|s| s.to_string())
+    // Peer comes from the edge `stamp_connect_ip` middleware via
+    // `x-oxidean-connect-ip` (see `ClientMeta::from_headers`).
+    oxidean_api_core::rpc::ClientMeta::from_headers(headers).ip_address
 }
 
 fn pat_expired(expires_at: &Option<String>) -> bool {

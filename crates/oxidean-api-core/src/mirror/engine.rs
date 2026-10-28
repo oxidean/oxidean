@@ -76,10 +76,16 @@ async fn run_mirror_sync_inner(
     let owner_slug = owner_slug_for_repo(db, &repo).await?;
     let bare = bare_repo_path(repos_dir, &owner_slug, &repo.name).map_err(|e| e.message.clone())?;
 
-    let credentials = credentials_from_mirror(mirror)?;
+    let mut credentials = credentials_from_mirror(mirror)?;
     let url = validate_remote_url(&mirror.remote_url)
         .map_err(|e| e.to_string())?
         .to_string();
+    // Validate egress AND pin the checked DNS answers into the git
+    // transport so fetch/push cannot re-resolve the host to an unvalidated
+    // answer between this check and connect (DNS-rebind TOCTOU).
+    credentials.dns_pin = crate::egress::resolve_remote_egress(&url, &crate::egress::env_name())
+        .await
+        .map_err(|e| e.to_string())?;
 
     // GIT-25: `git fetch` lands objects without running hooks/update, so a repo
     // already over quota pauses mirror syncs here (same "block the next write
@@ -1172,12 +1178,14 @@ pub fn credentials_from_mirror(mirror: &RepositoryMirrorRow) -> Result<RemoteCre
             }),
             secret,
             known_hosts: None,
+            dns_pin: None,
         }),
         "ssh_key" => Ok(RemoteCredentials {
             kind: RemoteAuthKind::SshKey,
             username: None,
             secret,
             known_hosts: Some(mirror.known_hosts.clone()),
+            dns_pin: None,
         }),
         other => Err(format!("unknown auth_kind: {other}")),
     }

@@ -1,13 +1,16 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::DefaultBodyLimit;
-use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::http::request::Parts;
+use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+use axum::middleware::{from_fn, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use oxidean_core::{AppError, RpcRequest, RpcResponse};
 use oxidean_db::Database;
+use std::net::{IpAddr, SocketAddr};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -234,7 +237,27 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
         .nest("/generic", crate::packages::generic::router())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
+        // Outermost: stamp ConnectInfo into an internal header so every
+        // `ClientMeta::from_headers` path (RPC, REST, packages, …) sees the
+        // peer without per-handler extractors. Client-supplied values are
+        // stripped first so the header is never attacker-controlled.
+        .layer(from_fn(stamp_connect_ip))
         .with_state(state)
+}
+
+/// Strip any inbound `x-oxidean-connect-ip`, then re-set it from
+/// `ConnectInfo` when the server was started with
+/// `into_make_service_with_connect_info`.
+async fn stamp_connect_ip(mut req: Request<axum::body::Body>, next: Next) -> Response {
+    req.headers_mut()
+        .remove(oxidean_api_core::rpc::CONNECT_IP_HEADER);
+    if let Some(ConnectInfo(addr)) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
+        if let Ok(v) = HeaderValue::from_str(&addr.ip().to_string()) {
+            req.headers_mut()
+                .insert(oxidean_api_core::rpc::CONNECT_IP_HEADER, v);
+        }
+    }
+    next.run(req).await
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -278,8 +301,30 @@ async fn setup_check(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// Peer IP when the server was started with
+/// `into_make_service_with_connect_info`; `None` under `Router::oneshot`
+/// tests that do not inject `ConnectInfo`.
+struct PeerIp(Option<IpAddr>);
+
+impl<S> FromRequestParts<S> for PeerIp
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(PeerIp(
+            parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|c| c.0.ip()),
+        ))
+    }
+}
+
 async fn rpc_http(
     State(state): State<AppState>,
+    PeerIp(peer): PeerIp,
     headers: HeaderMap,
     Json(body): Json<RpcRequest>,
 ) -> impl IntoResponse {
@@ -294,7 +339,7 @@ async fn rpc_http(
     let mut ctx = match build_rpc_ctx(
         &state,
         credential,
-        rpc::ClientMeta::from_headers(&headers),
+        rpc::ClientMeta::from_headers_and_peer(&headers, peer),
         challenge_id,
     )
     .await
@@ -318,6 +363,7 @@ async fn rpc_http(
 async fn rpc_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    PeerIp(peer): PeerIp,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let version = headers.get(VERSION_HEADER).and_then(|v| v.to_str().ok());
@@ -325,7 +371,7 @@ async fn rpc_ws(
         return (StatusCode::BAD_REQUEST, Json(RpcResponse::err(err))).into_response();
     }
     let credential = edge_credential(&headers);
-    let client = rpc::ClientMeta::from_headers(&headers);
+    let client = rpc::ClientMeta::from_headers_and_peer(&headers, peer);
     let challenge_id = two_factor_id_from_headers(&headers);
     ws.on_upgrade(move |socket| handle_socket(socket, state, credential, client, challenge_id))
 }

@@ -107,3 +107,18 @@ pub async fn read_object(lfs_dir: &Path, oid: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|e| format!("read object: {e}"))
 }
+
+/// Open an LFS object for streaming (Range / full GET) without buffering the
+/// whole blob in memory.
+pub async fn open_object(lfs_dir: &Path, oid: &str) -> Result<(tokio::fs::File, u64), String> {
+    let path = shard_path(lfs_dir, oid)?;
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| format!("open object: {e}"))?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| format!("object metadata: {e}"))?
+        .len();
+    Ok((file, len))
+}

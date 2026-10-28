@@ -18,6 +18,21 @@ pub enum RemoteAuthKind {
     SshKey,
 }
 
+/// Egress-validated DNS answers for an HTTP(S) remote — pins git's HTTP
+/// transport (`http.curloptResolve`) to the checked addresses so it cannot
+/// re-resolve to an unvalidated host between egress validation and connect
+/// (DNS-rebind TOCTOU). SSH remotes resolve inside OpenSSH and cannot be
+/// pinned here; that residual bound is documented in CONFIGURATION.md.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteDnsPin {
+    /// Remote hostname — always a domain; literal IPs have no DNS to pin.
+    pub host: String,
+    /// Remote port.
+    pub port: u16,
+    /// Validated answers.
+    pub addrs: Vec<std::net::IpAddr>,
+}
+
 /// Ephemeral credentials for one outbound git URL operation.
 ///
 /// Callers own secret lifetime; the CLI adapter materializes temp askpass /
@@ -31,6 +46,9 @@ pub struct RemoteCredentials {
     pub secret: String,
     /// OpenSSH `known_hosts` file contents (required for SSH).
     pub known_hosts: Option<String>,
+    /// Optional egress pin — set by callers that already resolved and
+    /// validated the remote's DNS answers (HTTP(S) only).
+    pub dns_pin: Option<RemoteDnsPin>,
 }
 
 /// Validate a remote git URL for mirroring (reject dangerous schemes/paths).

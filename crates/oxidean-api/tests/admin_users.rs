@@ -2,10 +2,12 @@
 
 mod support;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
+use axum::extract::ConnectInfo;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::email::{EmailError, EmailSender, OutboundEmail};
@@ -732,6 +734,8 @@ async fn admin_users_sessions_and_activity() {
     assert_eq!(signup.status(), StatusCode::OK);
     let _ = signup.into_body().collect().await;
     let login_body = r#"{"procedure":"auth.login","input":{"identifier":"target@ex.com","password":"password1","remember_me":true}}"#;
+    // Private `ConnectInfo` peer stands in for the web→api hop so the edge
+    // honors X-Forwarded-For (direct exposure ignores client-supplied XFF — M-1).
     let login_req = Request::builder()
         .method("POST")
         .uri("/api/rpc")
@@ -739,6 +743,10 @@ async fn admin_users_sessions_and_activity() {
         .header("Oxidean-RPC-Version", "1")
         .header("x-forwarded-for", "203.0.113.99")
         .header(header::USER_AGENT, "TestClient/1.0")
+        .extension(ConnectInfo(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            40000,
+        )))
         .body(Body::from(login_body.to_owned()))
         .unwrap();
     let login = app.clone().oneshot(login_req).await.unwrap();

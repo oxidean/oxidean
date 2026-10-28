@@ -208,6 +208,17 @@ pub async fn link_or_create_user(
         return Ok((user, incomplete));
     }
 
+    // Auto-link and create both require an IdP-verified email — otherwise an
+    // attacker controlling an unverified claim could hijack an existing
+    // account, or squat the address on a fresh account that absorbs the
+    // victim's later verified sign-in (H-2).
+    if !identity.email_verified {
+        return Err(ExternalAuthError::Failed(
+            "email is not verified at the identity provider — verify it there, then sign in again"
+                .into(),
+        ));
+    }
+
     let (user, incomplete) = if let Some(existing) = db
         .find_user_by_email(&email)
         .await
@@ -275,7 +286,11 @@ pub fn sanitize_return_to(raw: Option<&str>) -> String {
     let Some(s) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return "/".into();
     };
-    if !s.starts_with('/') || s.starts_with("//") || s.contains('\\') || s.contains('\n') {
+    if !s.starts_with('/')
+        || s.starts_with("//")
+        || s.contains('\\')
+        || s.chars().any(char::is_control)
+    {
         return "/".into();
     }
     if s == "/dashboard" || s.starts_with("/dashboard?") {
@@ -308,6 +323,47 @@ mod tests {
         assert_eq!(sanitize_return_to(Some("/")), "/");
         assert_eq!(sanitize_return_to(Some("/dashboard")), "/");
         assert_eq!(sanitize_return_to(None), "/");
+        assert_eq!(sanitize_return_to(Some("/ok\r\nX: 1")), "/");
+        assert_eq!(sanitize_return_to(Some("/ok\x00")), "/");
+    }
+
+    #[tokio::test]
+    async fn link_rejects_unverified_email_match_to_existing() {
+        let db = test_db().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        db.create_user(
+            &id,
+            "victim@ex.com",
+            "victim",
+            Some("unused-hash"),
+            "Victim",
+            "",
+            None,
+            oxidean_core::Role::User,
+        )
+        .await
+        .expect("create");
+        let identity = ExternalIdentity {
+            provider: "oidc".into(),
+            provider_subject: "attacker_sub".into(),
+            email: "victim@ex.com".into(),
+            display_name: Some("Attacker".into()),
+            email_verified: false,
+        };
+        let err = link_or_create_user(&db, &identity)
+            .await
+            .expect_err("must not auto-link");
+        assert!(
+            matches!(err, ExternalAuthError::Failed(ref m) if m.contains("not verified")),
+            "{err:?}"
+        );
+        assert!(
+            db.find_auth_identity("oidc", "attacker_sub")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "identity must not be linked"
+        );
     }
 
     #[test]
@@ -345,9 +401,12 @@ mod tests {
         );
     }
 
-    /// D-15 edge: absent/false IdP verification leaves local verify flows required.
+    /// H-2: unverified claims can neither link nor create — an IdP that
+    /// does not assert `email_verified` gets the same rejection on the
+    /// no-match branch as on an existing-account match, so an unverified
+    /// claim can never squat an address the victim later proves.
     #[tokio::test]
-    async fn link_or_create_leaves_unverified_when_idp_does_not_assert() {
+    async fn link_or_create_rejects_unverified_claim_create() {
         let db = test_db().await;
         let identity = ExternalIdentity {
             provider: "oidc".into(),
@@ -356,12 +415,26 @@ mod tests {
             display_name: None,
             email_verified: false,
         };
-        let (user, _) = link_or_create_user(&db, &identity)
+        let err = link_or_create_user(&db, &identity)
             .await
-            .expect("link_or_create");
+            .expect_err("unverified claim must not create an account");
         assert!(
-            user.email_verified_at.is_none(),
-            "IdP email_verified=false must leave email_verified_at null"
+            matches!(err, ExternalAuthError::Failed(ref m) if m.contains("not verified")),
+            "{err:?}"
+        );
+        assert!(
+            db.find_user_by_email("unverified-sso@ex.com")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "no account may be created from an unverified email claim"
+        );
+        assert!(
+            db.find_auth_identity("oidc", "sub_unverified_1")
+                .await
+                .expect("lookup")
+                .is_none(),
+            "identity must not be linked"
         );
     }
 }

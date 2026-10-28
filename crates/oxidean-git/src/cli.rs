@@ -511,6 +511,38 @@ fn looks_like_missing_ssh(combined: &str) -> bool {
         || (lower.contains("ssh:") && lower.contains("no such file or directory"))
 }
 
+/// `http.curloptResolve` exists only on git ≥ 2.37 (cc/http-curlopt-resolve)
+/// while the crate's floor is 2.5 — on an older git the DNS pin would be
+/// silently ignored and the remote could re-resolve to an unvalidated
+/// answer between egress validation and connect. Fail closed rather than
+/// run a pinned remote op on a git that cannot honor the pin.
+fn ensure_dns_pin_capable_git() -> Result<(), GitError> {
+    static GIT_VERSION: std::sync::OnceLock<Result<(u32, u32, u32), String>> =
+        std::sync::OnceLock::new();
+    let ver = GIT_VERSION.get_or_init(|| {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map_err(|e| format!("git missing or not executable: {e}"))
+            .and_then(|out| {
+                if !out.status.success() {
+                    return Err("git --version failed".into());
+                }
+                crate::version::parse_git_version(&String::from_utf8_lossy(&out.stdout))
+            })
+    });
+    match ver {
+        Ok(v) if *v >= (2, 37, 0) => Ok(()),
+        Ok(v) => Err(GitError::Process(format!(
+            "git {}.{}.{} cannot pin remote DNS — http.curloptResolve needs git ≥ 2.37",
+            v.0, v.1, v.2
+        ))),
+        Err(e) => Err(GitError::Process(format!(
+            "cannot verify git for DNS pinning: {e}"
+        ))),
+    }
+}
+
 /// Materialize askpass / SSH key / known_hosts for one outbound URL op.
 struct RemoteAuthFiles {
     _dir: tempfile::TempDir,
@@ -521,11 +553,55 @@ impl RemoteAuthFiles {
     fn prepare(credentials: &RemoteCredentials) -> Result<Self, GitError> {
         let dir = tempfile::tempdir().map_err(GitError::Io)?;
         let mut env = Vec::new();
+        // Transport policy on every outbound remote op: never follow HTTP
+        // redirects — a redirect could re-point the validated remote at an
+        // unvalidated host — and when the caller already resolved and
+        // egress-validated the remote's DNS answers, pin the HTTP transport
+        // to them so git cannot re-resolve to an unvalidated answer between
+        // validation and connect (DNS-rebind TOCTOU). SSH remotes resolve
+        // inside OpenSSH and cannot be pinned from here.
+        let mut cfgs: Vec<(String, String)> = vec![("http.followRedirects".into(), "false".into())];
+        if let Some(pin) = &credentials.dns_pin {
+            if !pin.addrs.is_empty() {
+                ensure_dns_pin_capable_git()?;
+                let joined = pin
+                    .addrs
+                    .iter()
+                    .map(|ip| match ip {
+                        std::net::IpAddr::V4(v4) => v4.to_string(),
+                        std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                cfgs.push((
+                    "http.curloptResolve".into(),
+                    format!("{}:{}:{}", pin.host, pin.port, joined),
+                ));
+                // The pin binds only local resolution — a configured or
+                // environment HTTP(S) proxy resolves the hostname itself
+                // and would bypass the checked answers, so proxies are
+                // disabled for pinned remotes: empty `http.proxy` beats
+                // repo config and env, and the env vars are scrubbed too.
+                cfgs.push(("http.proxy".into(), String::new()));
+                for var in [
+                    "http_proxy",
+                    "https_proxy",
+                    "all_proxy",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "ALL_PROXY",
+                    "no_proxy",
+                    "NO_PROXY",
+                ] {
+                    env.push((var.into(), String::new()));
+                }
+            }
+        }
         // An empty HTTPS secret means anonymous access — injecting a
         // `Basic <user>:` header makes strict servers 401 instead of serving
         // the public repo, so skip auth materialization entirely.
         if credentials.kind == RemoteAuthKind::HttpsToken && credentials.secret.is_empty() {
-            return Ok(Self { _dir: dir, env });
+            return Self::finish(dir, env, cfgs);
         }
         match credentials.kind {
             RemoteAuthKind::HttpsToken => {
@@ -598,10 +674,8 @@ impl RemoteAuthFiles {
                     }
                     out
                 };
-                env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
-                env.push(("GIT_CONFIG_KEY_0".into(), "http.extraHeader".into()));
-                env.push((
-                    "GIT_CONFIG_VALUE_0".into(),
+                cfgs.push((
+                    "http.extraHeader".into(),
                     format!("Authorization: Basic {auth_b64}"),
                 ));
                 let _ = askpass; // reserved if we switch to ASKPASS later
@@ -646,6 +720,25 @@ impl RemoteAuthFiles {
                 env.push(("GIT_SSH_COMMAND".into(), ssh_cmd));
             }
         }
+        Self::finish(dir, env, cfgs)
+    }
+
+    /// Emit `cfgs` as `GIT_CONFIG_*` pairs and lock the transport protocol
+    /// set — shared by the anonymous-HTTPS early return and the authed path.
+    /// `GIT_ALLOW_PROTOCOL` is defense in depth: it refuses the helper
+    /// transports `validate_remote_url` already rejects (file/ext/fd) for any
+    /// remote that reaches git without that pre-check.
+    fn finish(
+        dir: tempfile::TempDir,
+        mut env: Vec<(String, String)>,
+        cfgs: Vec<(String, String)>,
+    ) -> Result<Self, GitError> {
+        env.push(("GIT_CONFIG_COUNT".into(), cfgs.len().to_string()));
+        for (i, (k, v)) in cfgs.into_iter().enumerate() {
+            env.push((format!("GIT_CONFIG_KEY_{i}"), k));
+            env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+        }
+        env.push(("GIT_ALLOW_PROTOCOL".into(), "http:https:ssh".into()));
         Ok(Self { _dir: dir, env })
     }
 
@@ -5412,6 +5505,7 @@ mod tests {
             username: Some("git".into()),
             secret: "token".into(),
             known_hosts: None,
+            dns_pin: None,
         }
     }
 

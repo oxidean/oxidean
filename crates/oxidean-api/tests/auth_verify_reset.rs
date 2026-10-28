@@ -668,6 +668,7 @@ async fn reset_password_token_revokes_others_and_signs_in() {
 
 #[tokio::test]
 async fn reset_password_otp_consume() {
+    // OTP redeem requires email alongside code (C-1 attempt-cap).
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("reset_otp.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -681,12 +682,48 @@ async fn reset_password_otp_consume() {
         .expect("issue_reset");
 
     let reset_body = format!(
-        r#"{{"procedure":"auth.reset_password","input":{{"code":"{}","password":"newpass99"}}}}"#,
+        r#"{{"procedure":"auth.reset_password","input":{{"email":"otp@ex.com","code":"{}","password":"newpass99"}}}}"#,
         secrets.otp
     );
     let reset = app.oneshot(rpc_req(&reset_body)).await.unwrap();
     assert_eq!(reset.status(), StatusCode::OK);
     let _cookie = session_cookie_from_response(&reset);
+}
+
+#[tokio::test]
+async fn reset_password_otp_wrong_code_bumps_and_caps() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("reset_otp_cap.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_cookie, user_id, _) = signup_user(&app, "cap@ex.com", "capreset").await;
+    let secrets = verify_reset::issue_reset(&db, &user_id)
+        .await
+        .expect("issue_reset");
+
+    for _ in 0..verify_reset::MAX_REDEEM_ATTEMPTS {
+        let body = r#"{"procedure":"auth.reset_password","input":{"email":"cap@ex.com","code":"00000000","password":"newpass99"}}"#;
+        let resp = app.clone().oneshot(rpc_req(body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["code"], "auth.invalid_token", "{v}");
+    }
+    // Cap reached — the token row must be deleted. Assert on the row
+    // itself: the loop also filled the `reset:<email>` churn bucket, so a
+    // further redeem could return `auth.rate_limited` before the token
+    // check and mask a missed cap.
+    assert!(
+        db.find_email_token_by_user_purpose_target(&user_id, verify_reset::PURPOSE_RESET, "")
+            .await
+            .expect("lookup")
+            .is_none(),
+        "redeem-attempt cap must delete the reset token row"
+    );
+    let _ = secrets;
 }
 
 #[tokio::test]
