@@ -7062,6 +7062,14 @@ impl Database {
         oxpilot::touch_session_activity(self.require_pool()?, session_id).await
     }
 
+    pub async fn set_oxpilot_session_computer_use_target(
+        &self,
+        session_id: &str,
+        target_id: Option<&str>,
+    ) -> Result<u64, String> {
+        oxpilot::set_session_computer_use_target(self.require_pool()?, session_id, target_id).await
+    }
+
     pub async fn insert_oxpilot_message(
         &self,
         m: &NewOxpilotMessage<'_>,
@@ -7140,6 +7148,14 @@ impl Database {
         session_id: &str,
     ) -> Result<Vec<OxpilotQueuedRow>, String> {
         oxpilot::list_queued_for_session(self.require_pool()?, session_id).await
+    }
+
+    pub async fn delete_oxpilot_queued(
+        &self,
+        session_id: &str,
+        queued_id: &str,
+    ) -> Result<u64, String> {
+        oxpilot::delete_queued(self.require_pool()?, session_id, queued_id).await
     }
 
     pub async fn drain_oxpilot_queue_tx(
@@ -7329,6 +7345,15 @@ impl Database {
         target_id: Option<&str>,
     ) -> Result<Vec<OxpilotGrantRow>, String> {
         oxpilot::list_grants_for_user(self.require_pool()?, user_id, target_id).await
+    }
+
+    pub async fn list_oxpilot_grants_for_session(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        target_id: Option<&str>,
+    ) -> Result<Vec<OxpilotGrantRow>, String> {
+        oxpilot::list_grants_for_session(self.require_pool()?, user_id, session_id, target_id).await
     }
 
     pub async fn live_oxpilot_session_grant(

@@ -29,6 +29,9 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "oxpilot.session_delete" => arm!(session::delete(ctx, input)),
         "oxpilot.message_queue" => arm!(session::message_queue(ctx, input)),
         "oxpilot.queue_list" => arm!(session::queue_list(ctx, input)),
+        // U8 — the M8/[ix] inline queued-message cancel; owned session
+        // + `{deleted:true}`/`not_found` stale-ref honesty.
+        "oxpilot.queue_delete" => arm!(session::queue_delete(ctx, input)),
         "oxpilot.usage_get" => arm!(session::usage_get(ctx)),
         // U3 — C1's previously-orphaned proc: abort the live turn on an
         // owned session; `{aborted:bool}` reports the CAS outcome.

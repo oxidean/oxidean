@@ -26,6 +26,9 @@ pub struct OxpilotSessionRow {
     pub status: String,
     pub created_at: String,
     pub last_activity_at: String,
+    /// The U8 session→target binding (`0090`); `None` is the shipped
+    /// "no target" default.
+    pub computer_use_target_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +80,9 @@ macro_rules! map_session {
             last_activity_at: row
                 .try_get("last_activity_at")
                 .map_err(|e| format!("oxpilot session row: {e}"))?,
+            computer_use_target_id: row
+                .try_get("computer_use_target_id")
+                .map_err(|e| format!("oxpilot session row: {e}"))?,
         }
     }};
 }
@@ -117,19 +123,22 @@ macro_rules! map_message {
 const SESSION_SELECT_PG: &str = "SELECT s.id, s.user_id, s.repo_owner, s.repo_name, s.repo_id,
        s.branch, s.goal, s.title, s.status,
        to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
-       to_char(s.last_activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_activity_at
+       to_char(s.last_activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_activity_at,
+       s.computer_use_target_id
 FROM oxpilot_sessions s";
 
 const SESSION_SELECT_MYSQL: &str = "SELECT s.id, s.user_id, s.repo_owner, s.repo_name, s.repo_id,
        s.branch, s.goal, s.title, s.status,
        DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
-       DATE_FORMAT(s.last_activity_at, '%Y-%m-%dT%H:%i:%sZ') AS last_activity_at
+       DATE_FORMAT(s.last_activity_at, '%Y-%m-%dT%H:%i:%sZ') AS last_activity_at,
+       s.computer_use_target_id
 FROM oxpilot_sessions s";
 
 const SESSION_SELECT_SQLITE: &str = "SELECT s.id, s.user_id, s.repo_owner, s.repo_name, s.repo_id,
        s.branch, s.goal, s.title, s.status,
        strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at) AS created_at,
-       strftime('%Y-%m-%dT%H:%M:%SZ', s.last_activity_at) AS last_activity_at
+       strftime('%Y-%m-%dT%H:%M:%SZ', s.last_activity_at) AS last_activity_at,
+       s.computer_use_target_id
 FROM oxpilot_sessions s";
 
 const MESSAGE_SELECT_PG: &str = "SELECT m.id, m.session_id, m.seq, m.role, m.content,
@@ -156,6 +165,9 @@ pub struct NewOxpilotSession<'a> {
     pub branch: &'a str,
     pub goal: Option<&'a str>,
     pub title: &'a str,
+    /// U8 — the optional `oxpilot_targets` binding (`0090` column);
+    /// `None` persists NULL, the "no target" shipped default.
+    pub computer_use_target_id: Option<&'a str>,
 }
 
 pub async fn insert_session(
@@ -166,8 +178,9 @@ pub async fn insert_session(
         DbPool::Postgres(p) => {
             sqlx::query(
                 "INSERT INTO oxpilot_sessions
-                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title,
+                      computer_use_target_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(s.id)
             .bind(s.user_id)
@@ -177,6 +190,7 @@ pub async fn insert_session(
             .bind(s.branch)
             .bind(s.goal)
             .bind(s.title)
+            .bind(s.computer_use_target_id)
             .execute(p)
             .await
             .map_err(|e| format!("insert oxpilot session failed: {e}"))?;
@@ -184,8 +198,9 @@ pub async fn insert_session(
         DbPool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO oxpilot_sessions
-                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title,
+                      computer_use_target_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(s.id)
             .bind(s.user_id)
@@ -195,6 +210,7 @@ pub async fn insert_session(
             .bind(s.branch)
             .bind(s.goal)
             .bind(s.title)
+            .bind(s.computer_use_target_id)
             .execute(p)
             .await
             .map_err(|e| format!("insert oxpilot session failed: {e}"))?;
@@ -202,8 +218,9 @@ pub async fn insert_session(
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "INSERT INTO oxpilot_sessions
-                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title,
+                      computer_use_target_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )
             .bind(s.id)
             .bind(s.user_id)
@@ -213,6 +230,7 @@ pub async fn insert_session(
             .bind(s.branch)
             .bind(s.goal)
             .bind(s.title)
+            .bind(s.computer_use_target_id)
             .execute(p)
             .await
             .map_err(|e| format!("insert oxpilot session failed: {e}"))?;
@@ -388,6 +406,46 @@ pub async fn touch_session_activity(pool: &DbPool, session_id: &str) -> Result<(
         }
     }
     Ok(())
+}
+
+/// U8 — stamp the optional session→target binding (`0090` column) on an
+/// existing session row. The caller resolves ownership + the target's
+/// `connected` lifecycle first; `None` re-clears the binding. Returns
+/// rows affected (0 ⇒ the session id was absent).
+pub async fn set_session_computer_use_target(
+    pool: &DbPool,
+    session_id: &str,
+    target_id: Option<&str>,
+) -> Result<u64, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE oxpilot_sessions SET computer_use_target_id = $2 WHERE id = $1")
+                .bind(session_id)
+                .bind(target_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("set oxpilot session target failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE oxpilot_sessions SET computer_use_target_id = ? WHERE id = ?")
+                .bind(target_id)
+                .bind(session_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("set oxpilot session target failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE oxpilot_sessions SET computer_use_target_id = ?2 WHERE id = ?1")
+                .bind(session_id)
+                .bind(target_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("set oxpilot session target failed: {e}"))
+        }
+    }
 }
 
 pub struct NewOxpilotMessage<'a> {
@@ -1290,6 +1348,46 @@ pub async fn list_queued_for_session(
                 out.push(map_queued!(r));
             }
             Ok(out)
+        }
+    }
+}
+
+/// U8 (`queue_delete`) — drop ONE queued row scoped `(session_id, id)`.
+/// Session ownership is resolved by the caller first, so the pair
+/// filter alone can't reach across users. Returns rows affected
+/// (0 ⇒ already absent, the proc's `not_found` arm).
+pub async fn delete_queued(
+    pool: &DbPool,
+    session_id: &str,
+    queued_id: &str,
+) -> Result<u64, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM oxpilot_queued_messages WHERE session_id = $1 AND id = $2")
+                .bind(session_id)
+                .bind(queued_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("delete oxpilot queued message failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM oxpilot_queued_messages WHERE session_id = ? AND id = ?")
+                .bind(session_id)
+                .bind(queued_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("delete oxpilot queued message failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM oxpilot_queued_messages WHERE session_id = ?1 AND id = ?2")
+                .bind(session_id)
+                .bind(queued_id)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| format!("delete oxpilot queued message failed: {e}"))
         }
     }
 }
@@ -3919,6 +4017,86 @@ pub async fn list_grants_for_user(
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list oxpilot grants failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_grant!(r));
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// U8 (`grant_list{session_id}`) — the session-scoped owner read: only
+/// rows bound to THIS session's `session_id` column (connect grants
+/// carry NULL and never match); a `target_id` sent alongside ANDs in
+/// with the same optional-bind shape `list_grants_for_user` uses. Same
+/// pending-first ordering + bound as the target-scoped list;
+/// `0088`'s `idx_oxpilot_grants_session` covers the filter.
+pub async fn list_grants_for_session(
+    pool: &DbPool,
+    user_id: &str,
+    session_id: &str,
+    target_id: Option<&str>,
+) -> Result<Vec<OxpilotGrantRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let sql = format!(
+                "SELECT {GRANT_COLS_PG} FROM oxpilot_grants
+                 WHERE user_id = $1 AND session_id = $2
+                   AND ($3::text IS NULL OR target_id = $3)
+                 ORDER BY CASE WHEN state = 'pending' THEN 0 ELSE 1 END, created_at DESC
+                 LIMIT 500"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(user_id)
+                .bind(session_id)
+                .bind(target_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list oxpilot session grants failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_grant!(r));
+            }
+            Ok(out)
+        }
+        DbPool::MySql(p) => {
+            let sql = format!(
+                "SELECT {GRANT_COLS_MYSQL} FROM oxpilot_grants
+                 WHERE user_id = ? AND session_id = ?
+                   AND (? IS NULL OR target_id = ?)
+                 ORDER BY CASE WHEN state = 'pending' THEN 0 ELSE 1 END, created_at DESC
+                 LIMIT 500"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(user_id)
+                .bind(session_id)
+                .bind(target_id)
+                .bind(target_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list oxpilot session grants failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_grant!(r));
+            }
+            Ok(out)
+        }
+        DbPool::Sqlite(p) => {
+            let sql = format!(
+                "SELECT {GRANT_COLS_SQLITE} FROM oxpilot_grants
+                 WHERE user_id = ?1 AND session_id = ?2
+                   AND (?3 IS NULL OR target_id = ?3)
+                 ORDER BY CASE WHEN state = 'pending' THEN 0 ELSE 1 END, created_at DESC
+                 LIMIT 500"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(user_id)
+                .bind(session_id)
+                .bind(target_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list oxpilot session grants failed: {e}"))?;
             let mut out = Vec::with_capacity(rows.len());
             for r in &rows {
                 out.push(map_grant!(r));

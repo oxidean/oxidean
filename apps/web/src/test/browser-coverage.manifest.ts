@@ -62,7 +62,7 @@ const VCS_BROWSER = "apps/web/src/components/repo/vcs-settings-panel.browser.tes
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
 const MCP_HARNESS_BROWSER = "apps/web/src/components/settings/mcp-harness-blocks.browser.test.tsx";
 
-const AUTH_UI = "apps/w....tsx";
+const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
 const FORGE_SSH = "apps/web/e2e/stack-browser/forge-packages-ssh-orgs.stack.browser.test.tsx";
 const FORGE_MIRROR = "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test.tsx";
@@ -559,14 +559,34 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
 
-  // --- /oxpilot (U1 skeleton slice — Select portal DOM-race gate) ---
+  // --- /oxpilot (U8 — repo Select lives in the new-session dialog) ---
   {
-    surface: "routes/oxpilot.tsrx",
+    surface: "components/oxpilot/new-session-dialog.tsrx",
     coverage: [
       {
         kind: "browser",
         test: OXPILOT_BROWSER,
         subject: "oxpilot-repo-trigger",
+      },
+    ],
+  },
+  {
+    surface: "components/oxpilot/new-session-dialog.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: OXPILOT_BROWSER,
+        subject: "oxpilot-new-session",
+      },
+    ],
+  },
+  {
+    surface: "components/oxpilot/connect-dialog.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: OXPILOT_BROWSER,
+        subject: "oxpilot-connect",
       },
     ],
   },

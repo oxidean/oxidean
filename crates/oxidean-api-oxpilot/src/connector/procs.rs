@@ -102,16 +102,28 @@ pub async fn target_revoke(ctx: &RpcCtx, input: Value) -> Result<Value, AppError
 struct GrantListReq {
     #[serde(default)]
     target_id: Option<String>,
+    /// U8 amendment — when present the read narrows to the named
+    /// session's bound grants (mount/recovery); ownership resolves
+    /// `not_found` for foreign or absent session ids alike.
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
-/// `oxpilot.grant_list{target_id?}` → `{grants: [GrantView]}` — lazy
-/// pending-grant expiry on observation (BR3.1).
+/// `oxpilot.grant_list{target_id?, session_id?}` → `{grants:
+/// [GrantView]}` — lazy pending-grant expiry on observation (BR3.1).
+/// `session_id` rides the session-scoped read (U8); `target_id` keeps
+/// its shipped filter and ANDs alongside it when both arrive.
 pub async fn grant_list(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
     require_enabled(ctx).await?;
     let user = require_verified(ctx).await?;
     let req: GrantListReq = parse(input, "oxpilot.grant_list")?;
     let views = gateway(ctx)?
-        .list_grants(&ctx.client, &user.id, req.target_id.as_deref())
+        .list_grants(
+            &ctx.client,
+            &user.id,
+            req.target_id.as_deref(),
+            req.session_id.as_deref(),
+        )
         .await?;
     Ok(json!({ "grants": views }))
 }

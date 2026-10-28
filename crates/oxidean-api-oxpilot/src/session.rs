@@ -48,6 +48,7 @@ fn session_json(row: &OxpilotSessionRow) -> Value {
         "status": row.status,
         "created_at": row.created_at,
         "last_activity_at": row.last_activity_at,
+        "computer_use_target_id": row.computer_use_target_id,
     })
 }
 
@@ -74,6 +75,10 @@ struct CreateRequest {
     branch: Option<String>,
     #[serde(default)]
     goal: Option<String>,
+    /// U8 amendment — the optional computer-use target pick; absent or
+    /// blank rides the shipped NULL ("no target") binding.
+    #[serde(default)]
+    target_id: Option<String>,
 }
 
 pub async fn create(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
@@ -118,6 +123,28 @@ pub async fn create(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| "Untitled session".to_string());
 
+    // U8 — an explicit `target_id` binds the session to one of the
+    // caller's `connected` targets; absent/blank rides the shipped NULL
+    // ("no target") binding. The gateway read is owner-checked: foreign
+    // and unknown ids resolve `not_found` identically (BR7.1); a
+    // known-but-not-connected lifecycle refuses — the dialog only ever
+    // offers connected picks.
+    let target_id = req
+        .target_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    if let Some(tid) = &target_id {
+        let view = runtime(ctx)?
+            .gateway()?
+            .get_target(&ctx.client, &user.id, tid)
+            .await?;
+        if view.lifecycle != "connected" {
+            return Err(bad_input("target_id must name a connected target"));
+        }
+    }
+
     let svc = sessions(ctx)?;
     let row = svc
         .create_session(
@@ -130,6 +157,9 @@ pub async fn create(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
                 branch,
                 goal,
                 title,
+                // Validated above — the binding rides the INSERT so the
+                // returned row (and every later get/list) carries it.
+                computer_use_target_id: target_id,
             },
         )
         .await?;
@@ -146,6 +176,7 @@ pub async fn create(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
                 "repo_owner": row.repo_owner,
                 "repo_name": row.repo_name,
                 "branch": row.branch,
+                "computer_use_target_id": row.computer_use_target_id,
             })
             .to_string(),
         ),
@@ -354,6 +385,30 @@ pub async fn queue_list(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
     Ok(json!({
         "queued": rows.iter().map(queued_message_json).collect::<Vec<_>>(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct QueueDeleteRequest {
+    session_id: String,
+    queued_id: String,
+}
+
+/// `oxpilot.queue_delete{session_id, queued_id}` — U8's inline
+/// queued-message cancel (the M8/[ix] affordance, amendment #3).
+/// The service takes the SAME owned-session read `queue_list` rides —
+/// a foreign/absent session answers `not_found` before any row is
+/// touched (BR3.3 anti-enumeration); an already-absent `queued_id`
+/// under an owned session is `not_found` too, matching `grant_get`'s
+/// stale-ref honesty (BR9.1 — the drained row resolves on the client's
+/// next `queue_list`).
+pub async fn queue_delete(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
+    require_enabled(ctx).await?;
+    let user = require_verified(ctx).await?;
+    let req: QueueDeleteRequest = parse(input, "oxpilot.queue_delete")?;
+    sessions(ctx)?
+        .delete_queued(&user.id, &req.session_id, &req.queued_id)
+        .await?;
+    Ok(json!({ "deleted": true }))
 }
 
 /// `oxpilot.turn_cancel` — abort the live turn on an owned session

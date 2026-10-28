@@ -135,6 +135,7 @@ mod tests {
             status: "active".to_string(),
             created_at: String::new(),
             last_activity_at: String::new(),
+            computer_use_target_id: None,
         }
     }
 

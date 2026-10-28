@@ -5324,6 +5324,9 @@ export interface OxpilotSession {
   status: string;
   created_at: string;
   last_activity_at: string;
+  /** U8 — the optional computer-use target binding (`null` = "no
+   *  target", the shipped default). */
+  computer_use_target_id: string | null;
 }
 
 export interface OxpilotSessionCreateRequest {
@@ -5331,6 +5334,8 @@ export interface OxpilotSessionCreateRequest {
   repo_name: string;
   branch?: string;
   goal?: string;
+  /** U8 — optional `connected` target pick; absent keeps "no target". */
+  target_id?: string;
 }
 
 export interface OxpilotSessionListResponse {
@@ -5385,6 +5390,17 @@ export interface OxpilotQueuedMessage {
 
 export interface OxpilotQueueListResponse {
   queued: OxpilotQueuedMessage[];
+}
+
+/** `oxpilot.queue_delete` — U8's inline queued-message cancel; owned
+ *  session + queued row, `not_found` on foreign/absent. */
+export interface OxpilotQueueDeleteRequest {
+  session_id: string;
+  queued_id: string;
+}
+
+export interface OxpilotQueueDeleteResponse {
+  deleted: boolean;
 }
 
 export interface OxpilotTurnCancelResponse {
@@ -5498,6 +5514,8 @@ export interface OxpilotGrantRefRequest {
 
 export interface OxpilotGrantListRequest {
   target_id?: string;
+  /** U8 — narrows to the named session's bound grants (mount/recovery). */
+  session_id?: string;
 }
 
 export interface OxpilotGrantListResponse {
@@ -7382,6 +7400,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<OxpilotQueuedReceipt>(opts, "oxpilot.message_queue", input),
       queueList: (input: OxpilotSessionRefRequest) =>
         rpcCall<OxpilotQueueListResponse>(opts, "oxpilot.queue_list", input),
+      queueDelete: (input: OxpilotQueueDeleteRequest) =>
+        rpcCall<OxpilotQueueDeleteResponse>(opts, "oxpilot.queue_delete", input),
       usageGet: () => rpcCall<OxpilotUsageResponse>(opts, "oxpilot.usage_get", {}),
       turnCancel: (input: OxpilotSessionRefRequest) =>
         rpcCall<OxpilotTurnCancelResponse>(opts, "oxpilot.turn_cancel", input),
@@ -9023,7 +9043,12 @@ export function oxpilotGrantListQueryOptions(
   input: OxpilotGrantListRequest = {},
 ) {
   return {
-    queryKey: ["oxpilot", "grantList", input.target_id ?? null] as const,
+    queryKey: [
+      "oxpilot",
+      "grantList",
+      input.target_id ?? null,
+      input.session_id ?? null,
+    ] as const,
     queryFn: async () => {
       const res = await client.oxpilot.grantList(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);

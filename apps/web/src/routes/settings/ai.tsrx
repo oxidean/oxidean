@@ -166,5 +166,17 @@ function AiSettingsContent(props: {
         initialOauthHtml={props.mcpInitialOauthHtml}
       />
     </div>
+
+    <h2 className="mt-10 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
+      OxPilot
+    </h2>
+    <p className="mt-1 text-[14px] text-muted-foreground">
+      OxPilot sessions can also drive a paired computer-use target — a machine running the connector
+      that the agent can act on with your consent. Pair and manage systems under{" "}
+      <AppLink href="/oxpilot#targets" className="text-foreground underline underline-offset-2">
+        OxPilot → Computer use
+      </AppLink>
+      .
+    </p>
   </AccountSettingsLayout>;
 }

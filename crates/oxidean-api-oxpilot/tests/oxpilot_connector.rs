@@ -282,6 +282,7 @@ async fn make_session(
             branch: "main".to_string(),
             goal: None,
             title: "t".to_string(),
+            computer_use_target_id: None,
         },
     )
     .await

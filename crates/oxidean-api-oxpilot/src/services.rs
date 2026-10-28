@@ -224,6 +224,9 @@ impl SessionService for OxpilotSessionService {
                 branch: &input.branch,
                 goal: goal.as_deref(),
                 title: &title,
+                // U8 — the proc-validated target binding rides the
+                // INSERT itself (atomic; no post-write stamp).
+                computer_use_target_id: input.computer_use_target_id.as_deref(),
             })
             .await
             .map_err(db_err)
@@ -535,6 +538,28 @@ impl SessionService for OxpilotSessionService {
             .map_err(db_err)
     }
 
+    async fn delete_queued(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        queued_id: &str,
+    ) -> Result<(), AppError> {
+        // Same owner read `list_queue` takes — foreign/absent sessions
+        // fold into `not_found` before any row is touched (BR3.3).
+        self.owned(session_id, user_id).await?;
+        let deleted = self
+            .db
+            .delete_oxpilot_queued(session_id, queued_id)
+            .await
+            .map_err(db_err)?;
+        // Stale-ref honesty: an already-drained/foreign queued id under
+        // the owned session answers `not_found` (BR9.1).
+        if deleted == 0 {
+            return Err(AppError::new("not_found", "queued message not found"));
+        }
+        Ok(())
+    }
+
     // ---- tool-call cards (BR7.3) ----
 
     async fn append_tool_call(
@@ -797,6 +822,7 @@ mod tests {
             branch: "main".to_string(),
             goal: goal.map(str::to_string),
             title: title.to_string(),
+            computer_use_target_id: None,
         }
     }
 

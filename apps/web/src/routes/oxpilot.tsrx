@@ -1,73 +1,119 @@
 import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { OxpilotSession } from "@oxidean/api-client";
+import type { OxpilotSession, OxpilotTargetView } from "@oxidean/api-client";
 import { useState } from "octane";
-import { Bot, Check, ChevronDown, MessageSquarePlus } from "@octanejs/lucide";
+import { Bot, Cable, MessageSquarePlus } from "@octanejs/lucide";
 import { AppPage } from "@/components/app-page";
-import { AppLink } from "@/components/ui/app-link";
-import { AuthErrorBanner } from "@/components/auth-shell";
+import { ConnectDialog } from "@/components/oxpilot/connect-dialog";
+import { OxpilotConfirmDialog } from "@/components/oxpilot/confirm-dialog";
+import { OxpilotFlagOff } from "@/components/oxpilot/flag-off";
+import { NewSessionDialog } from "@/components/oxpilot/new-session-dialog";
+import { OxpilotSessionRow } from "@/components/oxpilot/session-row";
+import { OxpilotTargetRow } from "@/components/oxpilot/target-row";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { List, ListRow } from "@/components/ui/list";
+import { List } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  SelectIcon,
-  SelectItem,
-  SelectItemIndicator,
-  SelectItemText,
-  SelectList,
-  SelectPopup,
-  SelectPortal,
-  SelectPositioner,
-  SelectRoot,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import {
   invalidateOxpilotQueries,
-  oxpilotSessionCreate,
   oxpilotSessionListQueryOptions,
   oxpilotStatusQueryOptions,
+  oxpilotTargetDisconnectMutation,
+  oxpilotTargetListQuery,
+  oxpilotTargetRevokeMutation,
 } from "@/lib/oxpilot-queries";
-import { formatRelative } from "@/lib/relative-time";
-import { authSessionQueryOptions, repoListMineQueryOptions } from "@/lib/session-queries";
+import { authSessionQueryOptions } from "@/lib/session-queries";
+import { toastSuccess } from "@/lib/toast";
 
-/** `/oxpilot` — session list + new-session form; flag-off explanatory state. */
+/** `/oxpilot` — session list + computer-use targets; flag-off explanatory state. */
 export function OxpilotPage() @{
   <AppPage>
     <OxpilotContent />
   </AppPage>;
 }
 
-function flagOffReason(reason: string | null | undefined): string {
-  switch (reason) {
-    case "flag_off":
-      return "the OXIDEAN_OXPILOT_ENABLED flag is off";
-    case "misconfigured":
-      return "the provider configuration is incomplete";
-    case "no_provider":
-      return "no provider is configured";
-    default:
-      return "the feature is not enabled";
-  }
+/** Section-scoped query failure — typed inline notice + `[Retry]` (M8). */
+function SectionError(props: { message: string; onRetry: () => void }) @{
+  <div
+    className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
+    role="alert"
+  >
+    <p className="text-[14px] text-destructive">{props.message as string}</p>
+    <Button type="button" variant="outline" size="sm" onClick={props.onRetry}>
+      Retry
+    </Button>
+  </div>;
 }
 
 function OxpilotContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/oxpilot" : null);
+  const qc = useQueryClient();
   const statusQ = useQuery(oxpilotStatusQueryOptions());
   const enabled = statusQ.data?.enabled === true;
   const sessionsQ = useQuery(oxpilotSessionListQueryOptions(enabled));
+  const targetsQ = useQuery(oxpilotTargetListQuery(enabled));
   const sessions: OxpilotSession[] = sessionsQ.data ?? [];
+  const targets: OxpilotTargetView[] = targetsQ.data ?? [];
+
+  const [newOpen, setNewOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+
+  // Target rows hand `[Disconnect]`/`[Revoke]` back to the route — the
+  // shared M5 confirm + the procs live here (one success toast each;
+  // failures get a typed notice and NO toast).
+  const [confirm, setConfirm] = useState<{
+    kind: "disconnect" | "revoke";
+    target: OxpilotTargetView;
+  } | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+
+  function refresh() {
+    invalidateOxpilotQueries(qc);
+  }
+
+  const disconnectM = useMutation({
+    ...oxpilotTargetDisconnectMutation(),
+    onSuccess: () => {
+      setTargetError(null);
+      refresh();
+      toastSuccess("Target disconnected");
+    },
+    onError: (e) =>
+      setTargetError(e instanceof Error ? e.message : "Could not disconnect the target."),
+  });
+  const revokeM = useMutation({
+    ...oxpilotTargetRevokeMutation(),
+    onSuccess: () => {
+      setTargetError(null);
+      refresh();
+      toastSuccess("Target revoked");
+    },
+    onError: (e) => setTargetError(e instanceof Error ? e.message : "Could not revoke the target."),
+  });
+
+  /** Confirm-accept arm — a reject leaves the dialog open over the notice. */
+  async function confirmTargetAction() {
+    if (!confirm) return;
+    const m = confirm.kind === "disconnect" ? disconnectM : revokeM;
+    await m.mutateAsync({ target_id: confirm.target.id });
+  }
 
   <main className="mx-auto w-full max-w-4xl px-4 py-8" data-testid="oxpilot-page">
     <PageHeader
-      title="Oxpilot"
+      title="OxPilot"
       description="Agentic chat, builder, and debugger sessions bound to your repositories."
+      actions={
+        <Button
+          type="button"
+          onClick={() => setNewOpen(true)}
+          data-testid="oxpilot-new-session-open"
+        >
+          <MessageSquarePlus size={14} aria-hidden />
+          New session
+        </Button>
+      }
     />
     @if (statusQ.isPending || meQ.isPending) {
       <div className="mt-6 flex flex-col gap-3">
@@ -79,7 +125,6 @@ function OxpilotContent() @{
         <OxpilotFlagOff reason={statusQ.data?.reason} />;
       } @else {
         <>
-          <NewSessionCard />
           <section className="mt-8">
             <h2 className="font-[family-name:var(--font-display)] text-[16px] font-semibold text-foreground">
               Sessions
@@ -87,185 +132,161 @@ function OxpilotContent() @{
             @if (sessionsQ.isPending) {
               <Skeleton className="mt-3 h-32 w-full" />;
             } @else {
-              @if (sessions.length === 0) {
-                <div className="mt-3">
-                  <EmptyState
-                    icon={<Bot size={22} />}
-                    title="No sessions yet"
-                    description="Start a session above — Oxpilot streams a reply and keeps the transcript here."
-                  />
-                </div>;
+              @if (sessionsQ.isError) {
+                <SectionError
+                  message={sessionsQ.error?.message || "Could not load sessions."}
+                  onRetry={() => void sessionsQ.refetch()}
+                />;
               } @else {
-                <List className="mt-3" data-testid="oxpilot-session-list">
-                  @for (const s of sessions; key s.id) {
-                    <ListRow className="flex items-center justify-between gap-3 px-4 py-3">
-                      <div className="min-w-0">
-                        <AppLink
-                          href={`/oxpilot/${s.id}`}
-                          className="block truncate text-[14px] font-medium text-foreground hover:underline"
+                @if (sessions.length === 0) {
+                  <div className="mt-3">
+                    <EmptyState
+                      icon={<Bot size={22} />}
+                      title="No sessions yet"
+                      description="Start a session — OxPilot streams a reply and keeps the transcript here."
+                      action={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNewOpen(true)}
                         >
-                          {s.title as string}
-                        </AppLink>
-                        <p className="mt-0.5 truncate text-[13px] text-muted-foreground">
-                          {
-                            `${s.repo_owner}/${s.repo_name} · ${s.branch}` as string
-                          }
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-[12px] text-muted-foreground">
-                        {formatRelative(s.last_activity_at) as string}
-                      </span>
-                    </ListRow>;
-                  }
-                </List>;
+                          <MessageSquarePlus size={14} aria-hidden />
+                          New session
+                        </Button>
+                      }
+                    />
+                  </div>;
+                } @else {
+                  <List className="mt-3" data-testid="oxpilot-session-list">
+                    @for (const s of sessions; key s.id) {
+                      <OxpilotSessionRow
+                        session={s}
+                        onDelete={() => {
+                          refresh();
+                          toastSuccess("Session deleted");
+                        }}
+                      />;
+                    }
+                  </List>;
+                }
               }
             }
           </section>
+          <section className="mt-8" id="targets" data-testid="oxpilot-targets">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-[family-name:var(--font-display)] text-[16px] font-semibold text-foreground">
+                Computer use
+              </h2>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setConnectOpen(true)}
+                data-testid="oxpilot-connect-open"
+              >
+                <Cable size={14} aria-hidden />
+                Connect a system
+              </Button>
+            </div>
+            @if (targetError) {
+              <div
+                className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                role="alert"
+              >
+                <p className="text-[14px] text-destructive">{targetError as string}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTargetError(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>;
+            }
+            @if (targetsQ.isPending) {
+              <Skeleton className="mt-3 h-24 w-full" />;
+            } @else {
+              @if (targetsQ.isError) {
+                <SectionError
+                  message={
+                    targetsQ.error?.message || "Could not load computer-use targets."
+                  }
+                  onRetry={() => void targetsQ.refetch()}
+                />;
+              } @else {
+                @if (targets.length === 0) {
+                  <div className="mt-3">
+                    <EmptyState
+                      icon={<Cable size={22} />}
+                      title="No systems connected"
+                      description="Nothing is installed until you run it — pair a connector on a machine you control to grant computer-use capabilities."
+                      action={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setConnectOpen(true)}
+                        >
+                          Connect a system
+                        </Button>
+                      }
+                    />
+                  </div>;
+                } @else {
+                  <List className="mt-3" data-testid="oxpilot-target-list">
+                    @for (const t of targets; key t.id) {
+                      <OxpilotTargetRow
+                        target={t}
+                        onDisconnect={() =>
+                          setConfirm({ kind: "disconnect", target: t })
+                        }
+                        onRevoke={() => setConfirm({ kind: "revoke", target: t })}
+                      />;
+                    }
+                  </List>;
+                }
+              }
+            }
+          </section>
+          <NewSessionDialog
+            open={newOpen}
+            onClose={() => setNewOpen(false)}
+            onConnectRequest={() => {
+              setNewOpen(false);
+              setConnectOpen(true);
+            }}
+            onCreated={(created) => {
+              window.location.href = `/oxpilot/${created.id}`;
+            }}
+          />
+          <ConnectDialog
+            open={connectOpen}
+            onClose={() => {
+              setConnectOpen(false);
+              refresh();
+            }}
+          />
+          <OxpilotConfirmDialog
+            open={confirm !== null}
+            title={
+              (confirm?.kind === "disconnect"
+                ? `Disconnect ${confirm.target.label}?`
+                : `Revoke ${confirm?.target.label ?? "this target"}?`) as string
+            }
+            body={
+              (confirm?.kind === "disconnect"
+                ? "The connector goes offline; pending consent requests are cancelled."
+                : "Access ends for this system — every pending grant is cancelled, including in-flight ones. This cannot be undone.") as string
+            }
+            confirmLabel={confirm?.kind === "disconnect" ? "Disconnect" : "Revoke"}
+            danger
+            onConfirm={confirmTargetAction}
+            onClose={() => setConfirm(null)}
+          />
         </>;
       }
     }
   </main>;
-}
-
-/** Disabled surface — names the envs an admin must set (BR — flag-off UX). */
-function OxpilotFlagOff(props: { reason: string | null | undefined }) @{
-  <div className="mt-6">
-    <EmptyState
-      icon={<Bot size={22} />}
-      title="Oxpilot is not enabled on this instance"
-      description={
-        `This instance reports ${flagOffReason(props.reason)}. An administrator can enable it by ` +
-        `setting OXIDEAN_OXPILOT_ENABLED=1 and configuring a provider with ` +
-        `OXIDEAN_OXPILOT_PROVIDER (for example \`stub\` for a local deterministic provider). ` +
-        `See docs/CONFIGURATION.md for the full OXIDEAN_OXPILOT_* surface.`
-      }
-    />
-  </div>;
-}
-
-function NewSessionCard() @{
-  const qc = useQueryClient();
-  const reposQ = useQuery(repoListMineQueryOptions());
-  const repos = reposQ.data ?? [];
-  const [repoKey, setRepoKey] = useState("");
-  const [goal, setGoal] = useState("");
-  const [branch, setBranch] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const createM = useMutation({
-    mutationFn: oxpilotSessionCreate,
-    onSuccess: (session) => {
-      invalidateOxpilotQueries(qc);
-      window.location.href = `/oxpilot/${session.id}`;
-    },
-    onError: (e) => {
-      setError(e instanceof Error ? e.message : "Could not create the session.");
-    },
-  });
-
-  function submit(ev: SubmitEvent) {
-    ev.preventDefault();
-    setError(null);
-    const [owner, name] = repoKey.split("/", 2);
-    if (!owner || !name) {
-      setError("Pick a repository for the session.");
-      return;
-    }
-    const g = goal.trim();
-    createM.mutate({
-      repo_owner: owner,
-      repo_name: name,
-      ...(branch.trim() ? { branch: branch.trim() } : {}),
-      ...(g ? { goal: g } : {}),
-    });
-  }
-
-  <section
-    className="mt-6 rounded-lg border border-border bg-card p-5"
-    data-testid="oxpilot-new-session"
-  >
-    <h2 className="flex items-center gap-2 font-[family-name:var(--font-display)] text-[16px] font-semibold text-foreground">
-      <MessageSquarePlus size={18} aria-hidden />
-      New session
-    </h2>
-    <form method="post" action="#" className="mt-4 flex flex-col gap-4" onSubmit={submit}>
-      @if (error) {
-        <AuthErrorBanner message={error} />;
-      }
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="oxpilot-repo">Repository</Label>
-        <SelectRoot
-          value={repoKey}
-          onValueChange={(v) => setRepoKey(typeof v === "string" ? v : "")}
-        >
-          <SelectTrigger
-            id="oxpilot-repo"
-            className="w-full max-w-md"
-            aria-label="Repository"
-            data-testid="oxpilot-repo-trigger"
-          >
-            <SelectValue>{(repoKey || "Choose a repository") as string}</SelectValue>
-            <SelectIcon>
-              <ChevronDown aria-hidden size={16} />
-            </SelectIcon>
-          </SelectTrigger>
-          {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted
-              escape hatch; popup is anchor-scoped under the Select root. */}
-          <SelectPortal>
-            <SelectPositioner sideOffset={4}>
-              <SelectPopup className="min-w-[16rem]">
-                <SelectList>
-                  @for (const r of repos; key r.id) {
-                    <SelectItem
-                      value={`${r.owner_username}/${r.name}`}
-                      data-testid="oxpilot-repo-option"
-                    >
-                      <SelectItemIndicator>
-                        <Check aria-hidden size={16} className="text-primary" />
-                      </SelectItemIndicator>
-                      <SelectItemText>
-                        {`${r.owner_username}/${r.name}` as string}
-                      </SelectItemText>
-                    </SelectItem>;
-                  }
-                </SelectList>
-              </SelectPopup>
-            </SelectPositioner>
-          </SelectPortal>
-        </SelectRoot>
-        @if (!reposQ.isPending && repos.length === 0) {
-          <p className="text-[13px] text-muted-foreground">
-            No repositories yet — create one first, then bind a session to it.
-          </p>;
-        }
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="oxpilot-goal">Goal (optional)</Label>
-        <Textarea
-          id="oxpilot-goal"
-          rows={3}
-          className="max-w-2xl"
-          placeholder="What should Oxpilot work on?"
-          value={goal}
-          onInput={(e) => setGoal((e.target as HTMLTextAreaElement).value)}
-        />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="oxpilot-branch">Branch (optional — defaults to the repo default)</Label>
-        <Input
-          id="oxpilot-branch"
-          className="max-w-md"
-          autoComplete="off"
-          placeholder="main"
-          value={branch}
-          onInput={(e) => setBranch((e.target as HTMLInputElement).value)}
-        />
-      </div>
-      <div>
-        <Button type="submit" disabled={createM.isPending || repos.length === 0}>
-          {createM.isPending ? "Starting…" : "Start session"}
-        </Button>
-      </div>
-    </form>
-  </section>;
 }

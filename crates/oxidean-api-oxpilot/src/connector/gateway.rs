@@ -936,6 +936,7 @@ impl ConnectorGateway for OxpilotConnectorGateway {
         client: &ClientMeta,
         user_id: &str,
         target_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> Result<Vec<GrantView>, AppError> {
         // BR3.2 — the owner read of a pending_consent target re-mints;
         // scoped to the queried target when one is named.
@@ -956,11 +957,25 @@ impl ConnectorGateway for OxpilotConnectorGateway {
             }
         }
         let now = now_rfc();
-        let mut rows = self
-            .db
-            .list_oxpilot_grants_for_user(user_id, target_id)
-            .await
-            .map_err(db_err)?;
+        let mut rows = match session_id {
+            // U8 (`grant_list{session_id}`) — the session-scoped owner
+            // read: `get_session` resolves foreign/absent ids into
+            // `not_found` FIRST (BR3.3 anti-enumeration), then the
+            // session-bound rows answer; a `target_id` sent alongside
+            // ANDs in at the store layer.
+            Some(sid) => {
+                self.sessions.get_session(user_id, sid).await?;
+                self.db
+                    .list_oxpilot_grants_for_session(user_id, sid, target_id)
+                    .await
+                    .map_err(db_err)?
+            }
+            None => self
+                .db
+                .list_oxpilot_grants_for_user(user_id, target_id)
+                .await
+                .map_err(db_err)?,
+        };
         // BR3.1 — every observed past-due pending row stamps `expired`
         // on read, kind-branched audit.
         for g in rows.iter_mut() {

@@ -107,6 +107,7 @@ fn session<'a>(id: &'a str, uid: &'a str, repo: &'a str, title: &'a str) -> NewO
         branch: "main",
         goal: None,
         title,
+        computer_use_target_id: None,
     }
 }
 
@@ -2281,4 +2282,270 @@ async fn proposal_ops_json_stored_verbatim_no_redaction() {
         row.ops_json, ops,
         "store must not redact or mangle ops_json"
     );
+}
+
+// ---- 0090 oxpilot_session_target (U8) — the flagged session↔target
+// binding column + the session-scoped grant read + the queue-cancel
+// verb behind `session_create{target_id?}`, `grant_list{session_id}`,
+// and `queue_delete`. ----
+
+/// `computer_use_target_id` round-trips through insert and every read
+/// surface (`find_owned`, `list_sessions_for_user`), the post-create
+/// setter stamps/clears it, and a pre-column-shaped INSERT reads NULL.
+#[tokio::test]
+async fn session_target_column_round_trip() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let pool = RawPool::connect(&url).await;
+    let (uid, repo) = seed(&db, "tgtrt").await;
+    let t = claimed_target(&db, "tgtrt", &uid, "hash-tt", "vh-tt").await;
+
+    // Insert-bound row: the column carries the target verbatim through
+    // the owned read and the user's list.
+    db.insert_oxpilot_session(&NewOxpilotSession {
+        id: "oxps-tgtrt-1",
+        user_id: &uid,
+        repo_owner: "oxpilot",
+        repo_name: &repo,
+        repo_id: &repo,
+        branch: "main",
+        goal: None,
+        title: "bound",
+        computer_use_target_id: Some(&t.id),
+    })
+    .await
+    .expect("insert bound session");
+    let owned = db
+        .find_owned_oxpilot_session("oxps-tgtrt-1", &uid)
+        .await
+        .expect("owned")
+        .expect("row");
+    assert_eq!(owned.computer_use_target_id.as_deref(), Some(t.id.as_str()));
+    let listed = db.list_oxpilot_sessions_for_user(&uid).await.expect("list");
+    let bound = listed
+        .iter()
+        .find(|r| r.id == "oxps-tgtrt-1")
+        .expect("listed row");
+    assert_eq!(bound.computer_use_target_id.as_deref(), Some(t.id.as_str()));
+
+    // No-target row stays NULL; the setter stamps + re-clears.
+    db.insert_oxpilot_session(&session("oxps-tgtrt-2", &uid, &repo, "plain"))
+        .await
+        .expect("insert plain session");
+    let plain = db
+        .find_owned_oxpilot_session("oxps-tgtrt-2", &uid)
+        .await
+        .expect("owned")
+        .expect("row");
+    assert_eq!(plain.computer_use_target_id, None);
+    assert_eq!(
+        db.set_oxpilot_session_computer_use_target("oxps-tgtrt-2", Some(&t.id))
+            .await
+            .expect("stamp"),
+        1
+    );
+    let stamped = db
+        .find_owned_oxpilot_session("oxps-tgtrt-2", &uid)
+        .await
+        .expect("owned")
+        .expect("row");
+    assert_eq!(
+        stamped.computer_use_target_id.as_deref(),
+        Some(t.id.as_str())
+    );
+    assert_eq!(
+        db.set_oxpilot_session_computer_use_target("oxps-tgtrt-2", None)
+            .await
+            .expect("clear"),
+        1
+    );
+    let cleared = db
+        .find_owned_oxpilot_session("oxps-tgtrt-2", &uid)
+        .await
+        .expect("owned")
+        .expect("row");
+    assert_eq!(cleared.computer_use_target_id, None);
+    // Absent session ⇒ 0 rows touched, no error.
+    assert_eq!(
+        db.set_oxpilot_session_computer_use_target("oxps-no-such", Some(&t.id))
+            .await
+            .expect("dead session"),
+        0
+    );
+
+    // A pre-column-shaped INSERT (no computer_use_target_id in the list)
+    // reads back NULL — the migration's nullable default. The seeded
+    // user/repo keep the session FKs satisfied on every dialect.
+    let raw = Box::leak(
+        format!(
+            "INSERT INTO oxpilot_sessions (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title, status, created_at, last_activity_at) \
+             VALUES ('oxps-tgtrt-legacy', '{uid}', 'o', '{repo}', '{repo}', 'main', NULL, 'legacy', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        )
+        .into_boxed_str(),
+    );
+    pool.exec(raw).await.expect("raw insert");
+    let legacy = db
+        .find_owned_oxpilot_session("oxps-tgtrt-legacy", &uid)
+        .await
+        .expect("owned legacy")
+        .expect("legacy row");
+    assert_eq!(legacy.computer_use_target_id, None);
+}
+
+/// `list_oxpilot_grants_for_session` narrows to rows bound to THIS
+/// session — connect grants (`session_id NULL`) and other sessions'
+/// rows never surface; the user filter keeps foreign reads empty.
+#[tokio::test]
+async fn session_scoped_grant_list() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "sgrants").await;
+    let t = claimed_target(&db, "sgrants", &uid, "hash-sg", "vh-sg").await;
+    db.insert_oxpilot_session(&session("oxps-sg-1", &uid, &repo, "one"))
+        .await
+        .expect("session one");
+    db.insert_oxpilot_session(&session("oxps-sg-2", &uid, &repo, "two"))
+        .await
+        .expect("session two");
+
+    // One action grant per session; the claimed_target connect grant
+    // already rides `session_id NULL` (BR6.6) and must never match.
+    for (gid, sid) in [("oxpg-sg-a1", "oxps-sg-1"), ("oxpg-sg-a2", "oxps-sg-2")] {
+        db.insert_oxpilot_grant(&grant(
+            gid,
+            &t.id,
+            &uid,
+            Some(sid),
+            "action",
+            Some("fs_read"),
+            Some("{}"),
+            Some("x"),
+            FAR_FUTURE,
+        ))
+        .await
+        .expect("mint session grant");
+    }
+
+    let one = db
+        .list_oxpilot_grants_for_session(&uid, "oxps-sg-1", None)
+        .await
+        .expect("session one grants");
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].id, "oxpg-sg-a1");
+    assert_eq!(one[0].session_id.as_deref(), Some("oxps-sg-1"));
+
+    let two = db
+        .list_oxpilot_grants_for_session(&uid, "oxps-sg-2", None)
+        .await
+        .expect("session two grants");
+    assert_eq!(two.len(), 1);
+    assert_eq!(two[0].id, "oxpg-sg-a2");
+
+    // A `target_id` sent alongside ANDs in — the session's row still
+    // matches its own target, a different target narrows to empty.
+    let narrowed = db
+        .list_oxpilot_grants_for_session(&uid, "oxps-sg-1", Some(&t.id))
+        .await
+        .expect("session + target narrow");
+    assert_eq!(narrowed.len(), 1);
+    assert_eq!(narrowed[0].id, "oxpg-sg-a1");
+    assert!(db
+        .list_oxpilot_grants_for_session(&uid, "oxps-sg-1", Some("oxpt-other"))
+        .await
+        .expect("foreign target narrow")
+        .is_empty());
+
+    // Foreign user sees nothing even for a real session id.
+    assert!(db
+        .list_oxpilot_grants_for_session("u-other", "oxps-sg-1", None)
+        .await
+        .expect("foreign read")
+        .is_empty());
+    // A session with no bound grants is an empty list, not an error.
+    assert!(db
+        .list_oxpilot_grants_for_session(&uid, "oxps-no-such", None)
+        .await
+        .expect("dead session")
+        .is_empty());
+}
+
+/// `delete_oxpilot_queued` removes exactly the `(session_id, id)` pair —
+/// 1 on the live row, 0 on re-delete, and 0 against a different session
+/// holding the same queued id.
+#[tokio::test]
+async fn queued_delete_scoped_to_session() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "qdel").await;
+    db.insert_oxpilot_session(&session("oxps-qd-1", &uid, &repo, "one"))
+        .await
+        .expect("session one");
+    db.insert_oxpilot_session(&session("oxps-qd-2", &uid, &repo, "two"))
+        .await
+        .expect("session two");
+    db.enqueue_oxpilot_queued(&oxidean_db::NewOxpilotQueued {
+        id: "oxpq-qd-1",
+        session_id: "oxps-qd-1",
+        queue_seq: 1,
+        content: "mine",
+        client_msg_id: None,
+    })
+    .await
+    .expect("enqueue one");
+    db.enqueue_oxpilot_queued(&oxidean_db::NewOxpilotQueued {
+        id: "oxpq-qd-2",
+        session_id: "oxps-qd-2",
+        queue_seq: 1,
+        content: "other session",
+        client_msg_id: None,
+    })
+    .await
+    .expect("enqueue two");
+
+    assert_eq!(
+        db.delete_oxpilot_queued("oxps-qd-1", "oxpq-qd-1")
+            .await
+            .expect("delete"),
+        1
+    );
+    // Re-delete is a no-op read of rows affected — the proc maps it.
+    assert_eq!(
+        db.delete_oxpilot_queued("oxps-qd-1", "oxpq-qd-1")
+            .await
+            .expect("re-delete"),
+        0
+    );
+    // Same queued id under a different session never matches.
+    assert_eq!(
+        db.delete_oxpilot_queued("oxps-qd-1", "oxpq-qd-2")
+            .await
+            .expect("cross-session delete"),
+        0
+    );
+    let remaining = db
+        .list_oxpilot_queued_for_session("oxps-qd-2")
+        .await
+        .expect("list other session");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, "oxpq-qd-2");
+    assert!(db
+        .list_oxpilot_queued_for_session("oxps-qd-1")
+        .await
+        .expect("list deleted session")
+        .is_empty());
 }

@@ -36,6 +36,8 @@ pub const PROCEDURES: &[&str] = &[
     "oxpilot.session_delete",
     "oxpilot.message_queue",
     "oxpilot.queue_list",
+    // U8 — the M8/[ix] inline queued-message cancel (amendment #3).
+    "oxpilot.queue_delete",
     "oxpilot.usage_get",
     "oxpilot.turn_cancel",
     "oxpilot.pairing_create",

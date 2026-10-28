@@ -11,6 +11,8 @@ import type {
   OxpilotPairingCreateRequest,
   OxpilotPairingView,
   OxpilotProposedDiff,
+  OxpilotQueueDeleteRequest,
+  OxpilotQueueDeleteResponse,
   OxpilotQueuedMessage,
   OxpilotQueuedReceipt,
   OxpilotSession,
@@ -37,8 +39,7 @@ const oxpilotGrantGetQueryKey = (grantId: string) => ["oxpilot", "grantGet", gra
 const oxpilotQueueListQueryKey = (sessionId: string) =>
   ["oxpilot", "queueList", sessionId] as const;
 const oxpilotDiffListQueryKey = (sessionId: string) => ["oxpilot", "diffList", sessionId] as const;
-const oxpilotDiffGetQueryKey = (proposalId: string) =>
-  ["oxpilot", "diffGet", proposalId] as const;
+const oxpilotDiffGetQueryKey = (proposalId: string) => ["oxpilot", "diffGet", proposalId] as const;
 const oxpilotUsageGetQueryKey = ["oxpilot", "usageGet"] as const;
 
 /**
@@ -209,7 +210,10 @@ export function oxpilotDiffGetQuery(proposalId: string, enabled = true) {
   });
 }
 
-/** `oxpilot.usage_get` — the UTC-day rollup against budget caps (generated seam, unread in v1). */
+/**
+ * `oxpilot.usage_get` — the UTC-day rollup against budget caps (generated seam, unread in v1).
+ * @public
+ */
 export function oxpilotUsageGetQuery(enabled = true) {
   return queryOptions({
     queryKey: oxpilotUsageGetQueryKey,
@@ -300,9 +304,7 @@ export function oxpilotTargetRevokeMutation() {
 export function oxpilotGrantRespondMutation() {
   return {
     mutationKey: ["oxpilot", "grantRespond"] as const,
-    mutationFn: async (
-      input: OxpilotGrantRespondRequest,
-    ): Promise<OxpilotGrantRespondResponse> => {
+    mutationFn: async (input: OxpilotGrantRespondRequest): Promise<OxpilotGrantRespondResponse> => {
       const res = await apiClient.oxpilot.grantRespond(input);
       if (!res.ok) {
         throw new Error(`${res.error.code}: ${res.error.message}`);
@@ -336,6 +338,20 @@ export function oxpilotMessageQueueMutation() {
     mutationKey: ["oxpilot", "messageQueue"] as const,
     mutationFn: async (input: OxpilotMessageQueueRequest): Promise<OxpilotQueuedReceipt> => {
       const res = await apiClient.oxpilot.messageQueue(input);
+      if (!res.ok) {
+        throw new Error(`${res.error.code}: ${res.error.message}`);
+      }
+      return res.data;
+    },
+  };
+}
+
+/** `oxpilot.queue_delete` — the inline queued-message cancel (U8's `×` affordance). */
+export function oxpilotQueueDeleteMutation() {
+  return {
+    mutationKey: ["oxpilot", "queueDelete"] as const,
+    mutationFn: async (input: OxpilotQueueDeleteRequest): Promise<OxpilotQueueDeleteResponse> => {
+      const res = await apiClient.oxpilot.queueDelete(input);
       if (!res.ok) {
         throw new Error(`${res.error.code}: ${res.error.message}`);
       }

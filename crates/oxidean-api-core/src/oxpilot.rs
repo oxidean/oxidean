@@ -274,6 +274,11 @@ pub struct CreateSession {
     pub branch: String,
     pub goal: Option<String>,
     pub title: String,
+    /// U8 — the optional computer-use target binding (`0090` column);
+    /// the proc validates ownership + `connected` lifecycle up front so
+    /// the id lands on the INSERT itself. `None` keeps the shipped
+    /// NULL ("no target").
+    pub computer_use_target_id: Option<String>,
 }
 
 /// `append_message` input — caller-minted `id` (the turn's assistant id or
@@ -471,6 +476,17 @@ pub trait SessionService: Send + Sync {
         user_id: &str,
         session_id: &str,
     ) -> Result<Vec<OxpilotQueuedRow>, AppError>;
+    /// U8's inline queued-message cancel (`queue_delete`): the owned
+    /// session read runs first (foreign/absent ⇒ `not_found`, BR3.3),
+    /// then the `(session_id, id)` pair delete; an already-drained row
+    /// is `not_found` too (stale-ref honesty — the drained row resolves
+    /// on the client's next `queue_list`, BR9.1).
+    async fn delete_queued(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        queued_id: &str,
+    ) -> Result<(), AppError>;
 
     // ---- tool-call cards (BR7.3) ----
     async fn append_tool_call(
@@ -795,12 +811,17 @@ pub trait ConnectorGateway: Send + Sync {
         target_id: &str,
     ) -> Result<(), AppError>;
     /// Pending-first then recent resolved, optionally narrowed to one
-    /// target (WF6); lazy expiry stamps on read.
+    /// target (WF6); lazy expiry stamps on read. U8 adds an optional
+    /// `session_id` — when present the read first resolves session
+    /// ownership (`not_found` for foreign/absent ids alike, BR3.3),
+    /// then narrows to that session's bound grants; `target_id` ANDs
+    /// alongside it when both arrive.
     async fn list_grants(
         &self,
         client: &ClientMeta,
         user_id: &str,
         target_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> Result<Vec<GrantView>, AppError>;
     async fn get_grant(
         &self,
@@ -1607,6 +1628,9 @@ mod tests {
             unimplemented!()
         }
         async fn list_queue(&self, _u: &str, _s: &str) -> Result<Vec<OxpilotQueuedRow>, AppError> {
+            unimplemented!()
+        }
+        async fn delete_queued(&self, _u: &str, _s: &str, _q: &str) -> Result<(), AppError> {
             unimplemented!()
         }
         async fn append_tool_call(

@@ -10,6 +10,20 @@ const meMock = vi.fn();
 const statusMock = vi.fn();
 const sessionListMock = vi.fn();
 const sessionCreateMock = vi.fn();
+const sessionGetMock = vi.fn();
+const sessionDeleteMock = vi.fn();
+const targetListMock = vi.fn();
+const grantListMock = vi.fn();
+const queueListMock = vi.fn();
+const diffListMock = vi.fn();
+const messageQueueMock = vi.fn();
+const turnCancelMock = vi.fn();
+const diffApplyMock = vi.fn();
+const grantRespondMock = vi.fn();
+const queueDeleteMock = vi.fn();
+const targetDisconnectMock = vi.fn();
+const targetRevokeMock = vi.fn();
+const pairingCreateMock = vi.fn();
 const repoListMineMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
@@ -21,6 +35,20 @@ vi.mock("@/lib/api-client", () => ({
       status: (...args: unknown[]) => statusMock(...args),
       sessionList: (...args: unknown[]) => sessionListMock(...args),
       sessionCreate: (...args: unknown[]) => sessionCreateMock(...args),
+      sessionGet: (...args: unknown[]) => sessionGetMock(...args),
+      sessionDelete: (...args: unknown[]) => sessionDeleteMock(...args),
+      targetList: (...args: unknown[]) => targetListMock(...args),
+      grantList: (...args: unknown[]) => grantListMock(...args),
+      queueList: (...args: unknown[]) => queueListMock(...args),
+      diffList: (...args: unknown[]) => diffListMock(...args),
+      messageQueue: (...args: unknown[]) => messageQueueMock(...args),
+      turnCancel: (...args: unknown[]) => turnCancelMock(...args),
+      diffApply: (...args: unknown[]) => diffApplyMock(...args),
+      grantRespond: (...args: unknown[]) => grantRespondMock(...args),
+      queueDelete: (...args: unknown[]) => queueDeleteMock(...args),
+      targetDisconnect: (...args: unknown[]) => targetDisconnectMock(...args),
+      targetRevoke: (...args: unknown[]) => targetRevokeMock(...args),
+      pairingCreate: (...args: unknown[]) => pairingCreateMock(...args),
     },
     repo: {
       listMine: (...args: unknown[]) => repoListMineMock(...args),
@@ -76,8 +104,31 @@ const session = {
 function enabledStatus() {
   statusMock.mockResolvedValue({
     ok: true,
-    data: { enabled: true, provider: { id: "stub", model: "stub-1" }, reason: null },
+    data: {
+      enabled: true,
+      provider: { id: "stub", model: "stub-1" },
+      reason: null,
+    },
   });
+  // The reseed's read set + rail/target surfaces resolve to empty
+  // collections unless a test overrides them.
+  sessionGetMock.mockResolvedValue({ ok: true, data: { session } });
+  targetListMock.mockResolvedValue({ ok: true, data: { targets: [] } });
+  grantListMock.mockResolvedValue({ ok: true, data: { grants: [] } });
+  queueListMock.mockResolvedValue({ ok: true, data: { queued: [] } });
+  diffListMock.mockResolvedValue({ ok: true, data: { diffs: [] } });
+  for (const m of [
+    sessionDeleteMock,
+    messageQueueMock,
+    turnCancelMock,
+    diffApplyMock,
+    grantRespondMock,
+    queueDeleteMock,
+    targetDisconnectMock,
+    targetRevokeMock,
+  ]) {
+    m.mockResolvedValue({ ok: true, data: {} });
+  }
 }
 
 afterEach(() => {
@@ -112,7 +163,10 @@ describe("/oxpilot index", () => {
     window.history.pushState({}, "", "/oxpilot");
     meMock.mockResolvedValue({ ok: true, data: user });
     enabledStatus();
-    sessionListMock.mockResolvedValue({ ok: true, data: { sessions: [session] } });
+    sessionListMock.mockResolvedValue({
+      ok: true,
+      data: { sessions: [session] },
+    });
     repoListMineMock.mockResolvedValue({ ok: true, data: { repos: [repo] } });
     renderWithQueryClient(OxpilotPage);
 
@@ -211,8 +265,20 @@ describe("/oxpilot/{session} workspace", () => {
     const fetchMock = fetchFor(
       [snapshotFrame()],
       [
-        { type: "append", message_id: "m-a1", seq: 1, role: "assistant", delta: "Hello " },
-        { type: "append", message_id: "m-a1", seq: 2, role: "assistant", delta: "there" },
+        {
+          type: "append",
+          message_id: "m-a1",
+          seq: 1,
+          role: "assistant",
+          delta: "Hello ",
+        },
+        {
+          type: "append",
+          message_id: "m-a1",
+          seq: 2,
+          role: "assistant",
+          delta: "there",
+        },
         { type: "terminal", message_id: "m-a1", result: "done" },
       ],
     );
@@ -261,7 +327,9 @@ describe("/oxpilot/{session} workspace", () => {
         }
         return Promise.resolve(
           new Response(
-            JSON.stringify({ error: { code: "turn_active", message: "a turn is live" } }),
+            JSON.stringify({
+              error: { code: "turn_active", message: "a turn is live" },
+            }),
             { status: 409 },
           ),
         );

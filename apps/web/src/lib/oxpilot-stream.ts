@@ -31,12 +31,12 @@ export type OxpilotToolCallCard = {
  * the `card_kind`-keyed proc (`consent`→`grant_get`, `diff`→`diff_get`,
  * `queued`→`queue_list`).
  */
-export type OxpilotCardRef = {
+type OxpilotCardRef = {
   card_kind: string;
   ref_id: string;
 };
 
-export type OxpilotMessage = {
+type OxpilotMessage = {
   id: string;
   seq: number;
   role: string;
@@ -97,7 +97,10 @@ export type OxpilotFrame =
   | { type: string; [k: string]: unknown };
 
 /** Parse complete `data: {...}\n\n` blocks; returns frames + the trailing partial. */
-export function parseSseBuffer(buffer: string): { frames: OxpilotFrame[]; rest: string } {
+export function parseSseBuffer(buffer: string): {
+  frames: OxpilotFrame[];
+  rest: string;
+} {
   const frames: OxpilotFrame[] = [];
   let rest = buffer;
   for (;;) {
@@ -156,7 +159,9 @@ export async function postOxpilotChat(
   if (!res.ok || !res.body) {
     let detail = `${res.status}`;
     try {
-      const err = (await res.json()) as { error?: { code?: string; message?: string } };
+      const err = (await res.json()) as {
+        error?: { code?: string; message?: string };
+      };
       if (err.error) detail = `${err.error.code ?? res.status}: ${err.error.message ?? ""}`;
     } catch {
       // Non-JSON denial — keep the status.
@@ -200,7 +205,9 @@ export async function fetchOxpilotSnapshot(
   if (!res.ok || !res.body) {
     let detail = `${res.status}`;
     try {
-      const err = (await res.json()) as { error?: { code?: string; message?: string } };
+      const err = (await res.json()) as {
+        error?: { code?: string; message?: string };
+      };
       if (err.error) detail = `${err.error.code ?? res.status}: ${err.error.message ?? ""}`;
     } catch {
       // Non-JSON denial — keep the status.
@@ -262,7 +269,9 @@ export function openOxpilotStream(
     void (async () => {
       let code = "stream_error";
       try {
-        const res = await apiClient.oxpilot.sessionGet({ session_id: sessionId });
+        const res = await apiClient.oxpilot.sessionGet({
+          session_id: sessionId,
+        });
         if (!res.ok) {
           const c = res.error.code;
           code = c === "not_found" || c === "oxpilot.disabled" ? c : "stream_error";
