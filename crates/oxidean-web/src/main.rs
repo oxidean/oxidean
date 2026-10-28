@@ -199,6 +199,7 @@ async fn spa(
     req: axum::extract::Request,
 ) -> Response {
     let path = uri.path();
+    let query = uri.query();
 
     // Dot segments (literal or %-encoded) normalize before reaching the
     // upstream URL parser or the filesystem join — `/api/../x` would escape
@@ -248,11 +249,11 @@ async fn spa(
             // real owner never shares a name with asset space.
             let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
             if segs.len() == 2 && !st.dist.join(segs[0]).exists() {
-                return serve_shell(&st, m, &headers, req.method().clone(), path).await;
+                return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
             }
             return not_found(&st.dist, &headers, &st.meta).await;
         }
-        return serve_shell(&st, m, &headers, req.method().clone(), path).await;
+        return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
     }
 
     // Non-routed path — asset or 404.
@@ -271,7 +272,7 @@ fn static_file_present(dist: &std::path::Path, path: &str) -> bool {
 }
 
 /// Serve a dispatched shell: method gate → session signal → protected gate →
-/// pattern redirect → file → Astro stub → inject. Takes `method`/`path`
+/// pattern redirect → file → Astro stub → inject. Takes `method`/`path`/`query`
 /// rather than `&Request` — `Body` is `!Sync` (UnsyncBoxBody), so borrowing
 /// the request across an `.await` would make this future `!Send`.
 async fn serve_shell(
@@ -280,6 +281,7 @@ async fn serve_shell(
     headers: &HeaderMap,
     method: Method,
     path: &str,
+    query: Option<&str>,
 ) -> Response {
     // Shells are documents: GET/HEAD only. POST to a route path is almost
     // always a stray form/action or a confused crawler — 405 it rather
@@ -305,10 +307,15 @@ async fn serve_shell(
         let target = format!("/login?returnTo={}", urlencoding(path));
         return (StatusCode::FOUND, [(header::LOCATION, target)]).into_response();
     }
-    // Legacy-alias redirect (e.g. `/{o}/{r}/settings/actions`) — a real 302 so
-    // bots/no-JS follow too. Params are already interpolated by dispatch.
+    // Legacy-alias redirect (e.g. `/{o}/{r}/settings`) — a real 302 so
+    // bots/no-JS follow too. Params are already interpolated by dispatch;
+    // the request query rides along so `?notice=1`-style state survives.
     if let Some(target) = &m.redirect {
-        return (StatusCode::FOUND, [(header::LOCATION, target.clone())]).into_response();
+        let location = match query {
+            Some(q) => format!("{target}?{q}"),
+            None => target.clone(),
+        };
+        return (StatusCode::FOUND, [(header::LOCATION, location)]).into_response();
     }
     match tokio::fs::read_to_string(st.dist.join(m.file)).await {
         Ok(html) => {
@@ -728,6 +735,19 @@ mod tests {
         assert_eq!(
             resp.headers().get(header::LOCATION).unwrap(),
             "/jesse/app/settings/general"
+        );
+
+        // The request query rides along on the redirect.
+        let resp = get(
+            &st,
+            "/jesse/app/settings?notice=1",
+            Some("oxidean_session=x"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/jesse/app/settings/general?notice=1"
         );
 
         let resp = get(

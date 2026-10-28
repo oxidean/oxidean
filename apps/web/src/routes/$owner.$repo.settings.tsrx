@@ -85,10 +85,11 @@ function RepoSettingsPageContent() @{
     if (!owner || !repoName) return;
     // Bookmarks to the monolith's `#repo-settings-*` anchors land on the
     // sub-page that owns the section now.
-    const legacy = LEGACY_HASH[window.location.hash.replace(/^#/, "")];
+    const hashKey = window.location.hash.replace(/^#/, "");
+    const legacy = Object.hasOwn(LEGACY_HASH, hashKey) ? LEGACY_HASH[hashKey] : undefined;
     if (legacy) {
       if (legacy !== section) {
-        void astroNavigate(`/${owner}/${repoName}/settings/${legacy}`, {
+        void astroNavigate(`/${owner}/${repoName}/settings/${legacy}${window.location.search}`, {
           history: "replace",
         });
       }
@@ -96,7 +97,11 @@ function RepoSettingsPageContent() @{
     }
     // Bare `/settings` (client-side) and unknown sections canonicalize.
     if (rawSection !== section) {
-      history.replaceState(null, "", `/${owner}/${repoName}/settings/${section}`);
+      history.replaceState(
+        null,
+        "",
+        `/${owner}/${repoName}/settings/${section}${window.location.search}${window.location.hash}`,
+      );
     }
   }, [pathname, section, rawSection, owner, repoName]);
 
