@@ -2,6 +2,17 @@
 
 All notable changes to this component are documented here.
 
+## [0.3.1] - 2026-10-28
+
+### Fixes
+
+- fix: close auth takeover, SSO pre-hijack, SSRF, and client-IP spoof paths (#200) (d4bc9f8)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-git`
+
 ## [0.3.0] - 2026-10-24
 
 ### Features

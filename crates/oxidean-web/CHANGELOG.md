@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.4.0] - 2026-10-28
+
+### Features
+
+- feat: split repo settings into sub-page sections (#201) (1dd8699)
+
 ## [0.3.0] - 2026-10-24
 
 ### Features

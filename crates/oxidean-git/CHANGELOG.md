@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.2.1] - 2026-10-28
+
+### Fixes
+
+- fix: close auth takeover, SSO pre-hijack, SSRF, and client-IP spoof paths (#200) (d4bc9f8)
+
 ## [0.2.0] - 2026-10-24
 
 ### Features

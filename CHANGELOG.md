@@ -3,6 +3,45 @@
 Consolidated release log — each section links every bumped
 component's tag and its component changelog.
 
+## Release 2026-10-28
+
+- `api-client` 0.3.0 → 0.3.1 (tag `api-client-v0.3.1`)
+- `ox` 0.3.0 → 0.3.1 (tag `ox-v0.3.1`)
+- `oxidean-api` 0.3.1 → 0.4.0 (tag `oxidean-api-v0.4.0`)
+- `oxidean-api-actions` 0.2.1 → 0.2.2 (tag `oxidean-api-actions-v0.2.2`)
+- `oxidean-api-admin` 0.2.1 → 0.2.2 (tag `oxidean-api-admin-v0.2.2`)
+- `oxidean-api-auth` 0.2.1 → 0.2.2 (tag `oxidean-api-auth-v0.2.2`)
+- `oxidean-api-check` 0.2.1 → 0.2.2 (tag `oxidean-api-check-v0.2.2`)
+- `oxidean-api-core` 0.3.0 → 0.3.1 (tag `oxidean-api-core-v0.3.1`)
+- `oxidean-api-deployment` 0.2.1 → 0.2.2 (tag `oxidean-api-deployment-v0.2.2`)
+- `oxidean-api-discussion` 0.2.1 → 0.2.2 (tag `oxidean-api-discussion-v0.2.2`)
+- `oxidean-api-email` 0.2.1 → 0.2.2 (tag `oxidean-api-email-v0.2.2`)
+- `oxidean-api-issues` 0.2.1 → 0.2.2 (tag `oxidean-api-issues-v0.2.2`)
+- `oxidean-api-keys` 0.2.1 → 0.2.2 (tag `oxidean-api-keys-v0.2.2`)
+- `oxidean-api-merge-queue` 0.2.1 → 0.2.2 (tag `oxidean-api-merge-queue-v0.2.2`)
+- `oxidean-api-mirror` 0.2.1 → 0.2.2 (tag `oxidean-api-mirror-v0.2.2`)
+- `oxidean-api-notification` 0.2.1 → 0.2.2 (tag `oxidean-api-notification-v0.2.2`)
+- `oxidean-api-oauth` 0.2.1 → 0.2.2 (tag `oxidean-api-oauth-v0.2.2`)
+- `oxidean-api-org` 0.2.1 → 0.2.2 (tag `oxidean-api-org-v0.2.2`)
+- `oxidean-api-packages` 0.2.1 → 0.2.2 (tag `oxidean-api-packages-v0.2.2`)
+- `oxidean-api-pages` 0.2.1 → 0.2.2 (tag `oxidean-api-pages-v0.2.2`)
+- `oxidean-api-pat` 0.2.1 → 0.2.2 (tag `oxidean-api-pat-v0.2.2`)
+- `oxidean-api-project` 0.2.1 → 0.2.2 (tag `oxidean-api-project-v0.2.2`)
+- `oxidean-api-pulls` 0.2.1 → 0.2.2 (tag `oxidean-api-pulls-v0.2.2`)
+- `oxidean-api-release` 0.2.1 → 0.2.2 (tag `oxidean-api-release-v0.2.2`)
+- `oxidean-api-repo` 0.2.1 → 0.3.0 (tag `oxidean-api-repo-v0.3.0`)
+- `oxidean-api-rest` 0.3.0 → 0.3.1 (tag `oxidean-api-rest-v0.3.1`)
+- `oxidean-api-user` 0.2.1 → 0.2.2 (tag `oxidean-api-user-v0.2.2`)
+- `oxidean-api-vcs` 0.2.1 → 0.2.2 (tag `oxidean-api-vcs-v0.2.2`)
+- `oxidean-api-webhook` 0.2.1 → 0.2.2 (tag `oxidean-api-webhook-v0.2.2`)
+- `oxidean-api-wiki` 0.2.1 → 0.2.2 (tag `oxidean-api-wiki-v0.2.2`)
+- `oxidean-core` 0.3.0 → 0.3.1 (tag `oxidean-core-v0.3.1`)
+- `oxidean-db` 0.3.0 → 0.3.1 (tag `oxidean-db-v0.3.1`)
+- `oxidean-git` 0.2.0 → 0.2.1 (tag `oxidean-git-v0.2.1`)
+- `oxidean-vcs` 0.2.0 → 0.2.1 (tag `oxidean-vcs-v0.2.1`)
+- `oxidean-web` 0.3.0 → 0.4.0 (tag `oxidean-web-v0.4.0`)
+- `web` 0.3.0 → 0.4.0 (tag `web-v0.4.0`)
+
 ## Release 2026-10-25
 
 - `oxidean-api` 0.3.0 → 0.3.1 (tag `oxidean-api-v0.3.1`)
