@@ -712,22 +712,18 @@ async fn reset_password_otp_wrong_code_bumps_and_caps() {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"]["code"], "auth.invalid_token", "{v}");
     }
-    // Cap reached — even the correct code must fail. The loop also filled
-    // the `reset:<email>` churn bucket, so the denial can surface as
-    // `auth.invalid_token` or `auth.rate_limited` (both 400).
-    let body = format!(
-        r#"{{"procedure":"auth.reset_password","input":{{"email":"cap@ex.com","code":"{}","password":"newpass99"}}}}"#,
-        secrets.otp
-    );
-    let resp = app.oneshot(rpc_req(&body)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    // Cap reached — the token row must be deleted. Assert on the row
+    // itself: the loop also filled the `reset:<email>` churn bucket, so a
+    // further redeem could return `auth.rate_limited` before the token
+    // check and mask a missed cap.
     assert!(
-        ["auth.invalid_token", "auth.rate_limited"]
-            .contains(&v["error"]["code"].as_str().unwrap_or("")),
-        "{v}"
+        db.find_email_token_by_user_purpose_target(&user_id, verify_reset::PURPOSE_RESET, "")
+            .await
+            .expect("lookup")
+            .is_none(),
+        "redeem-attempt cap must delete the reset token row"
     );
+    let _ = secrets;
 }
 
 #[tokio::test]
