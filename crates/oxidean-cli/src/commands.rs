@@ -800,6 +800,12 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::SelfUpdate { .. }
         | Command::SkillPrint
         | Command::SkillInstall { .. }
+        // pilot talks to the C3 connector routes, not /api/rpc — no
+        // manifest procedure gate applies.
+        | Command::PilotPair { .. }
+        | Command::PilotRun { .. }
+        | Command::PilotDisconnect { .. }
+        | Command::PilotStatus
         | Command::McpPrint { .. }
         | Command::McpInstall { .. }
         | Command::McpStatus
@@ -2686,6 +2692,31 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             upgrade,
             detected,
         } => crate::skill::install(g, rt, harnesses, *project, *global, *upgrade, *detected),
+        Command::PilotPair {
+            code,
+            label,
+            caps,
+            verbose,
+        } => crate::pilot::pair(g, rt, code, label.as_deref(), caps.clone(), *verbose).await,
+        Command::PilotRun {
+            target,
+            root,
+            wait_seconds,
+            exec_timeout,
+            verbose,
+        } => {
+            crate::pilot::run(
+                rt,
+                target.as_deref(),
+                root.as_deref(),
+                *wait_seconds,
+                *exec_timeout,
+                *verbose,
+            )
+            .await
+        }
+        Command::PilotDisconnect { target } => crate::pilot::disconnect(rt, target.as_deref()),
+        Command::PilotStatus => crate::pilot::status(rt),
         Command::McpPrint { harness } => crate::mcp::print_cfg(g, rt, harness.as_deref()),
         Command::McpInstall {
             harnesses,

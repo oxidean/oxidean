@@ -33,6 +33,15 @@ termimad = "0.35.5"
 keyring = "4.2.0"
 jaq-std = "3.0.4"
 jaq-json = { version = "2.0.3", features = ["serde"] }
+# `ox pilot connect` connector: fs payloads ride base64 on the wire; key
+# material and verifier bytes are zeroized on drop (BR2.4).
+base64 = "0.22.1"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+# `ox pilot run` — process-group kill on exec cancel + `gethostname` for the
+# pair default label; unix-only so the Windows build stays libc-free.
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

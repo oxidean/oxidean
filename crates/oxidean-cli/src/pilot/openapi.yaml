@@ -1,0 +1,179 @@
+# C3 connector contract — the consumed surface for `ox pilot`.
+# Client doc, NOT served. Flat `{"error":"<code>"}` envelopes — these
+# routes deliberately do NOT use the `/api/rpc` envelope.
+openapi: 3.0.3
+info:
+  title: Oxidean oxpilot connector API (C3)
+  version: "1"
+paths:
+  /api/oxpilot/connector/pair:
+    post:
+      summary: Redeem a UI-minted pairing code
+      security: []           # the pairing_code IS the credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairing_code]
+              properties:
+                pairing_code: { type: string, maxLength: 128 }
+                device_label: { type: string, maxLength: 256 }
+                requested_caps:
+                  type: array
+                  items: { type: string, enum: [exec_shell, fs_read, fs_write] }
+                  maxItems: 16
+      responses:
+        "200":
+          description: Pairing redeemed — verifier shown ONCE
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connector_id, target_id, verifier]
+                properties:
+                  connector_id: { type: string }
+                  target_id: { type: string }
+                  verifier: { type: string }
+        "4XX":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: rate_limited — honor Retry-After (seconds)
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/oxpilot/connector/claim:
+    post:
+      summary: Long-poll for dispatched actions + cancel set
+      security: [{ verifierBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id, wait_seconds, capabilities]
+              properties:
+                target_id: { type: string }
+                wait_seconds: { type: integer, minimum: 1, maximum: 60 }
+                capabilities:
+                  type: array
+                  items: { type: string }
+                  maxItems: 16
+      responses:
+        "200":
+          description: Batch (possibly empty actions + cancel-only)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actions, cancel, retry_after]
+                properties:
+                  actions:
+                    type: array
+                    items:
+                      type: object
+                      required: [action_id, kind, args]
+                      properties:
+                        action_id: { type: string }
+                        kind: { type: string, enum: [exec_shell, fs_read, fs_write] }
+                        args:
+                          type: string
+                          description: JSON-encoded string (double-encoded per kind)
+                        grant_id: { type: string }
+                  cancel:
+                    type: array
+                    items: { type: string }
+                  retry_after: { type: integer }
+        "204":
+          description: No work — Retry-After header is the only hint
+          headers:
+            Retry-After: { schema: { type: integer } }
+        "4XX":
+          $ref: "#/components/responses/Error"
+
+  /api/oxpilot/connector/report:
+    post:
+      summary: Close out one action row (idempotent ack)
+      security: [{ verifierBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_id, status, output]
+              properties:
+                action_id: { type: string }
+                status: { type: string, enum: [done, failed] }
+                exit_code: { type: integer }
+                output: { type: string, maxLength: 262144 }
+      responses:
+        "200":
+          description: '{"ack":true} — idempotent'
+        "4XX":
+          $ref: "#/components/responses/Error"
+
+  /api/oxpilot/connector/heartbeat:
+    post:
+      summary: Liveness + cancel-set announce (15s cadence)
+      security: [{ verifierBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id]
+              properties:
+                target_id: { type: string }
+      responses:
+        "200":
+          description: revoked flag + cancel set (re-announced every beat)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked, cancel]
+                properties:
+                  revoked: { type: boolean }
+                  cancel:
+                    type: array
+                    items: { type: string }
+        "4XX":
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    verifierBearer:
+      type: http
+      scheme: bearer
+      description: The pair-time verifier; `pilot/<instance>/<connector_id>` in custody.
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - unauthorized
+            - forbidden
+            - revoked
+            - disabled
+            - not_found
+            - bad_input
+            - internal
+            - rate_limited
+            - pairing_expired
+            - pairing_used
+  responses:
+    Error:
+      description: Flat error envelope (code-bearing)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

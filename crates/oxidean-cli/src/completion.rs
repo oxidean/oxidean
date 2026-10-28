@@ -179,6 +179,16 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
     ("self-update", &[]),
     ("skill", &[("print", &[]), ("install", &[])]),
     (
+        "pilot",
+        &[
+            ("pair", &[]),
+            ("run", &[]),
+            ("connect", &[]),
+            ("disconnect", &[]),
+            ("status", &[]),
+        ],
+    ),
+    (
         "mcp",
         &[
             ("print", &[]),
@@ -257,7 +267,7 @@ pub fn run(shell: &str) -> Result<Out, CliError> {
         _ => {
             return Err(CliError::Usage(format!(
                 "unknown shell '{shell}' — expected bash|zsh|fish|pwsh"
-            )))
+            )));
         }
     };
     Ok(Out::Report {
