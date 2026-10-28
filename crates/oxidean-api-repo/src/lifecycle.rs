@@ -2363,6 +2363,16 @@ pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPubli
         dns_pin: None,
     };
 
+    // Same egress bound as mirror upsert: validate the remote and pin the
+    // checked DNS answers into the git transport so ls-remote/fetch cannot
+    // re-resolve to an unvalidated answer (DNS-rebind TOCTOU). Runs before
+    // `create` — a resolution/egress failure must not leave a persisted
+    // repository occupying the name.
+    credentials.dns_pin =
+        oxidean_api_core::egress::resolve_remote_egress(&clone_addr, &ctx.env_name)
+            .await
+            .map_err(|e| AppError::new("repo.migrate.invalid_url", e))?;
+
     let mut repo = create(
         ctx,
         serde_json::json!({
@@ -2375,13 +2385,6 @@ pub async fn migrate(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPubli
     .await?;
 
     let bare = bare_repo_path(&ctx.repos_dir, &repo.owner_username, &repo.name)?;
-    // Same egress bound as mirror upsert: validate the remote and pin the
-    // checked DNS answers into the git transport so ls-remote/fetch cannot
-    // re-resolve to an unvalidated answer (DNS-rebind TOCTOU).
-    credentials.dns_pin =
-        oxidean_api_core::egress::resolve_remote_egress(&clone_addr, &ctx.env_name)
-            .await
-            .map_err(|e| AppError::new("repo.migrate.invalid_url", e))?;
     let remote_refs = match ctx.git.ls_remote_url(&clone_addr, &credentials).await {
         Ok(r) => r,
         Err(e) => {
