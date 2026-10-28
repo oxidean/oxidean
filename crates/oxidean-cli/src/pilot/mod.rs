@@ -87,7 +87,7 @@ async fn pair_error(
     e: C3Error,
 ) -> Result<Out, CliError> {
     if let Disposition::PairRetryOnce(secs) = classify(&e, Route::Pair) {
-        tokio::time::sleep(std::time::Duration::from_secs(secs.max(1).min(3600))).await;
+        tokio::time::sleep(std::time::Duration::from_secs(secs.clamp(1, 3600))).await;
         match client.pair(code, label, caps).await {
             Ok(r) => return finish_pair(instance, r, label, caps.to_vec()),
             Err(e2) => return Err(pair_fail(&e2)),

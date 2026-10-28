@@ -175,7 +175,7 @@ impl TermReason {
 fn backoff_secs(fail_streak: u32, frac: f64) -> f64 {
     let exp = fail_streak.saturating_sub(1).min(9);
     let base = (1u64 << exp) as f64;
-    (base * (0.8 + frac * 0.4)).min(60.0).max(0.05)
+    (base * (0.8 + frac * 0.4)).clamp(0.05, 60.0)
 }
 
 /// Exit-pinned outcome — Ok(out) for exit 0, Err(cli) for exit 1.
@@ -190,7 +190,12 @@ impl std::fmt::Debug for LoopExit {
     }
 }
 
-type LResult<T> = Result<T, LoopExit>;
+type LResult<T> = Result<T, Box<LoopExit>>;
+
+/// The armed claim-wait future — pinned + boxed so `run_loop` can hold it
+/// across select iterations without restating the full type.
+type ClaimFut =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<ClaimAnswer, C3Error>> + Send>>;
 
 // ---------------------------------------------------------------------------
 // Signals — SIGINT + SIGTERM as persistent unix streams; SIGINT is a
@@ -350,11 +355,7 @@ impl RunState {
     /// The outer select: heartbeat | claim-wait | signal. Arms evaluate
     /// through destructured field borrows so `self` stays usable in bodies.
     pub async fn run_loop(mut self) -> Result<Out, CliError> {
-        let mut claim_fut: Option<
-            std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<ClaimAnswer, C3Error>> + Send>,
-            >,
-        > = None;
+        let mut claim_fut: Option<ClaimFut> = None;
         enum Ev {
             Heartbeat,
             ArmClaim,
@@ -389,11 +390,11 @@ impl RunState {
                     claim_fut = None;
                     self.on_claim(r).await
                 }
-                Ev::Signal(t) => Err(self.terminate(t).await),
+                Ev::Signal(t) => Err(Box::new(self.terminate(t).await)),
             };
             match res {
                 Ok(()) => {}
-                Err(LoopExit(out)) => return out,
+                Err(exit) => return exit.0,
             }
         }
     }
@@ -408,7 +409,7 @@ impl RunState {
                 self.fail_streak = 0;
                 self.apply_cancels(hb.cancel).await?;
                 if hb.revoked {
-                    return Err(self.terminate(TermReason::Revoked).await);
+                    return Err(Box::new(self.terminate(TermReason::Revoked).await));
                 }
                 Ok(())
             }
@@ -421,7 +422,7 @@ impl RunState {
             Err(e) => self.loop_error(&e, Route::Claim).await,
             Ok(ClaimAnswer::Timeout { retry_after }) => {
                 self.fail_streak = 0;
-                self.next_poll = Instant::now() + Duration::from_secs(retry_after.max(1).min(3600));
+                self.next_poll = Instant::now() + Duration::from_secs(retry_after.clamp(1, 3600));
                 Ok(())
             }
             Ok(ClaimAnswer::Batch {
@@ -438,7 +439,7 @@ impl RunState {
                 // 1s re-poll floor: 204s, absent hints, and cancel-only
                 // batches all bottom out at 1s (BR5.4/BR8.1). The 1h
                 // ceiling keeps hostile hints inside Instant's range.
-                self.next_poll = Instant::now() + Duration::from_secs(retry_after.max(1).min(3600));
+                self.next_poll = Instant::now() + Duration::from_secs(retry_after.clamp(1, 3600));
                 Ok(())
             }
         }
@@ -448,10 +449,16 @@ impl RunState {
     /// funnels through the single dispatch table.
     async fn loop_error(&mut self, e: &C3Error, route: Route) -> LResult<()> {
         match classify(e, route) {
-            Disposition::AuthDeath(code) => Err(self.terminate(TermReason::AuthDeath(code)).await),
-            Disposition::TerminalRevoked => Err(self.terminate(TermReason::Revoked).await),
-            Disposition::TerminalNotFound => Err(self.terminate(TermReason::NotFound).await),
-            Disposition::BadInputExit => Err(self.terminate(TermReason::BadInput).await),
+            Disposition::AuthDeath(code) => {
+                Err(Box::new(self.terminate(TermReason::AuthDeath(code)).await))
+            }
+            Disposition::TerminalRevoked => {
+                Err(Box::new(self.terminate(TermReason::Revoked).await))
+            }
+            Disposition::TerminalNotFound => {
+                Err(Box::new(self.terminate(TermReason::NotFound).await))
+            }
+            Disposition::BadInputExit => Err(Box::new(self.terminate(TermReason::BadInput).await)),
             Disposition::Backoff => {
                 let d = self.backoff();
                 self.log(&format!("{route:?} failed ({e}) — retry in {d:.0?}"));
@@ -460,7 +467,7 @@ impl RunState {
             }
             Disposition::Sleep(secs) => {
                 self.fail_streak = 0;
-                self.next_poll = Instant::now() + Duration::from_secs(secs.max(1).min(3600));
+                self.next_poll = Instant::now() + Duration::from_secs(secs.clamp(1, 3600));
                 Ok(())
             }
             // Loop routes never produce pair/report-only dispositions.
@@ -497,22 +504,22 @@ impl RunState {
                 Err(e) => match classify(&e, Route::Report) {
                     Disposition::DropAction => return Ok(true),
                     Disposition::AuthDeath(code) => {
-                        return Err(self.terminate(TermReason::AuthDeath(code)).await);
+                        return Err(Box::new(self.terminate(TermReason::AuthDeath(code)).await));
                     }
                     Disposition::TerminalRevoked => {
-                        return Err(self.terminate(TermReason::Revoked).await);
+                        return Err(Box::new(self.terminate(TermReason::Revoked).await));
                     }
                     Disposition::TerminalNotFound => {
-                        return Err(self.terminate(TermReason::NotFound).await);
+                        return Err(Box::new(self.terminate(TermReason::NotFound).await));
                     }
                     Disposition::BadInputExit => {
-                        return Err(self.terminate(TermReason::BadInput).await);
+                        return Err(Box::new(self.terminate(TermReason::BadInput).await));
                     }
                     Disposition::Sleep(secs) => {
                         if attempt >= REPORT_ATTEMPTS {
                             return Ok(false);
                         }
-                        tokio::time::sleep(Duration::from_secs(secs.max(1).min(3600))).await;
+                        tokio::time::sleep(Duration::from_secs(secs.clamp(1, 3600))).await;
                     }
                     Disposition::Backoff => {
                         if attempt >= REPORT_ATTEMPTS {
@@ -705,7 +712,7 @@ impl RunState {
                 ExecEv::Child(Err(e)) => break End::Done(None, format!("join:{e}")),
                 ExecEv::Timeout => break End::Timeout,
                 ExecEv::Heartbeat => self.on_heartbeat().await?,
-                ExecEv::Signal(t) => return Err(self.terminate(t).await),
+                ExecEv::Signal(t) => return Err(Box::new(self.terminate(t).await)),
             }
         };
         match end {
