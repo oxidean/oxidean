@@ -1,0 +1,469 @@
+{
+ "stage": "infrastructure-design",
+ "unit": "connector-client",
+ "upstream_ids": [
+  "NFR1",
+  "NFR1.1",
+  "NFR1.2",
+  "NFR1.3",
+  "NFR1.4",
+  "NFR1.5",
+  "NFR1.6",
+  "NFR1.7",
+  "NFR1.8",
+  "NFR1.9",
+  "NFR1.10",
+  "NFR1.11",
+  "NFR1.12",
+  "NFR2",
+  "NFR3",
+  "NFR3.1",
+  "NFR3.2",
+  "NFR3.3",
+  "NFR3.4",
+  "NFR3.5",
+  "NFR3.6",
+  "NFR3.7",
+  "NFR3.8",
+  "NFR3.9",
+  "NFR3.10",
+  "NFR3.11",
+  "NFR4",
+  "NFR4.1",
+  "NFR4.2",
+  "NFR4.3",
+  "NFR4.4",
+  "NFR4.5",
+  "NFR4.6",
+  "NFR4.7",
+  "NFR4.8",
+  "NFR4.9",
+  "NFR4.10",
+  "NFR4.11",
+  "NFR4.12",
+  "NFR5",
+  "NFR6",
+  "NFR6.1",
+  "NFR6.2",
+  "NFR6.3",
+  "NFR6.4",
+  "NFR6.5",
+  "NFR6.6",
+  "NFR7",
+  "NFR8",
+  "NFR9",
+  "NFR-S1",
+  "NFR-S2",
+  "NFR-S3",
+  "NFR-S4",
+  "NFR-S5",
+  "TS-1",
+  "TS-2",
+  "TS-3",
+  "TS-4",
+  "TS-5",
+  "TS-6",
+  "TS-7",
+  "TS-8"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "custody family \u2014 user-local state (pilot-targets/secrets.json 0600 + keyring) is binary-owned, not operator-provisioned infra"
+  },
+  {
+   "id": "NFR1.1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "two-backend custody seam \u2014 keyring shape + pilot-secrets.json named in user-local state table"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "never serialized \u2014 status --json structurally omits; --verbose redact set named in monitoring surface"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (deletion triggers keyed to terminal taxonomy in state.rs)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.4",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "zombie render \u2014 status verifier: present|missing + disconnect remedy row"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (lexical\u2192canonical jail chain in exec.rs::resolve_path)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.6",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (absolute config_dir exclusion, bidirectional is_within at launch)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.7",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (symlink_metadata non-regular refusal at resolve)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.8",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (OXIDEAN-scoped env strip at spawn)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.9",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (enumerated-value \u22658-char scrub before send)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.10",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (Bearer-only auth; /pair sole unauthenticated call)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.11",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (C3Error enum \u2014 flat code decode, 10-code vocabulary)",
+   "note": ""
+  },
+  {
+   "id": "NFR1.12",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (caps gate min(requested,granted) before exec)",
+   "note": ""
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "egress disclosure \u2014 the client-side mirror: --verbose redact set + structurally secret-free status surfaces"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "pacing/payload family \u2014 request budget + resource bounds named in Resource shape section"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (wait_seconds client clamp [1,60])",
+   "note": ""
+  },
+  {
+   "id": "NFR3.2",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (request timeouts: 30s / wait+15s split)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.3",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (cancel-only 1s re-poll floor)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.4",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (15s heartbeat interval arm)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.5",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (retry_after body + Retry-After header honored)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.6",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (64 KiB bounded tail buffer)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.7",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (128 KiB FS_IO_CAP pre-encode)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.8",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (universal <OUTPUT_MAX report bound)",
+   "note": ""
+  },
+  {
+   "id": "NFR3.9",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "serial executor resource bound \u2014 Resource shape section"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "O(output) scrub bound \u2014 Resource shape section"
+  },
+  {
+   "id": "NFR3.11",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "O(running+settled) RunState bound \u2014 Resource shape section"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "degrade/terminal family \u2014 exit-code contract + terminal narration are the supervisor-facing signals"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (backoff state machine in RunState)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.2",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (rate_limited honors Retry-After header)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.3",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (auth-death funnel ordering)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.4",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (BR8.4 terminal funnel ordering)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.5",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (bad_input/report-404 dispositions)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.6",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "SIGINT/SIGTERM close-out \u2014 exit-0 contract row"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (idempotent report repost)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.8",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (settled dedupe + exactly-once cancel close)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.9",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (process-group kill + fs cancel granularity)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.10",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (verifier-then-row delete ordering)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.11",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (serial claim-order execution)",
+   "note": ""
+  },
+  {
+   "id": "NFR4.12",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (EXEC_TIMEOUT in per-action select!)",
+   "note": ""
+  },
+  {
+   "id": "NFR5",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 server-owned audit emission (U6 `oxpilot.*` audit rows carry it); the client emits no audit per NFR6 scope boundary",
+   "note": ""
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "client observability family \u2014 stderr narration + --verbose + status + exit contract"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "lifecycle narration table"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "--verbose request log + redact set"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "exit-code contract section"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "honest-disclosure docs surfaces \u2014 CONNECTOR/CONFIGURATION + --help rows in Docs surfaces table"
+  },
+  {
+   "id": "NFR6.5",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "status surface \u2014 metadata-only fields incl. live-probe backend"
+  },
+  {
+   "id": "NFR6.6",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "operator-actionable error text \u2014 degrade/terminal narration rows"
+  },
+  {
+   "id": "NFR7",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 WCAG AA family: no web UI surface in a CLI unit (U8 carries it)",
+   "note": ""
+  },
+  {
+   "id": "NFR8",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 usability family: carried by NFR6.4/6.6 disclosure + operator-actionable error text",
+   "note": ""
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "testability \u2014 wiremock C3 suite + no-network unit tests ride the workspace nextest archive; lane coverage table"
+  },
+  {
+   "id": "NFR-S1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "single-process serial model \u2014 Resource shape"
+  },
+  {
+   "id": "NFR-S2",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "RunState bounds \u2014 Resource shape"
+  },
+  {
+   "id": "NFR-S3",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "multi-target rows \u2014 status prints all rows, no --target gate"
+  },
+  {
+   "id": "NFR-S4",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "bounded payload growth \u2014 Resource shape"
+  },
+  {
+   "id": "NFR-S5",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "self-limiting claim load \u2014 request budget in Resource shape"
+  },
+  {
+   "id": "TS-1",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "src/pilot module dir in oxidean-cli \u2014 deployable surface table"
+  },
+  {
+   "id": "TS-2",
+   "status": "N/A",
+   "target": "No infra footprint \u2014 code-level pin (reqwest + 30s-timeout conventions in client.rs)",
+   "note": ""
+  },
+  {
+   "id": "TS-3",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "keystore + pilot-secrets.json custody \u2014 user-local state table"
+  },
+  {
+   "id": "TS-4",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "pilot-targets.json under config_dir \u2014 user-local state table"
+  },
+  {
+   "id": "TS-5",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "process control cross-platform \u2014 windows/unix kill+shell paths compile+smoke on the ox-cli matrix"
+  },
+  {
+   "id": "TS-6",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "wiremock C3 suite + unit tests \u2014 lane coverage table"
+  },
+  {
+   "id": "TS-7",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "checked-in openapi.yaml reference \u2014 Docs surfaces table"
+  },
+  {
+   "id": "TS-8",
+   "status": "OK",
+   "target": "infrastructure-specification.md cicd-pipeline.md",
+   "note": "dep discipline \u2014 deps row + supply-chain section"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "infrastructure-specification.md",
+   "status": "OK",
+   "target": "NFR1 NFR1.1 NFR3 NFR3.9 NFR3.10 NFR3.11 NFR-S1 NFR-S2 NFR-S4 NFR-S5 TS-1 TS-3 TS-4 TS-8",
+   "note": "deployable surface, environment, distribution surface, operator provisioning, resource shape"
+  },
+  {
+   "id": "monitoring-design.md",
+   "status": "OK",
+   "target": "NFR1.2 NFR1.4 NFR2 NFR4 NFR4.6 NFR6 NFR6.1 NFR6.2 NFR6.3 NFR6.5 NFR6.6 NFR-S3",
+   "note": "operator signals, --verbose redact, status surface, exit-code contract, non-monitored boundaries"
+  },
+  {
+   "id": "cicd-pipeline.md",
+   "status": "OK",
+   "target": "NFR6.4 NFR9 TS-5 TS-6 TS-7 TS-8",
+   "note": "lane coverage, docs surfaces, supply chain, explicit non-changes"
+  }
+ ]
+}

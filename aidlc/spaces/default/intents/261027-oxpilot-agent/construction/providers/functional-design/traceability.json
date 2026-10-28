@@ -1,0 +1,49 @@
+{
+  "stage": "functional-design",
+  "unit": "providers",
+  "upstream_ids": [
+    "AC5.1.1",
+    "AC5.1.2",
+    "AC5.1.3",
+    "AC5.1.4",
+    "AC5.1.5",
+    "AC5.4.1",
+    "AC5.5.1",
+    "AC5.5.3",
+    "AC5.2.1",
+    "FR6.4",
+    "FR6.5",
+    "FR6.7",
+    "NFR1",
+    "NFR4",
+    "NFR9"
+  ],
+  "coverage": [
+    { "id": "AC5.1.1", "status": "OK", "target": "BR2.2 — ProviderHealthNote.reason carries the disabled explanation" },
+    { "id": "AC5.1.2", "status": "OK", "target": "BR1.3, BR4.4 — three real adapters + key/base-url env defaults" },
+    { "id": "AC5.1.3", "status": "OK", "target": "BR2.1, BR2.3 — admin.mcp.* env-default/DB-override pattern" },
+    { "id": "AC5.1.4", "status": "OK", "target": "BR5.6 — every new OXIDEAN_OXPILOT_* var ships .env.example + CONFIGURATION.md + railway.ts rows" },
+    { "id": "AC5.1.5", "status": "OK", "target": "BR2.2, BR5.5 — server-enforced oxpilot.disabled via DB-aware gate" },
+    { "id": "AC5.4.1", "status": "OK", "target": "BR4.4 — keyless Ollama + default loopback base_url" },
+    { "id": "AC5.5.1", "status": "OK", "target": "BR1.1, BR5.4 — admin procs inside the crate's closed PROCEDURES set" },
+    { "id": "AC5.5.3", "status": "OK", "target": "BR5.4 — migrations x3 + dialect_oxpilot.rs + TESTING.md row in same change" },
+    { "id": "AC5.2.1", "status": "Deferred", "target": "U2 session-core owns counters+refusal — U4 stores configured ceilings via BR3.3 and documents budget envs via BR5.6" },
+    { "id": "FR6.4", "status": "OK", "target": "BR1.3, BR3.1 — provider selection + construction-required enablement" },
+    { "id": "FR6.5", "status": "OK", "target": "BR1.2, BR2.1 — key custody + env/DB override merge" },
+    { "id": "FR6.7", "status": "OK", "target": "BR3.3, BR5.6 — budget ceilings stored + budget env vars documented" },
+    { "id": "NFR1", "status": "OK", "target": "BR1.2, BR3.2, BR4.5, BR5.2 — custody, SSRF bound, no-redirect, value-free audit" },
+    { "id": "NFR4", "status": "OK", "target": "BR4.1, BR4.2 — connect-phase retry bound + timeouts" },
+    { "id": "NFR9", "status": "OK", "target": "BR5.4 — admin.oxpilot.* inside the crate's closed PROCEDURES set = collect-only coverage" }
+  ],
+  "reverse": [
+    { "id": "BR1.4", "status": "N/A", "target": "stub exclusion — test-only adapter, no AC" },
+    { "id": "BR3.3", "status": "N/A", "target": "budget ceiling storage — configures AC5.2.1 whose counters+refusal are U2-owned" },
+    { "id": "BR2.4", "status": "N/A", "target": "effective+overridden read shape — admin.mcp precedent (review R-08)" },
+    { "id": "BR3.4", "status": "N/A", "target": "settings_set request-semantics contract pin (review R-09)" },
+    { "id": "BR4.3", "status": "N/A", "target": "mutex-serialized slot-rebuild mechanics — unit-def contract requirement (R-01/R-04)" },
+    { "id": "BR4.5", "status": "N/A", "target": "redirect-free egress — SSRF completion (review R-05)" },
+    { "id": "BR5.1", "status": "N/A", "target": "admin.oxpilot.* error-code contract pin incl. the one additive crypto.unavailable (review R-17)" },
+    { "id": "BR5.3", "status": "N/A", "target": "wiremock-only test constraint — unit-def requirement" },
+    { "id": "BR5.5", "status": "N/A", "target": "U1 seam delta — RwLock slot + DB-aware gate (review R-07)" }
+  ]
+}

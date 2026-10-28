@@ -1,0 +1,145 @@
+{
+  "stage": "functional-design",
+  "unit": "u1-skeleton-slice",
+  "upstream_ids": [
+    "AC1.1.1",
+    "AC1.1.3",
+    "AC1.1.5",
+    "AC1.2.2",
+    "AC1.3.1",
+    "AC1.3.2",
+    "AC1.3.3",
+    "AC1.3.4",
+    "AC1.3.5",
+    "AC1.3.6",
+    "AC5.1.1",
+    "AC5.1.3",
+    "AC5.1.4",
+    "AC5.1.5",
+    "AC5.3.3",
+    "AC5.5.1",
+    "AC5.5.2",
+    "AC5.5.3",
+    "AC5.5.4"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.1.1",
+      "status": "OK",
+      "target": "BR3.2",
+      "note": "u1 share: newest-first caller-scoped list proc — index-page render owned by u8 — partial share"
+    },
+    {
+      "id": "AC1.1.3",
+      "status": "OK",
+      "target": "BR5.1",
+      "note": "u1 share: the full route-registration set (SHELLS, astro, tsrx, RESERVED_TOP_SEGMENTS, routeTree, manifest) ships in the skeleton — owning unit for this AC"
+    },
+    {
+      "id": "AC1.1.5",
+      "status": "OK",
+      "target": "BR5.2",
+      "note": "any-authenticated-user admission ships with the skeleton routes"
+    },
+    {
+      "id": "AC1.2.2",
+      "status": "OK",
+      "target": "BR3.1",
+      "note": "u1 share: session_create binds+persists repo/branch — full persistence semantics owned by u2-session-core — partial share"
+    },
+    {
+      "id": "AC1.3.1",
+      "status": "OK",
+      "target": "BR4.1, BR4.3, BR4.4, BR4.6",
+      "note": "u1 share: SSE routes + append/terminal/snapshot emission with the stub provider — full reconnect/queue semantics owned by u3-agent-runtime/u8 — partial share"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "N/A",
+      "target": "u8-oxpilot-ui",
+      "note": "rail/transcript/drawer layout is U8 surface scope; skeleton page is minimal by design (BR5.3)"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "BR3.4",
+      "note": "u1 share: message rows persist in the skeleton tables — full transcript semantics owned by u2-session-core — partial share"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "N/A",
+      "target": "u8-oxpilot-ui",
+      "note": "aria-live/labelled-form choreography is U8's a11y surface"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "N/A",
+      "target": "u5-oxpilot-tools",
+      "note": "repo read-tool catalog is U5's surface; skeleton has no tools"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "N/A",
+      "target": "u8-oxpilot-ui, u5-oxpilot-tools",
+      "note": "tool-call cards need U5 tools + U8 rendering; skeleton emits no tool frames"
+    },
+    {
+      "id": "AC5.1.1",
+      "status": "OK",
+      "target": "BR5.4, BR2.3",
+      "note": "u1 share: gate + status.reason + minimal flag-off page copy naming env vars — full explanatory state owned by u8/u4 — partial share"
+    },
+    {
+      "id": "AC5.1.3",
+      "status": "OK",
+      "target": "BR2.4",
+      "note": "u1 share: env-default + override-seam resolution semantics pinned — the oxpilot_settings override table itself lands with u4 — partial share"
+    },
+    {
+      "id": "AC5.1.4",
+      "status": "OK",
+      "target": "BR1.5",
+      "note": "u1 share: OXIDEAN_OXPILOT_ENABLED/PROVIDER/MODEL docs in .env.example + CONFIGURATION.md — provider-specific vars land with u4 — partial share"
+    },
+    {
+      "id": "AC5.1.5",
+      "status": "OK",
+      "target": "BR2.1, BR2.2, BR2.3, BR2.4, BR2.5",
+      "note": "u1 owns the server-enforced denial — flag machinery + provider-slot resolution + oxpilot.disabled on every gated surface"
+    },
+    {
+      "id": "AC5.3.3",
+      "status": "OK",
+      "target": "BR3.5",
+      "note": "u1 owns redact-on-write for persisted transcript content in the skeleton tables"
+    },
+    {
+      "id": "AC5.5.1",
+      "status": "OK",
+      "target": "BR1.1, BR1.2, BR1.3"
+    },
+    {
+      "id": "AC5.5.2",
+      "status": "N/A",
+      "target": "u5-oxpilot-tools",
+      "note": "agent write-tool scoping is U5's identity-bound ToolCtx (ADR-008); skeleton ships no tools"
+    },
+    {
+      "id": "AC5.5.3",
+      "status": "OK",
+      "target": "BR1.4"
+    },
+    {
+      "id": "AC5.5.4",
+      "status": "OK",
+      "target": "BR3.2, BR3.3, BR4.1",
+      "note": "u1 share: session-scoped anti-enumeration + list scoping in skeleton procs/routes — target/grant negative paths owned by u2/u6 — partial share"
+    }
+  ],
+  "reverse": [
+    { "id": "BR3.6", "status": "N/A", "target": "idempotent-resend mechanics from C2 + contract-design Q4 — no dedicated AC; protects AC1.3.1's stream" },
+    { "id": "BR4.2", "status": "N/A", "target": "C2 contract rule + US1.8 groundwork — queue proc lands in u2; skeleton only needs the 409" },
+    { "id": "BR4.5", "status": "N/A", "target": "skeleton-internal stub policy — no user-facing AC; enables AC1.3.1's stream" },
+    { "id": "BR5.3", "status": "N/A", "target": "scope-boundary rule — defines what the skeleton does NOT do; reviewed, not user-tested" }
+  ]
+}

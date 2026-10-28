@@ -1,0 +1,27 @@
+{
+  "stage": "code-generation",
+  "unit": "agent-runtime",
+  "version": 1,
+  "writes": [
+    { "path": "crates/oxidean-api-core/src/oxpilot.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/dispatch.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/lib.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/routes.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/runtime.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/services.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/session.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/settings.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/providers/anthropic.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/providers/ollama.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/providers/openai.rs" },
+    { "path": "crates/oxidean-api-oxpilot/tests/oxpilot_providers.rs" },
+    { "path": "crates/oxidean-api-oxpilot/tests/oxpilot_settings.rs" },
+    { "path": "crates/oxidean-api/src/main.rs" },
+    { "path": "crates/oxidean-api/src/bin/rpc_gen.rs" },
+    { "path": "crates/oxidean-api/tests/oxpilot.rs" },
+    { "path": "crates/oxidean-db/tests/dialect_oxpilot.rs" },
+    { "path": "packages/api-client/src/index.ts" },
+    { "path": "packages/api-client/src/languages.ts" },
+    { "path": "packages/api-client/src/scope-catalog.ts" }
+  ]
+}

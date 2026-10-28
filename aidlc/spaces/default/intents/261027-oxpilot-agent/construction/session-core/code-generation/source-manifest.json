@@ -1,0 +1,103 @@
+{
+  "stage": "code-generation",
+  "unit": "session-core",
+  "version": 1,
+  "writes": [
+    {
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "path": "crates/oxidean-api-core/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/auth/verify_reset.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/dispatch.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/routes.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/services.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/session.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/settings.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/oxpilot_settings.rs"
+    },
+    {
+      "path": "crates/oxidean-api/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/main.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api/tests/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0087_oxpilot_session_core.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0087_oxpilot_session_core.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0087_oxpilot_session_core.sql"
+    },
+    {
+      "path": "crates/oxidean-db/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-db/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_actions.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_oxpilot.rs"
+    },
+    {
+      "path": "docs/TESTING.md"
+    },
+    {
+      "path": "packages/api-client/src/index.ts"
+    },
+    {
+      "path": "versioning.toml"
+    }
+  ]
+}

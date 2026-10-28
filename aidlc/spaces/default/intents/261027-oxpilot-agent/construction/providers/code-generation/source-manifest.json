@@ -1,0 +1,145 @@
+{
+  "stage": "code-generation",
+  "unit": "providers",
+  "version": 1,
+  "writes": [
+    {
+      "path": ".env.example"
+    },
+    {
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "path": ".railway/railway.ts"
+    },
+    {
+      "path": "Cargo.lock"
+    },
+    {
+      "path": "Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-core/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/dispatch.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/anthropic.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/egress.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/key.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/mod.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/ollama.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/openai.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/registry.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/providers/stream.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/routes.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/session.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/settings.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/status.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/fixtures/anthropic/sse_messages.txt"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/fixtures/ollama/ndjson_chat.txt"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/fixtures/openai/sse_chat.txt"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/oxpilot_providers.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/tests/oxpilot_settings.rs"
+    },
+    {
+      "path": "crates/oxidean-api/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/main.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api/tests/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0086_oxpilot_settings.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0086_oxpilot_settings.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0086_oxpilot_settings.sql"
+    },
+    {
+      "path": "crates/oxidean-db/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-db/src/oxpilot_settings.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_oxpilot.rs"
+    },
+    {
+      "path": "docs/CONFIGURATION.md"
+    },
+    {
+      "path": "docs/TESTING.md"
+    },
+    {
+      "path": "packages/api-client/src/index.ts"
+    },
+    {
+      "path": "versioning.toml"
+    }
+  ]
+}

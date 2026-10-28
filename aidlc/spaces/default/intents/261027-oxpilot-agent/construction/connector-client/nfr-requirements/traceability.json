@@ -1,0 +1,343 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "connector-client",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR7",
+  "NFR8",
+  "NFR9"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.10, NFR1.11, NFR1.12",
+   "note": "security-requirements.md \u2014 two-backend verifier custody (keyring composite key + pilot-secrets.json 0600 fallback), never serialized/logged, deletion on every terminal path, zombie-row naming, verifier-Bearer-only auth, flat error-code vocabulary incl. openapi.yaml enumeration, client-side caps re-enforcement. residual: NFR1's hashed-at-rest clause is the SERVER half (U6); transcript redaction binds U2/U3/U5"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "NFR1.5, NFR1.6, NFR1.8, NFR1.9",
+   "note": "egress-adjacent privacy controls client-side: fs jail + config_dir hard exclusion, OXIDEAN-scoped env strip, BR7.2 enumerated secret-value scrub before report \u2014 the client is the last user-controlled surface before forge transcript/provider egress. residual: NFR2's per-user isolation is enforced server-side (U6 identity binding); the client carries one target's identity only"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10, NFR3.11",
+   "note": "performance-requirements.md \u2014 wait_seconds client clamp [1,60], REQ_TIMEOUT split (claim = wait+15s), cancel-only 1s floor, 15s heartbeat inside 90s liveness, Retry-After honored exactly, 64KiB exec tail + FS_IO_CAP 128KiB < OUTPUT_MAX 256KiB, serial executor bounded, O(output) scrub. residual: NFR3's server-side claim/dispatch latency binds U6"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12",
+   "note": "reliability-requirements.md \u2014 the client's degrade contract: code-keyed taxonomy (disabled/internal/unknown\u2192backoff creds-kept; rate_limited\u2192Retry-After; unauthorized/forbidden\u2192kill+delete+exit non-zero; revoked/not_found\u2192kill+report+delete+exit 0; bad_input\u2192kill+exit creds-kept; report-404\u2192drop+continue), signal close-out, idempotent reports, exactly-once cancel close-out incl. cancelled:pre-start, serial integrity, EXEC_TIMEOUT. This unit IS the connector NFR4 names \u2014 its backoff/terminal table is the graceful degradation"
+  },
+  {
+   "id": "NFR5",
+   "status": "N/A",
+   "target": "NFR6.1",
+   "note": "audit_events vocabulary is server-owned (U6-BR7.2); the client emits lifecycle lines + exit codes only \u2014 NFR6.1 documents the boundary. No client-side audit surface exists to pin"
+  },
+  {
+   "id": "NFR7",
+   "status": "N/A",
+   "target": "N/A",
+   "note": "NFR7 (accessibility/WCAG) binds U8's render surface \u2014 a CLI has no accessible-render surface to pin (Q1-A)"
+  },
+  {
+   "id": "NFR8",
+   "status": "OK",
+   "target": "NFR6.4, NFR6.6",
+   "note": "NFR8 (usability) client half: error text names operator/remedy/fix \u2014 disabled names the operator, pairing_expired/pairing_used name the mint-fresh-code remedy, forbidden names the --caps fix (NFR6.6); --help/docs carry the explanatory state (NFR6.4). residual: NFR8's 'dead page' phrasing binds U8's render surface"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "NFR6.1, NFR6.2, NFR6.3, NFR6.4, NFR6.5, NFR6.6",
+   "note": "observability-requirements.md \u2014 reuses ox CLI conventions: stderr lifecycle narration, --verbose redacted request logs, exit-code supervisor contract, docs/help honesty (disconnect local-forget, jail bounds, env strip), status metadata-only, operator-actionable error text. No new telemetry surface"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "TS-6, TS-7",
+   "note": "tech-stack-decisions.md \u2014 NFR9's client half: wiremock fixture suites for all four C3 routes + full error vocabulary, no-network executor unit tests, checked-in openapi.yaml enumerating all 10 flat error codes. residual: NFR9's dialect_oxpilot + db-dialects -E rows bind U6"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "NFR1.1",
+   "status": "N/A",
+   "target": "BR2.4 two-backend custody + BR1.2 both-fail abort \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "N/A",
+   "target": "BR1.4/BR4.2/BR9.2 never-serialized + redaction \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "N/A",
+   "target": "BR8.3/BR8.4/BR9.1/BR2.3 terminal-keyed custody deletion \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.4",
+   "status": "N/A",
+   "target": "BR9.3 zombie-row path \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "N/A",
+   "target": "BR6.1/BR4.2 jail + exec-cwd split \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.6",
+   "status": "N/A",
+   "target": "BR6.3 config_dir hard exclusion + FR5.4 \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.7",
+   "status": "N/A",
+   "target": "BR4.3/BR4.4 non-regular refusal \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.8",
+   "status": "N/A",
+   "target": "BR4.2 OXIDEAN-scoped env strip \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "N/A",
+   "target": "BR7.2 enumerated value scrub + FR5.5 second pass \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.10",
+   "status": "N/A",
+   "target": "BR2.1/BR1.4 verifier-only Bearer + /pair sole unauth \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.11",
+   "status": "N/A",
+   "target": "BR2.3/BR1.3 flat code vocabulary + openapi.yaml \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR1.12",
+   "status": "N/A",
+   "target": "BR3.2/BR1.1 client-side caps re-enforcement \u2014 security-requirements.md"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "N/A",
+   "target": "BR8.2/BR2.3 backoff-classes creds-preserved \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.2",
+   "status": "N/A",
+   "target": "BR2.3/BR8.1 rate_limited Retry-After \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.3",
+   "status": "N/A",
+   "target": "BR8.3 auth death kill-first no-report \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.4",
+   "status": "N/A",
+   "target": "BR8.4/FR5.6 terminals exit 0 \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.5",
+   "status": "N/A",
+   "target": "BR2.3/WF3.5 bad_input creds-kept + report-404 continue \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.6",
+   "status": "N/A",
+   "target": "BR4.5 signal close-out \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "N/A",
+   "target": "BR7.4/C3 idempotent report \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.8",
+   "status": "N/A",
+   "target": "BR5.1/RunState.settled exactly-once cancels \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.9",
+   "status": "N/A",
+   "target": "BR5.2/BR4.3 mid-flight kill + fs granularity floor \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "N/A",
+   "target": "BR9.3 recoverable-zombie ordering \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.11",
+   "status": "N/A",
+   "target": "BR4.1/Q7-A serial FIFO \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.12",
+   "status": "N/A",
+   "target": "BR7.3/Pins EXEC_TIMEOUT \u2014 reliability-requirements.md"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "N/A",
+   "target": "BR2.2/N-06 wait_seconds [1,60] client clamp \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.2",
+   "status": "N/A",
+   "target": "Pins/R-13 REQ_TIMEOUT split \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.3",
+   "status": "N/A",
+   "target": "BR5.4/CLAIM_RETRY_AFTER_SECS=0 cancel-only floor \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.4",
+   "status": "N/A",
+   "target": "BR8.5 15s heartbeat inside 90s window \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.5",
+   "status": "N/A",
+   "target": "BR8.1 Retry-After honored \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.6",
+   "status": "N/A",
+   "target": "BR7.1/OUTPUT_CAP 64KiB exec tail \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.7",
+   "status": "N/A",
+   "target": "BR6.2/BR4.3/BR4.4/N-02 FS_IO_CAP wire-derived \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.8",
+   "status": "N/A",
+   "target": "BR7.1 universal output<OUTPUT_MAX \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.9",
+   "status": "N/A",
+   "target": "BR4.1 serial executor bounded \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "N/A",
+   "target": "BR7.2/Q3-A enumerated O(output) scrub \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR3.11",
+   "status": "N/A",
+   "target": "RunState/BR5.1 bounded state \u2014 performance-requirements.md"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "N/A",
+   "target": "Q6-A/NFR4.1 stderr lifecycle narration \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "N/A",
+   "target": "spec deltas/BR1.4/R-12 --verbose redaction \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "N/A",
+   "target": "BR8.3-8.5/Q6-A exit-code contract \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "N/A",
+   "target": "BR9.1/R-14/BR4.2 docs honesty \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR6.5",
+   "status": "N/A",
+   "target": "BR9.2 status metadata-only \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR6.6",
+   "status": "N/A",
+   "target": "BR1.3/N-09e operator-actionable error text \u2014 observability-requirements.md"
+  },
+  {
+   "id": "NFR-S1",
+   "status": "N/A",
+   "target": "BR4.1/Q7-A serial by contract \u2014 scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S2",
+   "status": "N/A",
+   "target": "RunState/BR5.1 bounded state \u2014 scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S3",
+   "status": "N/A",
+   "target": "BR9.1/BR9.3 multi-target map + --target \u2014 scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S4",
+   "status": "N/A",
+   "target": "BR7.1/BR6.2 pinned payload caps \u2014 scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S5",
+   "status": "N/A",
+   "target": "BR8.1/BR8.2/BR8.5 self-limiting claim load \u2014 scalability-requirements.md"
+  },
+  {
+   "id": "TS-1",
+   "status": "N/A",
+   "target": "Q1-A pilot module in oxidean-cli \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-2",
+   "status": "N/A",
+   "target": "device.rs HTTP precedent \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-3",
+   "status": "N/A",
+   "target": "BR2.4/Q2-A custody seam reuse \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-4",
+   "status": "N/A",
+   "target": "Q3-A pilot-targets.json \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-5",
+   "status": "N/A",
+   "target": "BR4.2/BR5.2 platform shells + process-group kill \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-6",
+   "status": "N/A",
+   "target": "Q7-A wiremock + no-network units \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-7",
+   "status": "N/A",
+   "target": "U6 C3 delta openapi.yaml vocabulary \u2014 tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-8",
+   "status": "N/A",
+   "target": "AGENTS.md dependency discipline \u2014 tech-stack-decisions.md"
+  }
+ ]
+}

@@ -1,0 +1,491 @@
+{
+ "stage": "infrastructure-design",
+ "unit": "agent-runtime",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR7",
+  "NFR8",
+  "NFR9",
+  "NFR10",
+  "NFR11",
+  "NFR1.1",
+  "NFR1.2",
+  "NFR1.3",
+  "NFR1.4",
+  "NFR1.5",
+  "NFR1.6",
+  "NFR1.7",
+  "NFR1.8",
+  "NFR1.9",
+  "NFR1.10",
+  "NFR1.11",
+  "NFR2.1",
+  "NFR2.2",
+  "NFR3.1",
+  "NFR3.2",
+  "NFR3.3",
+  "NFR3.4",
+  "NFR3.5",
+  "NFR3.6",
+  "NFR3.7",
+  "NFR3.8",
+  "NFR3.9",
+  "NFR3.10",
+  "NFR4.1",
+  "NFR4.2",
+  "NFR4.3",
+  "NFR4.4",
+  "NFR4.5",
+  "NFR4.6",
+  "NFR4.7",
+  "NFR4.8",
+  "NFR4.9",
+  "NFR4.10",
+  "NFR4.11",
+  "NFR4.12",
+  "NFR5.1",
+  "NFR5.2",
+  "NFR5.3",
+  "NFR6.1",
+  "NFR6.2",
+  "NFR6.3",
+  "NFR6.4",
+  "NFR10.1",
+  "NFR10.2",
+  "NFR10.3",
+  "NFR10.4",
+  "NFR10.5",
+  "NFR10.6",
+  "NFR10.7",
+  "NFR10.8",
+  "NFR10.9",
+  "NFR10.10",
+  "NFR11.1",
+  "NFR11.2",
+  "NFR11.3",
+  "NFR11.4",
+  "NFR11.5",
+  "NFR11.6"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "infrastructure-specification.md, cicd-pipeline.md",
+   "note": "in-process runtime \u2014 no new deployable or secret-bearing surface; flag-kill rollback keeps auth posture"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "id-only log/spans \u2014 no content in any operator surface"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "resource-shape section records the bounded structures (emitted_deltas accepted-risk, ping cadence)"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "infrastructure-specification.md, cicd-pipeline.md",
+   "note": "restart invariants (empty map at boot, sweep reaps streaming rows) + ordering contract (service calls fail internal pre-U2, never boot)"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "BR7.1 log table is the auditable operator surface; no content logged"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "monitoring-design.md",
+   "note": "no new observability stack \u2014 tracing/log surfaces only"
+  },
+  {
+   "id": "NFR7",
+   "status": "Deferred",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui",
+   "note": "accessibility binds rendered UI \u2014 U8"
+  },
+  {
+   "id": "NFR8",
+   "status": "Deferred",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui",
+   "note": "usability binds client presentation \u2014 U8"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "cicd-pipeline.md",
+   "note": "existing lanes absorb the unit's tests; turn_cancel joins PROCEDURES pin + rpc-sync; no new jobs"
+  },
+  {
+   "id": "NFR10",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "no new deps \u2014 stack conformance recorded"
+  },
+  {
+   "id": "NFR11",
+   "status": "OK",
+   "target": "infrastructure-specification.md",
+   "note": "single-replica caveat + process-local state documented"
+  },
+  {
+   "id": "NFR1.1",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "turn_cancel SessionOnly+gate arms recorded under deployable surface \u2014 proc-level auth vocabulary unchanged by infra"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "owner-bound ToolCtx user_id \u2014 no infra surface touches principal"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "ToolExecutor seam \u2014 no authz bypass via infra"
+  },
+  {
+   "id": "NFR1.4",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "ctx minted from claim context \u2014 infra unchanged"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "provider creds stay inside U4 Arc \u2014 no key surface added"
+  },
+  {
+   "id": "NFR1.6",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "runtime redact() on tool results \u2014 content path unchanged by infra"
+  },
+  {
+   "id": "NFR1.7",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "frame payload shape \u2014 ids/deltas/cards only, no new wire"
+  },
+  {
+   "id": "NFR1.8",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "owner-scoped transcript read \u2014 unchanged"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.10",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.11",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "admission_lock per-session \u2014 process-local, recorded in restart invariants"
+  },
+  {
+   "id": "NFR2.1",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR2.2",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "pending_content transient \u2014 restart invariants cover process-local state"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "PROMPT_TRANSCRIPT_MAX_BYTES 128KiB \u2014 resource-shape bound recorded"
+  },
+  {
+   "id": "NFR3.2",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.3",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.4",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.5",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "summary caps \u2014 frame-size bound recorded"
+  },
+  {
+   "id": "NFR3.6",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.7",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "TOOL_CALL_TIMEOUT 60s \u2014 loop bound recorded"
+  },
+  {
+   "id": "NFR3.8",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.9",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "admission_lock per-session \u2014 contention shape recorded"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.2",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "panic/JoinError release \u2014 restart invariant: claim dies with process"
+  },
+  {
+   "id": "NFR4.3",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.4",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "admission-lock atomicity \u2014 same-record single-process scope"
+  },
+  {
+   "id": "NFR4.5",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.6",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.8",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.9",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "no_model typed refusal \u2014 deployable surface notes runtime minted codes"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.11",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "durable-first ordering \u2014 unchanged by infra"
+  },
+  {
+   "id": "NFR4.12",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.1",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.2",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.3",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "OK",
+   "target": "infrastructure-design/monitoring-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.1",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.2",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.3",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.4",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.5",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.6",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.7",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.8",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.9",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.10",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.1",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.2",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.3",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.4",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "per-session serialization \u2014 parallel turns across sessions noted in resource shape"
+  },
+  {
+   "id": "NFR11.5",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "flat per-turn request size \u2014 prompt bound recorded"
+  },
+  {
+   "id": "NFR11.6",
+   "status": "OK",
+   "target": "infrastructure-design/infrastructure-specification.md",
+   "note": "fanout O(subscribers) \u2014 attach cost noted"
+  }
+ ]
+}

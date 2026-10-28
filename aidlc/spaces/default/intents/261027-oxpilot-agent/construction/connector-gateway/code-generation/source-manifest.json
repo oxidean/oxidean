@@ -1,0 +1,30 @@
+{
+  "stage": "code-generation",
+  "unit": "connector-gateway",
+  "version": 1,
+  "writes": [
+    { "path": "crates/oxidean-db/migrations/postgres/0088_oxpilot_connector.sql" },
+    { "path": "crates/oxidean-db/migrations/mysql/0088_oxpilot_connector.sql" },
+    { "path": "crates/oxidean-db/migrations/sqlite/0088_oxpilot_connector.sql" },
+    { "path": "crates/oxidean-db/src/oxpilot.rs" },
+    { "path": "crates/oxidean-db/src/lib.rs" },
+    { "path": "crates/oxidean-db/tests/dialect_oxpilot.rs" },
+    { "path": "crates/oxidean-api-core/src/oxpilot.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/connector/mod.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/connector/gateway.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/connector/routes.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/connector/procs.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/connector/hook.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/lib.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/dispatch.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/routes.rs" },
+    { "path": "crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs" },
+    { "path": "crates/oxidean-api/src/main.rs" },
+    { "path": "crates/oxidean-api/src/bin/rpc_gen.rs" },
+    { "path": "packages/api-client/src/index.ts" },
+    { "path": "packages/api-client/src/languages.ts" },
+    { "path": "packages/api-client/src/scope-catalog.ts" },
+    { "path": "docs/TESTING.md" },
+    { "path": "docs/CONFIGURATION.md" }
+  ]
+}

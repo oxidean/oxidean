@@ -1,0 +1,96 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "session-core",
+  "upstream_ids": [
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10",
+      "note": "security-requirements.md \u2014 caller-scoped service + not_found anti-enumeration (BR1.1/BR1.2), SessionOnly+gate proc set, service-layer enforcement, boundary redact() on exactly BR3.1's field set, post-redaction plaintext at rest, opaque client_msg_id, hook-ordered single-tx cascade, zero production hook registrars, self-scope usage_get"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "NFR1.2, NFR1.6, NFR1.10, NFR2.1",
+      "note": "per-user isolation via scoping+anti-enumeration; disclosed plaintext-after-redaction model extended to queued rows and usage counters in CONFIGURATION.md"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR11.1, NFR11.4, NFR11.5, NFR11.6",
+      "note": "performance-requirements.md \u2014 full-set transcript read as one index-covered scan (BR7.2), shipped (user_id,last_activity_at) index reuse, per-session seq mints, linear redact scan, O(1) counter upsert, single-tx drain; scalability adds per-session serialization and bounded counter cardinality; NFR11.5/11.6 cover growth-degradation shape for session tables and queue depth"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12, NFR11.2, NFR11.3",
+      "note": "reliability-requirements.md \u2014 union dedupe with re-attach/409/existing-return arms (BR2.2), atomic+residual drain, queue_seq retry bound + cmid-collision idempotent return, hook-abort delete, atomic counter upsert, typed budget refusal, no new sweep needed; scalability NFR11.2/11.3 carry the FR6.7 single-replica + check/act-window caveats (graceful-degradation share)"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "NFR5.1, NFR5.2, NFR5.3",
+      "note": "observability-requirements.md audit share \u2014 field-names-only audit on session_delete incl. hook-failure result; refusal deliberately not audited"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "NFR6.1, NFR6.2, NFR6.3, NFR6.4, NFR6.5, NFR6.6",
+      "note": "observability-requirements.md \u2014 id-only span attrs (no user_id per shipped convention), coded terminal logs, drain-count debug line, counters-as-telemetry with C1-pinned usage_get payload (period/tokens_used/tokens_cap/requests_used/requests_cap, null caps = unbounded), no new status proc"
+    },
+    {
+      "id": "NFR7",
+      "status": "N/A",
+      "target": "no UI surface in U2 \u2014 accessibility share belongs to U8 (oxpilot-ui); local NFR10.x ids are stack-conformance constraints, not WCAG rows"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "NFR6.2, NFR6.5",
+      "note": "usability share = typed actionable errors (budget_exceeded/turn_active/not_found naming the fix per C1) + unambiguous null-cap signal for unbounded in the pinned usage_get shape"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "NFR10.1, NFR10.2, NFR10.8, NFR10.9, NFR10.10",
+      "note": "tech-stack-decisions.md \u2014 0087 tri-dialect migration + dialect-test/TESTING.md pairing, closed PROCEDURES pin, dialect isolation, cfg(test) hook probe"
+    }
+  ],
+  "reverse": [
+    {
+      "id": "BR7.1",
+      "target": "NFR10.3, NFR10.4",
+      "note": "trait-port layering + namespace disambiguation",
+      "status": "OK"
+    },
+    {
+      "id": "BR4.1",
+      "target": "NFR10.7",
+      "note": "queue_seq retry bound value",
+      "status": "OK"
+    },
+    {
+      "id": "BR3.1",
+      "target": "NFR10.5",
+      "note": "single detector",
+      "status": "OK"
+    },
+    {
+      "id": "BR4.x",
+      "target": "NFR10.6",
+      "note": "queue-as-table persistence",
+      "status": "OK"
+    }
+  ]
+}

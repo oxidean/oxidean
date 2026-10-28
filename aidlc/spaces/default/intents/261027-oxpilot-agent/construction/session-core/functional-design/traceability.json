@@ -1,0 +1,200 @@
+{
+  "stage": "functional-design",
+  "unit": "session-core",
+  "upstream_ids": [
+    "AC1.3.1",
+    "AC1.3.2",
+    "AC1.3.3",
+    "AC1.3.4",
+    "AC1.6.1",
+    "AC1.3.5",
+    "AC1.3.6",
+    "AC1.5.1",
+    "AC1.5.2",
+    "AC1.5.3",
+    "AC1.8.1",
+    "AC1.8.2",
+    "AC5.2.1",
+    "AC5.2.2",
+    "AC5.3.3",
+    "AC5.5.1",
+    "FR1.2",
+    "FR1.7",
+    "FR2.4",
+    "FR5.6",
+    "FR6.6",
+    "FR6.7",
+    "NFR1",
+    "NFR2",
+    "NFR9"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.3.1",
+      "status": "Deferred",
+      "target": "U3 agent-runtime owns SSE streaming; U2 ships the persisted rows it frames"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "Deferred",
+      "target": "U8 oxpilot-ui owns the three-pane workspace; U2 supplies transcript/queue reads"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "BR2.1, BR2.3, WF4 \u2014 server-side transcript persists and restores ordered by seq"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "Deferred",
+      "target": "U8 oxpilot-ui owns aria-live + labelled composer"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "Deferred",
+      "target": "U5 oxpilot-tools owns the repo read-tool catalog; U2 stores the tool_call rows those calls produce"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "OK",
+      "target": "BR7.3, BR3.1 \u2014 OxpilotToolCall rows keyed (message_id, call_id) with redacted summaries persist as the durable card record (WF3)"
+    },
+    {
+      "id": "AC1.5.1",
+      "status": "Deferred",
+      "target": "U8 oxpilot-ui owns the confirm dialog; U2 owns the delete entry point behind the gate (BR1.3, WF6)"
+    },
+    {
+      "id": "AC1.5.2",
+      "status": "OK",
+      "target": "BR5.1, BR5.2, BR5.3 \u2014 hook-then-cascade; messages/tool_calls/queued/proposals cascade; grants revoked via U6's registered hook"
+    },
+    {
+      "id": "AC1.5.3",
+      "status": "OK",
+      "target": "BR1.1 \u2014 the user-scoped list stops returning a deleted session; WF6 step 6"
+    },
+    {
+      "id": "AC1.6.1",
+      "status": "Deferred",
+      "target": "BR2.2 covers the store-layer exactly-once half (union dedupe); the transport snapshot-replace half is U3's SSE contract"
+    },
+    {
+      "id": "AC1.8.1",
+      "status": "OK",
+      "target": "BR4.1, BR4.2, WF2a, WF5 \u2014 client-driven message_queue after 409 turn_active + atomic drain-into-transcript delivers after reply ends"
+    },
+    {
+      "id": "AC1.8.2",
+      "status": "OK",
+      "target": "BR4.3, `oxpilot.queue_list` (BR4.3) \u2014 read-only pending list for the UI chip"
+    },
+    {
+      "id": "AC5.2.1",
+      "status": "OK",
+      "target": "BR6.1, BR6.3 \u2014 counters keyed (scope, key, window-day); absent budget = unbounded generous default; configured ceilings resolved from U4"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "BR6.2, WF7 step 3 \u2014 BudgetExceeded surfaces as the in-session terminal refusal"
+    },
+    {
+      "id": "AC5.3.3",
+      "status": "OK",
+      "target": "BR3.1 \u2014 redact() at the service boundary on every body-bearing write"
+    },
+    {
+      "id": "AC5.5.1",
+      "status": "OK",
+      "target": "BR1.3 \u2014 session_get/session_delete/message_queue/queue_list/usage_get extend the U1 SessionOnly pin + enablement gate"
+    },
+    {
+      "id": "FR1.2",
+      "status": "OK",
+      "target": "BR1.1, BR2.4 \u2014 user-scoped reads; last_activity_at drives the newest-first index"
+    },
+    {
+      "id": "FR1.7",
+      "status": "OK",
+      "target": "BR5.1, BR5.3, WF6 \u2014 per-user scoped delete removes the persisted rows"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "BR2.1, BR2.3, WF4 \u2014 server-side transcript persists, ordered, resumable"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": "BR5.1 \u2014 `on_session_delete` seam is where U6's revocation registers; U2 ships the hook mechanism"
+    },
+    {
+      "id": "FR6.6",
+      "status": "OK",
+      "target": "BR7.1 + entities.md \u2014 session/message/tool_call/queued/proposal/usage_counter tables owned by the api-oxpilot service over oxidean-db; tri-dialect migrations per Q9"
+    },
+    {
+      "id": "FR6.7",
+      "status": "OK",
+      "target": "BR6.1, BR6.2, BR6.3 \u2014 per-user + per-instance counters, generous defaults, refusal path"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "BR1.3, BR3.1 \u2014 SessionOnly procs + secrets-redaction on all stored content"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "BR1.1 \u2014 per-user isolation; a caller sees only their own sessions"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "BR1.3 + Q9 \u2014 new tables ship dialect_oxpilot test coverage + the closed PROCEDURES pin update"
+    }
+  ],
+  "reverse": [
+    {
+      "id": "BR1.2",
+      "status": "N/A",
+      "target": "ownership-binding internal rule \u2014 caller-context user_id has no dedicated AC; enforced by BR1.1's contract"
+    },
+    {
+      "id": "BR2.2",
+      "status": "N/A",
+      "target": "client_msg_id dedupe mechanics \u2014 the exactly-once half of AC1.6.1's transport contract lands here at the store layer"
+    },
+    {
+      "id": "BR2.4",
+      "status": "N/A",
+      "target": "activity-touch mechanics \u2014 derived from AC1.1.1 ordering requirement (U1's index)"
+    },
+    {
+      "id": "BR5.2",
+      "status": "N/A",
+      "target": "C8 hook-failure semantics \u2014 contract-level pin, not a user story"
+    },
+    {
+      "id": "BR6.1",
+      "status": "N/A",
+      "target": "window-day rollup shape \u2014 service internals under AC5.2.1"
+    },
+    {
+      "id": "BR7.1",
+      "status": "N/A",
+      "target": "crate-layering rule from components.md + the providers boundary precedent"
+    },
+    {
+      "id": "BR7.2",
+      "status": "N/A",
+      "target": "C5 transcript-read contract pin (U3 prompt assembly consumes full history)"
+    },
+    {
+      "id": "BR7.3",
+      "status": "N/A",
+      "target": "tool-call identity model (message_id + call_id) \u2014 C2 tool-frame keying pin, not a user story"
+    }
+  ]
+}

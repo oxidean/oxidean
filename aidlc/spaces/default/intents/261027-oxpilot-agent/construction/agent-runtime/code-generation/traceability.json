@@ -1,0 +1,687 @@
+{
+  "stage": "code-generation",
+  "unit": "agent-runtime",
+  "upstream_ids": [
+    "AC1.3.1",
+    "AC1.3.2",
+    "AC1.3.3",
+    "AC1.3.4",
+    "AC1.3.5",
+    "AC1.3.6",
+    "AC1.4.1",
+    "AC1.4.2",
+    "AC1.6.1",
+    "AC1.8.1",
+    "AC1.8.2",
+    "AC5.2.2",
+    "FR2.1",
+    "FR2.2",
+    "FR2.3",
+    "FR2.4",
+    "FR6.1",
+    "FR6.3",
+    "FR6.7",
+    "FR7.1",
+    "FR7.3",
+    "NFR1",
+    "NFR3",
+    "NFR4",
+    "NFR6",
+    "NFR9",
+    "ADR-008",
+    "ADR-010",
+    "C1",
+    "C2",
+    "C4",
+    "C5",
+    "C6",
+    "C8",
+    "BR1.2",
+    "BR2.2",
+    "BR2.4",
+    "BR3.3",
+    "BR4.2",
+    "BR4.3",
+    "BR5.3",
+    "BR5.4",
+    "BR6.1",
+    "BR1.1",
+    "BR1.3",
+    "BR2.1",
+    "BR2.3",
+    "BR3.1",
+    "BR3.2",
+    "BR3.4",
+    "BR4.1",
+    "BR5.1",
+    "BR5.2",
+    "BR6.2",
+    "BR7.1",
+    "BR7.2",
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR1.11",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR3.10",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR11.1",
+    "NFR11.2",
+    "NFR11.3",
+    "NFR11.4",
+    "NFR11.5",
+    "NFR11.6"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "chat_post/chat_stream emit C2 frames over /api/ via SSE; snapshot-first contract intact [also: crates/oxidean-api-oxpilot/src/runtime.rs]"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "U8 oxpilot-ui owns rail+transcript+drawer; U3 supplies the frames and rows it renders"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "transcript persists via C5 finish_turn/assemble_prompt; reopening restores via the service-routed snapshot read"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "U8 owns aria-live + labelled composer; U3 emits the message-boundary frames it announces"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "U3 declares `tools` from executor.catalog() in ChatRequest and binds repo identity into the system prompt; the repo read tools themselves are U5 [also: crates/oxidean-api-core/src/oxpilot.rs]"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "tool cards persist durable-first (running -> done/error with summarized inputs) then emit as C2 tool frames; U8 renders from rows"
+    },
+    {
+      "id": "AC1.4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "every failure path produces a terminal frame with a stable code (provider code passthrough, turn_timeout, tool_rounds_exceeded, no_model, oxpilot.disabled, internal); never a silent stall [also: crates/oxidean-api-oxpilot/src/routes.rs]"
+    },
+    {
+      "id": "AC1.4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "finish_turn persists the assistant row with `error` status + partial content on failure paths; transcript and composer survive"
+    },
+    {
+      "id": "AC1.6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "snapshot-replace + append contract through the shipped GET route; subscribe-before-buffer-clone + (message_id, seq) dedupe make attach replay exactly-once"
+    },
+    {
+      "id": "AC1.8.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "drain_and_chain delivers queued rows into the transcript under admission_lock and chains the next turn (generation+1, depth cap 16)"
+    },
+    {
+      "id": "AC1.8.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "card{queued, ref_id} pushed into the live turn's buffer+fanout at insert behind the queued_id guard; resolves via queue_list"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "turn-start check_budget refuses with 429 budget_exceeded before claim; svc_err gained the budget_exceeded -> 429 arm [also: crates/oxidean-api/tests/oxpilot.rs chat_post_budget_exceeded_is_429]"
+    },
+    {
+      "id": "FR2.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "U8 owns the three-pane workspace; U3 serves the frames it renders"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "provider streaming through the C2 frame contract: snapshot/append/tool/terminal via emit_frame + fanout"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "session's repo binding in the system prompt (system_prompt l.182) + executor catalog on ChatRequest for on-demand repo reads"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "server-side transcript via C5 append_message/into_chat_msg; multi-turn state persists per user"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "run_turn/run_round drive ChatRequest/ChatStream through the C4 trait \u2014 the ai-octane-shaped turn loop"
+    },
+    {
+      "id": "FR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "dedicated SSE route under /api/; snapshot-then-attach per stream_job_log precedent"
+    },
+    {
+      "id": "FR6.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "dual-axis usage recording at terminal in finish_turn + turn-start budget refusal in chat_post"
+    },
+    {
+      "id": "FR7.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "catalog declaration + invoke loop is U3's (execute_calls); the repo read tools themselves are U5's registry entries"
+    },
+    {
+      "id": "FR7.3",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "dispatch+timeout mechanics are U3's (invoke_call under TOOL_CALL_TIMEOUT); CI tools land in U5's catalog"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "redact() on every provider-bound tool result and user-derived frame field; ownership-first ordering on turn_cancel/message_queue preserves anti-enumeration"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "PROMPT_TRANSCRIPT_MAX_BYTES window + MAX_TOOL_ROUNDS/TOOL_CALL_TIMEOUT/TURN_MAX_DURATION bounds keep first-token and turn latency finite"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "abort hook + terminal-on-every-failure + wrapper-owned release (spawn_turn_task/drain_and_chain) \u2014 a disconnect or panic cannot orphan the turn map"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "pinned warn/info lines reuse tracing (join-error, drain failure, hook abort); no new stack"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "runtime::tests module covers the unit-test list: turn loop, abort, chain, card emit, prompt windowing, CAS races"
+    },
+    {
+      "id": "ADR-008",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ToolCtx{session_id,user_id,repo_id,proposal_id} identity envelope built server-side on every invoke; executors never trust caller-supplied scope"
+    },
+    {
+      "id": "ADR-010",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "provider pinned per turn via turn_parts() single-read; delete aborts the live turn before cascade via OxpilotTurnAbortHook"
+    },
+    {
+      "id": "C1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "oxpilot.turn_cancel {session_id}->{aborted:bool}/no_active_turn landed: SessionOnly + owned-first; aborted:true on CAS win, false on CAS-loss [also: crates/oxidean-api-oxpilot/src/dispatch.rs, crates/oxidean-api-oxpilot/src/lib.rs]"
+    },
+    {
+      "id": "C2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "frame vocabulary incl. card{queued} + terminal{aborted}; first-wins CAS guarantees 'frames after terminal are never emitted' [also: crates/oxidean-api-oxpilot/src/session.rs, crates/oxidean-api-oxpilot/src/routes.rs]"
+    },
+    {
+      "id": "C4",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ChatMsg tool_call_id/tool_name/tool_calls_json amendment; all three adapters map native tool round-trips [also: crates/oxidean-api-oxpilot/src/providers/openai.rs, crates/oxidean-api-oxpilot/src/providers/anthropic.rs, crates/oxidean-api-oxpilot/src/providers/ollama.rs]"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "every transcript/queue/usage/tool-call read-write flows through the SessionService port, never state.db"
+    },
+    {
+      "id": "C6",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ToolExecutor/ToolCtx/ToolCall/ToolOutput/ToolError/ToolSpec + NullTools \u2014 U3 provides the seam U5 implements"
+    },
+    {
+      "id": "C8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "OxpilotTurnAbortHook registered first at boot (main.rs l.125); emits aborted terminal + cancels, then the C8 chain continues; idempotent, never waits"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ActiveTurns::claim atomic insert-if-absent -> Option (None = occupied); one live turn per session"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "union dedupe stays pre-claim; post-claim recheck releases on hit \u2014 U2 rule preserved, placement per BR1.1"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "durable-first: card persisted running before emit; assistant row before terminal; usage after persist"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "MAX_TOOL_ROUNDS=8 + TOOL_CALL_TIMEOUT=60s + TURN_MAX_DURATION=10min \u2014 spend-protection bounds"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "residual drain runs post-claim pre-insert in chat_post; end-of-turn drain inside drain_and_chain"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "chain-depth bound generation < 16; claim-loss quiet exit"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "run_turn never releases \u2014 wrapper owns release inside drain_and_chain; no permanent 409 pinning"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "emit_terminal CAS on terminal_sent inside the emitted_deltas lock \u2014 exactly-once across turn exit, cancel proc/hook, wrapper panic arm"
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "usage recorded at terminal via svc usage port (dual scope) \u2014 exchange accounting per Q7"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "admission order implemented verbatim: auth \u2192 require_enabled \u2192 owned \u2192 validate \u2192 union dedupe \u2192 check_budget \u2192 claim \u2192 recheck \u2192 residual drain \u2192 insert \u2192 spawn"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "turn_parts() pins {provider, model, executor} under one slot-lock read; slot swaps never reach a live turn"
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "caller-minted message_id on ActiveTurn; exactly one assistant row status streaming\u2192terminal per turn via finish_turn"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "assemble_prompt: newest-first 128 KiB byte window incl. \u2264200B call summary lines; streaming self-row excluded by status filter"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "ChatRequest.tools = executor.catalog(); provider-emitted calls pass raw through executor.invoke only"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "tool results re-enter natively: assistant buffered with tool_calls_json; tool output as ChatMsg{role:tool, tool_call_id, tool_name}"
+    },
+    {
+      "id": "BR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "message_queue enqueue atomic under admission_lock: re-verify (turn_id,liveness) pair then commit; stale \u21d2 session_active_turn_absent"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "end-of-turn drain inside the turn task under admission_lock: terminal status write \u2192 drain_queue \u2192 chain-or-exit"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "OxpilotTurnAbortHook registered first at boot; on_session_delete emits aborted terminal + cancels; C8 chain continues"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "provider Error/open-failure \u2192 terminal {error,code} verbatim; runtime-minted codes: internal, tool_rounds_exceeded, turn_timeout, no_model, card_persist"
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "check_budget at the pinned position pre-claim; over \u21d2 429 budget_exceeded"
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "pinned log lines: info turn-start {session_id,turn_id,provider_id,model}; debug tool/drain/terminal; warn abort+degraded arms"
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "redact() on delta content, args_summary, output_summary, and tool output before it reaches provider or frame"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "turn_cancel is SessionOnly + require_enabled + owned-first; foreign session_id \u21d2 not_found"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "svc invoked under captured owner user_id carried across chained claims \u2014 no request in flight on chains"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "tool authorization lives only behind ToolExecutor; runtime never pre-filters or executes outside the seam"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "ToolCtx populated from captured turn context, never from provider args"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "runtime holds Arc<dyn LlmProvider> only; key material stays inside the U4 registry"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "second redact() pass on tool output before ChatMsg{role:tool}"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "frames carry ids/deltas/card kinds/capped summaries only \u2014 never raw args_json, prompt context, or env"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "assemble_prompt reads transcript(session_id, owner_user_id) \u2014 service refuses foreign reads"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "emitted_deltas/fanout die with the turn; rows are the durable form"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "pending_content/pending_client_msg_id transient in ActiveTurn \u2014 never persisted"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "admission_lock is per-session inside the map entry; dropped with release"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "turn task logs ids only \u2014 never prompt text, deltas, tool bodies"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "pending_content holds the already-redacted copy; never logged/persisted"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "128 KiB newest-first window keeps ChatRequest O(1) in session age"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "repo preamble is the bound ref/summary prefix, not a repo dump"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "emitted_deltas unbounded by design; implicit bound TURN_MAX_DURATION \u00d7 throughput"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "fanout is O(subscribers); buffer push holds a short Mutex only"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "ARGS_SUMMARY_MAX/OUTPUT_SUMMARY_MAX = 2 KiB caps on card fields and tool frame"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "PING_INTERVAL = 15 s shipped cadence reused"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "invoke under timeout(60s) racing cancel; round exhaustion \u21d2 tool_rounds_exceeded"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "TURN_MAX_DURATION = 10 min \u21d2 turn_timeout"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "per-session Mutex<()>: hold span is release\u2192recheck or live-check\u2192enqueue; zero cross-session contention"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "claim lookup/fanout attach/get stay outside the admission lock"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "claim before persist; every post-claim exit (dedupe hit, drain Err) releases"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "spawn_turn_task awaits inner JoinHandle; Err \u21d2 warn + emit_terminal{internal}; wrapper owns release"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "crash leaves streaming rows + dead claim; U2 boot sweep reaps rows, memory dies with process"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "locked enqueue + locked release\u2192recheck-drain: no drainless-window commit"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "drain Err at turn end \u21d2 warn + treat-as-empty + terminal + release"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "MAX_CHAIN_DEPTH = 16 bounds lineage; depth-cap exit leaves rows for next residual drain"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "terminal_sent CAS across abort hook, run exits, wrapper Err arm \u2014 exactly one terminal"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "ChatStreamItem::Error \u21d2 terminal {error, code} with provider stable code"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "model None \u21d2 no_model terminal, never a fabricated request"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "abort emits {aborted} then normal release; delete path never chains onto a doomed session"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "card persisted running before its live frame; crash leaves rows not phantom frames"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "card persist failure feeds back as ToolError card_persist \u2014 provider sees the call answered"
+    },
+    {
+      "id": "NFR11.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ActiveTurns process-local; single-replica caveat documented"
+    },
+    {
+      "id": "NFR11.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "admission_lock atomicity is single-process; same caveat"
+    },
+    {
+      "id": "NFR11.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "fanout in-memory; clients recover via snapshot+attach per C2"
+    },
+    {
+      "id": "NFR11.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "per-session serialization only; cross-session turns run parallel"
+    },
+    {
+      "id": "NFR11.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/runtime.rs",
+      "note": "prompt window makes per-turn request size flat in session length"
+    },
+    {
+      "id": "NFR11.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "fanout O(subscribers); attach replays buffer once"
+    }
+  ]
+}
