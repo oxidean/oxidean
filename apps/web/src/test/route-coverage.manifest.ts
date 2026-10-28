@@ -785,4 +785,24 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+
+  // --- /oxpilot (skeleton slice → full surface in the oxpilot-ui unit) ---
+  {
+    route: "oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oxpilot.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "oxpilot.$session.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oxpilot.integration.test.ts",
+      },
+    ],
+  },
 ];

@@ -62,7 +62,7 @@ const VCS_BROWSER = "apps/web/src/components/repo/vcs-settings-panel.browser.tes
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
 const MCP_HARNESS_BROWSER = "apps/web/src/components/settings/mcp-harness-blocks.browser.test.tsx";
 
-const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
+const AUTH_UI = "apps/w....tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
 const FORGE_SSH = "apps/web/e2e/stack-browser/forge-packages-ssh-orgs.stack.browser.test.tsx";
 const FORGE_MIRROR = "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test.tsx";
@@ -76,16 +76,29 @@ const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
 const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
 const OAUTH_SCOPES_BROWSER = "apps/web/src/routes/oauth-consent.browser.test.tsx";
+const OXPILOT_BROWSER = "apps/web/src/routes/oxpilot.browser.test.tsx";
 
 export const browserCoverageManifest: BrowserCoverageEntry[] = [
   // --- primitives ---
   {
     surface: "components/ui/checkbox.tsrx",
-    coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-controls.browser-harness" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: UI_BROWSER,
+        subject: "ui-controls.browser-harness",
+      },
+    ],
   },
   {
     surface: "components/ui/radio-group.tsrx",
-    coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-controls.browser-harness" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: UI_BROWSER,
+        subject: "ui-controls.browser-harness",
+      },
+    ],
   },
   {
     surface: "components/ui/select.tsrx",
@@ -113,14 +126,22 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/settings/pat-classic-form.tsrx",
     coverage: [
       { kind: "browser", test: PAT_BROWSER, subject: "pat-classic-form" },
-      { kind: "stack-browser", test: PAT_STACK, subject: "expectPatMintClickThroughFlow" },
+      {
+        kind: "stack-browser",
+        test: PAT_STACK,
+        subject: "expectPatMintClickThroughFlow",
+      },
     ],
   },
   {
     surface: "components/settings/pat-fg-form.tsrx",
     coverage: [
       { kind: "browser", test: PAT_BROWSER, subject: "pat-fg-form" },
-      { kind: "stack-browser", test: PAT_STACK, subject: "expectPatMintClickThroughFlow" },
+      {
+        kind: "stack-browser",
+        test: PAT_STACK,
+        subject: "expectPatMintClickThroughFlow",
+      },
     ],
   },
   {
@@ -139,7 +160,11 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/settings/pat-expiry-field.tsrx",
     coverage: [
       { kind: "browser", test: PAT_BROWSER, subject: "pat-expiry-option" },
-      { kind: "stack-browser", test: PAT_STACK, subject: "expectPatMintClickThroughFlow" },
+      {
+        kind: "stack-browser",
+        test: PAT_STACK,
+        subject: "expectPatMintClickThroughFlow",
+      },
     ],
   },
 
@@ -153,7 +178,13 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   },
   {
     surface: "components/settings/mcp-harness-blocks.tsrx",
-    coverage: [{ kind: "browser", test: MCP_HARNESS_BROWSER, subject: "mcp-harness-blocks" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: MCP_HARNESS_BROWSER,
+        subject: "mcp-harness-blocks",
+      },
+    ],
   },
   {
     surface: "components/settings/gpg-key-add-form.tsrx",
@@ -179,13 +210,27 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   },
   {
     surface: "components/repo/repo-features-panel.tsrx",
-    coverage: [{ kind: "browser", test: FEATURES_BROWSER, subject: "repo-features-panel" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: FEATURES_BROWSER,
+        subject: "repo-features-panel",
+      },
+    ],
   },
   {
     surface: "components/repo/mirror-settings-panel.tsrx",
     coverage: [
-      { kind: "browser", test: MIRROR_BROWSER, subject: "mirror-settings-panel" },
-      { kind: "stack-browser", test: FORGE_MIRROR, subject: "expectMirrorAuthToggleFlow" },
+      {
+        kind: "browser",
+        test: MIRROR_BROWSER,
+        subject: "mirror-settings-panel",
+      },
+      {
+        kind: "stack-browser",
+        test: FORGE_MIRROR,
+        subject: "expectMirrorAuthToggleFlow",
+      },
     ],
   },
   {
@@ -495,10 +540,34 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   },
   {
     surface: "routes/oauth.consent.tsrx",
-    coverage: [{ kind: "browser", test: OAUTH_SCOPES_BROWSER, subject: "oauth-consent-approve" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: OAUTH_SCOPES_BROWSER,
+        subject: "oauth-consent-approve",
+      },
+    ],
   },
   {
     surface: "routes/oauth.device.tsrx",
-    coverage: [{ kind: "browser", test: OAUTH_SCOPES_BROWSER, subject: "oauth-device-approve" }],
+    coverage: [
+      {
+        kind: "browser",
+        test: OAUTH_SCOPES_BROWSER,
+        subject: "oauth-device-approve",
+      },
+    ],
+  },
+
+  // --- /oxpilot (U1 skeleton slice — Select portal DOM-race gate) ---
+  {
+    surface: "routes/oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: OXPILOT_BROWSER,
+        subject: "oxpilot-repo-trigger",
+      },
+    ],
   },
 ];

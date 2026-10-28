@@ -31,6 +31,8 @@
     "@octanejs/zustand": "^0.1.67",
     "@oxidean/api-client": "workspace:*",
     "@simplewebauthn/browser": "^14.0.0",
+    "@tanstack/ai-client": "^0.40.1",
+    "@tanstack/ai-octane": "^0.9.1",
     "astro": "^7.4.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
