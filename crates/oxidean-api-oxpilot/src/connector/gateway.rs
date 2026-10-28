@@ -1513,7 +1513,8 @@ impl ConnectorGateway for OxpilotConnectorGateway {
             let _g = lock.lock().await;
             self.dequeue(identity, capabilities, &mut audits).await
         };
-        self.emit_deferred(client, audits.drain(..).collect()).await;
+        self.emit_deferred(client, std::mem::take(&mut audits))
+            .await;
         let mut batch = first?;
         if batch.is_empty() {
             // A pending cancel set answers immediately — kill delivery
@@ -1543,7 +1544,8 @@ impl ConnectorGateway for OxpilotConnectorGateway {
                         let _g = lock.lock().await;
                         self.dequeue(identity, capabilities, &mut audits).await
                     };
-                    self.emit_deferred(client, audits.drain(..).collect()).await;
+                    self.emit_deferred(client, std::mem::take(&mut audits))
+                        .await;
                     batch = again?;
                 }
             }

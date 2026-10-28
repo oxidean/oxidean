@@ -121,7 +121,7 @@ fn decoded_len(b64: &str) -> Result<usize, String> {
             _ => return Err("content_b64 is not base64".to_string()),
         }
     }
-    if pad > 2 || (n + pad) % 4 != 0 {
+    if pad > 2 || !(n + pad).is_multiple_of(4) {
         return Err("content_b64 is not base64".to_string());
     }
     Ok((n + pad) / 4 * 3 - pad)

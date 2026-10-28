@@ -183,10 +183,8 @@ fn check_at(schema: &Value, instance: &Value, field: &str, depth: u32) -> Result
                 return Err(err(field, "must be a boolean"));
             }
         }
-        "null" => {
-            if !instance.is_null() {
-                return Err(err(field, "must be null"));
-            }
+        "null" if !instance.is_null() => {
+            return Err(err(field, "must be null"));
         }
         // No `type` — keyword-only schema (enum/pattern handled above).
         _ => {}
