@@ -112,6 +112,10 @@ export function OxpilotTranscript(props: {
   busy: boolean;
   cards: TranscriptCard[];
   queued: OxpilotQueuedMessage[];
+  /** Post-terminal-error flag — drives `stillQueued` copy (M8). */
+  turnFailed?: boolean;
+  /** Row-drop callback for a deleted queued message (N-01). */
+  onQueuedDelete?: (queuedId: string) => void;
 }) @{
   const qc = useQueryClient();
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -133,7 +137,10 @@ export function OxpilotTranscript(props: {
 
   const queueDelM = useMutation({
     ...oxpilotQueueDeleteMutation(),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
+      // The server emits no `card{queued}` on delete — drop the row
+      // locally so the cancel is visibly honored (N-01).
+      props.onQueuedDelete?.(vars.queued_id);
       invalidateOxpilotQueries(qc);
     },
     onError: (e) => {
@@ -250,7 +257,9 @@ export function OxpilotTranscript(props: {
                   <ConsentCardRef refId={card.ref_id} />;
                 } @else {
                   <p role="status" className="text-[13px] text-muted-foreground">
-                    {`Unsupported card kind “${card.card_kind}” — skipped.` as string}
+                    {
+                      `Unsupported card kind “${card.card_kind}” — update your client.` as string
+                    }
                   </p>;
                 }
               }
@@ -268,7 +277,7 @@ export function OxpilotTranscript(props: {
           @for (const q of props.queued; key q.id) {
             <OxpilotQueuedRow
               queued={q}
-              stillQueued={props.busy}
+              stillQueued={props.turnFailed === true}
               onCancel={() =>
                 queueDelM.mutate({ session_id: props.sessionId, queued_id: q.id })
               }

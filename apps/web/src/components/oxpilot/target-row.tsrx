@@ -20,7 +20,7 @@ import {
  * (BR1.3/BR10.3); `connected·busy` is a client-derived hint the caller
  * supplies from in-flight exec/fs tool cards — never a wire state.
  */
-function lifecycleLabel(t: OxpilotTargetView, busy: boolean): string {
+export function lifecycleLabel(t: OxpilotTargetView, busy: boolean): string {
   switch (t.lifecycle) {
     case "pending_consent":
       return "needs consent";

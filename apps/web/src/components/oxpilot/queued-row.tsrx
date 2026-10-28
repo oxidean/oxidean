@@ -19,10 +19,14 @@ export function OxpilotQueuedRow(props: {
       ◐
     </span>
     <p className="min-w-0 text-[13px] text-foreground">
-      <span className="font-medium">
-        {(props.stillQueued ? "still queued" : "queued") as string}
+      {props.queued.content as string}
+      <span className="font-medium text-muted-foreground">
+        {
+          ` — ${
+            props.stillQueued ? "still queued — send after retry" : "queued — sends next"
+          }` as string
+        }
       </span>
-      {` — ${props.queued.content}` as string}
     </p>
     @if (props.onCancel) {
       <button

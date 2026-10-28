@@ -815,7 +815,7 @@ describe("/oxpilot/{session} workspace", () => {
     emitFrame({ type: "card", card_kind: "mystery_kind", ref_id: "x-1" });
     await waitFor(() => {
       expect(
-        screen.getByText(/Unsupported card kind “mystery_kind” — skipped\./),
+        screen.getByText(/Unsupported card kind “mystery_kind” — update your client\./),
       ).toBeInTheDocument();
     });
   });
@@ -850,8 +850,8 @@ describe("/oxpilot/{session} workspace", () => {
   /** Queued rows are split text nodes — match by their role="status" surface. */
   function queuedRowEl(content: string): Element | null {
     return (
-      [...document.querySelectorAll('[role="status"]')].find((el) =>
-        (el.textContent ?? "").includes(`queued — ${content}`),
+      [...document.querySelectorAll('[role="status"]')].find(
+        (el) => (el.textContent ?? "").includes(content) && /queued/.test(el.textContent ?? ""),
       ) ?? null
     );
   }
@@ -949,7 +949,7 @@ describe("/oxpilot/{session} workspace", () => {
       expect((composer.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
     });
     expect(queuedRowEl("merged")).toBeNull();
-    expect(document.body.textContent ?? "").not.toContain("queued — merged");
+    expect(document.body.textContent ?? "").not.toContain("merged — queued");
   });
 
   it("queue denial surfaces the typed banner and keeps the draft", async () => {
@@ -1014,9 +1014,9 @@ describe("/oxpilot/{session} workspace", () => {
         queued_id: "q-1",
       });
     });
-    // The delete's invalidate marks queue_list stale — the next queued
-    // card refetches and the drained list drops the row (amendment #3).
-    emitFrame({ type: "card", card_kind: "queued", ref_id: "q-1" });
+    // No server frame announces a delete — the row drops from local
+    // state on mutation success (N-01); the invalidate keeps queue_list
+    // honest for any later card.
     await waitFor(() => {
       expect(queuedRowEl("drop me")).toBeNull();
     });
@@ -1559,14 +1559,9 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     await waitFor(() => {
       expect(targetDisconnectMock).toHaveBeenCalledWith({ target_id: "t-1" });
     });
-    // The parent's cache-refresh hook re-offers the same confirm ride —
-    // Cancel closes it without a second proc call.
-    const parentDialog = await screen.findByRole("alertdialog");
-    fireEvent.click(
-      screen
-        .getAllByRole("button", { name: "Cancel" })
-        .find((b) => parentDialog.contains(b)) as Element,
-    );
+    // The row owns the whole confirm+proc ride — post-success the
+    // parent's callback refreshes + toasts only; NO second confirm and
+    // NO second proc call (N-02).
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
@@ -1589,12 +1584,8 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     await waitFor(() => {
       expect(targetRevokeMock).toHaveBeenCalledWith({ target_id: "t-1" });
     });
-    const parentDialog = await screen.findByRole("alertdialog");
-    fireEvent.click(
-      screen
-        .getAllByRole("button", { name: "Cancel" })
-        .find((b) => parentDialog.contains(b)) as Element,
-    );
+    // Same single-ride contract as disconnect — the row owns it end to
+    // end; no phantom route-level confirm re-fires the proc (N-02).
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
@@ -1964,17 +1955,21 @@ describe("oxpilot source pins (SEC-2, SEC-14, zero-telemetry)", () => {
     for (const r of ["oxpilot.tsrx", "oxpilot.$session.tsrx"]) {
       out.push({ file: `routes/${r}`, src: readFileSync(join(SRC, "routes", r), "utf8") });
     }
-    for (const l of ["oxpilot-stream.ts", "oxpilot-chat.tsrx", "oxpilot-queries.ts"]) {
+    for (const l of [
+      "oxpilot-stream.ts",
+      "oxpilot-chat.tsrx",
+      "oxpilot-queries.ts",
+      // The `contentHtml` producer — the escaped pipeline the one
+      // allowlisted sink consumes; the pin must scan it too (N-06).
+      "highlight-diff.ts",
+    ]) {
       out.push({ file: `lib/${l}`, src: readFileSync(join(SRC, "lib", l), "utf8") });
     }
     return out;
   }
 
-  it("SEC-2: dangerouslySetInnerHTML only in diff-card/context-drawer; zero raw sinks", () => {
-    const allowed = new Set([
-      "components/oxpilot/diff-card.tsrx",
-      "components/oxpilot/context-drawer.tsrx",
-    ]);
+  it("SEC-2: dangerouslySetInnerHTML only in diff-card; zero raw sinks", () => {
+    const allowed = new Set(["components/oxpilot/diff-card.tsrx"]);
     const rawSink =
       /(?<![\w$])(innerHTML|outerHTML|insertAdjacentHTML)\b|document\.write|createElement\(\s*["'`]script|\beval\s*\(|new Function\s*\(/;
     for (const { file, src } of oxpilotSources()) {

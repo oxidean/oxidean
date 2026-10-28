@@ -1,10 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { OxpilotSession, OxpilotTargetView } from "@oxidean/api-client";
 import { useState } from "octane";
 import { Bot, Cable, MessageSquarePlus } from "@octanejs/lucide";
 import { AppPage } from "@/components/app-page";
 import { ConnectDialog } from "@/components/oxpilot/connect-dialog";
-import { OxpilotConfirmDialog } from "@/components/oxpilot/confirm-dialog";
 import { OxpilotFlagOff } from "@/components/oxpilot/flag-off";
 import { NewSessionDialog } from "@/components/oxpilot/new-session-dialog";
 import { OxpilotSessionRow } from "@/components/oxpilot/session-row";
@@ -19,9 +18,7 @@ import {
   invalidateOxpilotQueries,
   oxpilotSessionListQueryOptions,
   oxpilotStatusQueryOptions,
-  oxpilotTargetDisconnectMutation,
   oxpilotTargetListQuery,
-  oxpilotTargetRevokeMutation,
 } from "@/lib/oxpilot-queries";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 import { toastSuccess } from "@/lib/toast";
@@ -60,46 +57,11 @@ function OxpilotContent() @{
   const [newOpen, setNewOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
 
-  // Target rows hand `[Disconnect]`/`[Revoke]` back to the route — the
-  // shared M5 confirm + the procs live here (one success toast each;
-  // failures get a typed notice and NO toast).
-  const [confirm, setConfirm] = useState<{
-    kind: "disconnect" | "revoke";
-    target: OxpilotTargetView;
-  } | null>(null);
-  const [targetError, setTargetError] = useState<string | null>(null);
-
+  // Target rows own their `[Disconnect]`/`[Revoke]` confirms + procs
+  // (WF9) — these callbacks fire post-success only: refresh + one toast
+  // each. Failures stay inside the row's typed inline surface.
   function refresh() {
     invalidateOxpilotQueries(qc);
-  }
-
-  const disconnectM = useMutation({
-    ...oxpilotTargetDisconnectMutation(),
-    onSuccess: () => {
-      setTargetError(null);
-      refresh();
-      toastSuccess("Target disconnected");
-    },
-    onError: (e) =>
-      setTargetError(e instanceof Error ? e.message : "Could not disconnect the target."),
-  });
-  const revokeM = useMutation({
-    ...oxpilotTargetRevokeMutation(),
-    onSuccess: () => {
-      setTargetError(null);
-      refresh();
-      toastSuccess("Target revoked");
-    },
-    onError: (e) => setTargetError(e instanceof Error ? e.message : "Could not revoke the target."),
-  });
-
-  /** Confirm-accept arm — a reject leaves the dialog open over the notice. */
-  async function confirmTargetAction() {
-    if (!confirm) return;
-    const m = confirm.kind === "disconnect" ? disconnectM : revokeM;
-    // The typed `targetError` surface is the record — swallow the
-    // rejection so `void confirm()` never logs an unhandled rejection.
-    await m.mutateAsync({ target_id: confirm.target.id }).catch(() => {});
   }
 
   <div className="mx-auto w-full max-w-4xl px-4 py-8" data-testid="oxpilot-page">
@@ -193,22 +155,6 @@ function OxpilotContent() @{
                 Connect a system
               </Button>
             </div>
-            @if (targetError) {
-              <div
-                className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
-                role="alert"
-              >
-                <p className="text-[14px] text-destructive">{targetError as string}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTargetError(null)}
-                >
-                  Dismiss
-                </Button>
-              </div>;
-            }
             @if (targetsQ.isPending) {
               <Skeleton className="mt-3 h-24 w-full" />;
             } @else {
@@ -245,10 +191,14 @@ function OxpilotContent() @{
                         target={t}
                         onManage={refresh}
                         onConnect={refresh}
-                        onDisconnect={() =>
-                          setConfirm({ kind: "disconnect", target: t })
-                        }
-                        onRevoke={() => setConfirm({ kind: "revoke", target: t })}
+                        onDisconnect={() => {
+                          refresh();
+                          toastSuccess("Target disconnected");
+                        }}
+                        onRevoke={() => {
+                          refresh();
+                          toastSuccess("Target revoked");
+                        }}
                       />;
                     }
                   </List>;
@@ -273,23 +223,6 @@ function OxpilotContent() @{
               setConnectOpen(false);
               refresh();
             }}
-          />
-          <OxpilotConfirmDialog
-            open={confirm !== null}
-            title={
-              (confirm?.kind === "disconnect"
-                ? `Disconnect ${confirm.target.label}?`
-                : `Revoke ${confirm?.target.label ?? "this target"}?`) as string
-            }
-            body={
-              (confirm?.kind === "disconnect"
-                ? "The connector goes offline; pending consent requests are cancelled."
-                : "Access ends for this system — every pending grant is cancelled, including in-flight ones. This cannot be undone.") as string
-            }
-            confirmLabel={confirm?.kind === "disconnect" ? "Disconnect" : "Revoke"}
-            danger
-            onConfirm={confirmTargetAction}
-            onClose={() => setConfirm(null)}
           />
         </>;
       }

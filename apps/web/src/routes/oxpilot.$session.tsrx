@@ -205,7 +205,10 @@ function OxpilotSessionContent() @{
       // unamended server that silently ignores `{session_id}` returns
       // other sessions' grants; those cards never render here.
       for (const g of grants ?? []) {
-        if (g.session_id == null || g.session_id === sessionId) {
+        // Exact-match only — an unamended server returns session-less
+        // grants on this read; `== null` would admit every foreign
+        // pending grant as a consent card here (R-10).
+        if (g.session_id === sessionId) {
           pushCard("consent", g.id);
         }
       }
@@ -595,6 +598,24 @@ function OxpilotChatSurface(props: {
     (props.seed.session as { computer_use_target_id?: string | null } | null)
       ?.computer_use_target_id ?? null;
   const boundTarget = boundTargetId ? (targets.find((t) => t.id === boundTargetId) ?? null) : null;
+  // AC4.5.1 — `connected·busy` derives client-side from in-flight
+  // exec/fs tool cards on the session's bound target (Q11-A); a
+  // session binds at most one target, so any running exec/fs card
+  // marks it busy.
+  const busyTargets = useMemo(() => {
+    const ids = new Set<string>();
+    if (!boundTargetId) return ids;
+    for (const call of toolCalls.values()) {
+      if (
+        call.status === "running" &&
+        (call.tool === "exec_shell" || call.tool === "fs_read" || call.tool === "fs_write")
+      ) {
+        ids.add(boundTargetId);
+        break;
+      }
+    }
+    return ids;
+  }, [toolCalls, boundTargetId]);
   const diffs = diffsQ.data ?? [];
   const latestDiff = diffs.length ? diffs[diffs.length - 1]! : null;
 
@@ -610,6 +631,7 @@ function OxpilotChatSurface(props: {
             sessionId={props.sessionId}
             sessions={sessionsQ.data ?? []}
             targets={targets}
+            busyTargets={busyTargets}
             collapsed={railCollapsed}
             onToggle={() => setRailCollapsed((c) => !c)}
           />
@@ -673,6 +695,10 @@ function OxpilotChatSurface(props: {
               busy={busy}
               cards={surfaceCards}
               queued={queuedRows}
+              turnFailed={sendBanner != null}
+              onQueuedDelete={(queuedId) =>
+                setQueuedRows((prev) => prev.filter((q) => q.id !== queuedId))
+              }
             />
             <OxpilotComposer
               busy={busy}

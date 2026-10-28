@@ -3,22 +3,7 @@ import { Menu } from "@octanejs/lucide";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-/** Same lifecycle → text map as the target row (status is always text). */
-function targetStatusLabel(t: OxpilotTargetView): string {
-  switch (t.lifecycle) {
-    case "pending_consent":
-      return "needs consent";
-    case "connected":
-      return "connected";
-    case "disconnected":
-      return "offline";
-    case "revoked":
-      return "revoked";
-    default:
-      return t.status;
-  }
-}
+import { lifecycleLabel } from "@/components/oxpilot/target-row";
 
 /**
  * WF11 sessions rail — the left `nav` pane of the workspace. The one
@@ -33,6 +18,8 @@ export function SessionsRail(props: {
   sessionId: string;
   sessions: OxpilotSession[];
   targets: OxpilotTargetView[];
+  /** Caller-derived `connected·busy` ids — in-flight exec/fs cards. */
+  busyTargets?: ReadonlySet<string>;
   collapsed: boolean;
   onToggle: () => void;
 }) @{
@@ -101,7 +88,12 @@ export function SessionsRail(props: {
                     {t.label as string}
                   </span>
                   <span role="status" className="shrink-0 text-muted-foreground">
-                    {targetStatusLabel(t) as string}
+                    {
+                      lifecycleLabel(
+                        t,
+                        props.busyTargets?.has(t.id) === true,
+                      ) as string
+                    }
                   </span>
                 </li>;
               }

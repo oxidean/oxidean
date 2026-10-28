@@ -126,15 +126,32 @@ migrations and regenerated `packages/api-client`.
 
 ## Tests and coverage
 
-- **`routes/oxpilot.integration.test.ts`** — flag-off state, index
-  enabled state, transcript mount + composer POST shape, 409 denial
-  banner; mocks the full `apiClient.oxpilot` surface the reworked routes
-  consume.
-- **`routes/oxpilot.browser.test.tsx`** — Chromium mounts of the
-  new-session repo Select portal + connect flow (zero DOM races).
-- **`e2e/stack/oxpilot.stack.test.ts`** — stack-level rows for the
-  browser-coverage subjects.
-- **`lib/oxpilot-stream.unit.test.ts`** — SSE buffer/dedupe unit rows.
+- **`routes/oxpilot.integration.test.ts`** — 52 cases: pinned 4-read
+  mount, transcript a11y, pending-queue reseed, tool_call/consent/diff/
+  queued cards, live-turn queue + null receipt + denial/cancel, terminal
+  error/retry, not-found, rail/drawer, target lifecycle + manage/
+  disconnect/revoke, new-session validation/`target_id`/branch paths,
+  all three connect-dialog flows, and the SEC-2/SEC-14/zero-telemetry
+  source-pin greps; mocks the full `apiClient.oxpilot` surface the
+  reworked routes consume.
+- **`routes/oxpilot.browser.test.tsx`** — 3 Chromium mounts: the
+  new-session dialog repo Select + connected-target RadioGroup
+  (`oxpilot-new-session`), the repo-trigger Select DOM race
+  (`oxpilot-repo-trigger`), and the connect dialog step-1 gating →
+  pairing → step-2 (`oxpilot-connect`).
+- **`e2e/stack/oxpilot.stack.test.ts`** — the U1 skeleton slice
+  (status → session_create → POST chat → stream → session_list). The
+  C2 `append*`-or-resnapshot contract is asserted either-way after the
+  race fix.
+- **`lib/oxpilot-stream.unit.test.ts`** — 20 cases: `tool_call`/`card`
+  frame-union parsing, `type:"tool"` catch-all pin, unknown `card_kind`,
+  `tool_calls` merge, `{message_id}:{seq}` dedupe, CONNECTING vs CLOSED
+  `onerror` readyState split, POST/stream sequences.
+- **`crates/oxidean-api/tests/oxpilot.rs`** — proc-level coverage for
+  the three U8 amendments through `test_app_with_gateway` (real
+  DB-backed connector seam): `session_create{target_id}` bind/validate,
+  `grant_list{session_id}` narrowing, `queue_delete` owned/foreign
+  drains.
 - **`test/browser-coverage.manifest.ts`** — subjects rebound onto the
   regex-discovered surfaces (`new-session-dialog`, `connect-dialog`); the
   corrupted `AUTH_UI` path restored.
