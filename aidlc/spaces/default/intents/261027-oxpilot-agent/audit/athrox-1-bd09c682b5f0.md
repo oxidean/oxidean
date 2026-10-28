@@ -43,3 +43,28 @@
 **Message Id**: 1a258cd8
 
 ---
+
+## Session End
+**Timestamp**: 2026-10-28T16:40:47Z
+**Event**: SESSION_ENDED
+**Reason**: prompt_input_exit
+
+---
+
+## Session Resume
+**Timestamp**: 2026-10-28T16:41:08Z
+**Event**: SESSION_RESUMED
+**Source**: resume
+**Session**: linen-sleep
+
+---
+
+## Human Turn
+**Timestamp**: 2026-10-28T16:41:26Z
+**Event**: HUMAN_TURN
+**Session**: linen-sleep
+**Origin**: person
+**Source**: typed
+**Message Id**: 5e0bc0f0
+
+---
