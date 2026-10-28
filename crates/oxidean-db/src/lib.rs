@@ -28,6 +28,8 @@ pub mod oauth;
 pub mod org_invites;
 pub mod org_members;
 pub mod organizations;
+pub mod oxpilot;
+pub mod oxpilot_settings;
 pub mod packages;
 pub mod pages;
 pub mod pat_settings;
@@ -96,6 +98,14 @@ pub use org_invites::OrgInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
 pub use oxidean_core::DbProbeResponse;
+pub use oxpilot::{
+    NewOxpilotAction, NewOxpilotGrant, NewOxpilotMessage, NewOxpilotPairing, NewOxpilotProposal,
+    NewOxpilotQueued, NewOxpilotSession, NewOxpilotTarget, NewOxpilotToolCall, OxpilotActionRow,
+    OxpilotGrantRow, OxpilotMessageRow, OxpilotPairingRow, OxpilotProposalRow,
+    OxpilotQueuedCandidate, OxpilotQueuedRow, OxpilotSessionGrantRevokeOutcome, OxpilotSessionRow,
+    OxpilotTargetLifecycleOutcome, OxpilotTargetRow, OxpilotToolCallRow, OxpilotUsageCounterRow,
+};
+pub use oxpilot_settings::OxpilotSettingsRow;
 pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
 pub use pages::{PagesBuildRow, RepoPagesRow};
 pub use pats::PatRow;
@@ -7022,6 +7032,455 @@ impl Database {
 
     pub async fn delete_instance_workflow_template(&self, id: &str) -> Result<(), String> {
         workflow_templates::delete_instance_workflow_template(self.require_pool()?, id).await
+    }
+
+    // ---- oxpilot ----
+
+    pub async fn insert_oxpilot_session(
+        &self,
+        s: &NewOxpilotSession<'_>,
+    ) -> Result<OxpilotSessionRow, String> {
+        oxpilot::insert_session(self.require_pool()?, s).await
+    }
+
+    pub async fn find_owned_oxpilot_session(
+        &self,
+        session_id: &str,
+        user_id: &str,
+    ) -> Result<Option<OxpilotSessionRow>, String> {
+        oxpilot::find_owned_session(self.require_pool()?, session_id, user_id).await
+    }
+
+    pub async fn list_oxpilot_sessions_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<OxpilotSessionRow>, String> {
+        oxpilot::list_sessions_for_user(self.require_pool()?, user_id).await
+    }
+
+    pub async fn touch_oxpilot_session_activity(&self, session_id: &str) -> Result<(), String> {
+        oxpilot::touch_session_activity(self.require_pool()?, session_id).await
+    }
+
+    pub async fn insert_oxpilot_message(
+        &self,
+        m: &NewOxpilotMessage<'_>,
+    ) -> Result<OxpilotMessageRow, String> {
+        oxpilot::insert_message(self.require_pool()?, m).await
+    }
+
+    pub async fn next_oxpilot_message_seq(&self, session_id: &str) -> Result<i64, String> {
+        oxpilot::next_message_seq(self.require_pool()?, session_id).await
+    }
+
+    pub async fn find_oxpilot_message_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<OxpilotMessageRow>, String> {
+        oxpilot::find_message_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_oxpilot_message_by_client_msg_id(
+        &self,
+        session_id: &str,
+        client_msg_id: &str,
+    ) -> Result<Option<OxpilotMessageRow>, String> {
+        oxpilot::find_message_by_client_msg_id(self.require_pool()?, session_id, client_msg_id)
+            .await
+    }
+
+    pub async fn list_oxpilot_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<OxpilotMessageRow>, String> {
+        oxpilot::list_messages(self.require_pool()?, session_id).await
+    }
+
+    pub async fn set_oxpilot_message_content(&self, id: &str, content: &str) -> Result<(), String> {
+        oxpilot::set_message_content(self.require_pool()?, id, content).await
+    }
+
+    pub async fn set_oxpilot_message_status(&self, id: &str, status: &str) -> Result<(), String> {
+        oxpilot::set_message_status(self.require_pool()?, id, status).await
+    }
+
+    pub async fn sweep_oxpilot_streaming_messages(&self) -> Result<u64, String> {
+        oxpilot::sweep_streaming_messages(self.require_pool()?).await
+    }
+
+    pub async fn delete_oxpilot_session_cascade(
+        &self,
+        session_id: &str,
+        user_id: &str,
+    ) -> Result<u64, String> {
+        oxpilot::delete_session_cascade(self.require_pool()?, session_id, user_id).await
+    }
+
+    pub async fn next_oxpilot_queue_seq(&self, session_id: &str) -> Result<i64, String> {
+        oxpilot::next_queue_seq(self.require_pool()?, session_id).await
+    }
+
+    pub async fn enqueue_oxpilot_queued(
+        &self,
+        q: &NewOxpilotQueued<'_>,
+    ) -> Result<OxpilotQueuedRow, String> {
+        oxpilot::enqueue_queued(self.require_pool()?, q).await
+    }
+
+    pub async fn find_oxpilot_queued_by_cmid(
+        &self,
+        session_id: &str,
+        client_msg_id: &str,
+    ) -> Result<Option<OxpilotQueuedRow>, String> {
+        oxpilot::find_queued_by_cmid(self.require_pool()?, session_id, client_msg_id).await
+    }
+
+    pub async fn list_oxpilot_queued_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<OxpilotQueuedRow>, String> {
+        oxpilot::list_queued_for_session(self.require_pool()?, session_id).await
+    }
+
+    pub async fn drain_oxpilot_queue_tx(
+        &self,
+        session_id: &str,
+        mint_id: impl FnMut() -> String,
+    ) -> Result<Vec<OxpilotMessageRow>, String> {
+        oxpilot::drain_queue_tx(self.require_pool()?, session_id, mint_id).await
+    }
+
+    pub async fn insert_oxpilot_tool_call(
+        &self,
+        t: &NewOxpilotToolCall<'_>,
+    ) -> Result<OxpilotToolCallRow, String> {
+        oxpilot::insert_tool_call(self.require_pool()?, t).await
+    }
+
+    pub async fn find_oxpilot_tool_call_by_call_id(
+        &self,
+        session_id: &str,
+        call_id: &str,
+    ) -> Result<Option<OxpilotToolCallRow>, String> {
+        oxpilot::find_tool_call_by_call_id(self.require_pool()?, session_id, call_id).await
+    }
+
+    pub async fn list_oxpilot_tool_calls_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<OxpilotToolCallRow>, String> {
+        oxpilot::list_tool_calls_for_session(self.require_pool()?, session_id).await
+    }
+
+    pub async fn set_oxpilot_tool_call_status(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        status: &str,
+        output_summary: Option<&str>,
+    ) -> Result<u64, String> {
+        oxpilot::set_tool_call_status(
+            self.require_pool()?,
+            session_id,
+            call_id,
+            status,
+            output_summary,
+        )
+        .await
+    }
+
+    pub async fn insert_oxpilot_proposal(
+        &self,
+        p: &NewOxpilotProposal<'_>,
+    ) -> Result<OxpilotProposalRow, String> {
+        oxpilot::insert_proposal(self.require_pool()?, p).await
+    }
+
+    pub async fn find_oxpilot_proposal(
+        &self,
+        id: &str,
+    ) -> Result<Option<OxpilotProposalRow>, String> {
+        oxpilot::find_proposal(self.require_pool()?, id).await
+    }
+
+    pub async fn find_oxpilot_proposals_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<OxpilotProposalRow>, String> {
+        oxpilot::find_proposals_by_session(self.require_pool()?, session_id).await
+    }
+
+    pub async fn mark_oxpilot_proposal_applied(
+        &self,
+        id: &str,
+        pr_ref: &str,
+    ) -> Result<u64, String> {
+        oxpilot::mark_proposal_applied(self.require_pool()?, id, pr_ref).await
+    }
+
+    pub async fn upsert_oxpilot_usage(
+        &self,
+        user_id: &str,
+        window: &str,
+        requests: i64,
+        tokens: i64,
+    ) -> Result<(), String> {
+        oxpilot::upsert_usage(self.require_pool()?, user_id, window, requests, tokens).await
+    }
+
+    pub async fn read_oxpilot_usage_counters(
+        &self,
+        user_id: &str,
+        window: &str,
+    ) -> Result<
+        (
+            Option<OxpilotUsageCounterRow>,
+            Option<OxpilotUsageCounterRow>,
+        ),
+        String,
+    > {
+        oxpilot::read_counters(self.require_pool()?, user_id, window).await
+    }
+
+    pub async fn insert_oxpilot_pairing(
+        &self,
+        p: &NewOxpilotPairing<'_>,
+    ) -> Result<OxpilotPairingRow, String> {
+        oxpilot::insert_pairing(self.require_pool()?, p).await
+    }
+
+    pub async fn find_oxpilot_pairing_by_code_hash(
+        &self,
+        code_hash: &str,
+    ) -> Result<Option<OxpilotPairingRow>, String> {
+        oxpilot::find_pairing_by_code_hash(self.require_pool()?, code_hash).await
+    }
+
+    pub async fn expire_oxpilot_pairing(&self, id: &str) -> Result<u64, String> {
+        oxpilot::expire_pairing(self.require_pool()?, id).await
+    }
+
+    pub async fn claim_oxpilot_pairing_tx(
+        &self,
+        code_hash: &str,
+        now: &str,
+        target: &NewOxpilotTarget<'_>,
+        grant: &NewOxpilotGrant<'_>,
+    ) -> Result<Option<OxpilotTargetRow>, String> {
+        oxpilot::claim_pairing_tx(self.require_pool()?, code_hash, now, target, grant).await
+    }
+
+    pub async fn find_oxpilot_target(&self, id: &str) -> Result<Option<OxpilotTargetRow>, String> {
+        oxpilot::find_target(self.require_pool()?, id).await
+    }
+
+    pub async fn find_oxpilot_target_by_verifier_hash(
+        &self,
+        verifier_hash: &str,
+    ) -> Result<Option<OxpilotTargetRow>, String> {
+        oxpilot::find_target_by_verifier_hash(self.require_pool()?, verifier_hash).await
+    }
+
+    pub async fn list_oxpilot_targets_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<OxpilotTargetRow>, String> {
+        oxpilot::list_targets_for_user(self.require_pool()?, user_id).await
+    }
+
+    pub async fn touch_oxpilot_target_seen(
+        &self,
+        target_id: &str,
+        now: &str,
+    ) -> Result<(), String> {
+        oxpilot::touch_target_seen(self.require_pool()?, target_id, now).await
+    }
+
+    pub async fn disconnect_oxpilot_target_tx(
+        &self,
+        target_id: &str,
+        now: &str,
+    ) -> Result<Option<OxpilotTargetLifecycleOutcome>, String> {
+        oxpilot::disconnect_target_tx(self.require_pool()?, target_id, now).await
+    }
+
+    pub async fn revoke_oxpilot_target_tx(
+        &self,
+        target_id: &str,
+        now: &str,
+    ) -> Result<Option<OxpilotTargetLifecycleOutcome>, String> {
+        oxpilot::revoke_target_tx(self.require_pool()?, target_id, now).await
+    }
+
+    pub async fn insert_oxpilot_grant(
+        &self,
+        g: &NewOxpilotGrant<'_>,
+    ) -> Result<OxpilotGrantRow, String> {
+        oxpilot::insert_grant(self.require_pool()?, g).await
+    }
+
+    pub async fn find_oxpilot_grant(&self, id: &str) -> Result<Option<OxpilotGrantRow>, String> {
+        oxpilot::find_grant(self.require_pool()?, id).await
+    }
+
+    pub async fn list_oxpilot_grants_for_user(
+        &self,
+        user_id: &str,
+        target_id: Option<&str>,
+    ) -> Result<Vec<OxpilotGrantRow>, String> {
+        oxpilot::list_grants_for_user(self.require_pool()?, user_id, target_id).await
+    }
+
+    pub async fn live_oxpilot_session_grant(
+        &self,
+        target_id: &str,
+        session_id: &str,
+        now: &str,
+    ) -> Result<Option<OxpilotGrantRow>, String> {
+        oxpilot::live_session_grant(self.require_pool()?, target_id, session_id, now).await
+    }
+
+    pub async fn pending_oxpilot_action_grant(
+        &self,
+        target_id: &str,
+        session_id: &str,
+        action_kind: &str,
+        action_args: &str,
+    ) -> Result<Option<OxpilotGrantRow>, String> {
+        oxpilot::pending_action_grant(
+            self.require_pool()?,
+            target_id,
+            session_id,
+            action_kind,
+            action_args,
+        )
+        .await
+    }
+
+    pub async fn pending_oxpilot_connect_grant(
+        &self,
+        target_id: &str,
+        now: &str,
+    ) -> Result<Option<OxpilotGrantRow>, String> {
+        oxpilot::pending_connect_grant(self.require_pool()?, target_id, now).await
+    }
+
+    pub async fn expire_oxpilot_grant(&self, id: &str, now: &str) -> Result<u64, String> {
+        oxpilot::expire_grant(self.require_pool()?, id, now).await
+    }
+
+    pub async fn deny_oxpilot_grant(&self, id: &str, now: &str) -> Result<u64, String> {
+        oxpilot::deny_grant(self.require_pool()?, id, now).await
+    }
+
+    pub async fn allow_oxpilot_connect_grant_tx(
+        &self,
+        grant_id: &str,
+        target_id: &str,
+        now: &str,
+    ) -> Result<bool, String> {
+        oxpilot::allow_connect_grant_tx(self.require_pool()?, grant_id, target_id, now).await
+    }
+
+    pub async fn allow_oxpilot_action_grant_tx(
+        &self,
+        grant_id: &str,
+        stamped_kind: &str,
+        action: &NewOxpilotAction<'_>,
+        now: &str,
+    ) -> Result<Option<OxpilotActionRow>, String> {
+        oxpilot::allow_action_grant_tx(self.require_pool()?, grant_id, stamped_kind, action, now)
+            .await
+    }
+
+    pub async fn revoke_oxpilot_session_grant_tx(
+        &self,
+        grant_id: &str,
+        now: &str,
+    ) -> Result<Option<OxpilotSessionGrantRevokeOutcome>, String> {
+        oxpilot::revoke_session_grant_tx(self.require_pool()?, grant_id, now).await
+    }
+
+    pub async fn insert_oxpilot_action(
+        &self,
+        a: &NewOxpilotAction<'_>,
+    ) -> Result<OxpilotActionRow, String> {
+        oxpilot::insert_action(self.require_pool()?, a).await
+    }
+
+    pub async fn find_oxpilot_action(&self, id: &str) -> Result<Option<OxpilotActionRow>, String> {
+        oxpilot::find_action(self.require_pool()?, id).await
+    }
+
+    pub async fn queued_oxpilot_action_candidates(
+        &self,
+        target_id: &str,
+        limit: i64,
+    ) -> Result<Vec<OxpilotQueuedCandidate>, String> {
+        oxpilot::queued_action_candidates(self.require_pool()?, target_id, limit).await
+    }
+
+    pub async fn claim_oxpilot_action(&self, action_id: &str, now: &str) -> Result<u64, String> {
+        oxpilot::claim_action(self.require_pool()?, action_id, now).await
+    }
+
+    pub async fn cancel_queued_oxpilot_action(
+        &self,
+        action_id: &str,
+        now: &str,
+    ) -> Result<u64, String> {
+        oxpilot::cancel_queued_action(self.require_pool()?, action_id, now).await
+    }
+
+    pub async fn close_oxpilot_action_report(
+        &self,
+        action_id: &str,
+        new_state: &str,
+        result_summary: Option<&str>,
+        now: &str,
+    ) -> Result<u64, String> {
+        oxpilot::close_action_report(
+            self.require_pool()?,
+            action_id,
+            new_state,
+            result_summary,
+            now,
+        )
+        .await
+    }
+
+    pub async fn flip_oxpilot_claimed_to_running(&self, target_id: &str) -> Result<u64, String> {
+        oxpilot::flip_claimed_to_running(self.require_pool()?, target_id).await
+    }
+
+    pub async fn oxpilot_cancel_requested_ids(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<String>, String> {
+        oxpilot::cancel_requested_ids(self.require_pool()?, target_id).await
+    }
+
+    pub async fn cancel_oxpilot_session_connector_rows_tx(
+        &self,
+        session_id: &str,
+        now: &str,
+    ) -> Result<(Vec<OxpilotGrantRow>, Vec<OxpilotActionRow>), String> {
+        oxpilot::cancel_session_connector_rows_tx(self.require_pool()?, session_id, now).await
+    }
+
+    pub async fn get_oxpilot_settings(&self) -> Result<Option<OxpilotSettingsRow>, String> {
+        oxpilot_settings::get_row(self.require_pool()?).await
+    }
+
+    pub async fn upsert_oxpilot_settings(
+        &self,
+        row: &OxpilotSettingsRow,
+    ) -> Result<OxpilotSettingsRow, String> {
+        oxpilot_settings::upsert_row(self.require_pool()?, row).await
+    }
+
+    pub async fn clear_oxpilot_settings(&self) -> Result<(), String> {
+        oxpilot_settings::clear_row(self.require_pool()?).await
     }
 }
 

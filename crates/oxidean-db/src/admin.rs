@@ -31,7 +31,7 @@ pub async fn create_database(admin_url: &str, name: &str) -> Result<String, Stri
         Dialect::Sqlite => {
             return Err(
                 "create_database applies to server engines; SQLite databases are files".into(),
-            )
+            );
         }
     };
     // `ddl` is safe to interpolate: `name` is restricted to [A-Za-z0-9_] above.
