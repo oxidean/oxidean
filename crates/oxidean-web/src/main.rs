@@ -304,7 +304,12 @@ async fn serve_shell(
         session::SessionSignal::Unknown => inject::signed_in(cookie),
     };
     if m.protected && !passes_gate {
-        let target = format!("/login?returnTo={}", urlencoding(path));
+        // Keep the query inside `returnTo` so login lands back on the full URL.
+        let return_to = match query {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_string(),
+        };
+        let target = format!("/login?returnTo={}", urlencoding(&return_to));
         return (StatusCode::FOUND, [(header::LOCATION, target)]).into_response();
     }
     // Legacy-alias redirect (e.g. `/{o}/{r}/settings`) — a real 302 so
@@ -728,6 +733,15 @@ mod tests {
         assert_eq!(
             resp.headers().get(header::LOCATION).unwrap(),
             "/login?returnTo=/jesse/app/settings"
+        );
+
+        // Anonymous + query: `returnTo` carries the full URL so post-login
+        // lands back on `/settings?notice=1` (which then 302s to /general).
+        let resp = get(&st, "/jesse/app/settings?notice=1", None).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/login?returnTo=/jesse/app/settings%3Fnotice%3D1"
         );
 
         let resp = get(&st, "/jesse/app/settings", Some("oxidean_session=x")).await;
