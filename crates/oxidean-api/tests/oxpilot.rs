@@ -618,6 +618,10 @@ const U2_PROCS: &[&str] = &[
     "oxpilot.usage_get",
     // U3 — C1's previously-orphaned abort proc now dispatches.
     "oxpilot.turn_cancel",
+    // U8 — the session-scoped grant read + the inline queued-row cancel
+    // ride the identical SessionOnly / require_enabled gates.
+    "oxpilot.queue_delete",
+    "oxpilot.grant_list",
 ];
 
 /// Occupy the turn map — `message_queue` only exists under a live turn.
@@ -1699,5 +1703,409 @@ async fn diff_apply_fail_stop_keeps_proposal_pending() {
         .expect("row")
         .expect("present");
     assert_eq!(row.status, "pending", "failed apply must stay retryable");
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
+// ---------- U8 amendments — session_create{target_id}, grant_list{session_id}, queue_delete ----------
+//
+// The connector seam these procs ride is the REAL DB-backed gateway:
+// `connected` is reachable only through mint → redeem → connect-grant
+// approval — the same lifecycle the owner UI and the C3 routes drive.
+// Seeding through the seam keeps lifecycle invariants honest; direct
+// row writes are reserved for already-terminal grant shapes.
+
+use oxidean_api_core::oxpilot::ConnectorGateway;
+use oxidean_api_core::rpc::ClientMeta;
+use oxidean_api_oxpilot::connector::OxpilotConnectorGateway;
+
+/// The app variant with the connector-gateway seam installed — the
+/// same `SessionService` Arc backs the session procs AND the gateway's
+/// ownership checks (the one-gateway rule).
+async fn test_app_with_gateway(
+    db: Database,
+    slot: SharedOxpilot,
+) -> (axum::Router, Arc<OxpilotConnectorGateway>) {
+    let mut state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    );
+    let svc = std::sync::Arc::new(oxidean_api_oxpilot::services::OxpilotSessionService::new(
+        state.db.clone(),
+    ));
+    svc.register_delete_hook(std::sync::Arc::new(
+        oxidean_api_oxpilot::runtime::OxpilotTurnAbortHook::new(slot.clone()),
+    ));
+    slot.install_sessions(svc.clone());
+    let gateway = Arc::new(OxpilotConnectorGateway::new(db, svc));
+    slot.install_gateway(gateway.clone());
+    state = state.with_oxpilot(slot);
+    let cors = build_cors("development", None).expect("cors");
+    (router_with_state(state, cors), gateway)
+}
+
+/// Mint → redeem through the seam — a `pending_consent` target with
+/// its live connect grant, exactly what a real `/pair` leaves behind.
+async fn redeemed_target_id(gw: &OxpilotConnectorGateway, uid: &str, label: &str) -> String {
+    let meta = ClientMeta::default();
+    let caps = vec!["exec_shell".to_string()];
+    let pairing = gw
+        .mint_pairing(&meta, uid, label, &caps)
+        .await
+        .expect("mint_pairing");
+    let redeemed = gw
+        .redeem_pairing(&meta, &pairing.pairing_code, label, &caps)
+        .await
+        .expect("redeem_pairing");
+    redeemed.target_id
+}
+
+/// Approve the pending `connect` grant minted at redeem — BR3.2's one
+/// path from `pending_consent` to `connected`.
+async fn approve_connect_grant(gw: &OxpilotConnectorGateway, uid: &str, target_id: &str) {
+    let meta = ClientMeta::default();
+    let grants = gw
+        .list_grants(&meta, uid, Some(target_id), None)
+        .await
+        .expect("list_grants");
+    let connect = grants
+        .iter()
+        .find(|g| g.kind == "connect" && g.state == "pending")
+        .expect("a pending connect grant must ride the fresh target");
+    gw.respond_grant(&meta, uid, &connect.id, true, None)
+        .await
+        .expect("approve connect grant");
+}
+
+/// `session_create` carrying an explicit `target_id` — everything else
+/// about the request mirrors the untargeted helper.
+async fn create_session_targeted(
+    app: &axum::Router,
+    cookie: &str,
+    owner: &str,
+    name: &str,
+    target_id: &str,
+) -> serde_json::Value {
+    let body = format!(
+        r#"{{"procedure":"oxpilot.session_create","input":{{"repo_owner":"{owner}","repo_name":"{name}","goal":"g","target_id":"{target_id}"}}}}"#
+    );
+    rpc_json(app, Some(cookie), &body).await
+}
+
+/// `session_create{target_id}` — a `connected` target binds onto the
+/// created row and rides both owner reads (`session_get` AND
+/// `session_list`); absent and foreign ids answer `not_found`
+/// identically (BR7.1), a non-`connected` lifecycle `bad_input`.
+#[tokio::test]
+async fn session_create_target_id_binds_persists_and_validates() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let (app, gw) = test_app_with_gateway(db.clone(), stub_runtime()).await;
+    let (cookie, uid) = signup_and_login(&app, "oxpu@example.com", "oxpu").await;
+    verify_user(&db, &uid).await;
+    create_repo(&app, &cookie, "tgt").await;
+
+    // A pending_consent target is known-but-not-connected — the dialog
+    // never offers it, and the proc refuses it too (bad_input).
+    let target_id = redeemed_target_id(&gw, &uid, "desk-box").await;
+    let refused = create_session_targeted(&app, &cookie, "oxpu", "tgt", &target_id).await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "rpc.bad_input", "{refused}");
+
+    // Absent ⇒ not_found; foreign ⇒ not_found — identical codes keep
+    // target existence unenumerable (BR7.1). The foreign row is minted
+    // under a second user's id through the same seam.
+    let absent = create_session_targeted(&app, &cookie, "oxpu", "tgt", "t-absent").await;
+    assert_eq!(absent["ok"], false, "{absent}");
+    assert_eq!(absent["error"]["code"], "not_found", "{absent}");
+    let (_cookie2, uid2) = signup_and_login(&app, "oxpv@example.com", "oxpv").await;
+    verify_user(&db, &uid2).await;
+    let foreign = redeemed_target_id(&gw, &uid2, "other-box").await;
+    let foreign_res = create_session_targeted(&app, &cookie, "oxpu", "tgt", &foreign).await;
+    assert_eq!(foreign_res["ok"], false, "{foreign_res}");
+    assert_eq!(foreign_res["error"]["code"], "not_found", "{foreign_res}");
+
+    // Approve the connect grant → `connected` — now the bind persists
+    // onto the row AND projects through both owner reads.
+    approve_connect_grant(&gw, &uid, &target_id).await;
+    let created = create_session_targeted(&app, &cookie, "oxpu", "tgt", &target_id).await;
+    assert_eq!(created["ok"], true, "{created}");
+    let sid = created["data"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        created["data"]["computer_use_target_id"],
+        serde_json::Value::from(target_id.as_str()),
+        "{created}"
+    );
+
+    let got = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(r#"{{"procedure":"oxpilot.session_get","input":{{"session_id":"{sid}"}}}}"#),
+    )
+    .await;
+    assert_eq!(got["ok"], true, "{got}");
+    assert_eq!(
+        got["data"]["computer_use_target_id"],
+        serde_json::Value::from(target_id.as_str()),
+        "{got}"
+    );
+
+    let listed = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.session_list","input":{}}"#,
+    )
+    .await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    let row = listed["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == sid)
+        .expect("created session in list");
+    assert_eq!(
+        row["computer_use_target_id"],
+        serde_json::Value::from(target_id.as_str()),
+        "{row}"
+    );
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
+/// `grant_list{session_id}` narrows to that session's bound grants —
+/// the connect grant (`session_id NULL`) and another session's rows
+/// never leak into the scoped read; foreign/absent session ids resolve
+/// `not_found` identically (BR3.3).
+#[tokio::test]
+async fn grant_list_session_id_narrows_and_denies() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let (app, gw) = test_app_with_gateway(db.clone(), stub_runtime()).await;
+    let (cookie, uid) = signup_and_login(&app, "oxpw@example.com", "oxpw").await;
+    verify_user(&db, &uid).await;
+    create_repo(&app, &cookie, "gl").await;
+
+    // A connected target — leaves a resolved connect grant
+    // (`session_id NULL`) in the table alongside the session-bound rows.
+    let target_id = redeemed_target_id(&gw, &uid, "desk-box").await;
+    approve_connect_grant(&gw, &uid, &target_id).await;
+
+    let s1 = create_session(&app, &cookie, "oxpw", "gl", "one").await;
+    let sid1 = s1["data"]["id"].as_str().unwrap().to_string();
+    let s2 = create_session(&app, &cookie, "oxpw", "gl", "two").await;
+    let sid2 = s2["data"]["id"].as_str().unwrap().to_string();
+
+    // Session-bound action grants minted straight into the store (the
+    // dispatch path's insert shape verbatim — kind `action`,
+    // action_kind the capability wire name, far-future expiry so the
+    // BR3.1 lazy-expiry read leaves them pending).
+    const FAR_FUTURE: &str = "2999-01-01T00:00:00Z";
+    for (gid, sid, kind) in [
+        ("oxpg-u8-a1", sid1.as_str(), "exec_shell"),
+        ("oxpg-u8-a2", sid2.as_str(), "fs_read"),
+    ] {
+        db.insert_oxpilot_grant(&oxidean_db::NewOxpilotGrant {
+            id: gid,
+            target_id: &target_id,
+            user_id: &uid,
+            session_id: Some(sid),
+            kind: "action",
+            action_kind: Some(kind),
+            action_args: Some("{}"),
+            action_summary: Some("{}"),
+            expires_at: FAR_FUTURE,
+        })
+        .await
+        .expect("seed grant");
+    }
+
+    let scoped = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(r#"{{"procedure":"oxpilot.grant_list","input":{{"session_id":"{sid1}"}}}}"#),
+    )
+    .await;
+    assert_eq!(scoped["ok"], true, "{scoped}");
+    let grants = scoped["data"]["grants"].as_array().unwrap();
+    assert_eq!(grants.len(), 1, "{scoped}");
+    assert_eq!(grants[0]["id"], "oxpg-u8-a1");
+    assert_eq!(
+        grants[0]["session_id"],
+        serde_json::Value::from(sid1.as_str())
+    );
+    assert_eq!(grants[0]["capability"], "exec_shell");
+
+    let other = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(r#"{{"procedure":"oxpilot.grant_list","input":{{"session_id":"{sid2}"}}}}"#),
+    )
+    .await;
+    let other_grants = other["data"]["grants"].as_array().unwrap();
+    assert_eq!(other_grants.len(), 1, "{other}");
+    assert_eq!(other_grants[0]["id"], "oxpg-u8-a2");
+
+    // The unscoped owner read still carries everything — the allowed
+    // connect grant + both session-bound rows — so the narrowing above
+    // is the filter, not the table contents.
+    let all = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.grant_list","input":{}}"#,
+    )
+    .await;
+    let all_grants = all["data"]["grants"].as_array().unwrap();
+    let all_ids: Vec<&str> = all_grants.iter().filter_map(|g| g["id"].as_str()).collect();
+    assert_eq!(all_ids.len(), 3, "{all}");
+    assert!(all_ids.contains(&"oxpg-u8-a1"), "{all}");
+    assert!(all_ids.contains(&"oxpg-u8-a2"), "{all}");
+    // … and the third is the connect grant, carrying session_id NULL.
+    assert!(
+        all_grants
+            .iter()
+            .any(|g| g["kind"] == "connect" && g["session_id"].is_null()),
+        "{all}"
+    );
+
+    // Foreign + absent session ids fold into the same `not_found`
+    // (BR3.3) — a scoped read can never enumerate another user's
+    // sessions or their grants.
+    let absent = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.grant_list","input":{"session_id":"s-absent"}}"#,
+    )
+    .await;
+    assert_eq!(absent["ok"], false, "{absent}");
+    assert_eq!(absent["error"]["code"], "not_found", "{absent}");
+
+    let (cookie2, uid2) = signup_and_login(&app, "oxpx@example.com", "oxpx").await;
+    verify_user(&db, &uid2).await;
+    create_repo(&app, &cookie2, "gl2").await;
+    let foreign_session = create_session(&app, &cookie2, "oxpx", "gl2", "f").await;
+    let foreign_sid = foreign_session["data"]["id"].as_str().unwrap();
+    let foreign = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(
+            r#"{{"procedure":"oxpilot.grant_list","input":{{"session_id":"{foreign_sid}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(foreign["ok"], false, "{foreign}");
+    assert_eq!(foreign["error"]["code"], "not_found", "{foreign}");
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
+/// `queue_delete{session_id, queued_id}` — owned rows answer
+/// `{deleted:true}` and leave `queue_list` drained; absent ids and a
+/// foreign session resolve `not_found` without touching the row
+/// (BR3.3/BR9.1). The `require_verified`/`require_enabled` gates ride
+/// U2_PROCS above.
+#[tokio::test]
+async fn queue_delete_drains_and_denies_foreign_or_absent() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let runtime = stub_runtime();
+    let app = test_app(db.clone(), Some(runtime.clone())).await;
+    let (cookie, uid) = signup_and_login(&app, "oxpy2@example.com", "oxpy2").await;
+    verify_user(&db, &uid).await;
+    create_repo(&app, &cookie, "qd").await;
+    let session = create_session(&app, &cookie, "oxpy2", "qd", "g").await;
+    let sid = session["data"]["id"].as_str().unwrap().to_string();
+
+    // The queue exists only under a live turn — claim it, then enqueue.
+    claim_turn(&runtime, &sid).await;
+    let queue = |content: &str, cmid: &str| {
+        format!(
+            r#"{{"procedure":"oxpilot.message_queue","input":{{"session_id":"{sid}","content":"{content}","client_msg_id":"{cmid}"}}}}"#
+        )
+    };
+    let q1 = rpc_json(&app, Some(&cookie), &queue("first", "cm-qd1")).await;
+    assert_eq!(q1["ok"], true, "{q1}");
+    let qid1 = q1["data"]["queued_id"].as_str().unwrap().to_string();
+    let q2 = rpc_json(&app, Some(&cookie), &queue("second", "cm-qd2")).await;
+    assert_eq!(q2["ok"], true, "{q2}");
+    let qid2 = q2["data"]["queued_id"].as_str().unwrap().to_string();
+
+    // Absent queued_id under an owned session ⇒ not_found (stale-ref
+    // honesty, BR9.1); absent session ⇒ not_found before any row read.
+    let missing = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(
+            r#"{{"procedure":"oxpilot.queue_delete","input":{{"session_id":"{sid}","queued_id":"q-absent"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(missing["ok"], false, "{missing}");
+    assert_eq!(missing["error"]["code"], "not_found", "{missing}");
+    let no_session = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(
+            r#"{{"procedure":"oxpilot.queue_delete","input":{{"session_id":"s-absent","queued_id":"{qid1}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(no_session["ok"], false, "{no_session}");
+    assert_eq!(no_session["error"]["code"], "not_found", "{no_session}");
+
+    // A foreign session id folds into the same not_found — the owner's
+    // queued row is untouched.
+    let (cookie2, uid2) = signup_and_login(&app, "oxpz2@example.com", "oxpz2").await;
+    verify_user(&db, &uid2).await;
+    let foreign = rpc_json(
+        &app,
+        Some(&cookie2),
+        &format!(
+            r#"{{"procedure":"oxpilot.queue_delete","input":{{"session_id":"{sid}","queued_id":"{qid1}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(foreign["ok"], false, "{foreign}");
+    assert_eq!(foreign["error"]["code"], "not_found", "{foreign}");
+
+    // Owned delete → {deleted:true}; the drained row leaves queue_list.
+    let deleted = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(
+            r#"{{"procedure":"oxpilot.queue_delete","input":{{"session_id":"{sid}","queued_id":"{qid1}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert_eq!(deleted["data"]["deleted"], true, "{deleted}");
+
+    let list = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(r#"{{"procedure":"oxpilot.queue_list","input":{{"session_id":"{sid}"}}}}"#),
+    )
+    .await;
+    let queued = list["data"]["queued"].as_array().unwrap();
+    assert_eq!(queued.len(), 1, "{list}");
+    assert_eq!(queued[0]["id"], qid2.as_str(), "{list}");
+
+    // The already-drained id is a stale ref now — not_found again.
+    let stale = rpc_json(
+        &app,
+        Some(&cookie),
+        &format!(
+            r#"{{"procedure":"oxpilot.queue_delete","input":{{"session_id":"{sid}","queued_id":"{qid1}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(stale["ok"], false, "{stale}");
+    assert_eq!(stale["error"]["code"], "not_found", "{stale}");
     std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
 }
