@@ -412,7 +412,7 @@ impl ConnectorClient {
         let v: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| C3Error::Transport(format!("bad heartbeat body: {e}")))?;
         let revoked = v.get("revoked").and_then(|b| b.as_bool()).unwrap_or(false);
-        let cancel = v
+        let cancel: Vec<String> = v
             .get("cancel")
             .and_then(|c| c.as_array())
             .map(|a| {

@@ -692,7 +692,7 @@ impl RunState {
                     sigint,
                     sigterm,
                     ..
-                } = &mut self;
+                } = self;
                 tokio::select! {
                     res = child.wait_mut() => ExecEv::Child(res),
                     _ = &mut deadline => ExecEv::Timeout,
