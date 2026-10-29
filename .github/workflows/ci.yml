@@ -317,11 +317,20 @@ jobs:
       - name: web format check (oxfmt + prettier)
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
-        run: bun run test
+        # ~90 integration files serialize (fileParallelism: false) through ONE
+        # worker — the accumulated route-import graph crosses the heap ceiling
+        # mid-run (mark-compact OOM on consecutive attempts, 6 GB included).
+        # Sequential shards give each slice a fresh process, same pattern as
+        # the browser job below.
+        run: |
+          set -eo pipefail
+          bunx turbo run test --filter=@oxidean/api-client
+          cd apps/web
+          bunx vitest run --project unit
+          for shard in 1 2 3 4; do
+            bunx vitest run --project integration --shard="${shard}/4"
+          done
         env:
-          # Integration runs serialized (fileParallelism: false) inside ONE
-          # worker — its route-import graph can graze the default ~4 GB
-          # old-space ceiling and flake into mark-compact OOMs.
           NODE_OPTIONS: --max-old-space-size=6144
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
