@@ -424,6 +424,146 @@ impl ActionOutcome {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Descriptor-relative jail traversal (unix) — shared by the fs ops.
+// `resolve_*` validated the path, but every pathname op afterwards
+// re-traverses it — a raced component swap could redirect the final
+// open/rename outside the jail. The parent is RE-canonicalized at use
+// time and re-checked against the root (in-jail symlink resolution keeps
+// the pathname-path semantics), then each canonical component is opened
+// `O_NOFOLLOW` relative to the previous fd — a swap to a symlink fails
+// ELOOP — and leaf ops all run through that validated dirfd.
+// ---------------------------------------------------------------------------
+
+/// RAII close for the raw fds the jail walk opens.
+#[cfg(unix)]
+struct Fd(libc::c_int);
+
+#[cfg(unix)]
+impl Drop for Fd {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.0);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn cstr_os(s: &std::ffi::OsStr) -> Result<std::ffi::CString, JailError> {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::CString::new(s.as_bytes())
+        .map_err(|_| JailError::Io("path component contains NUL".into()))
+}
+
+/// Open `p`'s parent descriptor-relative — the returned dirfd is anchored
+/// inside the jail, so leaf ops through it cannot escape via a raced
+/// component swap.
+#[cfg(unix)]
+fn jail_dirfd(canonical_root: &Path, p: &Path) -> Result<Fd, JailError> {
+    let ioerr = |e: std::io::Error| JailError::Io(e.to_string());
+    let parent = p
+        .parent()
+        .ok_or_else(|| JailError::Io("target has no parent".into()))?;
+    let canonical_parent = std::fs::canonicalize(parent).map_err(ioerr)?;
+    if !is_within(&canonical_parent, canonical_root) {
+        return Err(JailError::Escape);
+    }
+    let rel = canonical_parent
+        .strip_prefix(canonical_root)
+        .map_err(|e| JailError::Io(e.to_string()))?;
+    let root = {
+        let fd = unsafe {
+            libc::open(
+                cstr_os(canonical_root.as_os_str())?.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(ioerr(std::io::Error::last_os_error()));
+        }
+        Fd(fd)
+    };
+    let mut dir = root;
+    for comp in rel.components() {
+        let name = cstr_os(comp.as_os_str())?;
+        let next = unsafe {
+            libc::openat(
+                dir.0,
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            )
+        };
+        if next < 0 {
+            return Err(ioerr(std::io::Error::last_os_error()));
+        }
+        // The replaced guard closes — the walk holds exactly one fd.
+        dir = Fd(next);
+    }
+    Ok(dir)
+}
+
+/// `fs_read` open (unix): dirfd walk + leaf `openat(O_NOFOLLOW)` + a
+/// regular-file `fstat` — all on the opened inode, no path re-traversal.
+#[cfg(unix)]
+fn jailed_open_read(canonical_root: &Path, p: &Path) -> Result<std::fs::File, JailError> {
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    let dir = jail_dirfd(canonical_root, p)?;
+    let leaf = p
+        .file_name()
+        .ok_or_else(|| JailError::Io("read target has no file name".into()))?;
+    let leaf_c = cstr_os(leaf)?;
+    let fd = unsafe {
+        libc::openat(
+            dir.0,
+            leaf_c.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        let e = std::io::Error::last_os_error();
+        return Err(if e.kind() == std::io::ErrorKind::NotFound {
+            JailError::NotFound
+        } else {
+            JailError::Io(e.to_string())
+        });
+    }
+    let f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(f.as_raw_fd(), &mut st) } != 0 {
+        return Err(JailError::Io(std::io::Error::last_os_error().to_string()));
+    }
+    if (st.st_mode & libc::S_IFMT) != libc::S_IFREG {
+        return Err(JailError::NotRegular);
+    }
+    Ok(f)
+}
+
+/// Pathname fallback (non-unix): the leaf type is verified on the opened
+/// handle; the parent-swap TOCTOU window is the same documented residual
+/// as `jailed_write`.
+#[cfg(not(unix))]
+fn jailed_open_read(_canonical_root: &Path, p: &Path) -> Result<std::fs::File, JailError> {
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .open(p)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                JailError::NotFound
+            } else {
+                JailError::Io(e.to_string())
+            }
+        })?;
+    if !f
+        .metadata()
+        .map_err(|e| JailError::Io(e.to_string()))?
+        .is_file()
+    {
+        return Err(JailError::NotRegular);
+    }
+    Ok(f)
+}
+
 /// `fs_read` — jailed path → ≤128 KiB → base64 → scrubbed. Runs inside
 /// `spawn_blocking` (caller's responsibility).
 pub fn fs_read(
@@ -435,7 +575,14 @@ pub fn fs_read(
     match resolve_read(canonical_root, canonical_cfg, input) {
         Err(j) => ActionOutcome::failed(j.report_reason(input)),
         Ok(p) => {
-            let meta = match std::fs::metadata(&p) {
+            // Open + metadata run on the SAME inode: the descriptor-
+            // relative walk (unix) fails a swapped parent with ELOOP,
+            // and fstat catches a leaf that changed type since resolve.
+            let f = match jailed_open_read(canonical_root, &p) {
+                Err(j) => return ActionOutcome::failed(j.report_reason(input)),
+                Ok(f) => f,
+            };
+            let meta = match f.metadata() {
                 Ok(m) => m,
                 Err(e) => return ActionOutcome::failed(format!("io:{e}")),
             };
@@ -446,46 +593,30 @@ pub fn fs_read(
                 ));
             }
             // Bound the READ, not just the pre-check: a file that grows
-            // between metadata and open is cut at cap+1 and refused.
-            // O_NOFOLLOW closes the leaf-swap TOCTOU between the earlier
-            // symlink_metadata check and this open.
-            let mut oo = std::fs::OpenOptions::new();
-            oo.read(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                oo.custom_flags(libc::O_NOFOLLOW);
-            }
-            match oo.open(&p) {
-                Ok(f) => {
-                    use std::io::Read;
-                    let mut bytes = Vec::new();
-                    match f.take(FS_IO_CAP + 1).read_to_end(&mut bytes) {
-                        Err(e) => ActionOutcome::failed(format!("io:{e}")),
-                        Ok(_) if bytes.len() as u64 > FS_IO_CAP => ActionOutcome::failed(format!(
-                            "too_large:{} bytes — cap {FS_IO_CAP}",
-                            bytes.len()
-                        )),
-                        Ok(_) => {
-                            // Scrub the RAW bytes first — a secret
-                            // inside the file must not survive the
-                            // base64 round-trip. The post-encode text
-                            // scrub stays as the second layer.
-                            scrub_bytes(&mut bytes, secrets);
-                            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                            ActionOutcome::done(scrub(&b64, secrets))
-                        }
-                    }
-                }
+            // between metadata and read is cut at cap+1 and refused.
+            let mut bytes = Vec::new();
+            match f.take(FS_IO_CAP + 1).read_to_end(&mut bytes) {
                 Err(e) => ActionOutcome::failed(format!("io:{e}")),
+                Ok(_) if bytes.len() as u64 > FS_IO_CAP => ActionOutcome::failed(format!(
+                    "too_large:{} bytes — cap {FS_IO_CAP}",
+                    bytes.len()
+                )),
+                Ok(_) => {
+                    // Scrub the RAW bytes first — a secret inside the
+                    // file must not survive the base64 round-trip. The
+                    // post-encode text scrub stays as the second layer.
+                    scrub_bytes(&mut bytes, secrets);
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    ActionOutcome::done(scrub(&b64, secrets))
+                }
             }
         }
     }
 }
 
 /// `fs_write` — decode (≤128 KiB decoded) → jailed resolve → tmp+rename
-/// atomic write. Missing parent dirs are NOT auto-created (BR4.4); the
-/// file mode is `0666 & ~umask` (server-authored content).
+/// atomic write. Missing parent dirs are NOT auto-created (BR4.4); new
+/// files land `0600`, and an existing regular target keeps its mode.
 pub fn fs_write(
     canonical_root: &Path,
     canonical_cfg: &Path,
@@ -523,14 +654,12 @@ pub fn fs_write(
     }
 }
 
-/// Descriptor-relative write chain (unix): `resolve_write` validated the
-/// path, but every pathname op afterwards re-traverses it — a raced
-/// component swap could redirect tmp-create + rename outside the jail.
-/// Instead the parent is RE-canonicalized at use time and re-checked
-/// against the root (in-jail symlink resolution keeps today's semantics),
-/// then each canonical component is opened `O_NOFOLLOW` relative to the
-/// parent fd — a swap to a symlink fails ELOOP — and tmp-create +
-/// rename + cleanup all run through that validated dirfd.
+/// Descriptor-relative write chain (unix): the `jail_dirfd` walk anchors
+/// the parent inside the jail, and tmp-create + rename + cleanup all run
+/// through that validated dirfd. The tmp leaf is created `0600` —
+/// private through the write window — and an existing regular target's
+/// mode is fchmod'd on only after the payload is written + synced, just
+/// before `renameat`.
 #[cfg(unix)]
 fn jailed_write(
     canonical_root: &Path,
@@ -538,78 +667,20 @@ fn jailed_write(
     tmp_leaf: &str,
     bytes: &[u8],
 ) -> Result<(), JailError> {
-    use std::ffi::CString;
     use std::io::Write;
-    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::io::{AsRawFd, FromRawFd};
 
     let ioerr = |e: std::io::Error| JailError::Io(e.to_string());
-    let cstr = |s: &std::ffi::OsStr| -> Result<CString, JailError> {
-        CString::new(s.as_bytes()).map_err(|_| JailError::Io("path component contains NUL".into()))
-    };
-    // RAII close for the raw fds this opens.
-    struct Fd(libc::c_int);
-    impl Drop for Fd {
-        fn drop(&mut self) {
-            unsafe {
-                libc::close(self.0);
-            }
-        }
-    }
-
-    let parent = p
-        .parent()
-        .ok_or_else(|| JailError::Io("write target has no parent".into()))?;
-    // Re-resolve the parent AT USE TIME: a swapped component either
-    // resolves inside the jail (same semantics as the pathname path) or
-    // escapes and is refused here.
-    let canonical_parent = std::fs::canonicalize(parent).map_err(ioerr)?;
-    if !is_within(&canonical_parent, canonical_root) {
-        return Err(JailError::Escape);
-    }
-    let rel = canonical_parent
-        .strip_prefix(canonical_root)
-        .map_err(|e| JailError::Io(e.to_string()))?;
-    let rootfd = unsafe {
-        libc::open(
-            cstr(canonical_root.as_os_str())?.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if rootfd < 0 {
-        return Err(ioerr(std::io::Error::last_os_error()));
-    }
-    let rootfd = Fd(rootfd);
-    // Walk the canonical parent one component at a time, no-follow —
-    // every opened fd is anchored inside the jail, so a post-check swap
-    // to a symlink fails ELOOP instead of escaping.
-    let mut dirfd = rootfd.0;
-    // The deepest opened component's guard — `dirfd` stays valid through
-    // it (or `rootfd`) until the function returns.
-    let mut _dir_guard: Option<Fd> = None;
-    for comp in rel.components() {
-        let name = cstr(comp.as_os_str())?;
-        let next = unsafe {
-            libc::openat(
-                dirfd,
-                name.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            )
-        };
-        if next < 0 {
-            return Err(ioerr(std::io::Error::last_os_error()));
-        }
-        _dir_guard = Some(Fd(next));
-        dirfd = next;
-    }
+    let dir = jail_dirfd(canonical_root, p)?;
+    let dirfd = dir.0;
     let leaf = p
         .file_name()
         .ok_or_else(|| JailError::Io("write target has no file name".into()))?;
-    let tmp_c = cstr(std::ffi::OsStr::new(tmp_leaf))?;
-    let leaf_c = cstr(leaf)?;
+    let tmp_c = cstr_os(std::ffi::OsStr::new(tmp_leaf))?;
+    let leaf_c = cstr_os(leaf)?;
     let result = (|| -> Result<(), std::io::Error> {
         // An existing regular target's mode survives the atomic replace —
-        // the tmp leaf's creation mode applies only to new files.
+        // the tmp leaf's private creation mode applies only to new files.
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
         let mode =
             if unsafe { libc::fstatat(dirfd, leaf_c.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) }
@@ -625,20 +696,20 @@ fn jailed_write(
                 dirfd,
                 tmp_c.as_ptr(),
                 libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                0o666,
+                0o600,
             )
         };
         if tfd < 0 {
             return Err(std::io::Error::last_os_error());
         }
         let mut f = unsafe { std::fs::File::from_raw_fd(tfd) };
+        f.write_all(bytes)?;
+        f.sync_all()?;
         if let Some(m) = mode {
             if unsafe { libc::fchmod(f.as_raw_fd(), m) } != 0 {
                 return Err(std::io::Error::last_os_error());
             }
         }
-        f.write_all(bytes)?;
-        f.sync_all()?;
         drop(f);
         let rc = unsafe { libc::renameat(dirfd, tmp_c.as_ptr(), dirfd, leaf_c.as_ptr()) };
         if rc != 0 {
@@ -1072,7 +1143,9 @@ mod tests {
         let j = jail();
         let target = j.root.join("keep-mode.txt");
         std::fs::write(&target, b"old").unwrap();
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        // set-user-ID + set-group-ID + rwxr-x--- — special bits survive
+        // the tmp+rename replace too.
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o6750)).unwrap();
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"new");
         let out = fs_write(&j.root, &j.cfg, "keep-mode.txt", &b64, &[]);
         assert!(matches!(
@@ -1080,8 +1153,31 @@ mod tests {
             super::super::client::ReportStatus::Done
         ));
         assert_eq!(
-            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
-            0o640
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777,
+            0o6750
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn fs_write_new_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let j = jail();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"n");
+        let out = fs_write(&j.root, &j.cfg, "fresh.txt", &b64, &[]);
+        assert!(matches!(
+            out.status,
+            super::super::client::ReportStatus::Done
+        ));
+        // Server-authored content lands owner-private — a secret the agent
+        // writes must not be world-readable even under a permissive umask.
+        assert_eq!(
+            std::fs::metadata(j.root.join("fresh.txt"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
         );
     }
 

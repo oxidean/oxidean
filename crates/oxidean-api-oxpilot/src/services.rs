@@ -675,6 +675,17 @@ impl SessionService for OxpilotSessionService {
         input: ProposalWrite,
     ) -> Result<OxpilotProposalRow, AppError> {
         self.owned(&input.session_id, user_id).await?;
+        // The owner approves the stored diff — if redaction would change
+        // it, the applied ops could carry secret-shaped bytes the preview
+        // hid. Refuse rather than store a preview that cannot represent
+        // what apply executes.
+        let diff_body = oxidean_core::redact(&input.diff_body);
+        if diff_body != input.diff_body {
+            return Err(AppError::new(
+                "invalid_args",
+                "generated patch contains secret-shaped content",
+            ));
+        }
         let id = Uuid::new_v4().to_string();
         let row = self
             .db
@@ -684,7 +695,7 @@ impl SessionService for OxpilotSessionService {
                 title: &oxidean_core::redact(&input.title),
                 base: &input.base,
                 base_sha: &input.base_sha,
-                diff_body: &oxidean_core::redact(&input.diff_body),
+                diff_body: &diff_body,
                 ops_json: &input.ops_json,
             })
             .await
@@ -1491,6 +1502,38 @@ mod tests {
                 .code,
             "diff_not_pending"
         );
+    }
+
+    #[tokio::test]
+    async fn proposal_with_secret_shaped_diff_is_refused() {
+        let db = test_db().await;
+        let (uid, repo) = seed(&db, "sec").await;
+        let svc = OxpilotSessionService::new(db.clone());
+        new_session(&svc, &uid, &repo, "s1").await;
+
+        // The owner approves the stored diff — a diff whose content would
+        // be redacted can hide secret-shaped ops_json bytes from review.
+        let err = svc
+            .save_proposal(
+                &uid,
+                ProposalWrite {
+                    session_id: "s1".to_string(),
+                    title: "t".to_string(),
+                    base: "main".to_string(),
+                    base_sha: "0".repeat(40),
+                    diff_body: "--- a/.env\n+TOKEN=ghp_abcdefghijklmnop\n".to_string(),
+                    ops_json: "[]".to_string(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "invalid_args");
+        // Nothing was stored — the preview can never diverge from apply.
+        assert!(db
+            .find_oxpilot_proposals_by_session("s1")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     // ---------- tool calls ----------
