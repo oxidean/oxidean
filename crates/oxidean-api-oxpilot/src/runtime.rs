@@ -2125,13 +2125,18 @@ mod tests {
         ])]));
         let state = state_with(&db, Some(provider.clone()), Some("m-1"), None).await;
         let (t, svc) = start_turn(&state, &session, 0).await;
+        // The route reserves the request at admission; completion then
+        // records tokens only (requests:0) so the two sum to one charge.
+        svc.admit_budget(&uid, BudgetCaps::default())
+            .await
+            .expect("admission reserves the request");
         let outcome = run_turn(&state, &session, &t).await.unwrap();
         assert!(outcome.drained.is_empty());
         let buf = buffered(&t).await;
         let last = buf.last().unwrap();
         assert_eq!(last["type"], "terminal");
         assert_eq!(last["result"], "done");
-        // Row completed + usage recorded (any_items ⇒ requests:1, tokens:12).
+        // Row completed + usage recorded (admission 1 request + 12 tokens).
         let msgs = svc.list_messages(&uid, &session.id).await.unwrap();
         let arow = msgs.iter().find(|m| m.id == t.message_id).unwrap();
         assert_eq!(arow.status, "complete");

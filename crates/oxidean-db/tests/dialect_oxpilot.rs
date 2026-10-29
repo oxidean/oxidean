@@ -2580,39 +2580,34 @@ async fn user_delete_cascades_connector_rows() {
     db.insert_oxpilot_session(&session(sid, &uid, &repo, "t"))
         .await
         .expect("session");
-    db.insert_oxpilot_pairing(&pairing(
-        "oxpp-cascade-1",
-        &uid,
-        "h1",
-        "box",
-        "[]",
-        "2030-01-01",
-    ))
-    .await
-    .expect("pairing");
-    db.insert_oxpilot_target(&target(
+    // claimed_target mints the pairing + claims it, producing the
+    // target row and a connect grant in one tx.
+    claimed_target(&db, "cascade-1", &uid, "h-cascade-1", "vh-cascade-1").await;
+    db.insert_oxpilot_action(&action(
+        "oxpa-cascade-1",
         "oxpt-cascade-1",
         &uid,
-        "oxpp-cascade-1",
-        "box",
-        "[]",
-        "vh1",
+        sid,
+        "oxpg-cascade-1-connect",
+        "exec_shell",
+        "{}",
+        "run",
     ))
     .await
-    .expect("target");
+    .expect("action");
 
     db.delete_user(&uid).await.expect("delete user");
 
     // The pairing row is gone…
     assert!(db
-        .find_oxpilot_pairing_by_code_hash("h1")
+        .find_oxpilot_pairing_by_code_hash("h-cascade-1")
         .await
         .expect("pairing read")
         .is_none());
     // …and the verifier lookup can never resurrect the connector —
     // the security surface this migration exists to close.
     assert!(db
-        .find_oxpilot_target_by_verifier_hash("vh1")
+        .find_oxpilot_target_by_verifier_hash("vh-cascade-1")
         .await
         .expect("verifier lookup")
         .is_none());
@@ -2620,5 +2615,16 @@ async fn user_delete_cascades_connector_rows() {
         .find_oxpilot_target("oxpt-cascade-1")
         .await
         .expect("target read")
+        .is_none());
+    // Grants and actions cascade transitively through the target.
+    assert!(db
+        .find_oxpilot_grant("oxpg-cascade-1-connect")
+        .await
+        .expect("grant read")
+        .is_none());
+    assert!(db
+        .find_oxpilot_action("oxpa-cascade-1")
+        .await
+        .expect("action read")
         .is_none());
 }
