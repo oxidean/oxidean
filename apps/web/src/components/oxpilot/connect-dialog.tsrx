@@ -46,11 +46,12 @@ const CAPS = [
  * set, so the narrowed grant must travel on the command line too. The
  * `pairing_code` never leaves this component: no transcript, live region,
  * storage, or logs (SEC-7). `target_list` polls every 2s bounded by the
- * server `expires_at`; a matching `pending_consent` target gets its
- * pending `connect` grant allowed once (`grant_respond` — the user
- * initiated pairing, so the connect consent is auto-approved), and
- * `connected` ends the wait. Esc/close on step 2 abandons the wait and
- * `reset()`s the mutations — the code dies with the dialog.
+ * server `expires_at`; a matching `pending_consent` target is surfaced
+ * for explicit review — identity + requested capabilities — and its
+ * pending `connect` grant is answered (`grant_respond`) only after the
+ * user picks Allow or Deny. `connected` ends the wait. Esc/close on
+ * step 2 abandons the wait and `reset()`s the mutations — the code dies
+ * with the dialog.
  */
 export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   const qc = useQueryClient();
@@ -62,16 +63,16 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   const [phase, setPhase] = useState<WaitPhase>("waiting");
   const [formError, setFormError] = useState<string | null>(null);
   const [consentError, setConsentError] = useState<string | null>(null);
-  const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
-  const consentTried = useRef<Set<string>>(new Set());
+  const [pendingTarget, setPendingTarget] = useState<OxpilotTargetView | null>(null);
+  const consentShown = useRef<Set<string>>(new Set());
 
   const pairingM = useMutation({
     ...oxpilotPairingCreateMutation(),
     onSuccess: (view) => {
       setFormError(null);
       setConsentError(null);
-      setPendingTargetId(null);
-      consentTried.current = new Set();
+      setPendingTarget(null);
+      consentShown.current = new Set();
       setPairing(view);
       setPhase("waiting");
       setStep(2);
@@ -82,12 +83,12 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   });
 
   /**
-   * `pending_consent` → find the pending `connect` grant for the just-
-   * minted target and allow it once. The user drove the pairing, so the
-   * connect consent is the only grant auto-responded in the unit.
+   * `pending_consent` → answer the pending `connect` grant for the
+   * surfaced target with the user's explicit Allow/Deny decision —
+   * pairing alone never grants consent.
    */
   const consentM = useMutation({
-    mutationFn: async (targetId: string) => {
+    mutationFn: async ({ targetId, allow }: { targetId: string; allow: boolean }) => {
       const listRes = await apiClient.oxpilot.grantList({ target_id: targetId });
       if (!listRes.ok) {
         throw new Error(`${listRes.error.code}: ${listRes.error.message}`);
@@ -96,7 +97,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       if (!grant) throw new Error("oxpilot.not_found: no pending connect grant");
       const res = await apiClient.oxpilot.grantRespond({
         grant_id: grant.id,
-        allow: true,
+        allow,
       });
       if (!res.ok) {
         throw new Error(`${res.error.code}: ${res.error.message}`);
@@ -108,7 +109,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       invalidateOxpilotQueries(qc);
     },
     onError: (e) => {
-      setConsentError(e instanceof Error ? e.message : "Could not approve the connection.");
+      setConsentError(e instanceof Error ? e.message : "Could not answer the connection request.");
     },
   });
 
@@ -132,7 +133,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   }, [waiting, pairing]);
 
   // Match the minted `pairing_id` — connected ⇒ success; pending_consent
-  // ⇒ approve its connect grant exactly once per target id.
+  // ⇒ surface the target for explicit Allow/Deny review (once per id).
   useEffect(() => {
     if (!waiting || !pairing) return;
     const match = (targetsQ.data ?? []).find(
@@ -140,18 +141,14 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     );
     if (!match) return;
     if (match.lifecycle === "connected") {
+      setPendingTarget(null);
       setPhase("success");
       invalidateOxpilotQueries(qc);
       return;
     }
-    if (
-      match.lifecycle === "pending_consent" &&
-      !consentTried.current.has(match.id) &&
-      !consentM.isPending
-    ) {
-      consentTried.current.add(match.id);
-      setPendingTargetId(match.id);
-      consentM.mutate(match.id);
+    if (match.lifecycle === "pending_consent" && !consentShown.current.has(match.id)) {
+      consentShown.current.add(match.id);
+      setPendingTarget(match);
     }
   }, [targetsQ.data, waiting, pairing]);
 
@@ -180,7 +177,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     setPhase("waiting");
     setFormError(null);
     setConsentError(null);
-    setPendingTargetId(null);
+    setPendingTarget(null);
     props.onClose();
   }
 
@@ -312,23 +309,44 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
                 </p>;
               }
             }
-            @if (consentError) {
-              <div className="flex flex-col gap-2">
-                <AuthErrorBanner message={consentError} />
-                <div>
+            @if (phase === "waiting" && pendingTarget) {
+              <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+                <p className="text-[13px] font-medium text-foreground">
+                  Review connection request
+                </p>
+                <p className="text-[13px] text-muted-foreground">
+                  {`Target: ${pendingTarget.label}` as string}
+                </p>
+                <p className="text-[13px] text-muted-foreground">
+                  {
+                    `Requested capabilities: ${pendingTarget.granted_caps.join(", ")}` as string
+                  }
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    disabled={consentM.isPending}
+                    onClick={() =>
+                      consentM.mutate({ targetId: pendingTarget.id, allow: true })
+                    }
+                  >
+                    Allow connection
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
                     disabled={consentM.isPending}
-                    onClick={() => {
-                      if (pendingTargetId) consentM.mutate(pendingTargetId);
-                    }}
+                    onClick={() =>
+                      consentM.mutate({ targetId: pendingTarget.id, allow: false })
+                    }
                   >
-                    Retry consent
+                    Deny
                   </Button>
                 </div>
               </div>;
+            }
+            @if (consentError) {
+              <AuthErrorBanner message={consentError} />;
             }
             <DialogFooter>
               @if (phase === "timeout") {

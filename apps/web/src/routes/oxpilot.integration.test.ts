@@ -1851,7 +1851,7 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("connect dialog: step-1 gating → pairing → step-2 command → auto-consent → Done", async () => {
+  it("connect dialog: step-1 gating → pairing → step-2 command → explicit consent → Done", async () => {
     const expiry = new Date(Date.now() + 60_000).toISOString();
     let connected = false;
     let resolveRespond: ((v: unknown) => void) | undefined;
@@ -1871,7 +1871,7 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
                 label: "desk-box",
                 lifecycle: connected ? "connected" : "pending_consent",
                 pairing_id: "pair-99",
-                granted_caps: [],
+                granted_caps: ["exec_shell"],
               }),
             ],
           },
@@ -1938,9 +1938,19 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     expect(screen.getByText(/Waiting for the connector to check in/)).toBeInTheDocument();
     expect(document.body.textContent ?? "").not.toContain("PAIR-42-XYZ");
 
-    // Poll matches pairing_id → pending_consent → grantList{target_id} →
-    // grantRespond{allow:true} (the only auto-approved consent in the unit).
+    // Poll matches pairing_id → pending_consent → the target is surfaced
+    // for review with its identity + requested capabilities — pairing
+    // alone never answers the grant.
     await waitFor(() => {
+      expect(screen.getByText("Review connection request")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Target: desk-box/)).toBeInTheDocument();
+    expect(screen.getByText(/Requested capabilities: exec_shell/)).toBeInTheDocument();
+    expect(grantRespondMock).not.toHaveBeenCalled();
+    // Explicit Allow → grantList{target_id} → grantRespond{allow:true}.
+    fireEvent.click(screen.getByRole("button", { name: "Allow connection" }));
+    await waitFor(() => {
+      expect(grantListMock).toHaveBeenCalledWith({ target_id: "t-99" });
       expect(grantRespondMock).toHaveBeenCalledWith({ grant_id: "g-c", allow: true });
     });
     // Release the held response — the next targetsQ refetch reports the
@@ -1954,6 +1964,67 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+  });
+
+  it("connect dialog: Deny answers the connect grant allow:false — never auto-approved", async () => {
+    const expiry = new Date(Date.now() + 60_000).toISOString();
+    mountIndex(() => {
+      sessionListMock.mockResolvedValue({ ok: true, data: { sessions: [] } });
+      pairingCreateMock.mockResolvedValue({
+        ok: true,
+        data: { pairing_id: "pair-98", pairing_code: "PAIR-98-XYZ", expires_at: expiry },
+      });
+      targetListMock.mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          data: {
+            targets: [
+              makeTarget({
+                id: "t-98",
+                label: "lab-box",
+                lifecycle: "pending_consent",
+                pairing_id: "pair-98",
+                granted_caps: ["fs_read"],
+              }),
+            ],
+          },
+        }),
+      );
+      grantListMock.mockImplementation((input: unknown) => {
+        const f = input as { target_id?: string };
+        if (f.target_id === "t-98") {
+          return Promise.resolve({
+            ok: true,
+            data: {
+              grants: [makeGrant({ id: "g-d", kind: "connect", session_id: null })],
+            },
+          });
+        }
+        return Promise.resolve({ ok: true, data: { grants: [] } });
+      });
+      grantRespondMock.mockResolvedValue({ ok: true, data: { state: "denied" } });
+    });
+    await openConnect();
+    fireEvent.input(document.getElementById("oxpilot-target-name") as Element, {
+      target: { value: "lab-box" },
+    });
+    fireEvent.click(checkboxInput("fs.read"));
+    fireEvent.click(checkboxInput("I understand the granted capabilities"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    // Redemption surfaces the review card; nothing is answered until Deny.
+    await waitFor(() => {
+      expect(screen.getByText("Review connection request")).toBeInTheDocument();
+    });
+    expect(grantRespondMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    await waitFor(() => {
+      expect(grantRespondMock).toHaveBeenCalledWith({ grant_id: "g-d", allow: false });
+    });
+    // The wait stays live — a denied connector never flips to connected.
+    expect(screen.getByText(/Waiting for the connector to check in/)).toBeInTheDocument();
   });
 
   it("connect dialog: expired pairing shows the timeout + retry affordance", async () => {
