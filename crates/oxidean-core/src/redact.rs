@@ -257,7 +257,7 @@ fn hold_start(buf: &str) -> usize {
     // BEGIN now would let the body ride later deltas unmasked. The
     // last BEGIN must postdate the last END to count as open.
     if let Some(begin) = buf.rfind(PEM_BEGIN) {
-        if buf.rfind(PEM_END).map_or(true, |end| end < begin) {
+        if buf.rfind(PEM_END).is_none_or(|end| end < begin) {
             return begin;
         }
     }
