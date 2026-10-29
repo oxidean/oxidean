@@ -541,7 +541,7 @@ fn jailed_write(
     use std::ffi::CString;
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::io::FromRawFd;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
 
     let ioerr = |e: std::io::Error| JailError::Io(e.to_string());
     let cstr = |s: &std::ffi::OsStr| -> Result<CString, JailError> {
@@ -608,6 +608,18 @@ fn jailed_write(
     let tmp_c = cstr(std::ffi::OsStr::new(tmp_leaf))?;
     let leaf_c = cstr(leaf)?;
     let result = (|| -> Result<(), std::io::Error> {
+        // An existing regular target's mode survives the atomic replace —
+        // the tmp leaf's creation mode applies only to new files.
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        let mode =
+            if unsafe { libc::fstatat(dirfd, leaf_c.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) }
+                == 0
+                && (st.st_mode & libc::S_IFMT) == libc::S_IFREG
+            {
+                Some(st.st_mode & 0o7777)
+            } else {
+                None
+            };
         let tfd = unsafe {
             libc::openat(
                 dirfd,
@@ -620,6 +632,11 @@ fn jailed_write(
             return Err(std::io::Error::last_os_error());
         }
         let mut f = unsafe { std::fs::File::from_raw_fd(tfd) };
+        if let Some(m) = mode {
+            if unsafe { libc::fchmod(f.as_raw_fd(), m) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
@@ -1045,6 +1062,26 @@ mod tests {
         assert_eq!(
             std::fs::read(j.root.join("sub/dir/new.bin")).unwrap(),
             b"payload-bytes"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn fs_write_preserves_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let j = jail();
+        let target = j.root.join("keep-mode.txt");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"new");
+        let out = fs_write(&j.root, &j.cfg, "keep-mode.txt", &b64, &[]);
+        assert!(matches!(
+            out.status,
+            super::super::client::ReportStatus::Done
+        ));
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
         );
     }
 

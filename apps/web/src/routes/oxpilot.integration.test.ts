@@ -2055,8 +2055,9 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
   it("connect dialog: denied consent outlives the pairing-code expiry", async () => {
     // Connector redeems near the code's TTL — expiry must not erase a live
     // consent review; the target stays pending_consent server-side.
-    // expires_at is minted at CALL time and the target list response is
-    // gated on pairing completing, so redemption ordering is deterministic.
+    // expires_at is minted at CALL time and every target-list response is
+    // gated on the pairing call starting, so redemption ordering is
+    // deterministic — repeat polls can't leave earlier requests pending.
     const targetPayload = {
       ok: true,
       data: {
@@ -2071,25 +2072,27 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
         ],
       },
     };
-    let releaseTargets: ((v: typeof targetPayload) => void) | undefined;
+    let markPairingStarted: (() => void) | undefined;
+    const pairingStarted = new Promise<void>((resolve) => {
+      markPairingStarted = resolve;
+    });
     mountIndex(() => {
       sessionListMock.mockResolvedValue({ ok: true, data: { sessions: [] } });
-      pairingCreateMock.mockImplementation(() =>
-        Promise.resolve({
+      pairingCreateMock.mockImplementation(() => {
+        markPairingStarted?.();
+        return Promise.resolve({
           ok: true,
           data: {
             pairing_id: "pair-97",
             pairing_code: "PAIR-97-XYZ",
             expires_at: new Date(Date.now() + 400).toISOString(),
           },
-        }),
-      );
-      targetListMock.mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            releaseTargets = resolve as (v: typeof targetPayload) => void;
-          }),
-      );
+        });
+      });
+      targetListMock.mockImplementation(async () => {
+        await pairingStarted;
+        return targetPayload;
+      });
       grantListMock.mockImplementation((input: unknown) => {
         const f = input as { target_id?: string };
         if (f.target_id === "t-97") {
@@ -2114,11 +2117,8 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
       expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled();
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    // Redeem immediately after pairing — strictly before the 400ms expiry.
-    await waitFor(() => {
-      expect(releaseTargets).toBeDefined();
-    });
-    releaseTargets?.(targetPayload);
+    // Redeem strictly before the 400ms expiry — the gated list resolves as
+    // soon as pairingCreate fires.
     await waitFor(() => {
       expect(screen.getByText("Review connection request")).toBeInTheDocument();
     });
