@@ -211,7 +211,9 @@ async fn status_flag_off_and_gated_denial() {
     assert_eq!(st["ok"], true, "{st}");
     assert_eq!(st["data"]["enabled"], false);
     assert_eq!(st["data"]["reason"], "flag_off");
-    assert_eq!(st["data"]["provider"], serde_json::Value::Null);
+    // Flag-off still reports the resolved provider identity to the
+    // sys-admin — the stub default is what flag-on would engage.
+    assert_eq!(st["data"]["provider"]["id"], "stub");
 
     let list = rpc_json(
         &app,

@@ -1409,15 +1409,16 @@ pub fn resolve_enablement_slot(slot: &OxpilotRuntimeSlot) -> EnablementState {
 /// non-admin callers (BR2.6).
 pub const STUB_PROVIDER_ID: &str = "stub";
 
-/// `enabled` AND resolved to the stub provider ⇒ the caller must be a
-/// sys-admin. The slot can't see callers — every gate/proc wraps its
-/// enablement check with this plus `user_is_sys_admin`/`caller_is_sys_admin`.
+/// Resolved to the stub provider ⇒ the caller must be a sys-admin —
+/// keyed on the provider identity alone so a flag-off-but-stub-resolved
+/// status answer still masks for non-admins (they must see nothing
+/// oxpilot-shaped, BR2.6). The slot can't see callers — every gate/proc
+/// wraps its enablement check with this plus
+/// `user_is_sys_admin`/`caller_is_sys_admin`.
 pub fn stub_restricted(st: &EnablementState) -> bool {
-    st.enabled
-        && st
-            .provider
-            .as_ref()
-            .is_some_and(|(id, _)| id == STUB_PROVIDER_ID)
+    st.provider
+        .as_ref()
+        .is_some_and(|(id, _)| id == STUB_PROVIDER_ID)
 }
 
 /// Sys-admin probe for surfaces holding a raw user id (SSE edge,
@@ -1446,7 +1447,12 @@ pub async fn caller_is_sys_admin(ctx: &RpcCtx) -> bool {
 /// denial for non-sys-admins (BR2.6 — the hide reads identical to off).
 pub async fn require_enabled(ctx: &RpcCtx) -> Result<EnablementState, AppError> {
     let state = resolve_enablement(ctx).await;
-    let hidden = stub_restricted(&state) && !caller_is_sys_admin(ctx).await;
+    // Unauthenticated callers (anonymous, PAT bearer) skip the hidden
+    // check — the proc's own auth gate answers `auth.unauthenticated` /
+    // `auth.pat_scope`; a fail-closed `false` here would shadow those
+    // codes with `oxpilot.disabled` for every stub-enabled deployment.
+    let hidden =
+        stub_restricted(&state) && ctx.session.is_some() && !caller_is_sys_admin(ctx).await;
     if !state.enabled || hidden {
         return Err(AppError::new(
             "oxpilot.disabled",
@@ -1942,8 +1948,17 @@ mod tests {
             reason: None,
         };
         assert!(!stub_restricted(&real));
-        // flag_off → the disabled path already denies; nothing to
-        // restrict on top.
+        // flag_off + stub-resolved → still restricted: a non-admin status
+        // read masks instead of revealing the stub identity. The gate
+        // denial reads the same `oxpilot.disabled` either way.
+        let off_stub = EnablementState {
+            enabled: false,
+            flag_on: false,
+            provider: Some((STUB_PROVIDER_ID.to_string(), Some("stub-1".to_string()))),
+            reason: Some("flag_off".to_string()),
+        };
+        assert!(stub_restricted(&off_stub));
+        // flag_off + no provider → nothing to hide.
         let off = EnablementState {
             enabled: false,
             flag_on: false,

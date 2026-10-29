@@ -120,7 +120,10 @@ async fn seed_user(db: &Database, tag: &str) -> String {
         tag,
         "",
         None,
-        oxidean_core::Role::User,
+        // Sys-admin: every suite runtime is stub-enabled, and stub is the
+        // sys-admin-only preview (BR2.6) — a plain user can't reach
+        // pairing or session surfaces at all.
+        oxidean_core::Role::SysAdmin,
     )
     .await
     .expect("create user");
