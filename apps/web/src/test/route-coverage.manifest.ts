@@ -315,6 +315,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+  {
+    route: "admin/oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/oxpilot.integration.test.ts",
+      },
+    ],
+  },
 
   // --- forge repo chrome + code browse (11.1-04) ---
   {

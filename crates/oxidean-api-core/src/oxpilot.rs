@@ -1929,6 +1929,7 @@ mod tests {
         // enabled + stub → the restricted surface (BR2.6).
         let stub = EnablementState {
             enabled: true,
+            flag_on: true,
             provider: Some((STUB_PROVIDER_ID.to_string(), Some("stub-1".to_string()))),
             reason: None,
         };
@@ -1936,6 +1937,7 @@ mod tests {
         // enabled + a real provider → open to everyone.
         let real = EnablementState {
             enabled: true,
+            flag_on: true,
             provider: Some(("openai".to_string(), None)),
             reason: None,
         };
@@ -1944,6 +1946,7 @@ mod tests {
         // restrict on top.
         let off = EnablementState {
             enabled: false,
+            flag_on: false,
             provider: None,
             reason: Some("flag_off".to_string()),
         };
