@@ -1673,7 +1673,10 @@ mod tests {
         assert!(card.output_summary.contains("***"));
         assert_eq!(card.tool, "fs_read");
 
-        // Proposal title/diff redact; base is an identifier.
+        // Proposal title redacts (display-only); the diff body stores
+        // verbatim — a secret-shaped diff is refused outright since a
+        // redacted preview could hide what apply executes (see
+        // proposal_with_secret_shaped_diff_is_refused).
         let p = svc
             .save_proposal(
                 &uid,
@@ -1682,14 +1685,14 @@ mod tests {
                     title: format!("t {secret}"),
                     base: "main".to_string(),
                     base_sha: "0".repeat(40),
-                    diff_body: format!("d {secret}"),
+                    diff_body: "d".to_string(),
                     ops_json: "[]".to_string(),
                 },
             )
             .await
             .unwrap();
         assert!(p.title.contains("***"));
-        assert!(p.diff_body.contains("***"));
+        assert_eq!(p.diff_body, "d");
         assert_eq!(p.base, "main");
     }
 
