@@ -493,7 +493,6 @@ pub fn fs_write(
     content_b64: &str,
     secrets: &[String],
 ) -> ActionOutcome {
-    use std::io::Write;
     let bytes = match base64::engine::general_purpose::STANDARD.decode(content_b64) {
         Ok(b) => b,
         Err(e) => return ActionOutcome::failed(format!("invalid_args:content_b64 {e}")),
@@ -504,10 +503,6 @@ pub fn fs_write(
     match resolve_write(canonical_root, canonical_cfg, input) {
         Err(j) => ActionOutcome::failed(j.report_reason(input)),
         Ok(p) => {
-            let parent = match p.parent() {
-                Some(par) => par.to_path_buf(),
-                None => return ActionOutcome::failed("io:no parent".into()),
-            };
             // create_new (O_CREAT|O_EXCL): a pre-planted file OR symlink at
             // the tmp name fails instead of being followed — the pid in
             // the name is observable to a jailed exec_shell ($PPID), so a
@@ -516,29 +511,162 @@ pub fn fs_write(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.subsec_nanos())
                 .unwrap_or(0);
-            let tmp = parent.join(format!(".oxpilot-tmp-{}-{nanos}", std::process::id()));
-            let result = (|| -> Result<(), std::io::Error> {
-                let mut f = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&tmp)?;
-                f.write_all(&bytes)?;
-                f.sync_all()?;
-                std::fs::rename(&tmp, &p)?;
-                Ok(())
-            })();
-            if result.is_err() {
-                let _ = std::fs::remove_file(&tmp);
-            }
-            match result {
+            let tmp_leaf = format!(".oxpilot-tmp-{}-{nanos}", std::process::id());
+            match jailed_write(canonical_root, &p, &tmp_leaf, &bytes) {
                 Ok(()) => ActionOutcome::done(scrub(
                     &format!("wrote {} bytes to {input}", bytes.len()),
                     secrets,
                 )),
-                Err(e) => ActionOutcome::failed(format!("io:{e}")),
+                Err(j) => ActionOutcome::failed(j.report_reason(input)),
             }
         }
     }
+}
+
+/// Descriptor-relative write chain (unix): `resolve_write` validated the
+/// path, but every pathname op afterwards re-traverses it — a raced
+/// component swap could redirect tmp-create + rename outside the jail.
+/// Instead the parent is RE-canonicalized at use time and re-checked
+/// against the root (in-jail symlink resolution keeps today's semantics),
+/// then each canonical component is opened `O_NOFOLLOW` relative to the
+/// parent fd — a swap to a symlink fails ELOOP — and tmp-create +
+/// rename + cleanup all run through that validated dirfd.
+#[cfg(unix)]
+fn jailed_write(
+    canonical_root: &Path,
+    p: &Path,
+    tmp_leaf: &str,
+    bytes: &[u8],
+) -> Result<(), JailError> {
+    use std::ffi::CString;
+    use std::io::Write;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::io::FromRawFd;
+
+    let ioerr = |e: std::io::Error| JailError::Io(e.to_string());
+    let cstr = |s: &std::ffi::OsStr| -> Result<CString, JailError> {
+        CString::new(s.as_bytes()).map_err(|_| JailError::Io("path component contains NUL".into()))
+    };
+    // RAII close for the raw fds this opens.
+    struct Fd(libc::c_int);
+    impl Drop for Fd {
+        fn drop(&mut self) {
+            unsafe {
+                libc::close(self.0);
+            }
+        }
+    }
+
+    let parent = p
+        .parent()
+        .ok_or_else(|| JailError::Io("write target has no parent".into()))?;
+    // Re-resolve the parent AT USE TIME: a swapped component either
+    // resolves inside the jail (same semantics as the pathname path) or
+    // escapes and is refused here.
+    let canonical_parent = std::fs::canonicalize(parent).map_err(ioerr)?;
+    if !is_within(&canonical_parent, canonical_root) {
+        return Err(JailError::Escape);
+    }
+    let rel = canonical_parent
+        .strip_prefix(canonical_root)
+        .map_err(|e| JailError::Io(e.to_string()))?;
+    let rootfd = unsafe {
+        libc::open(
+            cstr(canonical_root.as_os_str())?.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if rootfd < 0 {
+        return Err(ioerr(std::io::Error::last_os_error()));
+    }
+    let rootfd = Fd(rootfd);
+    // Walk the canonical parent one component at a time, no-follow —
+    // every opened fd is anchored inside the jail, so a post-check swap
+    // to a symlink fails ELOOP instead of escaping.
+    let mut dirfd = rootfd.0;
+    // The deepest opened component's guard — `dirfd` stays valid through
+    // it (or `rootfd`) until the function returns.
+    let mut _dir_guard: Option<Fd> = None;
+    for comp in rel.components() {
+        let name = cstr(comp.as_os_str())?;
+        let next = unsafe {
+            libc::openat(
+                dirfd,
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            )
+        };
+        if next < 0 {
+            return Err(ioerr(std::io::Error::last_os_error()));
+        }
+        _dir_guard = Some(Fd(next));
+        dirfd = next;
+    }
+    let leaf = p
+        .file_name()
+        .ok_or_else(|| JailError::Io("write target has no file name".into()))?;
+    let tmp_c = cstr(std::ffi::OsStr::new(tmp_leaf))?;
+    let leaf_c = cstr(leaf)?;
+    let result = (|| -> Result<(), std::io::Error> {
+        let tfd = unsafe {
+            libc::openat(
+                dirfd,
+                tmp_c.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o666,
+            )
+        };
+        if tfd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut f = unsafe { std::fs::File::from_raw_fd(tfd) };
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        let rc = unsafe { libc::renameat(dirfd, tmp_c.as_ptr(), dirfd, leaf_c.as_ptr()) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        unsafe {
+            libc::unlinkat(dirfd, tmp_c.as_ptr(), 0);
+        }
+    }
+    result.map_err(ioerr)
+}
+
+/// Pathname fallback (non-unix): the `create_new` tmp-leaf guard still
+/// holds; the parent-swap TOCTOU window is a documented residual —
+/// Windows directory-symlink creation needs elevation or developer mode.
+#[cfg(not(unix))]
+fn jailed_write(
+    _canonical_root: &Path,
+    p: &Path,
+    tmp_leaf: &str,
+    bytes: &[u8],
+) -> Result<(), JailError> {
+    use std::io::Write;
+    let ioerr = |e: std::io::Error| JailError::Io(e.to_string());
+    let parent = p
+        .parent()
+        .ok_or_else(|| JailError::Io("write target has no parent".into()))?;
+    let tmp = parent.join(tmp_leaf);
+    let result = (|| -> Result<(), std::io::Error> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, p)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map_err(ioerr)
 }
 
 // ---------------------------------------------------------------------------

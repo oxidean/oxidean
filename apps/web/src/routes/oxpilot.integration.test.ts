@@ -2055,28 +2055,40 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
   it("connect dialog: denied consent outlives the pairing-code expiry", async () => {
     // Connector redeems near the code's TTL — expiry must not erase a live
     // consent review; the target stays pending_consent server-side.
-    const expiry = new Date(Date.now() + 400).toISOString();
+    // expires_at is minted at CALL time and the target list response is
+    // gated on pairing completing, so redemption ordering is deterministic.
+    const targetPayload = {
+      ok: true,
+      data: {
+        targets: [
+          makeTarget({
+            id: "t-97",
+            label: "lab-box",
+            lifecycle: "pending_consent",
+            pairing_id: "pair-97",
+            granted_caps: ["fs_read"],
+          }),
+        ],
+      },
+    };
+    let releaseTargets: ((v: typeof targetPayload) => void) | undefined;
     mountIndex(() => {
       sessionListMock.mockResolvedValue({ ok: true, data: { sessions: [] } });
-      pairingCreateMock.mockResolvedValue({
-        ok: true,
-        data: { pairing_id: "pair-97", pairing_code: "PAIR-97-XYZ", expires_at: expiry },
-      });
-      targetListMock.mockImplementation(() =>
+      pairingCreateMock.mockImplementation(() =>
         Promise.resolve({
           ok: true,
           data: {
-            targets: [
-              makeTarget({
-                id: "t-97",
-                label: "lab-box",
-                lifecycle: "pending_consent",
-                pairing_id: "pair-97",
-                granted_caps: ["fs_read"],
-              }),
-            ],
+            pairing_id: "pair-97",
+            pairing_code: "PAIR-97-XYZ",
+            expires_at: new Date(Date.now() + 400).toISOString(),
           },
         }),
+      );
+      targetListMock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            releaseTargets = resolve as (v: typeof targetPayload) => void;
+          }),
       );
       grantListMock.mockImplementation((input: unknown) => {
         const f = input as { target_id?: string };
@@ -2102,6 +2114,11 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
       expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled();
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    // Redeem immediately after pairing — strictly before the 400ms expiry.
+    await waitFor(() => {
+      expect(releaseTargets).toBeDefined();
+    });
+    releaseTargets?.(targetPayload);
     await waitFor(() => {
       expect(screen.getByText("Review connection request")).toBeInTheDocument();
     });
