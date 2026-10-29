@@ -2002,7 +2002,10 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
         }
         return Promise.resolve({ ok: true, data: { grants: [] } });
       });
-      grantRespondMock.mockResolvedValue({ ok: true, data: { state: "denied" } });
+      grantRespondMock.mockImplementation((input: unknown) => {
+        const f = input as { allow?: boolean };
+        return Promise.resolve({ ok: true, data: { state: f.allow ? "allowed" : "denied" } });
+      });
     });
     await openConnect();
     fireEvent.input(document.getElementById("oxpilot-target-name") as Element, {
@@ -2023,12 +2026,23 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     await waitFor(() => {
       expect(grantRespondMock).toHaveBeenCalledWith({ grant_id: "g-d", allow: false });
     });
-    // A successful decision dismisses the review card; the wait stays
-    // live — a denied connector never flips to connected.
+    // A decided Deny swaps the card for an explicit denied state — the
+    // check-in wait does NOT masquerade as still-pending.
     await waitFor(() => {
-      expect(screen.queryByText("Review connection request")).not.toBeInTheDocument();
+      expect(screen.getByText("Connection denied")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Waiting for the connector to check in/)).toBeInTheDocument();
+    expect(screen.queryByText("Review connection request")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for the connector to check in/)).not.toBeInTheDocument();
+    // "Review again" re-opens the card — the owner read re-mints a
+    // pending grant — and Allow answers it.
+    fireEvent.click(screen.getByRole("button", { name: "Review again" }));
+    await waitFor(() => {
+      expect(screen.getByText("Review connection request")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow connection" }));
+    await waitFor(() => {
+      expect(grantRespondMock).toHaveBeenCalledWith({ grant_id: "g-d", allow: true });
+    });
   });
 
   it("connect dialog: expired pairing shows the timeout + retry affordance", async () => {

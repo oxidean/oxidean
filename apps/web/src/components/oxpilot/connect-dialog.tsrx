@@ -64,6 +64,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   const [formError, setFormError] = useState<string | null>(null);
   const [consentError, setConsentError] = useState<string | null>(null);
   const [pendingTarget, setPendingTarget] = useState<OxpilotTargetView | null>(null);
+  const [denied, setDenied] = useState(false);
   const consentShown = useRef<Set<string>>(new Set());
 
   const pairingM = useMutation({
@@ -72,6 +73,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       setFormError(null);
       setConsentError(null);
       setPendingTarget(null);
+      setDenied(false);
       consentShown.current = new Set();
       setPairing(view);
       setPhase("waiting");
@@ -104,9 +106,13 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       }
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       setConsentError(null);
-      setPendingTarget(null);
+      // Allow dismisses the card (the connector flips to connected);
+      // Deny keeps `pendingTarget` under a denied state so the user can
+      // re-review — the owner read re-mints a fresh pending grant.
+      if (vars.allow) setPendingTarget(null);
+      else setDenied(true);
       invalidateOxpilotQueries(qc);
     },
     onError: (e) => {
@@ -143,6 +149,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     if (!match) return;
     if (match.lifecycle === "connected") {
       setPendingTarget(null);
+      setDenied(false);
       setPhase("success");
       invalidateOxpilotQueries(qc);
       return;
@@ -179,6 +186,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     setFormError(null);
     setConsentError(null);
     setPendingTarget(null);
+    setDenied(false);
     props.onClose();
   }
 
@@ -289,13 +297,39 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
               />;
             }
             @if (phase === "waiting") {
-              <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <span
-                  aria-hidden
-                  className="inline-block size-2 animate-pulse rounded-full bg-primary"
-                />
-                Waiting for the connector to check in…
-              </p>;
+              @if (denied && pendingTarget) {
+                <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+                  <p className="text-[13px] font-medium text-foreground">
+                    Connection denied
+                  </p>
+                  <p className="text-[13px] text-muted-foreground">
+                    {
+                      `You denied ${pendingTarget.label}. Review it again to allow the connection, or close to keep it denied.` as string
+                    }
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={consentM.isPending}
+                      onClick={() => setDenied(false)}
+                    >
+                      Review again
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => close()}>
+                      Close
+                    </Button>
+                  </div>
+                </div>;
+              } @else {
+                <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                  <span
+                    aria-hidden
+                    className="inline-block size-2 animate-pulse rounded-full bg-primary"
+                  />
+                  Waiting for the connector to check in…
+                </p>;
+              }
             } @else {
               @if (phase === "success") {
                 <p className="flex items-center gap-2 text-[14px] text-foreground">
@@ -310,7 +344,11 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
                 </p>;
               }
             }
-            @if (phase === "waiting" && pendingTarget) {
+            @if (
+              phase === "waiting" &&
+              pendingTarget &&
+              !denied
+            ) {
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <p className="text-[13px] font-medium text-foreground">
                   Review connection request
