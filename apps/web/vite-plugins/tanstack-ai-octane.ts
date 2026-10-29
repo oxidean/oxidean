@@ -38,6 +38,13 @@ function resolveFile(base: string): string | null {
 /** Deepest string in an `exports` condition tree — `import` before `default`. */
 function pickCondition(v: unknown): string | null {
   if (typeof v === "string") return v;
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const hit = pickCondition(item);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
     return pickCondition(o.import) ?? pickCondition(o.default);
@@ -47,6 +54,10 @@ function pickCondition(v: unknown): string | null {
 
 /** The `exports[sub]` target for `sub` like `"."`/`"./x"`, or null. */
 function pickExport(exports: unknown, key: string): string | null {
+  // String/array shorthand (`"exports": "./dist/index.js"`) only binds `.`.
+  if (typeof exports === "string" || Array.isArray(exports)) {
+    return key === "." ? pickCondition(exports) : null;
+  }
   if (exports === null || typeof exports !== "object") return null;
   const table = exports as Record<string, unknown>;
   // `{".": {...}}` and bare condition objects (`{"import": "..."}`) both
@@ -72,10 +83,18 @@ function resolveFrom(fromFile: string, spec: string): string | null {
     const pkgDir = path.join(dir, "node_modules", seg);
     const manifestPath = path.join(pkgDir, "package.json");
     if (fs.existsSync(manifestPath)) {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
-        exports?: unknown;
-      };
-      const target = pickExport(manifest.exports, `.${sub}`) ?? `.${sub}`;
+      let manifest: { exports?: unknown; module?: string; main?: string };
+      try {
+        manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+          exports?: unknown;
+          module?: string;
+          main?: string;
+        };
+      } catch {
+        return null;
+      }
+      const legacy = sub === "" ? (manifest.module ?? manifest.main) : undefined;
+      const target = pickExport(manifest.exports, `.${sub}`) ?? legacy ?? `.${sub}`;
       const hit = resolveFile(path.join(pkgDir, target));
       return hit;
     }
