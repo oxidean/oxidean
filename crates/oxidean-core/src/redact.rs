@@ -199,7 +199,7 @@ const AWAITING_RUN: &[&str] = &[PEM_BEGIN, "Bearer ", "bearer "];
 /// `"Bear"` + `"er xyz…"`): each half passes its own pattern check.
 /// `StreamRedactor` holds back the buffer's trailing in-flight
 /// candidate — a partial opener, a matched opener whose token run
-/// hasn't terminated, or a bare [`AWAITING_RUN`] opener awaiting its
+/// hasn't terminated, or a bare `AWAITING_RUN` opener awaiting its
 /// token — and emits only `redact`ed text that can no longer extend
 /// a match. Flush emits whatever remains, where buffer-end IS the
 /// token end (an unterminated long run still masks).
