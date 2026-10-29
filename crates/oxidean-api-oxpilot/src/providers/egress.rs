@@ -99,18 +99,25 @@ fn proxy_env_hosts() -> std::collections::HashSet<String> {
 }
 
 /// Redirect-free provider client — connect 10 s, total 300 s
-/// (NFR4.7/NFR4.9). The validating resolver is installed for every
-/// provider client: literal-IP URLs skip DNS entirely, domain URLs get
-/// the per-connect public check. Per-adapter `build` calls this
-/// exactly once.
-pub(crate) fn provider_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+/// (NFR4.7/NFR4.9). `enforce_public` installs the validating resolver:
+/// literal-IP URLs skip DNS entirely, domain URLs get the per-connect
+/// public check. Adapters whose `base_url` is exempt from the public
+/// bound (`validate_base_url`'s Ollama self-host arm) pass `false` —
+/// their hosts are operator-chosen targets like `ollama:11434` or
+/// `host.docker.internal` that must resolve to private space.
+pub(crate) fn provider_http_client(enforce_public: bool) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::none())
-        .dns_resolver(std::sync::Arc::new(PublicOnlyResolver {
+        .redirect(reqwest::redirect::Policy::none());
+    let builder = if enforce_public {
+        builder.dns_resolver(std::sync::Arc::new(PublicOnlyResolver {
             proxy_hosts: proxy_env_hosts(),
         }))
+    } else {
+        builder
+    };
+    builder
         .build()
         .expect("static reqwest builder config cannot fail")
 }

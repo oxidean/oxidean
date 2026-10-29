@@ -468,6 +468,19 @@ pub trait SessionService: Send + Sync {
     /// Union dedupe transcript-first-then-queue (BR2.2); a transcript hit
     /// returns `{null, null}`, a queued hit returns the existing receipt.
     async fn enqueue(&self, user_id: &str, input: Enqueue) -> Result<QueuedReceipt, AppError>;
+    /// Read-only resend probe — the same union dedupe `enqueue` runs,
+    /// exposed so `message_queue` can answer a resend WITHOUT admitting
+    /// budget first (BR2.2 + BR6.2 take two: the admission reservation
+    /// mutates counters, so probing after `admit_budget` would charge
+    /// every idempotent resend). `None` ⇒ no prior receipt, the caller
+    /// admits and enqueues. Runs under the session admission lock so
+    /// the probe serializes with concurrent enqueues.
+    async fn peek_queued_receipt(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        client_msg_id: &str,
+    ) -> Result<Option<QueuedReceipt>, AppError>;
     /// Atomic claim+delete+append (BR4.2) — the appended transcript rows
     /// in delivery order.
     async fn drain_queue(
@@ -1646,6 +1659,14 @@ mod tests {
             unimplemented!()
         }
         async fn enqueue(&self, _u: &str, _i: Enqueue) -> Result<QueuedReceipt, AppError> {
+            unimplemented!()
+        }
+        async fn peek_queued_receipt(
+            &self,
+            _u: &str,
+            _s: &str,
+            _c: &str,
+        ) -> Result<Option<QueuedReceipt>, AppError> {
             unimplemented!()
         }
         async fn drain_queue(

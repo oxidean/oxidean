@@ -193,6 +193,44 @@ impl OxpilotSessionService {
         }))
     }
 
+    /// BR2.2 union dedupe — TRANSCRIPT first (the message already
+    /// landed; nothing to queue), then the queue itself (idempotent
+    /// resend returns the SAME receipt — same row, same position).
+    /// Read-only: shared by `enqueue`'s pre-insert path and
+    /// `peek_queued_receipt`'s pre-admission probe.
+    async fn dedupe_receipt(
+        &self,
+        session_id: &str,
+        client_msg_id: &str,
+    ) -> Result<Option<QueuedReceipt>, AppError> {
+        if self
+            .db
+            .find_oxpilot_message_by_client_msg_id(session_id, client_msg_id)
+            .await
+            .map_err(db_err)?
+            .is_some()
+        {
+            tracing::debug!(
+                session_id = %session_id,
+                arm = "transcript",
+                "oxpilot enqueue dedupe hit"
+            );
+            return Ok(Some(QueuedReceipt {
+                queued_id: None,
+                position: None,
+            }));
+        }
+        if let Some(receipt) = self.queued_receipt(session_id, client_msg_id).await? {
+            tracing::debug!(
+                session_id = %session_id,
+                arm = "queue",
+                "oxpilot enqueue dedupe hit"
+            );
+            return Ok(Some(receipt));
+        }
+        Ok(None)
+    }
+
     /// The UTC `YYYY-MM-DD` rollup window (BR6.1) — both scopes share the
     /// caller-computed day so a midnight boundary can't split one delta
     /// across two windows.
@@ -415,29 +453,7 @@ impl SessionService for OxpilotSessionService {
         // landed; nothing to queue), then the queue itself (idempotent
         // resend returns the SAME receipt — same row, same position).
         if let Some(cmid) = input.client_msg_id.as_deref() {
-            if self
-                .db
-                .find_oxpilot_message_by_client_msg_id(&input.session_id, cmid)
-                .await
-                .map_err(db_err)?
-                .is_some()
-            {
-                tracing::debug!(
-                    session_id = %input.session_id,
-                    arm = "transcript",
-                    "oxpilot enqueue dedupe hit"
-                );
-                return Ok(QueuedReceipt {
-                    queued_id: None,
-                    position: None,
-                });
-            }
-            if let Some(receipt) = self.queued_receipt(&input.session_id, cmid).await? {
-                tracing::debug!(
-                    session_id = %input.session_id,
-                    arm = "queue",
-                    "oxpilot enqueue dedupe hit"
-                );
+            if let Some(receipt) = self.dedupe_receipt(&input.session_id, cmid).await? {
                 return Ok(receipt);
             }
         }
@@ -495,6 +511,16 @@ impl SessionService for OxpilotSessionService {
             "oxpilot.internal",
             "enqueue could not allocate a queue position",
         ))
+    }
+
+    async fn peek_queued_receipt(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        client_msg_id: &str,
+    ) -> Result<Option<QueuedReceipt>, AppError> {
+        self.owned(session_id, user_id).await?;
+        self.dedupe_receipt(session_id, client_msg_id).await
     }
 
     async fn drain_queue(

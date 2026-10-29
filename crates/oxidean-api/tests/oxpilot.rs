@@ -970,6 +970,18 @@ async fn message_queue_receipt_shapes_and_queue_list() {
     assert_eq!(hit["ok"], true, "{hit}");
     assert_eq!(hit["data"]["queued_id"], serde_json::Value::Null);
     assert_eq!(hit["data"]["position"], serde_json::Value::Null);
+
+    // Budget honesty — both dedupe hits answered WITHOUT admitting:
+    // only q1, q2, and the cm-t POST reserved a request (BR2.2 +
+    // BR6.2 take two; a resend is never charged).
+    let usage = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.usage_get","input":{}}"#,
+    )
+    .await;
+    assert_eq!(usage["ok"], true, "{usage}");
+    assert_eq!(usage["data"]["requests_used"], 3);
     std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
 }
 

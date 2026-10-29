@@ -352,6 +352,17 @@ pub async fn message_queue(ctx: &RpcCtx, input: Value) -> Result<Value, AppError
                 ));
             }
         }
+        // Resend dedupe BEFORE admission — the union probe is read-only,
+        // so an idempotent resend returns its stored receipt without
+        // burning a request reservation on either scope.
+        if let Some(cmid) = client_msg_id.as_deref() {
+            if let Some(receipt) = svc
+                .peek_queued_receipt(&user.id, &req.session_id, cmid)
+                .await?
+            {
+                return Ok(serde_json::to_value(receipt).unwrap_or_else(|_| json!({})));
+            }
+        }
         // Atomic budget admission (BR6.2 take two) — inside the
         // admission lock so the reservation serializes with the turn
         // re-verify; a refusal leaves the queue untouched.

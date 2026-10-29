@@ -45,7 +45,7 @@ pub(in crate::providers) async fn build(
             message: e,
         })?;
     Ok(Arc::new(AnthropicProvider {
-        client: egress::provider_http_client(),
+        client: egress::provider_http_client(true),
         base_url,
         api_key,
     }))
@@ -63,7 +63,7 @@ impl AnthropicProvider {
     #[doc(hidden)]
     pub fn new_for_testing(base_url: &str, api_key: &str) -> Self {
         Self {
-            client: egress::provider_http_client(),
+            client: egress::provider_http_client(true),
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
         }
