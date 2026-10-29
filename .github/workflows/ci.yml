@@ -320,15 +320,19 @@ jobs:
         # ~90 integration files serialize (fileParallelism: false) through ONE
         # worker — the accumulated route-import graph crosses the heap ceiling
         # mid-run (mark-compact OOM on consecutive attempts, 6 GB included).
-        # Sequential shards give each slice a fresh process, same pattern as
-        # the browser job below.
+        # Sequential shards give each slice a fresh process (same pattern as
+        # the browser job below). The oxpilot file mounts the whole route tree,
+        # so it runs solo rather than on top of a shard's accumulated heap.
         run: |
           set -eo pipefail
           bunx turbo run test --filter=@oxidean/api-client
           cd apps/web
           bunx vitest run --project unit
-          for shard in 1 2 3 4; do
-            bunx vitest run --project integration --shard="${shard}/4"
+          bunx vitest run --project integration \
+            src/routes/oxpilot.integration.test.ts
+          for shard in 1 2 3 4 5 6; do
+            bunx vitest run --project integration --shard="${shard}/6" \
+              --exclude "src/routes/oxpilot.integration.test.ts"
           done
         env:
           NODE_OPTIONS: --max-old-space-size=6144
