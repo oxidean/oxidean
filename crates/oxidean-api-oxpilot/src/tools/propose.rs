@@ -302,8 +302,25 @@ fn render_hunks(
     new_no_nl: bool,
 ) {
     const CONTEXT: usize = 3;
+    let mut hunks = diff_lines(old_lines, new_lines);
+    // A trailing-newline-only change leaves the line vectors equal, so
+    // `diff_lines` reports nothing — force the final line through a
+    // change hunk so the `\ No newline` marker stays visible.
+    if old_no_nl != new_no_nl && !old_lines.is_empty() && !new_lines.is_empty() {
+        let covered = hunks.last().is_some_and(|h| {
+            h.old_start + h.old_len == old_lines.len() && h.new_start + h.new_len == new_lines.len()
+        });
+        if !covered {
+            hunks.push(LineHunk {
+                old_start: old_lines.len() - 1,
+                old_len: 1,
+                new_start: new_lines.len() - 1,
+                new_len: 1,
+            });
+        }
+    }
     let mut groups: Vec<Vec<LineHunk>> = Vec::new();
-    for h in diff_lines(old_lines, new_lines) {
+    for h in hunks {
         match groups.last_mut() {
             Some(g)
                 if h.old_start
@@ -775,6 +792,15 @@ mod tests {
         let mut out = String::new();
         render_stanza(&mut out, "bin", "bin", &Content::Opaque, &text("x\n"));
         assert!(out.contains("Binary files a/bin and b/bin differ"));
+    }
+
+    #[test]
+    fn stanza_trailing_newline_change_renders_hunk() {
+        let mut out = String::new();
+        render_stanza(&mut out, "x", "x", &text("a\nb"), &text("a\nb\n"));
+        assert!(out.contains("@@"));
+        assert!(out.contains("-b\n\\ No newline at end of file\n"));
+        assert!(out.contains("+b\n"));
     }
 
     #[test]
