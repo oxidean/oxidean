@@ -2084,7 +2084,7 @@ async fn proposal_ops_json_round_trip_and_backfill_default() {
     // list) reads back the `'[]'` default on every dialect.
     pool.exec(
         "INSERT INTO oxpilot_proposals (id, session_id, title, base, diff_body, status, created_at) \
-         VALUES ('oxpp-opsjson-legacy', 'oxps-opsjson-1', 'legacy', 'main', 'diff --git a/x b/x', 'pending', '2026-01-01T00:00:00Z')",
+         VALUES ('oxpp-opsjson-legacy', 'oxps-opsjson-1', 'legacy', 'main', 'diff --git a/x b/x', 'pending', '2026-01-01 00:00:00')",
     )
     .await
     .expect("raw insert");
@@ -2389,7 +2389,7 @@ async fn session_target_column_round_trip() {
     let raw = Box::leak(
         format!(
             "INSERT INTO oxpilot_sessions (id, user_id, repo_owner, repo_name, repo_id, branch, goal, title, status, created_at, last_activity_at) \
-             VALUES ('oxps-tgtrt-legacy', '{uid}', 'o', '{repo}', '{repo}', 'main', NULL, 'legacy', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+             VALUES ('oxps-tgtrt-legacy', '{uid}', 'o', '{repo}', '{repo}', 'main', NULL, 'legacy', 'active', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
         )
         .into_boxed_str(),
     );

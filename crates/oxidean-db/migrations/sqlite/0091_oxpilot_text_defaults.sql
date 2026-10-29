@@ -1,0 +1,6 @@
+-- logical: 0091_oxpilot_text_defaults — no-op on sqlite: the
+-- `DEFAULT ''` / `'[]'` clauses on the oxpilot body-bearing TEXT
+-- columns (`content`, `args_summary`, `output_summary`, `diff_body`,
+-- `ops_json`) were already correct in 0085/0087/0088/0089. The file
+-- exists to keep the migration set in lockstep with mysql, whose
+-- TEXT-family columns needed expression-default ALTERs.
