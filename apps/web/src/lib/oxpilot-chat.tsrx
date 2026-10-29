@@ -68,6 +68,7 @@ async function* oxpilotFetcher(
   let messageId: string | null = null;
   let opened = false;
   let sawTerminal = false;
+  let sawSnapshot = false;
   // The server subscribes before replaying its buffer (and replays that
   // buffer again on a broadcast Lagged), so an append can arrive twice —
   // dedupe by (message_id, seq) per the C2 exactly-once rule.
@@ -101,6 +102,8 @@ async function* oxpilotFetcher(
             yield { type: "RUN_ERROR", message: code, code };
           }
           return;
+        } else if (frame.type === "snapshot") {
+          sawSnapshot = true;
         }
         // snapshot/ping/tool/card frames: display-level, not run deltas.
       }
@@ -113,10 +116,16 @@ async function* oxpilotFetcher(
     }
   }
   if (!sawTerminal) {
-    // Resend/idempotent path or truncated stream — the server ended without
-    // a terminal; close the run cleanly rather than hanging `isLoading`.
-    if (opened && messageId) yield { type: "TEXT_MESSAGE_END", messageId };
-    yield { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId };
+    // The deliberate resend/idempotent path returns ONE snapshot frame and
+    // closes — no append ever opened a run message; finish cleanly.
+    if (sawSnapshot && !opened) {
+      yield { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId };
+      return;
+    }
+    // Any other terminal-less EOF is a truncated stream: surface it as a
+    // fetch error so the draft is preserved and the partial assistant
+    // text is not silently treated as a completed reply.
+    throw new Error("chat stream closed before terminal");
   }
 }
 

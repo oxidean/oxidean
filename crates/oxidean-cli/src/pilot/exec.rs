@@ -1,6 +1,8 @@
-//! Jailed action execution — `exec_shell` / `fs_read` / `fs_write`.
+//! Action execution — `exec_shell` / `fs_read` / `fs_write`.
 //!
-//! Jail chain (BR6.2/BR6.3, security-design Q6):
+//! `exec_shell` spawns with cwd = canonical root and is ambient — NOT
+//! path-jailed. The fs ops run the jail chain (BR6.2/BR6.3,
+//! security-design Q6):
 //!   lexical normalize → reject `..` escape → canonicalize (deepest
 //!   existing ancestor for write-create) → reject escape past canonical
 //!   root → reject inside canonical `config_dir()` → `symlink_metadata`

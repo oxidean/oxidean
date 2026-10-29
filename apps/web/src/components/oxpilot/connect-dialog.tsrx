@@ -66,6 +66,11 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
   const [pendingTarget, setPendingTarget] = useState<OxpilotTargetView | null>(null);
   const [denied, setDenied] = useState(false);
   const consentShown = useRef<Set<string>>(new Set());
+  // True once the connector has redeemed the code (a matching target was
+  // observed). The code's own expiry must not then wipe a live consent
+  // review — the target stays `pending_consent` server-side and the owner
+  // read can re-mint a fresh grant.
+  const redeemed = useRef(false);
 
   const pairingM = useMutation({
     ...oxpilotPairingCreateMutation(),
@@ -75,6 +80,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       setPendingTarget(null);
       setDenied(false);
       consentShown.current = new Set();
+      redeemed.current = false;
       setPairing(view);
       setPhase("waiting");
       setStep(2);
@@ -128,12 +134,17 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     refetchIntervalInBackground: false,
   });
 
-  // Expiry bound — the server `expires_at` stops both the poll and the wait.
+  // Expiry bound — the server `expires_at` stops both the poll and the
+  // wait, but ONLY while the code is unredeemed: a redeemed code's expiry
+  // cannot erase a pending consent review (the target outlives the code).
   useEffect(() => {
     if (!waiting || !pairing) return;
     const ms = Date.parse(pairing.expires_at) - Date.now();
     const t = window.setTimeout(
-      () => setPhase((p) => (p === "waiting" ? "timeout" : p)),
+      () => {
+        if (redeemed.current) return;
+        setPhase((p) => (p === "waiting" ? "timeout" : p));
+      },
       Math.max(ms, 0),
     );
     return () => window.clearTimeout(t);
@@ -147,6 +158,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
       (t: OxpilotTargetView) => t.pairing_id === pairing.pairing_id,
     );
     if (!match) return;
+    redeemed.current = true;
     if (match.lifecycle === "connected") {
       setPendingTarget(null);
       setDenied(false);
@@ -187,6 +199,8 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     setConsentError(null);
     setPendingTarget(null);
     setDenied(false);
+    redeemed.current = false;
+    consentShown.current = new Set();
     props.onClose();
   }
 

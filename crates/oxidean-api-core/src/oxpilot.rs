@@ -563,6 +563,13 @@ pub trait SessionService: Send + Sync {
     /// budget and turn-end accounting stays token-only. Same
     /// `budget_exceeded`/`data:{scope}` refusal shape as `check_budget`.
     async fn admit_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError>;
+    /// Token-axis-only budget read for the post-usage chain gates —
+    /// every queued row already reserved its request at admission
+    /// ([`admit_budget`](Self::admit_budget)), so re-applying the
+    /// request axis there would strand an admitted follow-up behind
+    /// its own reservation. Same `budget_exceeded`/`data:{scope}`
+    /// refusal shape as `check_budget`.
+    async fn check_token_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError>;
     /// The `usage_get` backing read — fills all five C1 fields and NEVER
     /// refuses: it is the spend surface itself.
     async fn usage_view(&self, user_id: &str, caps: BudgetCaps) -> Result<UsageView, AppError>;
@@ -1728,6 +1735,9 @@ mod tests {
             unimplemented!()
         }
         async fn admit_budget(&self, _u: &str, _c: BudgetCaps) -> Result<(), AppError> {
+            unimplemented!()
+        }
+        async fn check_token_budget(&self, _u: &str, _c: BudgetCaps) -> Result<(), AppError> {
             unimplemented!()
         }
         async fn usage_view(&self, _u: &str, _c: BudgetCaps) -> Result<UsageView, AppError> {

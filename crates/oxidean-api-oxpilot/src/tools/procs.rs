@@ -255,6 +255,16 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
     for op in &ops {
         match op.op.as_str() {
             "create" | "update" => {
+                // A repeated path inside one run would ship two `path`
+                // entries in a single `repo.file.upload` — the consumer
+                // rejects the whole commit. Split the run instead; the
+                // declared order still applies v1 then v2 (BR5.3).
+                if pending
+                    .iter()
+                    .any(|file| file.get("path").and_then(Value::as_str) == Some(op.path.as_str()))
+                {
+                    flush_uploads(ctx, &owner, &name, &branch, &id8, &mut pending).await?;
+                }
                 pending.push(json!({
                     "path": op.path,
                     "content_base64": op.content_b64,

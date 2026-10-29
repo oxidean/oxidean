@@ -775,6 +775,30 @@ impl SessionService for OxpilotSessionService {
         Ok(())
     }
 
+    async fn check_token_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError> {
+        let window = Self::utc_window();
+        let (user_row, instance_row) = self
+            .db
+            .read_oxpilot_usage_counters(user_id, &window)
+            .await
+            .map_err(db_err)?;
+        let breach = |cap: Option<i64>, row: &Option<OxpilotUsageCounterRow>| -> bool {
+            let Some(cap) = cap else { return false };
+            row.as_ref().map(|r| r.tokens).unwrap_or(0) >= cap
+        };
+        if breach(caps.user, &user_row) {
+            tracing::debug!(scope = "user", "oxpilot budget refusal");
+            return Err(AppError::new("budget_exceeded", "user budget exceeded")
+                .with_data(serde_json::json!({ "scope": "user" })));
+        }
+        if breach(caps.instance, &instance_row) {
+            tracing::debug!(scope = "instance", "oxpilot budget refusal");
+            return Err(AppError::new("budget_exceeded", "instance budget exceeded")
+                .with_data(serde_json::json!({ "scope": "instance" })));
+        }
+        Ok(())
+    }
+
     async fn admit_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError> {
         let window = Self::utc_window();
         match self
@@ -1266,6 +1290,46 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn token_budget_gate_ignores_reserved_requests() {
+        let db = test_db().await;
+        let (uid, _repo) = seed(&db, "u").await;
+        let svc = OxpilotSessionService::new(db);
+        // Requests at the cap — incl. a queued row's own reservation —
+        // with tokens still below.
+        svc.record_usage(
+            &uid,
+            UsageDelta {
+                requests: 2,
+                tokens: Some(1),
+            },
+        )
+        .await
+        .unwrap();
+        let caps = BudgetCaps {
+            user: Some(2),
+            instance: None,
+        };
+        // The dual-axis read refuses — the admission surface.
+        let err = svc.check_budget(&uid, caps).await.unwrap_err();
+        assert_eq!(err.code, "budget_exceeded");
+        // The post-usage chain gate must NOT strand the already-admitted
+        // queued row behind its own request reservation.
+        svc.check_token_budget(&uid, caps).await.unwrap();
+        // …but a token breach still blocks the successor turn.
+        svc.record_usage(
+            &uid,
+            UsageDelta {
+                requests: 0,
+                tokens: Some(5),
+            },
+        )
+        .await
+        .unwrap();
+        let err = svc.check_token_budget(&uid, caps).await.unwrap_err();
+        assert_eq!(err.data.as_ref().unwrap()["scope"], "user");
     }
 
     #[tokio::test]

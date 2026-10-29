@@ -784,7 +784,11 @@ async fn finish_turn(
         } else {
             let caps = slot.budget_caps;
             drop(slot);
-            match svc.check_budget(&session.user_id, caps).await {
+            // Token-axis only — every queued row already reserved its
+            // request at enqueue (`admit_budget`); re-checking requests
+            // here would strand an admitted follow-up behind its own
+            // reservation.
+            match svc.check_token_budget(&session.user_id, caps).await {
                 Ok(()) => true,
                 Err(e) => {
                     // A breach keeps rows queued; any other check
@@ -1221,7 +1225,9 @@ async fn drain_and_chain(
         }
         let caps = slot.budget_caps;
         drop(slot);
-        if let Err(e) = svc.check_budget(&session.user_id, caps).await {
+        // Token-axis only — queued rows hold request reservations from
+        // their own `admit_budget` at enqueue (see finish_turn's gate).
+        if let Err(e) = svc.check_token_budget(&session.user_id, caps).await {
             if e.code == "budget_exceeded" {
                 tracing::debug!(
                     session_id = %session.id,
