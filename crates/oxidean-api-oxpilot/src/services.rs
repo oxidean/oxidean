@@ -17,6 +17,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use oxidean_api_core::oxpilot::{
     AppendMessage, BudgetCaps, CreateSession, Enqueue, ProposalWrite, QueuedReceipt,
     SessionDeleteHook, SessionService, ToolCallStatusUpdate, ToolCallWrite, UsageDelta, UsageView,
@@ -685,6 +686,28 @@ impl SessionService for OxpilotSessionService {
                 "invalid_args",
                 "generated patch contains secret-shaped content",
             ));
+        }
+        // The bytes apply writes live in `ops_json`'s base64 payloads —
+        // a payload the diff cannot render (binary or oversized file)
+        // could still carry secret-shaped content to disk. Decode and
+        // check each payload the same way; undecodable/malformed entries
+        // are apply-side rejections, not storage secrets.
+        if let Ok(ops) = serde_json::from_str::<Vec<serde_json::Value>>(&input.ops_json) {
+            for op in &ops {
+                let Some(b64) = op["content_b64"].as_str() else {
+                    continue;
+                };
+                let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+                    continue;
+                };
+                let text = String::from_utf8_lossy(&bytes);
+                if oxidean_core::redact(&text) != text {
+                    return Err(AppError::new(
+                        "invalid_args",
+                        "generated patch contains secret-shaped content",
+                    ));
+                }
+            }
         }
         let id = Uuid::new_v4().to_string();
         let row = self
@@ -1529,6 +1552,44 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, "invalid_args");
         // Nothing was stored — the preview can never diverge from apply.
+        assert!(db
+            .find_oxpilot_proposals_by_session("s1")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn proposal_with_secret_shaped_ops_payload_is_refused() {
+        let db = test_db().await;
+        let (uid, repo) = seed(&db, "ops").await;
+        let svc = OxpilotSessionService::new(db.clone());
+        new_session(&svc, &uid, &repo, "s1").await;
+
+        // The diff preview is clean, but the base64 payload apply would
+        // write carries a secret the preview cannot render (binary or
+        // oversized files never render into the diff).
+        let payload = base64::engine::general_purpose::STANDARD
+            .encode(b"prefix TOKEN=ghp_abcdefghijklmnop suffix");
+        let ops = format!(
+            r#"[{{"path":"blob.bin","op":"create","new_path":null,"content_b64":"{payload}"}}]"#
+        );
+        let err = svc
+            .save_proposal(
+                &uid,
+                ProposalWrite {
+                    session_id: "s1".to_string(),
+                    title: "t".to_string(),
+                    base: "main".to_string(),
+                    base_sha: "0".repeat(40),
+                    diff_body: "diff --git a/blob.bin b/blob.bin\nBinary files differ\n"
+                        .to_string(),
+                    ops_json: ops,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "invalid_args");
         assert!(db
             .find_oxpilot_proposals_by_session("s1")
             .await

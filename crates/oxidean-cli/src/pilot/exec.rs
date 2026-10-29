@@ -504,6 +504,9 @@ fn jail_dirfd(canonical_root: &Path, p: &Path) -> Result<Fd, JailError> {
 
 /// `fs_read` open (unix): dirfd walk + leaf `openat(O_NOFOLLOW)` + a
 /// regular-file `fstat` — all on the opened inode, no path re-traversal.
+/// `O_NONBLOCK` keeps a swapped FIFO from blocking the open before the
+/// `fstat` regular-file check; `O_NOCTTY` keeps a swapped terminal
+/// device from becoming this process's controlling terminal.
 #[cfg(unix)]
 fn jailed_open_read(canonical_root: &Path, p: &Path) -> Result<std::fs::File, JailError> {
     use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -517,7 +520,7 @@ fn jailed_open_read(canonical_root: &Path, p: &Path) -> Result<std::fs::File, Ja
         libc::openat(
             dir.0,
             leaf_c.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK | libc::O_NOCTTY,
         )
     };
     if fd < 0 {
