@@ -23,3 +23,22 @@ CREATE TRIGGER fk_oxpilot_targets_user
   BEGIN
     DELETE FROM oxpilot_targets WHERE user_id = OLD.id;
   END;
+
+-- Write-time owner checks — the delete triggers only sweep rows that
+-- exist when the delete runs. A request authenticated before the
+-- delete can still INSERT a pairing/target afterwards; these BEFORE
+-- INSERT guards give the same write bound a real FK would (pg/mysql
+-- enforce it natively in this migration's ADD CONSTRAINT arms).
+CREATE TRIGGER fk_oxpilot_pairings_user_insert
+  BEFORE INSERT ON oxpilot_pairings
+  WHEN NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.user_id)
+  BEGIN
+    SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed');
+  END;
+
+CREATE TRIGGER fk_oxpilot_targets_user_insert
+  BEFORE INSERT ON oxpilot_targets
+  WHEN NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.user_id)
+  BEGIN
+    SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed');
+  END;

@@ -1176,6 +1176,95 @@ async fn chat_post_queued_client_msg_id_answers_turn_active() {
     std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
 }
 
+/// BR6.2 take two — admission runs BEFORE the residual drain: a
+/// `budget_exceeded` POST releases the claim with the queue untouched,
+/// so a retried send re-drains the same rows instead of finding them
+/// stranded as dedupe-only transcript rows.
+#[tokio::test]
+async fn chat_post_budget_refusal_preserves_residual_queue() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let mut slot = OxpilotRuntimeSlot {
+        provider: Some(Arc::new(StubProvider { fail: false })),
+        model: Some("stub-1".to_string()),
+        disabled_reason: None,
+        turns: Arc::new(ActiveTurns::default()),
+        built_from: Some(ProviderIdentity {
+            provider_id: "stub".to_string(),
+            model: Some("stub-1".to_string()),
+            base_url: None,
+            key_source: KeySource::None,
+        }),
+        budget_caps: BudgetCaps::default(),
+        tools: None,
+    };
+    slot.budget_caps = BudgetCaps {
+        user: Some(1),
+        instance: None,
+    };
+    let runtime = OxpilotRuntime::from_slot(slot);
+    let app = test_app(db.clone(), Some(runtime.clone())).await;
+    let (cookie, uid) = signup_and_login(&app, "oxpw@example.com", "oxpw").await;
+    verify_user(&db, &uid).await;
+    create_repo(&app, &cookie, "bdq").await;
+    let create = create_session(&app, &cookie, "oxpw", "bdq", "g").await;
+    let session_id = create["data"]["id"].as_str().unwrap().to_string();
+
+    // A residual queued row the next turn should drain…
+    db.enqueue_oxpilot_queued(&oxidean_db::NewOxpilotQueued {
+        id: "oxpq-resid-1",
+        session_id: &session_id,
+        queue_seq: 1,
+        content: "residual",
+        client_msg_id: Some("cm-resid"),
+    })
+    .await
+    .expect("queue insert");
+    // …and a user already at the 1-request cap → admission refuses.
+    runtime
+        .sessions()
+        .unwrap()
+        .record_usage(
+            &uid,
+            oxidean_api_core::oxpilot::UsageDelta {
+                requests: 1,
+                tokens: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let chat = Request::builder()
+        .method("POST")
+        .uri(chat_uri(&session_id, ""))
+        .header("content-type", "application/json")
+        .header("cookie", &cookie)
+        .body(Body::from(r#"{"content":"again"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(chat).await.unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS, "{res:?}");
+
+    // The refusal must NOT have committed the drain — the row is still
+    // queued and no transcript row materialized.
+    let queued = db
+        .list_oxpilot_queued_for_session(&session_id)
+        .await
+        .unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].id, "oxpq-resid-1");
+    assert!(db
+        .list_oxpilot_messages(&session_id)
+        .await
+        .unwrap()
+        .is_empty());
+    // …and the released claim lets the next attempt claim again.
+    assert!(runtime.turns().await.get(&session_id).await.is_none());
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
 // ---------- U3 — turn_cancel + live-turn abort ----------
 
 #[tokio::test]

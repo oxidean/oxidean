@@ -483,6 +483,27 @@ pub async fn chat_post(
         }
     }
 
+    // Atomic budget admission (BR6.2 take two) — the request reserves
+    // its counter slot in one tx per scope, closing the read-then-spend
+    // gap `check_budget` left between concurrent senders. This sits
+    // AFTER every release-armed exit above (claim conflict, dedupe) but
+    // BEFORE the residual drain: a refusal must leave the queue intact
+    // — a committed drain would orphan the rows as transcript dedupe
+    // targets that can never re-queue. A refusal releases the claim
+    // like any other late failure.
+    {
+        let caps = state.oxpilot.slot.read().await.budget_caps;
+        if let Err(e) = svc.admit_budget(&user_id, caps).await {
+            state
+                .oxpilot
+                .turns()
+                .await
+                .release(&session_id, &turn.turn_id)
+                .await;
+            return svc_err(&e, "budget admission failed");
+        }
+    }
+
     // Residual queue drain (WF1 step 9): rows a previous turn left
     // behind — raced out by claim loss or the chain depth cap — become
     // transcript rows under THIS winner BEFORE the new user row mints
@@ -491,7 +512,8 @@ pub async fn chat_post(
     // a residual batch belongs to whoever actually starts a turn. A
     // drain failure fails the send honestly — release + 500 — never
     // minting the user row's seq ahead of the undrained orphans
-    // (BR4.2).
+    // (BR4.2). The admission reservation is consumed like any other
+    // committed send attempt; the intact queue lets the retry re-drain.
     if let Err(e) = svc.drain_queue(&user_id, &session_id).await {
         state
             .oxpilot
@@ -505,26 +527,6 @@ pub async fn chat_post(
             "oxpilot.internal",
             "residual drain failed",
         );
-    }
-
-    // Atomic budget admission (BR6.2 take two) — the request reserves
-    // its counter slot in one tx per scope, closing the read-then-spend
-    // gap `check_budget` left between concurrent senders. This sits
-    // AFTER every release-armed exit above (claim conflict, dedupe,
-    // residual-drain failure), so only a send that will actually spawn
-    // the turn consumes budget. A refusal releases the claim like any
-    // other late failure.
-    {
-        let caps = state.oxpilot.slot.read().await.budget_caps;
-        if let Err(e) = svc.admit_budget(&user_id, caps).await {
-            state
-                .oxpilot
-                .turns()
-                .await
-                .release(&session_id, &turn.turn_id)
-                .await;
-            return svc_err(&e, "budget admission failed");
-        }
     }
 
     // Persist the user row through the service (BR3.4/BR3.5) — `seq` is
