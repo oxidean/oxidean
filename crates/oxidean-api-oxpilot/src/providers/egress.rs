@@ -11,9 +11,12 @@
 //!    self-host exception (NFR1.10, disclosed in CONFIGURATION.md).
 //! 4. Literal IPs must be public; DNS names resolve through
 //!    `lookup_host` and EVERY answer must be public (zero answers ⇒
-//!    reject). DNS can re-resolve differently at connect — the
-//!    documented TOCTOU bound; airtight deployments use a literal
-//!    public IP or the Ollama adapter.
+//!    reject). The validated answers pin into the provider client via
+//!    `resolve_to_addrs`, so a post-validation re-resolution cannot
+//!    rebind the connect to an unchecked address — the TOCTOU bound is
+//!    closed for direct egress. A configured egress proxy resolves the
+//!    name itself (admin-controlled infrastructure by definition), so
+//!    env-proxy support stays enabled.
 //!
 //! Provider HTTP clients are built redirect-free
 //! (`redirect(Policy::none())`) so a validated URL cannot 302 onto
@@ -22,7 +25,7 @@
 //! The public-routable classifier lives in `oxidean_core::net` and is
 //! shared with webhook delivery, git mirrors, and XFF trust.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use oxidean_core::net::is_public_ip;
@@ -32,21 +35,42 @@ use url::Url;
 /// hang the boot rebuild or the settings write path (NFR4.11).
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// DNS answers validated at settings-write/build time, pinned into the
+/// provider client so the socket connect reaches only these addresses —
+/// a later re-resolution to a private target never takes effect.
+/// `host` is the URL's DNS name — the `resolve_to_addrs` lookup key.
+pub(crate) struct PinnedEgress {
+    pub host: String,
+    pub addrs: Vec<SocketAddr>,
+}
+
 /// Redirect-free provider client — connect 10 s, total 300 s
-/// (NFR4.7/NFR4.9). Per-adapter `build` calls this exactly once.
-pub(crate) fn provider_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+/// (NFR4.7/NFR4.9). `pinned` carries the validated DNS answers for a
+/// domain-named base_url; `None` builds the same client as before
+/// (literal-IP and exempted URLs have nothing to pin). Per-adapter
+/// `build` calls this exactly once.
+pub(crate) fn provider_http_client(pinned: Option<&PinnedEgress>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(p) = pinned {
+        builder = builder.resolve_to_addrs(&p.host, &p.addrs);
+    }
+    builder
         .build()
         .expect("static reqwest builder config cannot fail")
 }
 
 /// Validate an admin/env `base_url` against the resolved provider.
-/// `Err(String)` carries a short reason the caller maps to
-/// `invalid_provider` — never echoed to non-admin surfaces.
-pub(crate) async fn validate_base_url(provider_id: Option<&str>, url: &str) -> Result<(), String> {
+/// Returns the DNS pin the provider client must connect through —
+/// `Some` for a public-checked domain name, `None` for literal-IP and
+/// bound-exempt URLs. `Err(String)` carries a short reason the caller
+/// maps to `invalid_provider` — never echoed to non-admin surfaces.
+pub(crate) async fn validate_base_url(
+    provider_id: Option<&str>,
+    url: &str,
+) -> Result<Option<PinnedEgress>, String> {
     let parsed = Url::parse(url.trim()).map_err(|e| format!("base_url is not a valid URL: {e}"))?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -59,19 +83,19 @@ pub(crate) async fn validate_base_url(provider_id: Option<&str>, url: &str) -> R
     // No consumer (provider-less write) or the Ollama self-host
     // exemption — shape check done, private-target bound skipped.
     match provider_id {
-        None => return Ok(()),
-        Some("ollama") => return Ok(()),
+        None => return Ok(None),
+        Some("ollama") => return Ok(None),
         _ => {}
     }
 
     match host {
-        url::Host::Ipv4(v4) => require_public(&IpAddr::V4(v4), url),
-        url::Host::Ipv6(v6) => require_public(&IpAddr::V6(v6), url),
+        url::Host::Ipv4(v4) => require_public(&IpAddr::V4(v4), url).map(|_| None),
+        url::Host::Ipv6(v6) => require_public(&IpAddr::V6(v6), url).map(|_| None),
         url::Host::Domain(name) => {
             let port = parsed.port_or_known_default().unwrap_or(443);
             let name = name.to_string();
             let lookup = tokio::net::lookup_host((name.as_str(), port));
-            let addrs: Vec<std::net::SocketAddr> =
+            let addrs: Vec<SocketAddr> =
                 match tokio::time::timeout(DNS_LOOKUP_TIMEOUT, lookup).await {
                     Ok(Ok(iter)) => iter.collect(),
                     Ok(Err(e)) => return Err(format!("base_url host does not resolve: {e}")),
@@ -83,7 +107,7 @@ pub(crate) async fn validate_base_url(provider_id: Option<&str>, url: &str) -> R
             for addr in &addrs {
                 require_public(&addr.ip(), url)?;
             }
-            Ok(())
+            Ok(Some(PinnedEgress { host: name, addrs }))
         }
     }
 }

@@ -223,7 +223,10 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
         ));
     }
 
-    // a. fresh namespaced branch at the proposal's base (BR5.3/BR5.6).
+    // a. fresh namespaced branch at the proposal's PINNED base — the
+    // commit `canonical_diff` read its blobs from (BR5.3/BR5.6). A
+    // named `base` could have moved since propose; `''` (pre-0092 rows,
+    // already-a-commit-ish bases) falls back to `base` verbatim.
     apply_step(
         ctx,
         "repo.branchCreate",
@@ -231,7 +234,11 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
             "owner": owner,
             "name": name,
             "branch": branch,
-            "start": row.base,
+            "start": if row.base_sha.is_empty() {
+                row.base.as_str()
+            } else {
+                row.base_sha.as_str()
+            },
         }),
     )
     .await?;

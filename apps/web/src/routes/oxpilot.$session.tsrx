@@ -164,6 +164,7 @@ function OxpilotSessionContent() @{
    */
   async function reseed() {
     if (!sessionId) return;
+    const seq = ++reseedSeq.current;
     try {
       const grantsOrNull = qc
         .fetchQuery(oxpilotGrantListQuery({ session_id: sessionId }, true))
@@ -220,6 +221,8 @@ function OxpilotSessionContent() @{
         if (c.card_kind !== "queued") pushCard(c.card_kind, c.ref_id);
       }
 
+      // A newer reseed owns the seed — this call's reads are stale.
+      if (seq !== reseedSeq.current) return;
       setSeed((prev) => ({
         version: (prev?.version ?? 0) + 1,
         messages: (snap.messages ?? []).map(toUiMessage),
@@ -236,6 +239,7 @@ function OxpilotSessionContent() @{
       setSeedError(null);
       setSeedNotFound(false);
     } catch (e) {
+      if (seq !== reseedSeq.current) return;
       const code = codeOf(e);
       setSeedNotFound(code === "not_found" || code === "oxpilot.not_found");
       setSeedError(e instanceof Error ? e.message : "Could not load the session.");
@@ -248,6 +252,9 @@ function OxpilotSessionContent() @{
   // staler than the replay it read against) and the attach keeps the
   // seed state instead of looping. Other reseed arms clear it.
   const reconcileRef = useRef<string | null>(null);
+  // Overlapping reseeds resolve out of order — only the newest call
+  // may land its seed/error, or an older completion remounts stale.
+  const reseedSeq = useRef(0);
 
   useEffect(() => {
     if (!enabled || !sessionId) return;

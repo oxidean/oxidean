@@ -340,11 +340,16 @@ pub struct ToolCallStatusUpdate {
 /// identifier, never redacted); `title`/`diff_body` redact on write.
 /// `ops_json` is the serialized ordered `DiffFileOp[]` the apply path
 /// executes verbatim (U5) — validated op-set only, never redacted.
+/// `base_sha` is `base` resolved to its tip commit at propose time —
+/// the apply path branches from it so a later push can't move the
+/// tree out from under the generated patch; `""` when `base` listed
+/// no head (already a commit-ish).
 #[derive(Debug, Clone)]
 pub struct ProposalWrite {
     pub session_id: String,
     pub title: String,
     pub base: String,
+    pub base_sha: String,
     pub diff_body: String,
     pub ops_json: String,
 }

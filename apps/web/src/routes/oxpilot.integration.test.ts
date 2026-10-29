@@ -1099,6 +1099,55 @@ describe("/oxpilot/{session} workspace", () => {
     });
   });
 
+  it("suppresses a stale reseed landing when calls overlap", async () => {
+    // Every snapshot GET parks in `gates` — the test controls which
+    // reseed's read completes first, so an older call can resolve last.
+    const gates: Array<(r: Response) => void> = [];
+    mountWorkspace((url) =>
+      url.endsWith("/chat/stream")
+        ? new Promise<Response>((res) => gates.push(res))
+        : Promise.resolve(sseResponse(defaultPost)),
+    );
+    await waitFor(() => expect(gates.length).toBe(1));
+    gates[0](sseResponse([snapshotFrame()]));
+    await waitFor(() => {
+      expect(screen.getByText("seed message")).toBeInTheDocument();
+    });
+
+    // A later snapshot (arm 2) + foreign terminal (arm 3) fire two
+    // reseeds in one synchronous pass — both GETs park in flight.
+    emitFrame(snapshotFrame());
+    emitFrame({ type: "terminal", message_id: "m-for", result: "done" });
+    await waitFor(() => expect(gates.length).toBe(3));
+
+    // The NEWER call (gates[2]) lands first with fresh data...
+    gates[2](
+      sseResponse([
+        snapshotFrame({
+          messages: [{ ...seedMessages[0], id: "m-n", content: "fresh seed" }],
+        }),
+      ]),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("fresh seed")).toBeInTheDocument();
+    });
+
+    // ...then the OLDER call (gates[1]) resolves — its landing must be
+    // suppressed or the fresh seed remounts back to the stale one.
+    gates[1](
+      sseResponse([
+        snapshotFrame({
+          messages: [{ ...seedMessages[0], id: "m-o", content: "stale seed" }],
+        }),
+      ]),
+    );
+    // Give the suppressed completion its window to (not) land, then
+    // assert the DOM still reflects the newer seed.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("stale seed")).not.toBeInTheDocument();
+    expect(screen.getByText("fresh seed")).toBeInTheDocument();
+  });
+
   it("budget_exceeded send denial names the envs + docs link", async () => {
     mountWorkspace((url) =>
       Promise.resolve(

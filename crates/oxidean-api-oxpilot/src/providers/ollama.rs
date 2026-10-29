@@ -36,7 +36,9 @@ pub(in crate::providers) async fn build(
             message: e,
         })?;
     Ok(Arc::new(OllamaProvider {
-        client: egress::provider_http_client(),
+        // The self-host exemption skips the private-target bound, so
+        // there are no validated answers to pin (None).
+        client: egress::provider_http_client(None),
         base_url,
     }))
 }
@@ -52,7 +54,7 @@ impl OllamaProvider {
     #[doc(hidden)]
     pub fn new_for_testing(base_url: &str) -> Self {
         Self {
-            client: egress::provider_http_client(),
+            client: egress::provider_http_client(None),
             base_url: base_url.to_string(),
         }
     }

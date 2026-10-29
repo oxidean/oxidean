@@ -182,6 +182,113 @@ fn consume_secret(s: &str, start: usize) -> usize {
     start + n
 }
 
+/// Match openers whose token run is still in flight when they end a
+/// buffer — everything [`redact`] can start a match on except the
+/// bare `Bearer`/`PEM` forms, which carry a trailing non-secret
+/// character and are covered by [`AWAITING_RUN`].
+const STREAM_OPENERS: &[&str] = &["eyJ", "sk-"];
+
+/// Complete openers that still await their token/body — they end in a
+/// NON-secret char (space), so they never sit inside the trailing
+/// secret-char run and the in-run scan cannot see them.
+const AWAITING_RUN: &[&str] = &[PEM_BEGIN, "Bearer ", "bearer "];
+
+/// Streaming variant of [`redact`] for delta-wise emission. Feeding
+/// each provider delta through `redact` independently misses any
+/// secret split across a chunk boundary (`"ghp_"` + `"abc123…"`,
+/// `"Bear"` + `"er xyz…"`): each half passes its own pattern check.
+/// `StreamRedactor` holds back the buffer's trailing in-flight
+/// candidate — a partial opener, a matched opener whose token run
+/// hasn't terminated, or a bare [`AWAITING_RUN`] opener awaiting its
+/// token — and emits only `redact`ed text that can no longer extend
+/// a match. Flush emits whatever remains, where buffer-end IS the
+/// token end (an unterminated long run still masks).
+#[derive(Default)]
+pub struct StreamRedactor {
+    /// Text held back as a possible in-flight candidate — bounded by
+    /// the longest candidate span, not the stream.
+    pending: String,
+}
+
+impl StreamRedactor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Append `delta`; returns the redacted prefix now safe to emit —
+    /// possibly empty while a candidate is still in flight.
+    pub fn push(&mut self, delta: &str) -> String {
+        self.pending.push_str(delta);
+        let hold = hold_start(&self.pending);
+        if hold == 0 {
+            return String::new();
+        }
+        let out = redact(&self.pending[..hold]);
+        self.pending.drain(..hold);
+        out
+    }
+
+    /// Stream-end drain — the pending tail resolves as-is under the
+    /// same rules (a still-open candidate at end-of-input masks per
+    /// [`redact`]).
+    pub fn flush(&mut self) -> String {
+        let pending = std::mem::take(&mut self.pending);
+        redact(&pending)
+    }
+}
+
+/// `true` when `tail` (a suffix of secret-alphabet chars, so every
+/// byte past an opener is still token-eligible) starts with a match
+/// opener or IS the strict prefix of one — both keep the tail in
+/// flight until the run terminates.
+fn tail_is_in_flight(tail: &str) -> bool {
+    STREAM_OPENERS
+        .iter()
+        .chain(KEY_PREFIXES)
+        .chain(AWAITING_RUN)
+        .any(|p| tail.starts_with(p) || p.starts_with(tail))
+}
+
+/// The earliest index where `buf[i..]` is still an in-flight secret
+/// candidate; `buf.len()` means nothing is in flight.
+fn hold_start(buf: &str) -> usize {
+    // A bare `Bearer `/`-----BEGIN ` at end awaits its token/body —
+    // the trailing run is empty, so the in-run scan never sees it.
+    for opener in AWAITING_RUN {
+        if buf.ends_with(opener) {
+            return buf.len() - opener.len();
+        }
+    }
+    // Only the trailing secret-char run can still extend a match —
+    // everything before it is settled text.
+    let run_start = buf
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !is_secret_char(*c))
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    // `Bearer <run>` — the separated-token idiom's opener sits just
+    // before the run (conservative on boundary: an embedded `bearer`
+    // mid-word also holds — late by one token, never unsafe).
+    for opener in AWAITING_RUN {
+        if buf[..run_start].ends_with(opener) {
+            return run_start - opener.len();
+        }
+    }
+    // Inside the run, a position following a non-ALPHANUMERIC char is a
+    // token start under the same rule `redact` applies — `x-sk-…`
+    // matches at `s`. Run chars are all ASCII, so byte steps stay on
+    // char boundaries.
+    let bytes = buf.as_bytes();
+    for i in run_start..buf.len() {
+        let token_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if token_start && tail_is_in_flight(&buf[i..]) {
+            return i;
+        }
+    }
+    buf.len()
+}
+
 fn utf8_len(b: u8) -> usize {
     if b < 0x80 {
         1
@@ -240,5 +347,66 @@ mod tests {
         let once = redact("x oxidean_fg_0123456789abcdef");
         assert_eq!(once, "x ***");
         assert_eq!(redact(&once), once);
+    }
+
+    /// Feed `chunks` through a StreamRedactor; the concatenated output
+    /// must equal one-shot `redact` of the whole input.
+    fn stream(chunks: &[&str]) -> String {
+        let mut r = StreamRedactor::new();
+        let mut out = String::new();
+        for c in chunks {
+            out.push_str(&r.push(c));
+        }
+        out.push_str(&r.flush());
+        out
+    }
+
+    #[test]
+    fn stream_masks_secret_split_across_deltas() {
+        let secret = "ghp_0123456789abcdefghij";
+        let text = format!("key {secret} tail");
+        for split in ["key ghp_".len(), "key ghp_012".len(), text.len() - 1] {
+            let out = stream(&[&text[..split], &text[split..]]);
+            assert_eq!(out, "key *** tail", "split at {split}");
+        }
+        // One char at a time — the worst-case delta granularity.
+        let chars: Vec<&str> = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|w| &text[w[0]..w[1]])
+            .collect();
+        assert_eq!(stream(&chars), "key *** tail");
+    }
+
+    #[test]
+    fn stream_masks_bearer_split_inside_the_opener() {
+        let text = "use Bearer abcdef0123456789 now";
+        for split in ["use Bea".len(), "use Bearer ".len(), "use Bearer ab".len()] {
+            let out = stream(&[&text[..split], &text[split..]]);
+            assert_eq!(out, "use Bearer *** now", "split at {split}");
+        }
+    }
+
+    #[test]
+    fn stream_passes_prose_and_incomplete_candidates() {
+        // Under the length floor the candidate resolves unmasked.
+        assert_eq!(stream(&["key sk-abc", " tail"]), "key sk-abc tail");
+        // Bare prose never holds.
+        assert_eq!(
+            stream(&["the answer is ", "forty-two"]),
+            "the answer is forty-two"
+        );
+    }
+
+    #[test]
+    fn stream_masks_pem_split_across_deltas() {
+        let pem = "h\n-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\nt";
+        for split in ["h\n-----BE".len(), "h\n-----BEGIN ".len(), 20] {
+            let out = stream(&[&pem[..split], &pem[split..]]);
+            assert_eq!(out, "h\n***\nt", "split at {split}");
+        }
     }
 }

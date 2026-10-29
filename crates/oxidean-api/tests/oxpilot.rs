@@ -1439,6 +1439,9 @@ fn proposal<'a>(
         session_id,
         title: "agent diff",
         base,
+        // Unpinned — `diff_apply` falls back to `base` verbatim, which
+        // is what the `no-such-ref` apply-failure leg relies on.
+        base_sha: "",
         diff_body: "diff --git a/hello.txt b/hello.txt\nnew file mode 100644\n",
         ops_json,
     }

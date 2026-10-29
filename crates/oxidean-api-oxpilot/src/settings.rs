@@ -412,8 +412,11 @@ async fn validate(
             .provider_id
             .as_deref()
             .filter(|id| registry::resolve_descriptor(id).is_some());
+        // The returned pin is for the provider client's connect —
+        // the settings path validates only; build re-resolves its own.
         egress::validate_base_url(bound_provider, url)
             .await
+            .map(|_| ())
             .map_err(|e| AppError::new("invalid_provider", e))?;
     }
     Ok(())

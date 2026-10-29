@@ -38,14 +38,14 @@ pub(in crate::providers) async fn build(
         .base_url
         .clone()
         .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-    egress::validate_base_url(Some("anthropic"), &base_url)
+    let pinned = egress::validate_base_url(Some("anthropic"), &base_url)
         .await
         .map_err(|e| ProviderError {
             code: "invalid_provider".to_string(),
             message: e,
         })?;
     Ok(Arc::new(AnthropicProvider {
-        client: egress::provider_http_client(),
+        client: egress::provider_http_client(pinned.as_ref()),
         base_url,
         api_key,
     }))
@@ -63,7 +63,7 @@ impl AnthropicProvider {
     #[doc(hidden)]
     pub fn new_for_testing(base_url: &str, api_key: &str) -> Self {
         Self {
-            client: egress::provider_http_client(),
+            client: egress::provider_http_client(None),
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
         }

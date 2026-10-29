@@ -36,14 +36,16 @@ pub(in crate::providers) async fn build(
         .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
     // Re-run the egress bound at construction — the boot/rebuild path
     // reaches build without settings::validate, and the bound is cheap.
-    egress::validate_base_url(Some("openai"), &base_url)
+    // The validated DNS answers pin into the client so connect-time
+    // re-resolution can't rebind to an unchecked address.
+    let pinned = egress::validate_base_url(Some("openai"), &base_url)
         .await
         .map_err(|e| ProviderError {
             code: "invalid_provider".to_string(),
             message: e,
         })?;
     Ok(Arc::new(OpenAiProvider {
-        client: egress::provider_http_client(),
+        client: egress::provider_http_client(pinned.as_ref()),
         base_url,
         api_key,
     }))
@@ -63,7 +65,7 @@ impl OpenAiProvider {
     #[doc(hidden)]
     pub fn new_for_testing(base_url: &str, api_key: &str) -> Self {
         Self {
-            client: egress::provider_http_client(),
+            client: egress::provider_http_client(None),
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
         }

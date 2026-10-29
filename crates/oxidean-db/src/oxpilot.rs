@@ -837,6 +837,10 @@ pub struct OxpilotProposalRow {
     pub title: String,
     /// Base ref/sha the diff applies against (C1 `ProposedDiff.base`).
     pub base: String,
+    /// Immutable commit `base` resolved to at propose time (migration
+    /// 0092) — the `repo.branchCreate.start` pin; `''` on pre-0092 rows
+    /// and when `base` names no listed head (already a commit-ish).
+    pub base_sha: String,
     /// Canonical unified-diff body — `files[{path,patch}]` derives by
     /// splitting on 'diff --git' headers at read time.
     pub diff_body: String,
@@ -948,6 +952,9 @@ macro_rules! map_proposal {
             base: row
                 .try_get("base")
                 .map_err(|e| format!("oxpilot proposal row: {e}"))?,
+            base_sha: row
+                .try_get("base_sha")
+                .map_err(|e| format!("oxpilot proposal row: {e}"))?,
             diff_body: row
                 .try_get("diff_body")
                 .map_err(|e| format!("oxpilot proposal row: {e}"))?,
@@ -1028,17 +1035,20 @@ const TOOL_CALL_SELECT_SQLITE: &str = "SELECT t.id, t.session_id, t.message_id, 
        strftime('%Y-%m-%dT%H:%M:%SZ', t.created_at) AS created_at
 FROM oxpilot_tool_calls t";
 
-const PROPOSAL_SELECT_PG: &str = "SELECT p.id, p.session_id, p.title, p.base, p.diff_body,
+const PROPOSAL_SELECT_PG: &str =
+    "SELECT p.id, p.session_id, p.title, p.base, p.base_sha, p.diff_body,
        p.ops_json, p.status, p.pr_ref,
        to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM oxpilot_proposals p";
 
-const PROPOSAL_SELECT_MYSQL: &str = "SELECT p.id, p.session_id, p.title, p.base, p.diff_body,
+const PROPOSAL_SELECT_MYSQL: &str =
+    "SELECT p.id, p.session_id, p.title, p.base, p.base_sha, p.diff_body,
        p.ops_json, p.status, p.pr_ref,
        DATE_FORMAT(p.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM oxpilot_proposals p";
 
-const PROPOSAL_SELECT_SQLITE: &str = "SELECT p.id, p.session_id, p.title, p.base, p.diff_body,
+const PROPOSAL_SELECT_SQLITE: &str =
+    "SELECT p.id, p.session_id, p.title, p.base, p.base_sha, p.diff_body,
        p.ops_json, p.status, p.pr_ref,
        strftime('%Y-%m-%dT%H:%M:%SZ', p.created_at) AS created_at
 FROM oxpilot_proposals p";
@@ -1893,6 +1903,9 @@ pub struct NewOxpilotProposal<'a> {
     pub title: &'a str,
     /// Base ref/sha — an identifier, never redacted.
     pub base: &'a str,
+    /// Immutable commit `base` resolved to at propose time — the
+    /// apply-path pin; `""` when no head listed under `base`.
+    pub base_sha: &'a str,
     /// Already secrets-redacted by the service boundary.
     pub diff_body: &'a str,
     /// Serialized `DiffFileOp[]` — validated op-set only, never redacted
@@ -1909,13 +1922,14 @@ pub async fn insert_proposal(
         DbPool::Postgres(pp) => {
             sqlx::query(
                 "INSERT INTO oxpilot_proposals
-                     (id, session_id, title, base, diff_body, ops_json)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                     (id, session_id, title, base, base_sha, diff_body, ops_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
             )
             .bind(p.id)
             .bind(p.session_id)
             .bind(p.title)
             .bind(p.base)
+            .bind(p.base_sha)
             .bind(p.diff_body)
             .bind(p.ops_json)
             .execute(pp)
@@ -1925,13 +1939,14 @@ pub async fn insert_proposal(
         DbPool::MySql(pp) => {
             sqlx::query(
                 "INSERT INTO oxpilot_proposals
-                     (id, session_id, title, base, diff_body, ops_json)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                     (id, session_id, title, base, base_sha, diff_body, ops_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(p.id)
             .bind(p.session_id)
             .bind(p.title)
             .bind(p.base)
+            .bind(p.base_sha)
             .bind(p.diff_body)
             .bind(p.ops_json)
             .execute(pp)
@@ -1941,13 +1956,14 @@ pub async fn insert_proposal(
         DbPool::Sqlite(pp) => {
             sqlx::query(
                 "INSERT INTO oxpilot_proposals
-                     (id, session_id, title, base, diff_body, ops_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     (id, session_id, title, base, base_sha, diff_body, ops_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .bind(p.id)
             .bind(p.session_id)
             .bind(p.title)
             .bind(p.base)
+            .bind(p.base_sha)
             .bind(p.diff_body)
             .bind(p.ops_json)
             .execute(pp)

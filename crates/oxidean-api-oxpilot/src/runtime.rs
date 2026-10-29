@@ -334,6 +334,12 @@ async fn run_round(
         any_items: false,
         terminal: None,
     };
+    // Streaming redact — an opener split across provider deltas
+    // (`"ghp_"`/`"abc…"`, `"Bear"`/`"er tok…"`) holds its in-flight
+    // tail until the token terminates; per-delta `redact` would pass
+    // each half through unmasked. The service's cumulative write
+    // re-redacts whole — the row stays the safety floor.
+    let mut scrub = oxidean_core::redact::StreamRedactor::new();
     loop {
         // Already-cancelled wins deterministically — else a Ready stream
         // item could beat the cancel arm's poll order and emit a frame
@@ -368,17 +374,17 @@ async fn run_round(
                         accum.content.push_str(&d);
                         out.text.push_str(&d);
                         accum.delta_seq += 1;
-                        // Redact per-delta at emission (NFR1.8); the
-                        // service re-redacts the cumulative write —
-                        // the row stays the safety floor.
-                        emit_frame(turn, json!({
-                            "type": "append",
-                            "message_id": turn.message_id,
-                            "seq": accum.delta_seq,
-                            "role": "assistant",
-                            "delta": redact(&d),
-                        }))
-                        .await;
+                        let emitted = scrub.push(&d);
+                        if !emitted.is_empty() {
+                            emit_frame(turn, json!({
+                                "type": "append",
+                                "message_id": turn.message_id,
+                                "seq": accum.delta_seq,
+                                "role": "assistant",
+                                "delta": emitted,
+                            }))
+                            .await;
+                        }
                         svc.set_message_content(
                             &session.user_id,
                             &turn.message_id,
@@ -411,6 +417,24 @@ async fn run_round(
                 }
             }
         }
+    }
+    // Whatever the scrubber still held resolves at stream end — the
+    // buffer's own end is the token end, so an unterminated run masks
+    // under the same rules.
+    let tail = scrub.flush();
+    if !tail.is_empty() {
+        accum.delta_seq += 1;
+        emit_frame(
+            turn,
+            json!({
+                "type": "append",
+                "message_id": turn.message_id,
+                "seq": accum.delta_seq,
+                "role": "assistant",
+                "delta": tail,
+            }),
+        )
+        .await;
     }
     Ok(out)
 }
@@ -780,7 +804,10 @@ async fn finish_turn(
             }
         }
     };
-    let drained = if !chain_open {
+    let drained = if turn.generation >= MAX_CHAIN_DEPTH || !chain_open {
+        // At the depth cap no successor will claim these rows — draining
+        // them here would strand them answered-never; they stay queued
+        // for the next POST's residual drain.
         Vec::new()
     } else {
         match svc.drain_queue(&session.user_id, &session.id).await {
@@ -1155,6 +1182,12 @@ async fn drain_and_chain(
     };
     let _g = lock.lock().await;
     turns.release(&session.id, &turn.turn_id).await;
+    if turn.generation >= MAX_CHAIN_DEPTH {
+        // Depth cap — no successor can claim, so the queue stays
+        // durable for the next POST's residual drain instead of
+        // being moved into the transcript unanswered.
+        return;
+    }
     let mut batch = outcome.map(|o| o.drained).unwrap_or_default();
     let svc = match state.oxpilot.sessions() {
         Ok(s) => s,
@@ -2379,12 +2412,19 @@ mod tests {
         let state = state_with(&db, Some(provider), Some("m-1"), None).await;
         let (t, _s) = start_turn(&state, &session, MAX_CHAIN_DEPTH).await;
         drain_and_chain(&state, &session, &t, None).await;
-        // Released, drained rows delivered as transcript, NO successor.
+        // Released with NO successor — and the queued row stays QUEUED:
+        // draining it to transcript here would strand it unanswered,
+        // since no claim can ever run it. The next POST's residual
+        // drain picks it up.
         assert!(state.oxpilot.turns().await.get(&session.id).await.is_none());
-        let msgs = svc.list_messages(&uid, &session.id).await.unwrap();
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0].content, "left behind");
-        assert!(svc.list_queue(&uid, &session.id).await.unwrap().is_empty());
+        assert!(svc
+            .list_messages(&uid, &session.id)
+            .await
+            .unwrap()
+            .is_empty());
+        let queue = svc.list_queue(&uid, &session.id).await.unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].content, "left behind");
     }
 
     #[tokio::test]

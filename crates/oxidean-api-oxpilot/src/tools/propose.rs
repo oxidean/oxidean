@@ -159,6 +159,7 @@ async fn fetch_base(
     tools: &OxpilotTools,
     ctx: &ToolCtx,
     session: &OxpilotSessionRow,
+    base_ref: &str,
     path: &str,
 ) -> Result<Content, ToolError> {
     match tools
@@ -168,7 +169,7 @@ async fn fetch_base(
             json!({
                 "owner": session.repo_owner,
                 "name": session.repo_name,
-                "ref": session.branch,
+                "ref": base_ref,
                 "path": path,
             }),
         )
@@ -521,15 +522,60 @@ fn side_ref(content: &Content, path: &str, prefix: char) -> String {
     }
 }
 
+/// `repo.refs` → `session.branch`'s tip oid — the immutable pin the
+/// apply path branches from. No listed match degrades to `""` (the
+/// branch is already a commit-ish, so `base` itself can't drift);
+/// the proc's own errors propagate fail-closed like the blob fetches.
+async fn resolve_base_sha(
+    tools: &OxpilotTools,
+    ctx: &ToolCtx,
+    session: &OxpilotSessionRow,
+) -> Result<String, ToolError> {
+    let data = tools
+        .dispatch_proc_raw(
+            ctx,
+            "repo.refs",
+            json!({
+                "owner": session.repo_owner,
+                "name": session.repo_name,
+            }),
+        )
+        .await
+        .map_err(|e| map_proc_error(&e))?;
+    let want = format!("refs/heads/{}", session.branch);
+    let sha = data["refs"]
+        .as_array()
+        .and_then(|rs| {
+            rs.iter()
+                .find(|r| {
+                    let n = r["name"].as_str();
+                    n == Some(want.as_str()) || n == Some(session.branch.as_str())
+                })
+                .and_then(|r| r["oid"].as_str())
+        })
+        .unwrap_or_default()
+        .to_string();
+    Ok(sha)
+}
+
 /// The whole stored patch — each touched path's (base → final)
 /// net-effect stanza in path order. `bases` must cover every op's
-/// `path` AND `new_path` before this runs.
+/// `path` AND `new_path` before this runs. Returns `(diff_body,
+/// base_sha)`: the ref resolves FIRST so the blob reads and the
+/// stored pin anchor the same immutable commit — a push landing
+/// mid-proposal can never split the patch from its apply base.
 async fn canonical_diff(
     tools: &OxpilotTools,
     ctx: &ToolCtx,
     session: &OxpilotSessionRow,
     ops: &[FileOp],
-) -> Result<String, ToolError> {
+) -> Result<(String, String), ToolError> {
+    let base_sha = resolve_base_sha(tools, ctx, session).await?;
+    let base_ref = if base_sha.is_empty() {
+        session.branch.as_str()
+    } else {
+        base_sha.as_str()
+    };
     // One fetch per unique touched path — `path` ∪ `new_path`, sorted
     // for a deterministic dispatch order.
     let mut paths: Vec<&str> = Vec::new();
@@ -543,7 +589,10 @@ async fn canonical_diff(
     paths.dedup();
     let mut bases: BTreeMap<String, Content> = BTreeMap::new();
     for p in paths {
-        bases.insert(p.to_string(), fetch_base(tools, ctx, session, p).await?);
+        bases.insert(
+            p.to_string(),
+            fetch_base(tools, ctx, session, base_ref, p).await?,
+        );
     }
 
     let finals = fold_ops(ops, &bases)?;
@@ -565,7 +614,7 @@ async fn canonical_diff(
         };
         render_stanza(&mut out, origin, new_name, &base, content);
     }
-    Ok(out)
+    Ok((out, base_sha))
 }
 
 /// `propose_diff{title, files[], diff_body}` → pending row + diff card
@@ -634,7 +683,7 @@ pub async fn propose_diff(
     // diverge from the base64 payloads the apply path writes). The
     // base fetches also fail a dead repo binding up front, better than
     // a pending row that can never apply.
-    let diff_body = canonical_diff(tools, ctx, session, &ops).await?;
+    let (diff_body, base_sha) = canonical_diff(tools, ctx, session, &ops).await?;
     if diff_body.len() > DIFF_BODY_MAX {
         return Err(tool_err(
             "invalid_args",
@@ -655,6 +704,7 @@ pub async fn propose_diff(
                 session_id: ctx.session_id.clone(),
                 title: title.to_string(),
                 base: session.branch.clone(),
+                base_sha,
                 diff_body,
                 ops_json: serde_json::to_string(&args["files"])
                     .unwrap_or_else(|_| "[]".to_string()),

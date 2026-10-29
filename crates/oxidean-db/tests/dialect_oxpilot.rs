@@ -866,6 +866,7 @@ async fn session_delete_cascades_children_but_keeps_usage() {
         session_id: sid,
         title: "diff",
         base: "main",
+        base_sha: "0000000000000000000000000000000000000000",
         diff_body: "diff --git a/x b/x",
         ops_json: "[]",
     })
@@ -2068,6 +2069,7 @@ async fn proposal_ops_json_round_trip_and_backfill_default() {
         session_id: sid,
         title: "ops diff",
         base: "main",
+        base_sha: "0000000000000000000000000000000000000000",
         diff_body: "diff --git a/src/a.rs b/src/a.rs\n",
         ops_json: ops,
     })
@@ -2132,6 +2134,7 @@ async fn find_proposals_by_session_newest_first_and_scoped() {
             session_id: s,
             title: "t",
             base: "main",
+            base_sha: "0000000000000000000000000000000000000000",
             diff_body: "d",
             ops_json: "[]",
         })
@@ -2183,6 +2186,7 @@ async fn proposal_id_keyed_read_and_apply_transition() {
         session_id: sid,
         title: "t",
         base: "main",
+        base_sha: "0000000000000000000000000000000000000000",
         diff_body: "diff --git a/a.rs b/a.rs\n",
         ops_json: ops,
     })
@@ -2273,6 +2277,7 @@ async fn proposal_ops_json_stored_verbatim_no_redaction() {
         session_id: sid,
         title: "t",
         base: "main",
+        base_sha: "0000000000000000000000000000000000000000",
         diff_body: "diff --git a/src/x.rs b/src/x.rs\n",
         ops_json: ops,
     })

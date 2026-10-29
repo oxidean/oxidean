@@ -72,38 +72,45 @@ pub async fn dispatch_action(
 
     // BR7.3 — target resolution: an explicit `target_id` is used
     // verbatim (the gateway's own owner/connected/caps checks verify
-    // it); absent resolves via the `connected` lifecycle filter.
+    // it); absent, the session's binding is authoritative — only an
+    // UNBOUND session falls back to sole-connected selection. The
+    // bound id goes through the same gateway checks on dispatch, so a
+    // bound-but-offline target denies rather than silently reroute
+    // the action onto a different machine.
     let arg_target = args["target_id"].as_str().map(str::to_string);
     let target_id = match arg_target {
         Some(t) => t,
-        None => {
-            let views = gw
-                .list_targets(&ClientMeta::default(), &ctx.user_id)
-                .await
-                .map_err(|e| map_proc_error(&e))?;
-            let connected: Vec<_> = views
-                .iter()
-                .filter(|t| t.lifecycle == "connected")
-                .collect();
-            match connected.len() {
-                0 => {
-                    return Err(tool_err(
-                        "no_target",
-                        "no connected connector target — call targets_list to inspect paired targets, or ask the user to pair one",
-                    ));
-                }
-                1 => connected[0].id.clone(),
-                _ => {
-                    return Err(tool_err(
-                        "ambiguous_target",
-                        format!(
-                            "{} connected targets — pass target_id (see targets_list) to choose one",
-                            connected.len()
-                        ),
-                    ));
+        None => match session.computer_use_target_id.clone() {
+            Some(t) => t,
+            None => {
+                let views = gw
+                    .list_targets(&ClientMeta::default(), &ctx.user_id)
+                    .await
+                    .map_err(|e| map_proc_error(&e))?;
+                let connected: Vec<_> = views
+                    .iter()
+                    .filter(|t| t.lifecycle == "connected")
+                    .collect();
+                match connected.len() {
+                    0 => {
+                        return Err(tool_err(
+                            "no_target",
+                            "no connected connector target — call targets_list to inspect paired targets, or ask the user to pair one",
+                        ));
+                    }
+                    1 => connected[0].id.clone(),
+                    _ => {
+                        return Err(tool_err(
+                            "ambiguous_target",
+                            format!(
+                                "{} connected targets — pass target_id (see targets_list) to choose one",
+                                connected.len()
+                            ),
+                        ));
+                    }
                 }
             }
-        }
+        },
     };
 
     // The dispatched arg string drops `target_id` — it is a selector,
@@ -131,7 +138,6 @@ pub async fn dispatch_action(
             &args_str,
         )
         .await;
-    let _ = session; // resolved upstream for ownership/liveness (BR2.1)
 
     match row {
         Ok(action) => {
