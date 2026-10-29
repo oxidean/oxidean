@@ -226,6 +226,11 @@ async fn assemble_prompt(
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         let msg = into_chat_msg(row, cards);
+        // Empty rows (failed/aborted turns with no deltas and no cards)
+        // carry nothing and break providers that reject empty content.
+        if msg.content.trim().is_empty() {
+            continue;
+        }
         let n = rendered_len(&msg);
         if n > budget {
             break;

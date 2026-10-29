@@ -14,7 +14,7 @@ rest of the CLI uses.
 #    Codes live 10 minutes and are single-use.
 
 # 2. Redeem it on the machine that should run actions:
-ox pilot pair OXPAIR-XXXX [--instance https://forge.example] \
+ox pilot pair <64-hex-code> [--instance https://forge.example] \
      [--label "build-box-1"] [--caps exec_shell,fs_read,fs_write] [--verbose]
 
 # 3. Run the connector (foreground — send ctrl-c to stop):

@@ -5435,37 +5435,49 @@ export interface OxpilotSnapshot {
   active_turn: OxpilotActiveTurn | null;
 }
 
-export interface OxpilotDeltaFrame {
-  type: "delta";
+export interface OxpilotAppendFrame {
+  type: "append";
+  message_id: string;
   seq: number;
-  content: string;
+  role: string;
+  delta: string;
 }
 
 export interface OxpilotToolCallFrame {
   type: "tool_call";
   call_id: string;
+  call_index?: number;
   tool: string;
   status: string;
+  message_id?: string;
+  args_summary?: string | null;
   output_summary?: string | null;
 }
 
-export interface OxpilotDoneFrame {
-  type: "done";
-  status: "done" | "error" | "aborted";
+export interface OxpilotCardFrame {
+  type: "card";
+  card_kind: string;
+  ref_id: string;
 }
 
-export interface OxpilotErrorFrame {
-  type: "error";
-  code: string;
-  message: string;
+export interface OxpilotTerminalFrame {
+  type: "terminal";
+  message_id: string;
+  result: string;
+  code?: string;
+}
+
+export interface OxpilotPingFrame {
+  type: "ping";
 }
 
 export type OxpilotFrame =
   | OxpilotSnapshot
-  | OxpilotDeltaFrame
+  | OxpilotAppendFrame
   | OxpilotToolCallFrame
-  | OxpilotDoneFrame
-  | OxpilotErrorFrame;
+  | OxpilotCardFrame
+  | OxpilotTerminalFrame
+  | OxpilotPingFrame;
 
 // ── Connector (C3) owner surface ─────────────────────────────────────────
 

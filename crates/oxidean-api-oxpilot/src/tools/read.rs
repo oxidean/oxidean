@@ -71,6 +71,20 @@ fn build_input(entry_name: &str, args: &Value, session: &OxpilotSessionRow) -> V
     Value::Object(input)
 }
 
+/// JSON-escaped width of one char — `bound_output` measures the serialized
+/// string, so the tail cap must be budgeted in escaped width, not raw bytes
+/// (a newline-heavy or control-char log can otherwise exceed TOOL_OUTPUT_MAX
+/// after escaping and get cut inside the string, malformed-JSON-ing the
+/// frame and dropping the paging fields).
+fn escaped_len(c: char) -> usize {
+    match c {
+        '"' | '\\' => 2,
+        '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2,
+        c if (c as u32) < 0x20 => 6, // \u00xx
+        c => c.len_utf8(),
+    }
+}
+
 /// `actions_get_job_log` — re-shape `ActionJobLogResponse{content,
 /// next_offset, size, done}` into the tool output `{content
 /// (tail-bounded), next_offset, done}` (WF3): the log's TAIL is the
@@ -81,12 +95,20 @@ fn bound_job_log(mut data: Value) -> Value {
         if let Some(content) = obj.get("content").and_then(|c| c.as_str()) {
             // Reserve room for the framing fields under TOOL_OUTPUT_MAX.
             let cap = TOOL_OUTPUT_MAX.saturating_sub(1024);
-            if content.len() > cap {
-                let start = content.len() - cap;
-                let start = content
-                    .char_indices()
-                    .find_map(|(i, _)| (i >= start).then_some(i))
-                    .unwrap_or(content.len());
+            // Keep the largest TAIL whose escaped width fits — raw-byte
+            // length under-budgets escapable content.
+            let mut keep_bytes = 0usize;
+            let mut width = 0usize;
+            for c in content.chars().rev() {
+                let w = escaped_len(c);
+                if width + w > cap {
+                    break;
+                }
+                width += w;
+                keep_bytes += c.len_utf8();
+            }
+            if keep_bytes < content.len() {
+                let start = content.len() - keep_bytes;
                 obj.insert(
                     "content".to_string(),
                     Value::String(content[start..].to_string()),
@@ -195,6 +217,31 @@ mod tests {
         assert_eq!(data["truncated"], true);
         assert!(data["content"].as_str().unwrap().len() <= TOOL_OUTPUT_MAX);
         assert_eq!(data["next_offset"], 12345);
+    }
+
+    #[test]
+    fn job_log_tail_bounds_escaped_width() {
+        // Newlines double in escaped width — a raw-byte cap lets the
+        // serialized string overflow TOOL_OUTPUT_MAX and get cut inside
+        // the JSON string by `bound_output`.
+        let big = "\n".repeat(TOOL_OUTPUT_MAX);
+        let data = bound_job_log(json!({
+            "content": big,
+            "next_offset": 5u64,
+            "size": 1u64,
+            "done": false
+        }));
+        let serialized = serde_json::to_string(&data).unwrap();
+        assert_eq!(data["truncated"], true);
+        assert!(
+            serialized.len() <= TOOL_OUTPUT_MAX,
+            "serialized {} exceeds cap",
+            serialized.len()
+        );
+        // Tail semantics preserved — the kept content is the log's end.
+        let kept = data["content"].as_str().unwrap();
+        assert!(kept.chars().all(|c| c == '\n'));
+        assert_eq!(data["next_offset"], 5);
     }
 
     #[test]

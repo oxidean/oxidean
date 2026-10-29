@@ -3776,7 +3776,10 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("pilot", "pair", "") => {
-            let f = scan(tail, &["--label", "--caps"], &["--verbose"], &["--caps"])?;
+            // `--caps` lives ONLY in `multi_flags` — listing it as a
+            // value-flag too made `scan` route every repeat to `f.values`
+            // and drop all but the last.
+            let f = scan(tail, &["--label"], &["--verbose"], &["--caps"])?;
             let code = f
                 .positionals
                 .first()
@@ -3788,17 +3791,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             // `--caps` accepts a comma list and/or repeats; merged into one
             // set. The empty-after-split case surfaces as `Some(vec![])` so
             // `pilot::pair` can refuse with its own message.
-            let caps = if f.values.contains_key("--caps") || !f.multi.is_empty() {
+            let caps = if f.multi.iter().any(|(k, _)| k == "--caps") {
                 Some(
-                    f.values
-                        .get("--caps")
-                        .into_iter()
-                        .chain(
-                            f.multi
-                                .iter()
-                                .filter(|(k, _)| k == "--caps")
-                                .map(|(_, v)| v),
-                        )
+                    f.multi
+                        .iter()
+                        .filter(|(k, _)| k == "--caps")
+                        .map(|(_, v)| v)
                         .flat_map(|v| v.split(','))
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())

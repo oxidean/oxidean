@@ -74,11 +74,14 @@ pub(crate) fn key_material_resolvable(ciphertext: Option<&str>, env_key: Option<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    /// Env mutation is process-global — serialize the custody tests.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// Env mutation is process-global — serialize every test that touches
+    /// `OXIDEAN_OXPILOT_SECRETS_KEY`/`OXIDEAN_SESSION_SECRET`. `pub(crate)`
+    /// because `settings.rs`'s custody tests mutate the SAME variables; two
+    /// module-local locks would not serialize against each other.
+    pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct EnvGuard;
     impl EnvGuard {

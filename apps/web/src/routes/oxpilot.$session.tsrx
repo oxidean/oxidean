@@ -426,11 +426,16 @@ function OxpilotChatSurface(props: {
         if (!dedupe(frame)) return;
         if (frame.type === "append") {
           setLiveTurns((prev) => new Set(prev).add(String(frame.message_id)));
-          setLiveTail((prev) => ({
-            ...prev,
-            [String(frame.message_id)]:
-              (prev[String(frame.message_id)] ?? "") + String(frame.delta),
-          }));
+          // Own turn: useChat already accumulates these deltas from the POST
+          // stream — adding them to liveTail too would double-render. Keep
+          // the tail only for foreign turns (busy false).
+          if (!busyRef.current) {
+            setLiveTail((prev) => ({
+              ...prev,
+              [String(frame.message_id)]:
+                (prev[String(frame.message_id)] ?? "") + String(frame.delta),
+            }));
+          }
         } else if (frame.type === "tool_call") {
           const call = toCallCard({
             call_id: String(frame.call_id),

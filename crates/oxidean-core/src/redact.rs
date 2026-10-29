@@ -64,12 +64,17 @@ fn is_secret_char(c: char) -> bool {
 }
 
 /// `true` when `s` starts a JWT — `eyJ` (base64 `{"`) followed by at least
-/// two further dot-separated segments.
+/// two further dot-separated segments. Dots are counted inside the candidate
+/// token only (the secret-char run), never across the whole remaining input —
+/// otherwise any `eyJ`-starting word followed by two sentence periods would
+/// mask prose.
 fn looks_like_jwt(s: &str) -> bool {
     if !s.starts_with("eyJ") {
         return false;
     }
-    s.matches('.').count() >= 2 && s.len() > 20
+    let token_len = s.find(|c: char| !is_secret_char(c)).unwrap_or(s.len());
+    let token = &s[..token_len];
+    token.matches('.').count() >= 2 && token.len() > 20
 }
 
 /// Redact secret-shaped content in `input`; returns the masked string.
@@ -100,9 +105,19 @@ pub fn redact(input: &str) -> String {
 
         let rest = &input[i..];
 
+        // Token boundary — prefix matches only count at a token start, i.e.
+        // the preceding char is not ASCII alphanumeric. Otherwise ordinary
+        // words mask as secrets: `task-runner-service` matches `sk-` at byte
+        // 2, `ringbearer <word>` matches `bearer ` at byte 4.
+        let token_start = i == 0
+            || !input[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric());
+
         // JWT — checked before generic prefixes because `eyJ` overlaps no
         // vendor idiom but needs the three-segment shape test.
-        if looks_like_jwt(rest) {
+        if token_start && looks_like_jwt(rest) {
             let end = consume_secret(rest, i);
             out.push_str(MASK);
             i = end;
@@ -111,7 +126,7 @@ pub fn redact(input: &str) -> String {
 
         // Generic OpenAI-style `sk-` — short prefix, kept separate so the
         // require-length rule still applies.
-        if rest.starts_with("sk-") {
+        if token_start && rest.starts_with("sk-") {
             let end = consume_secret(rest, i);
             if end - i - "sk-".len() >= MIN_SUFFIX_LEN {
                 out.push_str(MASK);
@@ -120,17 +135,19 @@ pub fn redact(input: &str) -> String {
             }
         }
 
-        if let Some(prefix) = KEY_PREFIXES.iter().find(|p| rest.starts_with(**p)) {
-            let end = consume_secret(rest, i);
-            if end - i - prefix.len() >= MIN_SUFFIX_LEN {
-                out.push_str(MASK);
-                i = end;
-                continue;
+        if token_start {
+            if let Some(prefix) = KEY_PREFIXES.iter().find(|p| rest.starts_with(**p)) {
+                let end = consume_secret(rest, i);
+                if end - i - prefix.len() >= MIN_SUFFIX_LEN {
+                    out.push_str(MASK);
+                    i = end;
+                    continue;
+                }
             }
         }
 
         // Bearer token idiom — `Bearer <token>` masks only the token.
-        if rest.starts_with("Bearer ") || rest.starts_with("bearer ") {
+        if token_start && (rest.starts_with("Bearer ") || rest.starts_with("bearer ")) {
             let token_start = i + "Bearer ".len();
             let token_rest = &input[token_start..];
             let end = consume_secret(token_rest, token_start);

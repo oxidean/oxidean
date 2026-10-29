@@ -685,6 +685,10 @@ pub async fn settings_set(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppEr
             ),
         }
     };
+    // The installed slot's reason is the runtime truth — an enable-only
+    // write that installs a `misconfigured` slot must not report
+    // `disabled_reason: null` just because the provider id resolved.
+    let installed_reason = new_slot.disabled_reason.clone();
     *runtime.slot.write().await = new_slot;
 
     // Audit AFTER commit+swap — names only, fire-and-log; a failed audit
@@ -698,7 +702,9 @@ pub async fn settings_set(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppEr
     )
     .await;
 
-    Ok(settings_json(persisted_row.as_ref(), &cfg))
+    let mut out = settings_json(persisted_row.as_ref(), &cfg);
+    out["disabled_reason"] = json!(installed_reason);
+    Ok(out)
 }
 
 /// `admin.oxpilot.providers_list` — REGISTRY verbatim plus a computed
@@ -729,10 +735,8 @@ pub async fn providers_list(ctx: &RpcCtx) -> Result<Value, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::key::tests::ENV_LOCK;
     use oxidean_api_core::oxpilot::{ActiveTurns, StubProvider};
-
-    /// Real env mutation (key custody only) — serialize.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn env() -> EnvDefaults {
         EnvDefaults {

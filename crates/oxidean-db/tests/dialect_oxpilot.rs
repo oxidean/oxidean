@@ -4,8 +4,11 @@
 //! ordering, `client_msg_id` dedupe lookup, `(session_id, seq)` uniqueness,
 //! and the streaming-orphan sweep — on all three engines.
 //!
-//! All tests share one `DATABASE_URL` target; serialize them so SQLite's
-//! single-writer model doesn't race schema-touching connections.
+//! All tests share one `DATABASE_URL` target. Nextest runs each test in its
+//! own process, so `.config/nextest.toml` serializes this binary through a
+//! `max-threads = 1` test group; the in-process `SERIAL` mutex below only
+//! orders the (single) live test's own awaits — it cannot serialize across
+//! processes and is kept for `cargo test` runs, which do share a process.
 
 use oxidean_db::{
     dialect, Database, Dialect, NewOxpilotAction, NewOxpilotGrant, NewOxpilotMessage,

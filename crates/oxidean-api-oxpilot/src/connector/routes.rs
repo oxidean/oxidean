@@ -150,8 +150,9 @@ struct PairBody {
 }
 
 /// `POST /pair` — BR1.5's no-auth carve-out: the pairing code IS the
-/// credential. No session, no PAT, no route-level limiter (the code's
-/// entropy + TTL is the bound).
+/// credential. No session, no PAT — the failed-auth IP limiter in
+/// `redeem_pairing` bounds unknown-code audit writes at request rate
+/// (the code's entropy + TTL bounds the guess surface).
 pub async fn pair(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     let meta = ClientMeta::from_headers(&headers);
     if let Err(r) = require_enabled_gate(&state).await {

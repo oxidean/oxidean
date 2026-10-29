@@ -42,11 +42,19 @@ fn match_pattern(name: &str, value: &str) -> Result<(), String> {
             if value.contains('\\') || value.contains('\0') {
                 return Err("contains an illegal path character".to_string());
             }
-            if value == ".git" || value.starts_with(".git/") {
-                return Err("must not enter .git".to_string());
-            }
-            if value.split('/').any(|seg| seg == "..") {
-                return Err("must not contain '..' segments".to_string());
+            for seg in value.split('/') {
+                if seg.is_empty() || seg == "." {
+                    return Err("must not contain empty or '.' segments".to_string());
+                }
+                // `.git` at ANY depth — Git rejects a `.git` component at
+                // any level, and case-insensitive filesystems fold `.GIT`
+                // onto it too.
+                if seg.eq_ignore_ascii_case(".git") {
+                    return Err("must not enter .git".to_string());
+                }
+                if seg == ".." {
+                    return Err("must not contain '..' segments".to_string());
+                }
             }
             Ok(())
         }
@@ -278,7 +286,18 @@ mod tests {
     #[test]
     fn repo_path_pattern() {
         let s = obj_schema();
-        for bad in ["/abs/x", "..\\x", "a/../b", ".git/config", "~/x", ""] {
+        for bad in [
+            "/abs/x",
+            "..\\x",
+            "a/../b",
+            ".git/config",
+            "a/.git/config",
+            "sub/.GIT/hooks/pre-commit",
+            "~/x",
+            "a//b",
+            "a/./b",
+            "",
+        ] {
             assert!(
                 validate(&s, &json!({"path": bad})).is_err(),
                 "{bad} must reject"

@@ -1274,6 +1274,14 @@ impl ConnectorGateway for OxpilotConnectorGateway {
         if code.is_empty() || code.len() > 128 {
             return Err(bad_input("pairing_code is required"));
         }
+        // NFR1.3 — `/pair` is unauthenticated, so every well-formed unknown
+        // code would otherwise write an audit row at request rate. The
+        // shared failed-auth IP bucket gates BEFORE the hash lookup; a
+        // tripped bucket answers rate_limited and writes NO audit row.
+        let ip = client.ip_address.as_deref().unwrap_or("unknown");
+        if let Err(retry) = self.limiter().check_ip(ip) {
+            return Err(rate_limited(retry));
+        }
         let hash = sha256_hex(code.as_bytes());
         let now = now_rfc();
         let pairing = self
@@ -1283,7 +1291,10 @@ impl ConnectorGateway for OxpilotConnectorGateway {
             .map_err(db_err)?;
         let Some(p) = pairing else {
             // Unknown-but-wellformed folds into `used` — C3's refusal
-            // trio admits no never-existed/consumed split.
+            // trio admits no never-existed/consumed split. The recorded
+            // failure is what bounds this write: enough unknown-code
+            // attempts trip the IP bucket checked above.
+            self.limiter().record_ip(ip);
             self.audit(
                 client,
                 None,

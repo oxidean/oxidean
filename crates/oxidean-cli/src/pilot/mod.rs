@@ -169,11 +169,25 @@ fn pick_row<'m>(
     target: Option<&str>,
 ) -> Result<&'m TargetRow, CliError> {
     match target {
-        Some(t) => map.get(t).ok_or_else(|| {
-            CliError::Transport(format!(
-                "no paired target \"{t}\" — `ox pilot status` lists known targets"
-            ))
-        }),
+        Some(t) => match map.get(t) {
+            Some(row) => Ok(row),
+            // `--target` accepts a device label per the help text — resolve
+            // it only when exactly one row carries it.
+            None => {
+                let by_label: Vec<&TargetRow> =
+                    map.values().filter(|r| r.device_label == t).collect();
+                match by_label.as_slice() {
+                    [row] => Ok(*row),
+                    [] => Err(CliError::Transport(format!(
+                        "no paired target \"{t}\" — `ox pilot status` lists known targets"
+                    ))),
+                    _ => Err(CliError::Transport(format!(
+                        "label \"{t}\" matches {} targets — pass the target id instead",
+                        by_label.len()
+                    ))),
+                }
+            }
+        },
         None if map.len() == 1 => map
             .values()
             .next()

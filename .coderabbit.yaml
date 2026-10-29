@@ -7,7 +7,21 @@ reviews:
     # shipped code.
     - "!aidlc/**"
   profile: chill
-  request_changes_workflow: false
+  tools:
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: false
+    gitleaks:
+      enabled: true
+    checkov:
+      enabled: false
+    hadolint:
+      enabled: true
+    actionlint:
+      enabled: true
+    github-checks:
+      enabled: false
   high_level_summary: true
   review_status: true
   commit_status: true
@@ -28,18 +42,3 @@ reviews:
     ignore_title_keywords: []
     drafts: false
     base_branches: []
-tools:
-  shellcheck:
-    enabled: true
-  markdownlint:
-    enabled: false
-  gitleaks:
-    enabled: true
-  checkov:
-    enabled: false
-  hadolint:
-    enabled: true
-  actionlint:
-    enabled: true
-  github-checks:
-    enabled: false

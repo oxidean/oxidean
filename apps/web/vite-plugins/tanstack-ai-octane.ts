@@ -13,7 +13,6 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Plugin } from "vite";
 
 const PKG = "@tanstack/ai-octane";
@@ -34,6 +33,56 @@ function resolveFile(base: string): string | null {
     }
   }
   return null;
+}
+
+/** Deepest string in an `exports` condition tree — `import` before `default`. */
+function pickCondition(v: unknown): string | null {
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return pickCondition(o.import) ?? pickCondition(o.default);
+  }
+  return null;
+}
+
+/** The `exports[sub]` target for `sub` like `"."`/`"./x"`, or null. */
+function pickExport(exports: unknown, key: string): string | null {
+  if (exports === null || typeof exports !== "object") return null;
+  const table = exports as Record<string, unknown>;
+  // `{".": {...}}` and bare condition objects (`{"import": "..."}`) both
+  // appear as the package root's exports value.
+  const entry = key in table ? table[key] : key === "." ? table : null;
+  return pickCondition(entry);
+}
+
+/**
+ * Resolve a bare specifier as if imported from `fromFile` — node_modules
+ * walk upward from the importer's directory, `exports`-map aware
+ * (`import`/`default` conditions). `import.meta.resolve` ignores its
+ * `parent` arg without an experimental flag on pre-24 Node, and CJS
+ * `require.resolve` cannot read `import` conditions.
+ */
+function resolveFrom(fromFile: string, spec: string): string | null {
+  const seg = spec.startsWith("@")
+    ? spec.split("/").slice(0, 2).join("/")
+    : (spec.split("/")[0] ?? spec);
+  const sub = spec.slice(seg.length);
+  let dir = path.dirname(fromFile);
+  for (;;) {
+    const pkgDir = path.join(dir, "node_modules", seg);
+    const manifestPath = path.join(pkgDir, "package.json");
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+        exports?: unknown;
+      };
+      const target = pickExport(manifest.exports, `.${sub}`) ?? `.${sub}`;
+      const hit = resolveFile(path.join(pkgDir, target));
+      return hit;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
 
 export function tanstackAiOctaneSource(projectRoot: string): Plugin {
@@ -91,11 +140,12 @@ export function tanstackAiOctaneSource(projectRoot: string): Plugin {
             // resolution, which honors `import`-condition exports maps
             // (`require.resolve` cannot read them).
             if (id && id !== spec) return id;
-            try {
-              return fileURLToPath(import.meta.resolve(spec, pathToFileURL(importerReal).href));
-            } catch {
-              return null;
-            }
+            // `import.meta.resolve`'s parent arg is silently ignored without
+            // `--experimental-import-meta-resolve` (pre-Node-24), which would
+            // resolve from this plugin module instead of `importerReal`.
+            // Walk importerReal's own node_modules chain instead — CJS
+            // `require.resolve` can't read `import`-condition exports maps.
+            return resolveFrom(importerReal, spec);
           });
       }
 
@@ -113,7 +163,15 @@ export function tanstackAiOctaneSource(projectRoot: string): Plugin {
       // `load` returns the authored source; the Octane transform compiles it.
       // The real file is not a graph node, so dep edits don't invalidate the
       // dev graph — restart the dev server when patching the package.
-      return fs.readFileSync(realPath(id), "utf8");
+      // Containment: `path.join` resolves `..` segments — an id like
+      // `tanstack-ai-octane-octane-src:../../etc/passwd` must not escape
+      // the package directory.
+      const real = path.resolve(realPath(id));
+      const root = path.resolve(pkgSrc());
+      if (real !== root && !real.startsWith(root + path.sep)) {
+        return null;
+      }
+      return fs.readFileSync(real, "utf8");
     },
   };
 }
