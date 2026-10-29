@@ -2082,14 +2082,25 @@ async fn proposal_ops_json_round_trip_and_backfill_default() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].ops_json, ops, "ops_json must round-trip verbatim");
 
-    // Backfill: a pre-column-shaped INSERT (no ops_json in the column
-    // list) reads back the `'[]'` default on every dialect.
-    pool.exec(
-        "INSERT INTO oxpilot_proposals (id, session_id, title, base, diff_body, status, created_at) \
-         VALUES ('oxpp-opsjson-legacy', 'oxps-opsjson-1', 'legacy', 'main', 'diff --git a/x b/x', 'pending', '2026-01-01 00:00:00')",
-    )
-    .await
-    .expect("raw insert");
+    // Backfill: a pre-column-shaped row reads back the dialect's
+    // empty-op marker — pg/sqlite fill an omitted column with the '[]'
+    // literal default; mysql's MEDIUMTEXT takes no literal default, so
+    // the ALTER backfilled existing rows to '' (and a column-omissive
+    // INSERT would fail under strict mode), which readers treat as the
+    // same empty op list.
+    let (legacy_sql, legacy_ops) = match dialect::from_url(&url).expect("dialect") {
+        Dialect::MySql => (
+            "INSERT INTO oxpilot_proposals (id, session_id, title, base, diff_body, status, created_at, ops_json) \
+             VALUES ('oxpp-opsjson-legacy', 'oxps-opsjson-1', 'legacy', 'main', 'diff --git a/x b/x', 'pending', '2026-01-01 00:00:00', '')",
+            "",
+        ),
+        _ => (
+            "INSERT INTO oxpilot_proposals (id, session_id, title, base, diff_body, status, created_at) \
+             VALUES ('oxpp-opsjson-legacy', 'oxps-opsjson-1', 'legacy', 'main', 'diff --git a/x b/x', 'pending', '2026-01-01 00:00:00')",
+            "[]",
+        ),
+    };
+    pool.exec(legacy_sql).await.expect("raw insert");
     let rows = db
         .find_oxpilot_proposals_by_session(sid)
         .await
@@ -2098,7 +2109,10 @@ async fn proposal_ops_json_round_trip_and_backfill_default() {
         .iter()
         .find(|r| r.id == "oxpp-opsjson-legacy")
         .expect("legacy row");
-    assert_eq!(legacy.ops_json, "[]", "pre-column row must backfill '[]'");
+    assert_eq!(
+        legacy.ops_json, legacy_ops,
+        "pre-column row must backfill the empty op list"
+    );
 }
 
 /// `find_oxpilot_proposals_by_session` is newest-first by

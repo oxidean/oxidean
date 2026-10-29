@@ -249,8 +249,22 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
     // sequence. Global re-batching would reorder a rename-before-
     // update pair (e.g. `update old → rename old→new → update new`
     // must upload `new` only AFTER the rename lands).
-    let ops: Vec<DiffFileOp> = serde_json::from_str(&row.ops_json)
-        .map_err(|e| AppError::new("oxpilot.internal", format!("ops_json decode: {e}")))?;
+    let ops: Vec<DiffFileOp> = if row.ops_json.trim().is_empty() {
+        // '' — mysql's no-default backfill on proposals that predate
+        // 0089; reads as the same empty op list pg/sqlite store as '[]'.
+        Vec::new()
+    } else {
+        serde_json::from_str(&row.ops_json)
+            .map_err(|e| AppError::new("oxpilot.internal", format!("ops_json decode: {e}")))?
+    };
+    if ops.is_empty() {
+        // A proposal without ops can't apply — the reviewer approved a
+        // diff, but the executable op list is absent (pre-0089 row).
+        return Err(AppError::new(
+            "diff_no_ops",
+            "proposal carries no op list — it predates stored ops; re-propose the change",
+        ));
+    }
     let mut pending: Vec<Value> = Vec::new();
     for op in &ops {
         match op.op.as_str() {
