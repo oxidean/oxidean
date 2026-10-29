@@ -108,6 +108,32 @@ async fn openai_golden_stream_deltas_toolcall_done_usage() {
     assert_eq!(bodies[0]["tools"][0]["function"]["name"], "lookup");
 }
 
+#[tokio::test]
+async fn openai_compatible_keyless_sends_no_authorization_header() {
+    // LiteLLM-style endpoint with no key — the wire must omit the
+    // Authorization header entirely, not send an empty bearer.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(include_str!("fixtures/openai/sse_chat.txt")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let provider = openai::OpenAiProvider::new_compat_for_testing(&server.uri());
+    let items = collect(provider.stream(request()).await.unwrap()).await;
+    assert_eq!(kinds(&items).last().unwrap(), "done:12:7");
+    let reqs = server.received_requests().await.unwrap_or_default();
+    assert_eq!(reqs.len(), 1);
+    assert!(!reqs[0]
+        .headers
+        .iter()
+        .any(|(k, _)| k.as_str() == "authorization"));
+}
+
 // ---------- anthropic ----------
 
 #[tokio::test]

@@ -32,7 +32,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use oxidean_api_core::app::AppState;
 use oxidean_api_core::oxpilot::{
-    resolve_enablement_slot, ClaimOutcome, ConnectorGateway, ConnectorIdentity,
+    resolve_enablement_slot, stub_restricted, user_is_sys_admin, ClaimOutcome, ConnectorGateway,
+    ConnectorIdentity,
 };
 use oxidean_api_core::rpc::ClientMeta;
 use oxidean_core::AppError;
@@ -98,6 +99,14 @@ async fn require_enabled_gate(state: &AppState) -> Result<(), Response> {
     }
 }
 
+/// BR2.6 — under the stub provider a connector identity serves only
+/// sys-admin-owned targets; the post-auth owner check answers the same
+/// `disabled` 403 as a dead flag.
+async fn stub_owner_hidden(state: &AppState, owner_user_id: &str) -> bool {
+    let st = resolve_enablement_slot(&*state.oxpilot.slot.read().await);
+    stub_restricted(&st) && !user_is_sys_admin(&state.db, owner_user_id).await
+}
+
 fn gateway(state: &AppState) -> Result<Arc<dyn ConnectorGateway>, Response> {
     state
         .oxpilot
@@ -126,9 +135,14 @@ async fn connector_identity(
     require_enabled_gate(state).await?;
     let gw = gateway(state)?;
     let token = bearer(headers).unwrap_or_default();
-    gw.resolve_verifier(meta, &token)
+    let identity = gw
+        .resolve_verifier(meta, &token)
         .await
-        .map_err(|e| gateway_err(&e))
+        .map_err(|e| gateway_err(&e))?;
+    if stub_owner_hidden(state, &identity.user_id).await {
+        return Err(err(StatusCode::FORBIDDEN, "disabled"));
+    }
+    Ok(identity)
 }
 
 /// BR2.4 — a body's `target_id` must equal the resolved identity's
@@ -180,15 +194,25 @@ pub async fn pair(State(state): State<AppState>, headers: HeaderMap, body: Bytes
     {
         // The ONE response that ever carries plaintext verifier
         // material (BR1.2/BR7.3) — shown once, stored hashed.
-        Ok(r) => (
-            StatusCode::OK,
-            Json(json!({
-                "connector_id": r.connector_id,
-                "target_id": r.target_id,
-                "verifier": r.verifier,
-            })),
-        )
-            .into_response(),
+        Ok(r) => {
+            // BR2.6 — a stale code minted before the stub switch could
+            // still redeem for a non-admin owner; the minted credential
+            // stays dead because every authed call denies the same way.
+            if let Ok(Some(t)) = state.db.find_oxpilot_target(&r.target_id).await {
+                if stub_owner_hidden(&state, &t.user_id).await {
+                    return err(StatusCode::FORBIDDEN, "disabled");
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "connector_id": r.connector_id,
+                    "target_id": r.target_id,
+                    "verifier": r.verifier,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => gateway_err(&e),
     }
 }

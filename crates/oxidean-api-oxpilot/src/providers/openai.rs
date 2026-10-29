@@ -24,12 +24,36 @@ pub const DEFAULT_BASE_URL: &str = "https://api.openai.com";
 pub(in crate::providers) async fn build(
     cfg: &crate::settings::EffectiveProviderConfig,
 ) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+    build_inner(cfg, false).await
+}
+
+/// `openai-compatible` — the same chat-completions adapter pointed at an
+/// operator-chosen endpoint (LiteLLM, vLLM, NIM, llama.cpp servers, …).
+/// `base_url` is required and the API key optional; like `ollama` the
+/// endpoint is exempt from the public-egress bound since admin-chosen
+/// targets legitimately live on private/LAN space.
+pub(in crate::providers) async fn build_compat(
+    cfg: &crate::settings::EffectiveProviderConfig,
+) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+    build_inner(cfg, true).await
+}
+
+async fn build_inner(
+    cfg: &crate::settings::EffectiveProviderConfig,
+    compat: bool,
+) -> Result<Arc<dyn LlmProvider>, ProviderError> {
     let api_key =
-        super::key::resolve_material(cfg.key_ciphertext.as_deref(), cfg.api_key_env.as_deref())?
-            .ok_or_else(|| ProviderError {
-                code: "invalid_provider".to_string(),
-                message: "openai requires API key material".to_string(),
-            })?;
+        super::key::resolve_material(cfg.key_ciphertext.as_deref(), cfg.api_key_env.as_deref())?;
+    let err = |message: &str| ProviderError {
+        code: "invalid_provider".to_string(),
+        message: message.to_string(),
+    };
+    if !compat && api_key.is_none() {
+        return Err(err("openai requires API key material"));
+    }
+    if compat && cfg.base_url.is_none() {
+        return Err(err("openai-compatible requires a base_url"));
+    }
     let base_url = cfg
         .base_url
         .clone()
@@ -37,15 +61,18 @@ pub(in crate::providers) async fn build(
     // Re-run the egress bound at construction — the boot/rebuild path
     // reaches build without settings::validate, and the bound is cheap.
     // The client re-validates DNS answers on every connect, so a
-    // re-resolution can never rebind to an unchecked address.
-    egress::validate_base_url(Some("openai"), &base_url)
+    // re-resolution can never rebind to an unchecked address. Compat
+    // endpoints are exempt (admin-chosen LAN targets).
+    let id = if compat {
+        "openai-compatible"
+    } else {
+        "openai"
+    };
+    egress::validate_base_url(Some(id), &base_url)
         .await
-        .map_err(|e| ProviderError {
-            code: "invalid_provider".to_string(),
-            message: e,
-        })?;
+        .map_err(|e| err(&e))?;
     Ok(Arc::new(OpenAiProvider {
-        client: egress::provider_http_client(true),
+        client: egress::provider_http_client(!compat),
         base_url,
         api_key,
     }))
@@ -54,7 +81,7 @@ pub(in crate::providers) async fn build(
 pub struct OpenAiProvider {
     client: reqwest::Client,
     base_url: String,
-    api_key: String,
+    api_key: Option<String>,
 }
 
 impl OpenAiProvider {
@@ -67,7 +94,17 @@ impl OpenAiProvider {
         Self {
             client: egress::provider_http_client(true),
             base_url: base_url.to_string(),
-            api_key: api_key.to_string(),
+            api_key: Some(api_key.to_string()),
+        }
+    }
+
+    /// `openai-compatible` test seam — keyless endpoint, exempt client.
+    #[doc(hidden)]
+    pub fn new_compat_for_testing(base_url: &str) -> Self {
+        Self {
+            client: egress::provider_http_client(false),
+            base_url: base_url.to_string(),
+            api_key: None,
         }
     }
 }
@@ -107,13 +144,14 @@ impl LlmProvider for OpenAiProvider {
                     .collect(),
             );
         }
-        let resp = send_bounded(
-            self.client
-                .post(format!("{}/v1/chat/completions", self.base_url))
-                .bearer_auth(&self.api_key)
-                .json(&body),
-        )
-        .await?;
+        let mut req = self
+            .client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = send_bounded(req).await?;
         if !resp.status().is_success() {
             return Err(classify_status(resp).await);
         }

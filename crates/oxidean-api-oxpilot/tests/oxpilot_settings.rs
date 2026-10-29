@@ -251,7 +251,9 @@ async fn settings_round_trip_get_set_get() {
     assert_eq!(g0["ok"], true, "{g0}");
     assert_eq!(g0["data"]["enabled"], false); // env flag unset → off
     assert_eq!(g0["data"]["enabled_overridden"], false);
-    assert_eq!(g0["data"]["provider_id"], Value::Null);
+    // Unset provider resolves the sys-admin-only stub default even while
+    // the flag is off — the response reports resolution, not enablement.
+    assert_eq!(g0["data"]["provider_id"], "stub");
     assert_eq!(g0["data"]["disabled_reason"], "flag_off");
     assert_eq!(g0["data"]["key_set"], false);
 
@@ -371,7 +373,7 @@ async fn build_failure_is_invalid_provider_nothing_persisted() {
 }
 
 #[tokio::test]
-async fn providerless_writes_succeed_and_install_reason_slots() {
+async fn providerless_writes_succeed_and_install_stub_default() {
     let _g = env_lock().await;
     clear_oxpilot_env();
     let db = test_db().await;
@@ -382,14 +384,20 @@ async fn providerless_writes_succeed_and_install_reason_slots() {
     // Budget-only — valid with no provider resolved (BR3.1).
     let v = settings_set(&app, &cookie, serde_json::json!({"user_budget": 1000})).await;
     assert_eq!(v["ok"], true, "{v}");
-    // Flag-only ON — no provider → reason-bearing disabled slot.
+    // Flag-only ON — no provider → the sys-admin-only stub default
+    // builds a live stub slot (BR2.6).
     let v = settings_set(&app, &cookie, serde_json::json!({"enabled": true})).await;
     assert_eq!(v["ok"], true, "{v}");
-    assert_eq!(v["data"]["disabled_reason"], "no_provider");
+    assert_eq!(v["data"]["disabled_reason"], serde_json::Value::Null);
+    assert_eq!(v["data"]["provider_id"], "stub");
     {
         let slot = rt.slot.read().await;
-        assert!(slot.provider.is_none());
-        assert_eq!(slot.disabled_reason.as_deref(), Some("no_provider"));
+        assert_eq!(
+            slot.provider.as_ref().map(|p| p.id()),
+            Some("stub"),
+            "provider-less resolution should build the stub default"
+        );
+        assert_eq!(slot.disabled_reason, None);
     }
     // clear_overrides wipes the row — still a valid provider-less write.
     let v = settings_set(
@@ -463,14 +471,15 @@ async fn flag_off_combined_write_never_installs_enabled_slot() {
     assert_eq!(slot.disabled_reason.as_deref(), Some("flag_off"));
     // Identity changed (model stub-2 ≠ parked None) → no stale carry.
     drop(slot);
-    // The write persisted: a flag-on write now builds the new identity.
+    // The write persisted: a flag-on write builds the stored identity
+    // best-effort — the slot must not wedge `misconfigured` waiting on a
+    // rebuild nothing triggers (a build failure still degrades, never
+    // refuses the flag write — BR3.1 recovery path).
     let v = settings_set(&app, &cookie, serde_json::json!({"enabled": true})).await;
     assert_eq!(v["ok"], true, "{v}");
     let slot = rt.slot.read().await;
-    // Flag-on flag-only write skips build — installs reason-bearing
-    // disabled until next rebuild (BR3.1 recovery path).
-    assert_eq!(slot.disabled_reason.as_deref(), Some("misconfigured"));
-    assert!(slot.provider.is_none());
+    assert_eq!(slot.disabled_reason, None);
+    assert_eq!(slot.provider.as_ref().map(|p| p.id()), Some("stub"));
 }
 
 #[tokio::test]
@@ -510,7 +519,7 @@ async fn key_write_surfaces_metadata_only() {
     .await;
     assert_eq!(p["ok"], true, "{p}");
     let providers = p["data"]["providers"].as_array().unwrap();
-    assert_eq!(providers.len(), 3); // stub omitted (BR1.4)
+    assert_eq!(providers.len(), 4); // stub omitted (BR1.4)
     assert_eq!(providers[0]["id"], "openai");
     assert_eq!(providers[0]["configured"], true);
     assert_eq!(providers[0]["requires_key"], true);
@@ -519,6 +528,9 @@ async fn key_write_surfaces_metadata_only() {
     assert_eq!(providers[2]["id"], "ollama");
     assert_eq!(providers[2]["configured"], true);
     assert_eq!(providers[2]["requires_key"], false);
+    assert_eq!(providers[3]["id"], "openai-compatible");
+    assert_eq!(providers[3]["configured"], true);
+    assert_eq!(providers[3]["requires_key"], false);
     // clear_key erases the pair.
     let v = settings_set(&app, &cookie, serde_json::json!({"clear_key": true})).await;
     assert_eq!(v["ok"], true, "{v}");
@@ -602,7 +614,52 @@ async fn stub_write_debug_shaped_succeeds() {
         .iter()
         .map(|d| d["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["openai", "anthropic", "ollama"]);
+    assert_eq!(ids, ["openai", "anthropic", "ollama", "openai-compatible"]);
+}
+
+#[tokio::test]
+async fn openai_compatible_write_builds_keyless_slot() {
+    // LiteLLM-style endpoint: provider_id + base_url with no key —
+    // validate passes (self-host exemption) and the slot builds.
+    let _g = env_lock().await;
+    clear_oxpilot_env();
+    let db = test_db().await;
+    let admin_id = seed_admin(&db).await;
+    let (app, rt) = test_app(db.clone(), None).await;
+    let cookie = session_cookie(&db, &admin_id).await;
+
+    let v = settings_set(
+        &app,
+        &cookie,
+        serde_json::json!({
+            "enabled": true,
+            "provider_id": "openai-compatible",
+            "model": "llama-3.3-70b",
+            "base_url": "http://litellm.local:4000"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["data"]["provider_id"], "openai-compatible");
+    let slot = rt.slot.read().await;
+    assert!(
+        slot.provider.is_some(),
+        "compat build must install a provider"
+    );
+    assert_eq!(slot.disabled_reason, None);
+
+    // Missing base_url is refused up front — the write fails typed.
+    let v = settings_set(
+        &app,
+        &cookie,
+        serde_json::json!({
+            "provider_id": "openai-compatible",
+            "base_url": null
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "invalid_provider");
 }
 
 #[tokio::test]

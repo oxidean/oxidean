@@ -88,8 +88,8 @@ services:
       OXIDEAN_OXPILOT_INSTANCE_BUDGET: ${OXIDEAN_OXPILOT_INSTANCE_BUDGET:-}
       # OXIDEAN_ENV=production refuses private webhook/git-mirror egress —
       # self-hosts hooking LAN services opt in here. Unrelated to oxpilot:
-      # `ollama` accepts private provider endpoints without it; other
-      # providers keep the public-egress bound regardless.
+      # `ollama` and `openai-compatible` accept private provider endpoints
+      # without it; other providers keep the public-egress bound regardless.
       OXIDEAN_EGRESS_ALLOW_PRIVATE: ${OXIDEAN_EGRESS_ALLOW_PRIVATE:-}
       # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
       OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}

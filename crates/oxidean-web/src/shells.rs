@@ -291,6 +291,13 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[L("admin"), L("oxpilot")],
+        file: "admin/oxpilot/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[L("admin"), L("packages")],
         file: "admin/packages/index.html",
         title: None,

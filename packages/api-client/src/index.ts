@@ -5318,7 +5318,7 @@ export type OxpilotErrorCode =
 export interface OxpilotStatusResponse {
   enabled: boolean;
   provider: { id: string; model: string } | null;
-  /** `flag_off | no_provider | misconfigured` when `enabled` is false. */
+  /** `flag_off | no_provider | misconfigured | restricted` when `enabled` is false. */
   reason: string | null;
 }
 

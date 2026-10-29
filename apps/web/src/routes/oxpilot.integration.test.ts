@@ -238,6 +238,28 @@ describe("/oxpilot index", () => {
     expect(screen.queryByTestId("oxpilot-new-session")).not.toBeInTheDocument();
   });
 
+  it("restricted (stub): renders the route as absent — no OxPilot surface", async () => {
+    window.history.pushState({}, "", "/oxpilot");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    statusMock.mockResolvedValue({
+      ok: true,
+      data: { enabled: false, provider: null, reason: "restricted" },
+    });
+    repoListMineMock.mockResolvedValue({ ok: true, data: { repos: [] } });
+    renderWithQueryClient(OxpilotPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Page not found")).toBeInTheDocument();
+    });
+    // BR2.6 — no header, no flag-off explainer, no controls.
+    expect(screen.queryByText(/Oxpilot is not enabled/)).not.toBeInTheDocument();
+    expect(screen.queryByText("OxPilot")).not.toBeInTheDocument();
+    expect(screen.queryByText(/OXIDEAN_OXPILOT/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("oxpilot-new-session-open")).not.toBeInTheDocument();
+    expect(sessionListMock).not.toHaveBeenCalled();
+    expect(targetListMock).not.toHaveBeenCalled();
+  });
+
   it("enabled: renders the session list + new-session form", async () => {
     window.history.pushState({}, "", "/oxpilot");
     meMock.mockResolvedValue({ ok: true, data: user });
@@ -639,6 +661,25 @@ describe("/oxpilot/{session} workspace", () => {
     expect(screen.queryByTestId("oxpilot-composer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("oxpilot-context-toggle")).not.toBeInTheDocument();
     expect(screen.getByText("All sessions").closest("a")?.getAttribute("href")).toBe("/oxpilot");
+  });
+
+  it("restricted on the session route renders the page as absent", async () => {
+    statusMock.mockResolvedValue({
+      ok: true,
+      data: { enabled: false, provider: null, reason: "restricted" },
+    });
+    window.history.pushState({}, "", "/oxpilot/s-1");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    renderWithQueryClient(OxpilotSessionPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Page not found")).toBeInTheDocument();
+    });
+    // BR2.6 — even the "All sessions" back link is part of the hidden
+    // surface; the gated read set must not fire either.
+    expect(screen.queryByText("All sessions")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Oxpilot is not enabled/)).not.toBeInTheDocument();
+    expect(sessionGetMock).not.toHaveBeenCalled();
   });
 
   it("tool_call frames update the keyed card running → done", async () => {

@@ -137,11 +137,14 @@ pub(crate) async fn validate_base_url(provider_id: Option<&str>, url: &str) -> R
         .host()
         .ok_or_else(|| "base_url has no host".to_string())?;
 
-    // No consumer (provider-less write) or the Ollama self-host
-    // exemption — shape check done, private-target bound skipped.
+    // No consumer (provider-less write) or the self-host exemptions —
+    // shape check done, private-target bound skipped. Ollama and the
+    // generic OpenAI-compatible endpoint are admin-chosen targets that
+    // legitimately live on private/LAN space (LiteLLM, vLLM, …); `stub`
+    // never dials a network — its base_url is dead config.
     match provider_id {
         None => return Ok(()),
-        Some("ollama") => return Ok(()),
+        Some("ollama") | Some("openai-compatible") | Some("stub") => return Ok(()),
         _ => {}
     }
 
@@ -210,6 +213,22 @@ mod tests {
         }
         // Exemption covers targets, not shape — bad URLs still reject.
         assert!(!ok(Some("ollama"), "ftp://127.0.0.1").await);
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_self_host_exemption() {
+        // LiteLLM / vLLM endpoints are operator-chosen LAN targets like
+        // ollama — the same exemption applies.
+        for url in [
+            "http://127.0.0.1:4000",
+            "http://litellm.local:4000",
+            "http://192.168.1.50:8000",
+        ] {
+            assert!(ok(Some("openai-compatible"), url).await, "{url}");
+        }
+        // Shape still binds: no ftp, no missing host.
+        assert!(!ok(Some("openai-compatible"), "ftp://127.0.0.1").await);
+        assert!(!ok(Some("openai-compatible"), "not a url").await);
     }
 
     #[tokio::test]

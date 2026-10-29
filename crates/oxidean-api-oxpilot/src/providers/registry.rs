@@ -55,6 +55,14 @@ pub const REGISTRY: &[ProviderDescriptor] = &[
         models: &[],
         requires_key: false,
     },
+    ProviderDescriptor {
+        id: "openai-compatible",
+        // LiteLLM / vLLM / NIM-style endpoints — model ids are the
+        // serving server's own names, unknowable statically (BR3.1).
+        // The API key is optional: many LAN proxies take none.
+        models: &[],
+        requires_key: false,
+    },
 ];
 
 /// Internal resolution — `stub` is buildable from env (U1 parity) but
@@ -81,6 +89,7 @@ pub async fn build(cfg: &EffectiveProviderConfig) -> Result<Arc<dyn LlmProvider>
         Some("openai") => super::openai::build(cfg).await,
         Some("anthropic") => super::anthropic::build(cfg).await,
         Some("ollama") => super::ollama::build(cfg).await,
+        Some("openai-compatible") => super::openai::build_compat(cfg).await,
         // U1 parity — the env path's canned provider; not reachable via
         // settings_set (release-shaped guard in `settings::validate`).
         Some("stub") => Ok(Arc::new(StubProvider { fail: false })),
@@ -103,21 +112,26 @@ mod tests {
     #[test]
     fn registry_is_exactly_the_admin_surface() {
         let ids: Vec<&str> = REGISTRY.iter().map(|d| d.id).collect();
-        assert_eq!(ids, ["openai", "anthropic", "ollama"]);
+        assert_eq!(ids, ["openai", "anthropic", "ollama", "openai-compatible"]);
     }
 
     #[test]
     fn resolution_map_adds_stub_but_never_lists_it() {
         assert!(resolve_descriptor("stub").is_some());
         assert!(REGISTRY.iter().all(|d| d.id != "stub"));
-        for id in ["openai", "anthropic", "ollama", "stub"] {
+        for id in ["openai", "anthropic", "ollama", "openai-compatible", "stub"] {
             assert!(resolve_descriptor(id).is_some(), "{id}");
         }
         assert!(resolve_descriptor("gemini").is_none());
-        // Only ollama + stub are keyless (BR4.4).
+        // Only ollama + stub + the compat endpoint are keyless (BR4.4).
         assert!(resolve_descriptor("openai").unwrap().requires_key);
         assert!(resolve_descriptor("anthropic").unwrap().requires_key);
         assert!(!resolve_descriptor("ollama").unwrap().requires_key);
+        assert!(
+            !resolve_descriptor("openai-compatible")
+                .unwrap()
+                .requires_key
+        );
         assert!(!resolve_descriptor("stub").unwrap().requires_key);
     }
 
@@ -131,6 +145,49 @@ mod tests {
         };
         let p = build(&cfg).await.unwrap();
         assert_eq!(p.id(), "stub");
+    }
+
+    #[tokio::test]
+    async fn build_compat_accepts_private_url_without_key() {
+        // LiteLLM-style LAN endpoint: key optional, private target exempt
+        // from the public-egress bound (same trust level as ollama).
+        let cfg = EffectiveProviderConfig {
+            enabled: true,
+            provider_id: Some("openai-compatible".to_string()),
+            model: Some("llama-3.3-70b".to_string()),
+            base_url: Some("http://10.0.0.9:4000".to_string()),
+            ..Default::default()
+        };
+        let p = build(&cfg).await.expect("compat provider must build");
+        assert_eq!(p.id(), "openai");
+    }
+
+    #[tokio::test]
+    async fn build_compat_requires_base_url() {
+        let cfg = EffectiveProviderConfig {
+            enabled: true,
+            provider_id: Some("openai-compatible".to_string()),
+            ..Default::default()
+        };
+        let e = build(&cfg)
+            .await
+            .err()
+            .expect("compat without url must fail");
+        assert_eq!(e.code, "invalid_provider");
+    }
+
+    #[tokio::test]
+    async fn build_openai_still_requires_key() {
+        let cfg = EffectiveProviderConfig {
+            enabled: true,
+            provider_id: Some("openai".to_string()),
+            ..Default::default()
+        };
+        let e = build(&cfg)
+            .await
+            .err()
+            .expect("openai without key must fail");
+        assert_eq!(e.code, "invalid_provider");
     }
 
     #[tokio::test]

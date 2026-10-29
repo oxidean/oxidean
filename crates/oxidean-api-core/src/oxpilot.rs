@@ -9,7 +9,10 @@
 //! (default OFF — fail-closed for a spend-bearing feature) feeds the
 //! resolved `enabled` bit; U4's `oxpilot_settings` singleton row can
 //! override it, and the resolved reason is stamped into the slot at every
-//! rebuild (`flag_off | no_provider | misconfigured`).
+//! rebuild (`flag_off | misconfigured`). An unset provider resolves the
+//! `stub` default — the sys-admin-only preview mode (BR2.6) — so
+//! `no_provider` survives only as the defensive backstop on hand-built
+//! slots.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -17,8 +20,8 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use oxidean_core::AppError;
 use oxidean_db::{
-    OxpilotActionRow, OxpilotMessageRow, OxpilotProposalRow, OxpilotQueuedRow, OxpilotSessionRow,
-    OxpilotToolCallRow,
+    Database, OxpilotActionRow, OxpilotMessageRow, OxpilotProposalRow, OxpilotQueuedRow,
+    OxpilotSessionRow, OxpilotToolCallRow,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -1168,7 +1171,8 @@ impl OxpilotRuntime {
     /// `stub` installs [`StubProvider`]; an env provider value api-core
     /// can't build lands `misconfigured` until `settings::rebuild`
     /// (unconditional, right after `AppState::new`) resolves it through
-    /// the api-oxpilot registry; unset ⇒ `no_provider`. The flag env is
+    /// the api-oxpilot registry; unset installs the same stub — the
+    /// sys-admin-only default (BR2.6). The flag env is
     /// stamped into `disabled_reason` so the reason invariant holds even
     /// before the first rebuild.
     pub fn new() -> SharedOxpilot {
@@ -1194,13 +1198,14 @@ impl OxpilotRuntime {
             instance: parse_budget("OXIDEAN_OXPILOT_INSTANCE_BUDGET"),
         };
         let (provider, model, mut misconfigured) = match env.as_deref() {
-            Some("stub") => (
+            // Unset defaults to the deterministic stub — flag-on with
+            // no real provider is the sys-admin-only preview mode.
+            Some("stub") | None => (
                 Some(Arc::new(StubProvider { fail: false }) as Arc<dyn LlmProvider>),
                 Some(model_env.unwrap_or_else(|| "stub-1".to_string())),
                 false,
             ),
             Some(_) => (None, None, true),
-            None => (None, None, false),
         };
         let built_from = provider.as_ref().map(|_| ProviderIdentity {
             provider_id: "stub".to_string(),
@@ -1399,12 +1404,50 @@ pub fn resolve_enablement_slot(slot: &OxpilotRuntimeSlot) -> EnablementState {
     }
 }
 
+/// The built-in deterministic provider — `enabled` under `stub` is the
+/// sys-admin-only preview mode: every oxpilot surface hides from
+/// non-admin callers (BR2.6).
+pub const STUB_PROVIDER_ID: &str = "stub";
+
+/// `enabled` AND resolved to the stub provider ⇒ the caller must be a
+/// sys-admin. The slot can't see callers — every gate/proc wraps its
+/// enablement check with this plus `user_is_sys_admin`/`caller_is_sys_admin`.
+pub fn stub_restricted(st: &EnablementState) -> bool {
+    st.enabled
+        && st
+            .provider
+            .as_ref()
+            .is_some_and(|(id, _)| id == STUB_PROVIDER_ID)
+}
+
+/// Sys-admin probe for surfaces holding a raw user id (SSE edge,
+/// connector identities). Unknown user / banned / db failure ⇒ `false` —
+/// restriction fails closed, never throws.
+pub async fn user_is_sys_admin(db: &Database, user_id: &str) -> bool {
+    db.find_user_by_id(user_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|u| u.role.is_sys_admin() && u.banned_at.is_none())
+}
+
+/// The `RpcCtx` variant — the proc gate and `oxpilot.status` check the
+/// session's user. Absent session ⇒ `false`.
+pub async fn caller_is_sys_admin(ctx: &RpcCtx) -> bool {
+    match ctx.session.as_ref() {
+        Some(s) => user_is_sys_admin(&ctx.db, &s.user_id).await,
+        None => false,
+    }
+}
+
 /// The gated-surface check — everything except `oxpilot.status` and the
 /// gate-exempt `admin.oxpilot.*` procs calls this first (BR2.3). Disabled
-/// ⇒ typed `oxpilot.disabled`.
+/// ⇒ typed `oxpilot.disabled`; a stub provider narrows that to the same
+/// denial for non-sys-admins (BR2.6 — the hide reads identical to off).
 pub async fn require_enabled(ctx: &RpcCtx) -> Result<EnablementState, AppError> {
     let state = resolve_enablement(ctx).await;
-    if !state.enabled {
+    let hidden = stub_restricted(&state) && !caller_is_sys_admin(ctx).await;
+    if !state.enabled || hidden {
         return Err(AppError::new(
             "oxpilot.disabled",
             state
@@ -1879,5 +1922,31 @@ mod tests {
         assert_eq!(cards[0]["tool"], "fs_read");
         assert_eq!(cards[1]["call_id"], "call-tc2");
         assert!(frame["active_turn"].is_null());
+    }
+
+    #[test]
+    fn stub_restricted_flags_enabled_stub_only() {
+        // enabled + stub → the restricted surface (BR2.6).
+        let stub = EnablementState {
+            enabled: true,
+            provider: Some((STUB_PROVIDER_ID.to_string(), Some("stub-1".to_string()))),
+            reason: None,
+        };
+        assert!(stub_restricted(&stub));
+        // enabled + a real provider → open to everyone.
+        let real = EnablementState {
+            enabled: true,
+            provider: Some(("openai".to_string(), None)),
+            reason: None,
+        };
+        assert!(!stub_restricted(&real));
+        // flag_off → the disabled path already denies; nothing to
+        // restrict on top.
+        let off = EnablementState {
+            enabled: false,
+            provider: None,
+            reason: Some("flag_off".to_string()),
+        };
+        assert!(!stub_restricted(&off));
     }
 }

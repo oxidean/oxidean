@@ -517,6 +517,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "routes/admin/oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/admin/oxpilot.browser.test.tsx",
+        subject: "admin-oxpilot-page",
+      },
+    ],
+  },
+  {
     surface: "routes/$owner.settings.index.tsrx",
     coverage: [
       {

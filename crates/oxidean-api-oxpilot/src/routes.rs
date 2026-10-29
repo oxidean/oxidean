@@ -27,8 +27,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use oxidean_api_core::app::{resolve_session_user_id, AppState};
 use oxidean_api_core::oxpilot::{
-    active_turn_view, resolve_enablement_slot, ActiveTurn, AppendMessage, SessionService,
-    TURN_FANOUT_CAPACITY,
+    active_turn_view, resolve_enablement_slot, stub_restricted, user_is_sys_admin, ActiveTurn,
+    AppendMessage, SessionService, TURN_FANOUT_CAPACITY,
 };
 use oxidean_core::redact;
 use oxidean_db::OxpilotMessageRow;
@@ -95,10 +95,13 @@ async fn session_user(state: &AppState, headers: &HeaderMap) -> Result<String, R
 }
 
 /// The enablement gate — every SSE route runs it after auth (WF1). A
-/// slot read only; the gate never waits on `rebuild_lock` or the DB.
-async fn require_gate(state: &AppState) -> Result<(), Response> {
+/// slot read only; the gate never waits on `rebuild_lock`. Under the
+/// stub provider the caller must be a sys-admin (BR2.6) — that check
+/// does hit the DB for the role read.
+async fn require_gate(state: &AppState, user_id: &str) -> Result<(), Response> {
     let st = resolve_enablement_slot(&*state.oxpilot.slot.read().await);
-    if st.enabled {
+    let hidden = stub_restricted(&st) && !user_is_sys_admin(&state.db, user_id).await;
+    if st.enabled && !hidden {
         Ok(())
     } else {
         Err(err_response(
@@ -247,7 +250,7 @@ pub async fn chat_post(
         Ok(u) => u,
         Err(r) => return r,
     };
-    if let Err(r) = require_gate(&state).await {
+    if let Err(r) = require_gate(&state, &user_id).await {
         return r;
     }
     let session = match owned_session(&state, &session_id, &user_id).await {
@@ -585,7 +588,7 @@ pub async fn chat_stream(
         Ok(u) => u,
         Err(r) => return r,
     };
-    if let Err(r) = require_gate(&state).await {
+    if let Err(r) = require_gate(&state, &user_id).await {
         return r;
     }
     if let Err(r) = owned_session(&state, &session_id, &user_id).await {

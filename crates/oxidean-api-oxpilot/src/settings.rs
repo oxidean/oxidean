@@ -102,17 +102,18 @@ pub struct EffectiveProviderConfig {
     pub key_last4: Option<String>,
     pub user_budget: Option<i64>,
     pub instance_budget: Option<i64>,
-    /// `flag_off | no_provider | misconfigured | null` — construction
-    /// can still downgrade to `misconfigured` (entities.md).
+    /// `flag_off | misconfigured | null` — construction can still
+    /// downgrade to `misconfigured` (entities.md).
     pub disabled_reason: Option<String>,
 }
 
 /// Merge the sparse override row over the env snapshot — each field
 /// takes the DB value when non-NULL, else the env default (BR2.1).
-/// `disabled_reason` resolves `flag_off` > `misconfigured` >
-/// `no_provider` (U1 precedence): flag-off wins even with a broken
-/// provider id, unknown-but-present ids land `misconfigured`, absent
-/// lands `no_provider`.
+/// `disabled_reason` resolves `flag_off` > `misconfigured` (U1
+/// precedence): flag-off wins even with a broken provider id and
+/// unknown-but-present ids land `misconfigured`. An unset provider id
+/// defaults to `stub` — the sys-admin-only preview mode (BR2.6) — so
+/// `no_provider` never reaches this resolution anymore.
 pub fn resolve_over_env(
     row: Option<&OxpilotSettingsRow>,
     env: &EnvDefaults,
@@ -121,7 +122,8 @@ pub fn resolve_over_env(
     let empty = OxpilotSettingsRow::default();
     let row = row.unwrap_or(&empty);
     let enabled = row.enabled_override.unwrap_or(env.enabled);
-    let provider_id = pick(&row.provider_id, &env.provider_id);
+    let provider_id = pick(&row.provider_id, &env.provider_id)
+        .or_else(|| Some(oxidean_api_core::oxpilot::STUB_PROVIDER_ID.to_string()));
     let key_ciphertext = row.key_ciphertext.clone();
     let api_key_env = env.api_key.clone();
     let key_source = if key_ciphertext.is_some() {
@@ -138,8 +140,6 @@ pub fn resolve_over_env(
     };
     let disabled_reason = if !enabled {
         Some("flag_off".to_string())
-    } else if provider_id.is_none() {
-        Some("no_provider".to_string())
     } else if provider_id
         .as_deref()
         .is_some_and(|id| registry::resolve_descriptor(id).is_none())
@@ -676,15 +676,31 @@ pub async fn settings_set(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppEr
             SlotPlan::Slot(s) => s,
             SlotPlan::CarryProvider => carried_slot(&prior, &cfg),
             // A no-build write reaching Build (e.g. flag-on with an
-            // uncarried provider) installs a reason-bearing disabled
-            // slot — it must NOT wedge on the un-attempted build
-            // (BR3.1); the next rebuild constructs it.
-            SlotPlan::Build(_) => disabled_slot(
-                prior.turns.clone(),
-                "misconfigured",
-                BudgetCaps::from(&cfg),
-                prior.tools.clone(),
-            ),
+            // uncarried provider) builds best-effort: the write itself
+            // already succeeded — the slot must not wedge on a refusal
+            // meant for provider-affecting writes (BR3.1). A build
+            // failure degrades to `misconfigured`, same as `rebuild`.
+            SlotPlan::Build(identity) => match registry::build(&cfg).await {
+                Ok(provider) => built_slot(
+                    prior.turns.clone(),
+                    provider,
+                    &cfg,
+                    identity,
+                    prior.tools.clone(),
+                ),
+                Err(e) => {
+                    tracing::warn!(
+                        code = %e.code,
+                        "oxpilot provider build failed on settings write; installing misconfigured slot"
+                    );
+                    disabled_slot(
+                        prior.turns.clone(),
+                        "misconfigured",
+                        BudgetCaps::from(&cfg),
+                        prior.tools.clone(),
+                    )
+                }
+            },
         }
     };
     // The installed slot's reason is the runtime truth — an enable-only
@@ -823,10 +839,11 @@ mod tests {
         e.enabled = true;
         let cfg = resolve_over_env(None, &e);
         assert_eq!(cfg.disabled_reason.as_deref(), Some("misconfigured"));
-        // No provider → no_provider.
+        // No provider → the sys-admin-only stub default (BR2.6).
         e.provider_id = None;
         let cfg = resolve_over_env(None, &e);
-        assert_eq!(cfg.disabled_reason.as_deref(), Some("no_provider"));
+        assert_eq!(cfg.provider_id.as_deref(), Some("stub"));
+        assert_eq!(cfg.disabled_reason, None);
     }
 
     #[test]
@@ -842,10 +859,10 @@ mod tests {
         e.model = None;
         let cfg = resolve_over_env(None, &e);
         assert_eq!(cfg.resolved_model().as_deref(), Some("gpt-4.1"));
-        // Provider-less → no identity.
+        // Provider-less resolves the stub default's identity (BR2.6).
         e.provider_id = None;
         let cfg = resolve_over_env(None, &e);
-        assert!(cfg.identity().is_none());
+        assert_eq!(cfg.identity().unwrap().provider_id, "stub");
     }
 
     // ---------- apply ----------
@@ -1007,17 +1024,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_slot_enabled_no_provider_is_reason_slot() {
+    fn resolve_slot_enabled_unset_provider_uses_stub_default() {
+        // BR2.6 — an unset provider resolves stub; a prior stub slot
+        // carries its Arc (same identity, no rebuild).
         let mut e = env();
         e.provider_id = None;
         let cfg = resolve_over_env(None, &e);
-        match resolve_slot(&cfg, &prior_slot(true)) {
-            SlotPlan::Slot(s) => {
-                assert!(s.provider.is_none());
-                assert_eq!(s.disabled_reason.as_deref(), Some("no_provider"));
-            }
-            _ => panic!("expected Slot"),
-        }
+        assert!(matches!(
+            resolve_slot(&cfg, &prior_slot(true)),
+            SlotPlan::CarryProvider
+        ));
     }
 
     #[test]
@@ -1062,10 +1078,11 @@ mod tests {
             SlotPlan::Slot(s) => assert_eq!(s.budget_caps, want),
             _ => panic!("expected Slot"),
         }
-        // enabled+no_provider → reason-bearing disabled slot.
-        let mut e = env();
-        e.provider_id = None;
-        let none = resolve_over_env(None, &e);
+        // enabled with a hand-built providerless cfg → reason-bearing
+        // disabled slot (defensive path — resolve_over_env's stub
+        // default means this never arrives through real resolution).
+        let mut none = cfg_with("stub", true);
+        none.provider_id = None;
         match resolve_slot(&none, &prior) {
             SlotPlan::Slot(s) => assert_eq!(s.budget_caps, want),
             _ => panic!("expected Slot"),

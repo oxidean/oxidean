@@ -14,8 +14,8 @@ use http_body_util::BodyExt;
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_api_core::oxpilot::{
-    disabled_slot, ActiveTurns, BudgetCaps, KeySource, OxpilotRuntime, OxpilotRuntimeSlot,
-    ProviderIdentity, SharedOxpilot, StubProvider,
+    disabled_slot, user_is_sys_admin, ActiveTurns, BudgetCaps, KeySource, OxpilotRuntime,
+    OxpilotRuntimeSlot, ProviderIdentity, SharedOxpilot, StubProvider,
 };
 use oxidean_db::Database;
 use tokio::sync::MutexGuard;
@@ -101,7 +101,12 @@ fn session_cookie_from_response(res: &axum::http::Response<Body>) -> String {
     set_cookie.split(';').next().unwrap().trim().to_string()
 }
 
-async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (String, String) {
+async fn signup_and_login(
+    app: &axum::Router,
+    db: &Database,
+    email: &str,
+    username: &str,
+) -> (String, String) {
     let signup_body = format!(
         r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
     );
@@ -126,6 +131,11 @@ async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (S
     let bytes = login.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let user_id = v["data"]["id"].as_str().unwrap().to_string();
+    // BR2.6 — the stub provider is sys-admin-only; this file's feature
+    // tests all run under stub, so signup users get promoted.
+    db.set_user_role(&user_id, "sys-admin")
+        .await
+        .expect("promote to sys-admin");
     (cookie, user_id)
 }
 
@@ -189,8 +199,8 @@ async fn status_flag_off_and_gated_denial() {
     let db = support::connect_test_db("sqlite::memory:").await.unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
-    let app = test_app(db, None).await;
-    let (cookie, _uid) = signup_and_login(&app, "oxp1@example.com", "oxp1").await;
+    let app = test_app(db.clone(), None).await;
+    let (cookie, _uid) = signup_and_login(&app, &db, "oxp1@example.com", "oxp1").await;
 
     let st = rpc_json(
         &app,
@@ -224,8 +234,8 @@ async fn status_enabled_reports_stub_provider() {
     let db = support::connect_test_db("sqlite::memory:").await.unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
-    let app = test_app(db, Some(stub_runtime())).await;
-    let (cookie, _uid) = signup_and_login(&app, "oxp2@example.com", "oxp2").await;
+    let app = test_app(db.clone(), Some(stub_runtime())).await;
+    let (cookie, _uid) = signup_and_login(&app, &db, "oxp2@example.com", "oxp2").await;
 
     let st = rpc_json(
         &app,
@@ -241,6 +251,101 @@ async fn status_enabled_reports_stub_provider() {
 }
 
 #[tokio::test]
+async fn stub_provider_hides_everything_from_regular_users() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), Some(stub_runtime())).await;
+    let (cookie, uid) = signup_and_login(&app, &db, "regular@example.com", "regular").await;
+    // signup_and_login promotes; BR2.6's ordinary user is the Role::User case.
+    db.set_user_role(&uid, "user").await.unwrap();
+
+    // oxpilot.status → the restricted shape: provider id masked so the
+    // route renders absent rather than a disabled-feature billboard.
+    let st = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.status","input":{}}"#,
+    )
+    .await;
+    assert_eq!(st["ok"], true, "{st}");
+    assert_eq!(st["data"]["enabled"], false);
+    assert_eq!(st["data"]["provider"], serde_json::Value::Null);
+    assert_eq!(st["data"]["reason"], "restricted");
+
+    // Gated procs → the same typed denial as flag-off.
+    let list = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.session_list","input":{}}"#,
+    )
+    .await;
+    assert_eq!(list["ok"], false);
+    assert_eq!(list["error"]["code"], "oxpilot.disabled");
+
+    let create = create_session(&app, &cookie, "regular", "r", "g").await;
+    assert_eq!(create["ok"], false);
+    assert_eq!(create["error"]["code"], "oxpilot.disabled");
+
+    // SSE routes → 403 with the disabled shape (gate runs after auth,
+    // before the session lookup, so any session id does).
+    let post = Request::builder()
+        .method("POST")
+        .uri("/api/oxpilot/sessions/x/chat")
+        .header("content-type", "application/json")
+        .header("cookie", &cookie)
+        .body(Body::from(r#"{"content":"hi"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(post).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["error"]["code"], "oxpilot.disabled");
+
+    let get = Request::builder()
+        .method("GET")
+        .uri("/api/oxpilot/sessions/x/chat/stream")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(get).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
+#[tokio::test]
+async fn sys_admin_probe_fails_closed_on_banned_or_unknown_user() {
+    let _g = env_lock().await;
+    std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
+    let db = support::connect_test_db("sqlite::memory:").await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), Some(stub_runtime())).await;
+    let (cookie, uid) = signup_and_login(&app, &db, "banned@example.com", "banned").await;
+
+    // The probe that guards every stub surface: banned and missing
+    // users both resolve false — never throws, never grants.
+    assert!(user_is_sys_admin(&db, &uid).await);
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_user_banned_at(&uid, &now).await.unwrap();
+    assert!(!user_is_sys_admin(&db, &uid).await);
+    assert!(!user_is_sys_admin(&db, "missing-user-id").await);
+
+    // The session layer denies a banned caller before the stub check —
+    // the proc requires a live session first.
+    let st = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"oxpilot.status","input":{}}"#,
+    )
+    .await;
+    assert_eq!(st["ok"], false, "{st}");
+    std::env::remove_var("OXIDEAN_OXPILOT_ENABLED");
+}
+
+#[tokio::test]
 async fn session_create_list_and_cross_user_isolation() {
     let _g = env_lock().await;
     std::env::set_var("OXIDEAN_OXPILOT_ENABLED", "1");
@@ -248,8 +353,8 @@ async fn session_create_list_and_cross_user_isolation() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie_a, uid_a) = signup_and_login(&app, "oxpa@example.com", "oxpa").await;
-    let (cookie_b, uid_b) = signup_and_login(&app, "oxpb@example.com", "oxpb").await;
+    let (cookie_a, uid_a) = signup_and_login(&app, &db, "oxpa@example.com", "oxpa").await;
+    let (cookie_b, uid_b) = signup_and_login(&app, &db, "oxpb@example.com", "oxpb").await;
     verify_user(&db, &uid_a).await;
     verify_user(&db, &uid_b).await;
     create_repo(&app, &cookie_a, "proj").await;
@@ -300,7 +405,7 @@ async fn pat_credential_denied_session_only() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpp@example.com", "oxpp").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpp@example.com", "oxpp").await;
     verify_user(&db, &uid).await;
 
     let pat = rpc_json(
@@ -347,7 +452,7 @@ async fn chat_post_streams_appends_then_terminal_done() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpc@example.com", "oxpc").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpc@example.com", "oxpc").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "chatproj").await;
     let create = create_session(&app, &cookie, "oxpc", "chatproj", "say hi").await;
@@ -395,7 +500,7 @@ async fn second_post_while_turn_active_is_409() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpd@example.com", "oxpd").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpd@example.com", "oxpd").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "p2").await;
     let create = create_session(&app, &cookie, "oxpd", "p2", "g").await;
@@ -448,7 +553,7 @@ async fn get_stream_emits_snapshot_then_stays_open() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpe@example.com", "oxpe").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpe@example.com", "oxpe").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "p3").await;
     let create = create_session(&app, &cookie, "oxpe", "p3", "g").await;
@@ -497,8 +602,8 @@ async fn sse_routes_deny_when_disabled() {
     let db = support::connect_test_db("sqlite::memory:").await.unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
-    let app = test_app(db, Some(empty_runtime())).await;
-    let (cookie, _uid) = signup_and_login(&app, "oxpf@example.com", "oxpf").await;
+    let app = test_app(db.clone(), Some(empty_runtime())).await;
+    let (cookie, _uid) = signup_and_login(&app, &db, "oxpf@example.com", "oxpf").await;
 
     let chat = Request::builder()
         .method("POST")
@@ -540,7 +645,7 @@ async fn provider_failure_yields_error_terminal_and_error_row() {
         tools: None,
     });
     let app = test_app(db.clone(), Some(runtime)).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpg@example.com", "oxpg").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpg@example.com", "oxpg").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "pf").await;
     let create = create_session(&app, &cookie, "oxpg", "pf", "g").await;
@@ -577,7 +682,7 @@ async fn client_msg_id_resend_returns_snapshot_no_duplicate() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxph@example.com", "oxph").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxph@example.com", "oxph").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "pm").await;
     let create = create_session(&app, &cookie, "oxph", "pm", "g").await;
@@ -658,7 +763,7 @@ async fn u2_procs_anonymous_and_pat_denied() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpm@example.com", "oxpm").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpm@example.com", "oxpm").await;
     verify_user(&db, &uid).await;
 
     let pat = rpc_json(
@@ -701,7 +806,7 @@ async fn u2_procs_flag_off_denied() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(empty_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpn@example.com", "oxpn").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpn@example.com", "oxpn").await;
     verify_user(&db, &uid).await;
 
     for proc in U2_PROCS {
@@ -724,7 +829,7 @@ async fn session_get_and_delete_happy_path() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpq@example.com", "oxpq").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpq@example.com", "oxpq").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "gd").await;
     let create = create_session(&app, &cookie, "oxpq", "gd", "goal one").await;
@@ -822,7 +927,7 @@ async fn session_delete_hook_failed_audits_and_keeps_row() {
     runtime.install_sessions(Arc::new(svc));
     let app = test_app(db.clone(), Some(runtime)).await;
 
-    let (cookie, uid) = signup_and_login(&app, "oxpr@example.com", "oxpr").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpr@example.com", "oxpr").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "hf").await;
     let create = create_session(&app, &cookie, "oxpr", "hf", "g").await;
@@ -874,7 +979,7 @@ async fn message_queue_receipt_shapes_and_queue_list() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxps@example.com", "oxps").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxps@example.com", "oxps").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "mq").await;
     let create = create_session(&app, &cookie, "oxps", "mq", "g").await;
@@ -994,7 +1099,7 @@ async fn usage_get_c1_payload_and_recorded_values() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime(); // BudgetCaps::default → unbounded
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpu@example.com", "oxpu").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpu@example.com", "oxpu").await;
     verify_user(&db, &uid).await;
 
     let v = rpc_json(
@@ -1061,7 +1166,7 @@ async fn message_queue_budget_exceeded_with_scope() {
     };
     let runtime = OxpilotRuntime::from_slot(slot);
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpv@example.com", "oxpv").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpv@example.com", "oxpv").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "bd").await;
     let create = create_session(&app, &cookie, "oxpv", "bd", "g").await;
@@ -1125,7 +1230,7 @@ async fn chat_post_queued_client_msg_id_answers_turn_active() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpd@example.com", "oxpd").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpd@example.com", "oxpd").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "qdedupe").await;
     let create = create_session(&app, &cookie, "oxpd", "qdedupe", "g").await;
@@ -1207,7 +1312,7 @@ async fn chat_post_budget_refusal_preserves_residual_queue() {
     };
     let runtime = OxpilotRuntime::from_slot(slot);
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpw@example.com", "oxpw").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpw@example.com", "oxpw").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "bdq").await;
     let create = create_session(&app, &cookie, "oxpw", "bdq", "g").await;
@@ -1276,7 +1381,7 @@ async fn turn_cancel_aborts_live_turn() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxtc@example.com", "oxtc").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxtc@example.com", "oxtc").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "tc").await;
     let create = create_session(&app, &cookie, "oxtc", "tc", "g").await;
@@ -1322,12 +1427,12 @@ async fn turn_cancel_absent_and_foreign() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxtd@example.com", "oxtd").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxtd@example.com", "oxtd").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "td").await;
     let create = create_session(&app, &cookie, "oxtd", "td", "g").await;
     let session_id = create["data"]["id"].as_str().unwrap().to_string();
-    let (cookie2, uid2) = signup_and_login(&app, "oxte@example.com", "oxte").await;
+    let (cookie2, uid2) = signup_and_login(&app, &db, "oxte@example.com", "oxte").await;
     verify_user(&db, &uid2).await;
 
     // No live turn on an owned session ⇒ no_active_turn (C1).
@@ -1366,7 +1471,7 @@ async fn session_delete_aborts_live_turn_via_hook() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxdh@example.com", "oxdh").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxdh@example.com", "oxdh").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "dh").await;
     let create = create_session(&app, &cookie, "oxdh", "dh", "g").await;
@@ -1406,7 +1511,7 @@ async fn get_stream_late_attach_replays_buffer_to_terminal() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxla@example.com", "oxla").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxla@example.com", "oxla").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "la").await;
     let create = create_session(&app, &cookie, "oxla", "la", "g").await;
@@ -1461,7 +1566,7 @@ async fn chat_post_budget_exceeded_is_429() {
     };
     let runtime = OxpilotRuntime::from_slot(slot);
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxbp@example.com", "oxbp").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxbp@example.com", "oxbp").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "bp").await;
     let create = create_session(&app, &cookie, "oxbp", "bp", "g").await;
@@ -1556,7 +1661,7 @@ async fn u5_procs_anonymous_and_pat_denied() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpz@example.com", "oxpz").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpz@example.com", "oxpz").await;
     verify_user(&db, &uid).await;
 
     let pat = rpc_json(
@@ -1598,7 +1703,7 @@ async fn u5_procs_flag_off_denied() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(empty_runtime())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpy@example.com", "oxpy").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpy@example.com", "oxpy").await;
     verify_user(&db, &uid).await;
 
     for proc in U5_PROCS {
@@ -1634,8 +1739,8 @@ async fn diff_list_and_get_session_scoped() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), Some(stub_runtime())).await;
-    let (cookie_a, uid_a) = signup_and_login(&app, "oxpw@example.com", "oxpw").await;
-    let (cookie_b, uid_b) = signup_and_login(&app, "oxpv@example.com", "oxpv").await;
+    let (cookie_a, uid_a) = signup_and_login(&app, &db, "oxpw@example.com", "oxpw").await;
+    let (cookie_b, uid_b) = signup_and_login(&app, &db, "oxpv@example.com", "oxpv").await;
     verify_user(&db, &uid_a).await;
     verify_user(&db, &uid_b).await;
     create_repo(&app, &cookie_a, "diffs").await;
@@ -1714,7 +1819,7 @@ async fn diff_apply_chain_materializes_then_rejects_second_apply() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app_repos(db.clone(), Some(stub_runtime()), dir.path().join("repos")).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpu@example.com", "oxpu").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpu@example.com", "oxpu").await;
     verify_user(&db, &uid).await;
     // stack_id seeds the initial `main` commit the apply branches from.
     let create = rpc_json(
@@ -1778,7 +1883,7 @@ async fn diff_apply_fail_stop_keeps_proposal_pending() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app_repos(db.clone(), Some(stub_runtime()), dir.path().join("repos")).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpt@example.com", "oxpt").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpt@example.com", "oxpt").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "failrepo").await;
 
@@ -1908,7 +2013,7 @@ async fn session_create_target_id_binds_persists_and_validates() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let (app, gw) = test_app_with_gateway(db.clone(), stub_runtime()).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpu@example.com", "oxpu").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpu@example.com", "oxpu").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "tgt").await;
 
@@ -1925,7 +2030,7 @@ async fn session_create_target_id_binds_persists_and_validates() {
     let absent = create_session_targeted(&app, &cookie, "oxpu", "tgt", "t-absent").await;
     assert_eq!(absent["ok"], false, "{absent}");
     assert_eq!(absent["error"]["code"], "not_found", "{absent}");
-    let (_cookie2, uid2) = signup_and_login(&app, "oxpv@example.com", "oxpv").await;
+    let (_cookie2, uid2) = signup_and_login(&app, &db, "oxpv@example.com", "oxpv").await;
     verify_user(&db, &uid2).await;
     let foreign = redeemed_target_id(&gw, &uid2, "other-box").await;
     let foreign_res = create_session_targeted(&app, &cookie, "oxpu", "tgt", &foreign).await;
@@ -1990,7 +2095,7 @@ async fn grant_list_session_id_narrows_and_denies() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let (app, gw) = test_app_with_gateway(db.clone(), stub_runtime()).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpw@example.com", "oxpw").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpw@example.com", "oxpw").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "gl").await;
 
@@ -2088,7 +2193,7 @@ async fn grant_list_session_id_narrows_and_denies() {
     assert_eq!(absent["ok"], false, "{absent}");
     assert_eq!(absent["error"]["code"], "not_found", "{absent}");
 
-    let (cookie2, uid2) = signup_and_login(&app, "oxpx@example.com", "oxpx").await;
+    let (cookie2, uid2) = signup_and_login(&app, &db, "oxpx@example.com", "oxpx").await;
     verify_user(&db, &uid2).await;
     create_repo(&app, &cookie2, "gl2").await;
     let foreign_session = create_session(&app, &cookie2, "oxpx", "gl2", "f").await;
@@ -2120,7 +2225,7 @@ async fn queue_delete_drains_and_denies_foreign_or_absent() {
     support::unlock_signup(&db).await;
     let runtime = stub_runtime();
     let app = test_app(db.clone(), Some(runtime.clone())).await;
-    let (cookie, uid) = signup_and_login(&app, "oxpy2@example.com", "oxpy2").await;
+    let (cookie, uid) = signup_and_login(&app, &db, "oxpy2@example.com", "oxpy2").await;
     verify_user(&db, &uid).await;
     create_repo(&app, &cookie, "qd").await;
     let session = create_session(&app, &cookie, "oxpy2", "qd", "g").await;
@@ -2165,7 +2270,7 @@ async fn queue_delete_drains_and_denies_foreign_or_absent() {
 
     // A foreign session id folds into the same not_found — the owner's
     // queued row is untouched.
-    let (cookie2, uid2) = signup_and_login(&app, "oxpz2@example.com", "oxpz2").await;
+    let (cookie2, uid2) = signup_and_login(&app, &db, "oxpz2@example.com", "oxpz2").await;
     verify_user(&db, &uid2).await;
     let foreign = rpc_json(
         &app,

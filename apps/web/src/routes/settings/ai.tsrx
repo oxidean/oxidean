@@ -6,6 +6,7 @@ import { McpHarnessBlocks } from "@/components/settings/mcp-harness-blocks";
 import { AppLink } from "@/components/ui/app-link";
 import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
+import { oxpilotStatusQueryOptions } from "@/lib/oxpilot-queries";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 
@@ -30,6 +31,12 @@ function AiSettingsContent(props: {
   const meQ = useQuery(authSessionQueryOptions());
   // Auth gate (formerly loader): anonymous → login.
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/settings/ai" : null);
+
+  // BR2.6 — under the stub provider OxPilot hides from non-sys-admins;
+  // hold the section until status resolves so restricted users never
+  // see a flash of it.
+  const oxpilotStatus = useQuery(oxpilotStatusQueryOptions());
+  const oxpilotVisible = oxpilotStatus.data != null && oxpilotStatus.data.reason !== "restricted";
 
   const origin = resolvePublicOriginClient();
   const skillInstallCmd = "ox skill install";
@@ -167,16 +174,23 @@ function AiSettingsContent(props: {
       />
     </div>
 
-    <h2 className="mt-10 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
-      OxPilot
-    </h2>
-    <p className="mt-1 text-[14px] text-muted-foreground">
-      OxPilot sessions can also drive a paired computer-use target — a machine running the connector
-      that the agent can act on with your consent. Pair and manage systems under{" "}
-      <AppLink href="/oxpilot#targets" className="text-foreground underline underline-offset-2">
-        OxPilot → Computer use
-      </AppLink>
-      .
-    </p>
+    @if (oxpilotVisible) {
+      <>
+        <h2 className="mt-10 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
+          OxPilot
+        </h2>
+        <p className="mt-1 text-[14px] text-muted-foreground">
+          OxPilot sessions can also drive a paired computer-use target — a machine running the
+          connector that the agent can act on with your consent. Pair and manage systems under{" "}
+          <AppLink
+            href="/oxpilot#targets"
+            className="text-foreground underline underline-offset-2"
+          >
+            OxPilot → Computer use
+          </AppLink>
+          .
+        </p>
+      </>;
+    }
   </AccountSettingsLayout>;
 }

@@ -12,6 +12,7 @@ import { AuthErrorBanner } from "@/components/auth-shell";
 import { OxpilotComposer } from "@/components/oxpilot/composer";
 import { ContextDrawer } from "@/components/oxpilot/context-drawer";
 import { OxpilotFlagOff } from "@/components/oxpilot/flag-off";
+import { PageNotFound } from "@/components/page-not-found";
 import { OxpilotTranscript, type TranscriptCard } from "@/components/oxpilot/transcript";
 import { SessionsRail } from "@/components/oxpilot/sessions-rail";
 import { AppLink } from "@/components/ui/app-link";
@@ -263,76 +264,82 @@ function OxpilotSessionContent() @{
   }, [enabled, sessionId]);
 
   <div className="mx-auto w-full max-w-6xl px-4 py-8" data-testid="oxpilot-session-page">
-    <AppLink
-      href="/oxpilot"
-      className="inline-flex w-fit items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
-    >
-      <ArrowLeft size={14} aria-hidden />
-      All sessions
-    </AppLink>
-    @if (statusQ.isPending || meQ.isPending) {
-      <Skeleton className="mt-6 h-48 w-full" />;
+    @if (statusQ.isSuccess && statusQ.data?.reason === "restricted") {
+      <PageNotFound />;
     } @else {
-      @if (!enabled) {
-        <OxpilotFlagOff reason={statusQ.data?.reason} />;
-      } @else {
-        <>
-          @if (seedNotFound) {
-            <SessionNotFound />;
+      <>
+        <AppLink
+          href="/oxpilot"
+          className="inline-flex w-fit items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft size={14} aria-hidden />
+          All sessions
+        </AppLink>
+        @if (statusQ.isPending || meQ.isPending) {
+          <Skeleton className="mt-6 h-48 w-full" />;
+        } @else {
+          @if (!enabled) {
+            <OxpilotFlagOff reason={statusQ.data?.reason} />;
           } @else {
-            @if (seedError) {
-              <AuthErrorBanner message={seedError} />;
-            }
-          }
-          @if (turnNotice) {
-            <div
-              className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
-              role="alert"
-            >
-              <p className="text-[14px] text-foreground">
-                {
-                  (turnNotice === "aborted"
-                    ? "Reply stopped."
-                    : "The provider stopped mid-reply — your messages are saved.") as string
+            <>
+              @if (seedNotFound) {
+                <SessionNotFound />;
+              } @else {
+                @if (seedError) {
+                  <AuthErrorBanner message={seedError} />;
                 }
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setTurnNotice(null);
-                  void reseed();
-                }}
-              >
-                Retry
-              </Button>
-            </div>;
+              }
+              @if (turnNotice) {
+                <div
+                  className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                  role="alert"
+                >
+                  <p className="text-[14px] text-foreground">
+                    {
+                      (turnNotice === "aborted"
+                        ? "Reply stopped."
+                        : "The provider stopped mid-reply — your messages are saved.") as string
+                    }
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setTurnNotice(null);
+                      void reseed();
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </div>;
+              }
+              @if (!seedNotFound && !seedError) {
+                @if (!seed) {
+                  <Skeleton className="mt-6 h-48 w-full" />;
+                } @else {
+                  <OxpilotChatSurface
+                    key={`s-${seed.version}`}
+                    sessionId={sessionId}
+                    seed={seed}
+                    onReseed={(reconcileSig) => {
+                      if (reconcileSig !== undefined) {
+                        if (reconcileRef.current === reconcileSig) return;
+                        reconcileRef.current = reconcileSig;
+                      } else {
+                        reconcileRef.current = null;
+                      }
+                      void reseed();
+                    }}
+                    onTurnNotice={(notice) => setTurnNotice(notice)}
+                    disabledReason={statusQ.data?.reason}
+                  />;
+                }
+              }
+            </>;
           }
-          @if (!seedNotFound && !seedError) {
-            @if (!seed) {
-              <Skeleton className="mt-6 h-48 w-full" />;
-            } @else {
-              <OxpilotChatSurface
-                key={`s-${seed.version}`}
-                sessionId={sessionId}
-                seed={seed}
-                onReseed={(reconcileSig) => {
-                  if (reconcileSig !== undefined) {
-                    if (reconcileRef.current === reconcileSig) return;
-                    reconcileRef.current = reconcileSig;
-                  } else {
-                    reconcileRef.current = null;
-                  }
-                  void reseed();
-                }}
-                onTurnNotice={(notice) => setTurnNotice(notice)}
-                disabledReason={statusQ.data?.reason}
-              />;
-            }
-          }
-        </>;
-      }
+        }
+      </>;
     }
   </div>;
 }
@@ -678,7 +685,11 @@ function OxpilotChatSurface(props: {
 
   <>
     @if (effectiveFatal === "oxpilot.disabled") {
-      <OxpilotFlagOff reason={props.disabledReason} />;
+      @if (props.disabledReason === "restricted") {
+        <PageNotFound />;
+      } @else {
+        <OxpilotFlagOff reason={props.disabledReason} />;
+      }
     } @else {
       @if (effectiveFatal === "not_found") {
         <SessionNotFound />;
