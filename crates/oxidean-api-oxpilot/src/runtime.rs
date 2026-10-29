@@ -2573,14 +2573,28 @@ mod tests {
         let (t, _s) = start_turn(&state, &session, 0).await;
         t.started_seq.store(user_row.seq, Ordering::SeqCst);
         spawn_turn_task(state.clone(), session.clone(), t.clone());
-        // Wait for the full chain to settle — map empties when the
-        // successor (generation 1) also completes.
+        // Wait for the full chain to settle. The map flickers empty in
+        // the release→claim gap between turns, so the predicate also
+        // requires the successor's row to have landed — otherwise a
+        // slow (instrumented) spawn reads the transcript mid-chain.
         let sid = session.id.clone();
         let st = state.clone();
+        let svc_wait = svc.clone();
+        let uid_wait = uid.clone();
         let settled = eventually_async(move || {
             let st = st.clone();
             let sid = sid.clone();
-            async move { st.oxpilot.turns().await.get(&sid).await.is_none() }
+            let svc = svc_wait.clone();
+            let uid = uid_wait.clone();
+            async move {
+                if st.oxpilot.turns().await.get(&sid).await.is_some() {
+                    return false;
+                }
+                svc.list_messages(&uid, &sid)
+                    .await
+                    .map(|ms| ms.iter().filter(|m| m.role == "assistant").count() == 2)
+                    .unwrap_or(false)
+            }
         })
         .await;
         assert!(settled, "chain ran to completion");
