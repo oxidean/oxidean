@@ -5997,3 +5997,144 @@
 **Review File**: .aidlc-engine/reviews/code-generation/units/oxpilot-ui/6bc2091a791a039a/3.e3e46454b567c7823db3ef5b4ac2e73e.review.md
 
 ---
+
+## Review Completed
+**Timestamp**: 2026-10-28T23:53:24Z
+**Event**: REVIEW_COMPLETED
+**Stage**: code-generation
+**Reviewer**: aidlc-architecture-reviewer-agent
+**Unit**: oxpilot-ui
+**Iteration**: 3
+**Verdict**: READY
+**Review Headings Made Level 3**: line 1: # Code-Generation Architecture Review — oxpilot-ui — iteration 3; line 10: ## Findings; line 45: ## Detail; line 109: ## Merge verdict
+**Request Fingerprint**: sha256:c126f9450ea838a7eaadf65a4bc9c022c6ec25499f24a665e5f3d95ed51f6c19
+**Artifact Fingerprint**: sha256:c126f9450ea838a7eaadf65a4bc9c022c6ec25499f24a665e5f3d95ed51f6c19
+**Request Id**: review:e3e46454b567c7823db3ef5b4ac2e73e
+**Request Source Fingerprint**: 82369c497f4339d929816fcbe22db71f70c7b5525d31e618f19b2901280ac7a0
+**Source Fingerprint**: 82369c497f4339d929816fcbe22db71f70c7b5525d31e618f19b2901280ac7a0
+**Unit Source Fingerprint**: sha256:3d01b9c564606758843dc658a669591fae5788882415af1aa75bc1da0358211e
+**Review Record**: .aidlc-engine/reviews/code-generation/units/oxpilot-ui/6bc2091a791a039a/3.json
+**Review Record Digest**: sha256:6df3a4a16666cfc25f7344ea089bdbfa114935720507d045cba2dffb368a0ca7
+
+---
+
+## Unit Started
+**Timestamp**: 2026-10-28T23:53:46Z
+**Event**: UNIT_STARTED
+**Stage**: code-generation
+**Unit**: oxpilot-ui
+**Run floor**: WORKFLOW_STARTED:2026-10-27T00:33:37Z#1
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:53:46Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-state
+**Command**: aidlc-state engine state unit complete --stage code-generation --unit oxpilot-ui
+**Error**: Refusing to complete unit "oxpilot-ui" for "code-generation": The code plan is not approved yet: run `aidlc engine orchestrate next` and follow the step it prints.
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:54:12Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log decision --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --decision Approve the oxpilot-ui code-generation plan --options Approve Plan,Request Changes --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-cli --project-dir .
+**Error**: Plan Approval questions file must contain exactly [Answer]: (blank)
+
+---
+
+## Decision Recorded
+**Timestamp**: 2026-10-28T23:54:15Z
+**Event**: DECISION_RECORDED
+**Stage**: code-generation
+**Decision**: Approve the oxpilot-ui code-generation plan
+**Options**: Approve Plan,Request Changes
+**Checkpoint**: Code Generation Plan Approval
+**Plan Target**: unit:oxpilot-ui
+**Intent**: 01a17ac6-df2f-7900-b991-f2f2548b7a1f
+**Directive Epoch**: sha256:85432b86d678999d876e16fc810897f8cd5edc978e860a9a09473a74b24ae12d
+**Run floor**: WORKFLOW_STARTED:2026-10-27T00:33:37Z#1
+**Approval Fingerprint**: sha256:v3:8cd89d3492d2638e3dcdfe9ea8b4da0fae21e13c7ca308afcde720a28ea93b73
+**Questions File**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+**Questions SHA-256**: d7af4ad9ddb6b8661a1b72e0d5e7b430ccb6bdaaa05f20491afda823d801ecea
+**Prompt SHA-256**: 710a17f22d764a52e7b64361ac5ba67516389f4a3b90fb79c4c441153207888a
+**Session**: devin-cli
+**Unit**: oxpilot-ui
+
+---
+
+## Decision Recorded
+**Timestamp**: 2026-10-28T23:54:18Z
+**Event**: DECISION_RECORDED
+**Stage**: code-generation
+**Decision**: Approve the oxpilot-ui code-generation plan
+**Options**: Approve Plan,Request Changes
+**Checkpoint**: Code Generation Plan Approval
+**Plan Target**: unit:oxpilot-ui
+**Intent**: 01a17ac6-df2f-7900-b991-f2f2548b7a1f
+**Directive Epoch**: sha256:85432b86d678999d876e16fc810897f8cd5edc978e860a9a09473a74b24ae12d
+**Run floor**: WORKFLOW_STARTED:2026-10-27T00:33:37Z#1
+**Approval Fingerprint**: sha256:v3:8cd89d3492d2638e3dcdfe9ea8b4da0fae21e13c7ca308afcde720a28ea93b73
+**Questions File**: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+**Questions SHA-256**: d7af4ad9ddb6b8661a1b72e0d5e7b430ccb6bdaaa05f20491afda823d801ecea
+**Prompt SHA-256**: 710a17f22d764a52e7b64361ac5ba67516389f4a3b90fb79c4c441153207888a
+**Session**: devin-f3d429bf
+**Unit**: oxpilot-ui
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:54:24Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --session devin-f3d429bf
+**Error**: Plan Approval questions file must be the active target's canonical file: aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:54:26Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-f3d429bf
+**Error**: Plan Approval questions file must contain exactly [Answer]: Approve Plan
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:54:30Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-f3d429bf
+**Error**: Refusing to record Plan Approval: Plan Approval requires the person's reply to this prompt, in this session. The person has not replied to this question yet: end the turn, wait for their reply, then record the choice they made. An answer is recorded only in the session it arrives from; if the human already chose an option, "devin-f3d429bf" may not be this conversation's session. Use the exact value on this conversation's `AIDLC Runtime Session:` line from SessionStart context. The session most recently active in this project is devin-f3d429bf. Next: re-run the Plan Approval decision command with that --session value, present the Plan Approval question, wait for the human's answer, then run the answer command with the same value. If this conversation shows no `AIDLC Runtime Session:` line, ask the human to start a new chat session and run /aidlc to re-offer the Plan Approval question.
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-28T23:54:34Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-f3d429bf --on-instruction Go ahead with feature, but after this expect no input for me until we have a PR that is fully ready — keep going until the plan is fully gone through
+**Error**: --on-instruction is for a stage question the person left to you; --checkpoint plan-approval is theirs to answer. Ask them and record their reply.
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-29T00:10:09Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-f3d429bf
+**Error**: Refusing to record Plan Approval: Plan Approval requires the person's reply to this prompt, in this session. The person has not replied to this question yet: end the turn, wait for their reply, then record the choice they made. An answer is recorded only in the session it arrives from; if the human already chose an option, "devin-f3d429bf" may not be this conversation's session. Use the exact value on this conversation's `AIDLC Runtime Session:` line from SessionStart context. The session most recently active in this project is devin-f3d429bf. Next: re-run the Plan Approval decision command with that --session value, present the Plan Approval question, wait for the human's answer, then run the answer command with the same value. If this conversation shows no `AIDLC Runtime Session:` line, ask the human to start a new chat session and run /aidlc to re-offer the Plan Approval question.
+
+---
+
+## Error Logged
+**Timestamp**: 2026-10-29T00:14:57Z
+**Event**: ERROR_LOGGED
+**Tool**: aidlc-log
+**Command**: aidlc-log engine log answer --stage code-generation --unit oxpilot-ui --checkpoint plan-approval --details Approve Plan --questions-file aidlc/spaces/default/intents/261027-oxpilot-agent/construction/oxpilot-ui/code-generation/code-generation-questions.md --session devin-f3d429bf
+**Error**: Refusing to record Plan Approval: Plan Approval requires the person's reply to this prompt, in this session. The person has not replied to this question yet: end the turn, wait for their reply, then record the choice they made. An answer is recorded only in the session it arrives from; if the human already chose an option, "devin-f3d429bf" may not be this conversation's session. Use the exact value on this conversation's `AIDLC Runtime Session:` line from SessionStart context. The session most recently active in this project is devin-f3d429bf. Next: re-run the Plan Approval decision command with that --session value, present the Plan Approval question, wait for the human's answer, then run the answer command with the same value. If this conversation shows no `AIDLC Runtime Session:` line, ask the human to start a new chat session and run /aidlc to re-offer the Plan Approval question.
+
+---
