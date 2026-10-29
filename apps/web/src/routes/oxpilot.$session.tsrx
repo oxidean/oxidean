@@ -309,25 +309,27 @@ function OxpilotSessionContent() @{
               </Button>
             </div>;
           }
-          @if (!seed) {
-            <Skeleton className="mt-6 h-48 w-full" />;
-          } @else {
-            <OxpilotChatSurface
-              key={`s-${seed.version}`}
-              sessionId={sessionId}
-              seed={seed}
-              onReseed={(reconcileSig) => {
-                if (reconcileSig !== undefined) {
-                  if (reconcileRef.current === reconcileSig) return;
-                  reconcileRef.current = reconcileSig;
-                } else {
-                  reconcileRef.current = null;
-                }
-                void reseed();
-              }}
-              onTurnNotice={(notice) => setTurnNotice(notice)}
-              disabledReason={statusQ.data?.reason}
-            />;
+          @if (!seedNotFound && !seedError) {
+            @if (!seed) {
+              <Skeleton className="mt-6 h-48 w-full" />;
+            } @else {
+              <OxpilotChatSurface
+                key={`s-${seed.version}`}
+                sessionId={sessionId}
+                seed={seed}
+                onReseed={(reconcileSig) => {
+                  if (reconcileSig !== undefined) {
+                    if (reconcileRef.current === reconcileSig) return;
+                    reconcileRef.current = reconcileSig;
+                  } else {
+                    reconcileRef.current = null;
+                  }
+                  void reseed();
+                }}
+                onTurnNotice={(notice) => setTurnNotice(notice)}
+                disabledReason={statusQ.data?.reason}
+              />;
+            }
           }
         </>;
       }

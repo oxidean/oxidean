@@ -252,6 +252,15 @@ fn tail_is_in_flight(tail: &str) -> bool {
 /// The earliest index where `buf[i..]` is still an in-flight secret
 /// candidate; `buf.len()` means nothing is in flight.
 fn hold_start(buf: &str) -> usize {
+    // An opened PEM block stays buffered whole — `redact` masks the
+    // span only when the `-----END ` footer is present, so emitting a
+    // BEGIN now would let the body ride later deltas unmasked. The
+    // last BEGIN must postdate the last END to count as open.
+    if let Some(begin) = buf.rfind(PEM_BEGIN) {
+        if buf.rfind(PEM_END).map_or(true, |end| end < begin) {
+            return begin;
+        }
+    }
     // A bare `Bearer `/`-----BEGIN ` at end awaits its token/body —
     // the trailing run is empty, so the in-run scan never sees it.
     for opener in AWAITING_RUN {
@@ -408,5 +417,21 @@ mod tests {
             let out = stream(&[&pem[..split], &pem[split..]]);
             assert_eq!(out, "h\n***\nt", "split at {split}");
         }
+    }
+
+    #[test]
+    fn stream_holds_open_pem_block_until_footer() {
+        // Line-granular deltas: the BEGIN line completes in one delta
+        // and body lines land in later ones — the open block must stay
+        // buffered until `-----END `, or the body leaks unmasked.
+        let out = stream(&[
+            "-----BEGIN PRIVATE KEY-----\n",
+            "MIIabc\n",
+            "MIIdef\n",
+            "-----END PRIVATE KEY-----\nafter",
+        ]);
+        assert_eq!(out, "***\nafter");
+        // Stream ends mid-block — the unterminated BEGIN masks to end.
+        assert_eq!(stream(&["-----BEGIN KEY-----\n", "MIIabc"]), "***");
     }
 }

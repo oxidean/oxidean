@@ -5288,21 +5288,31 @@ export type CommentHistoryResponse = {
 
 // --- Oxpilot agentic surface (the `oxpilot.*` + `admin.oxpilot.*` family) ---
 
-/** Closed error-code set the oxpilot routes + procs emit. */
+/** Closed error-code set the oxpilot routes + procs emit. Session/RPC
+ * and REST codes are the top block; the connector surface
+ * (`/api/oxpilot/connector/*`) emits the bottom block. */
 export type OxpilotErrorCode =
+  | "unauthenticated"
   | "oxpilot.disabled"
   | "oxpilot.internal"
-  | "oxpilot.no_active_turn"
-  | "oxpilot.session_active_turn_absent"
-  | "oxpilot.budget_exceeded"
-  | "oxpilot.pairing_expired"
-  | "oxpilot.grant_expired"
-  | "oxpilot.target_revoked"
-  | "oxpilot.not_found"
-  | "oxpilot.forbidden"
+  | "oxpilot.action_denied"
+  | "invalid_body"
+  | "bad_input"
+  | "forbidden"
   | "not_found"
+  | "turn_active"
+  | "no_active_turn"
+  | "session_active_turn_absent"
+  | "budget_exceeded"
   | "diff_not_pending"
-  | `apply_failed:${string}`;
+  | `apply_failed:${string}`
+  | "unauthorized"
+  | "rate_limited"
+  | "revoked"
+  | "pairing_expired"
+  | "pairing_used"
+  | "disabled"
+  | "internal";
 
 /** `oxpilot.status` — the gate-exempt enablement probe. */
 export interface OxpilotStatusResponse {

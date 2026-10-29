@@ -2026,7 +2026,7 @@ async fn connector_schema_columns_exist() {
         }
         RawPool::MySql(_) => {
             let n = pool
-                .count("SELECT COUNT(*) FROM information_schema.statistics WHERE index_name = 'idx_oxpilot_actions_dequeue'")
+                .count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'oxpilot_actions' AND index_name = 'idx_oxpilot_actions_dequeue'")
                 .await;
             assert_eq!(n, 4, "dequeue composite index");
         }

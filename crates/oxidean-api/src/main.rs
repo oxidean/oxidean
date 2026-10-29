@@ -113,7 +113,7 @@ async fn serve() {
     } else {
         oxidean_api::email::build_email_sender_from_env()
     };
-    let state = oxidean_api::AppState::new(db, email, env_name);
+    let mut state = oxidean_api::AppState::new(db, email, env_name);
     // Resolve the persisted oxpilot settings row over env — unconditional so
     // a stored provider config installs at boot; bounded lookups keep listen
     // startup fast.
@@ -142,6 +142,13 @@ async fn serve() {
     ));
     state.oxpilot.install_gateway(oxpilot_gateway);
     state.oxpilot.install_sessions(oxpilot_sessions);
+    // Install the aggregated dispatcher BEFORE the tools clone `state` —
+    // `router_with_state` repeats the same assignment for the HTTP edge,
+    // but a clone taken here would otherwise keep `core_dispatch`'s
+    // residual surface and answer `rpc.method_not_found` to `repo.*`/
+    // `pull.*` procs the tools dispatch through `state.rpc_dispatch`.
+    state.rpc_dispatch =
+        std::sync::Arc::new(|ctx, req| Box::pin(oxidean_api::rpc::dispatch(ctx, req)));
     // U5 — the tool executor rides the runtime slot (carried across
     // provider rebuilds); turns().get pin it per-turn via turn_parts.
     state

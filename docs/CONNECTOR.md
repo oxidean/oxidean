@@ -10,7 +10,7 @@ rest of the CLI uses.
 ## Runbook: pair → run
 
 ```bash
-# 1. In the Oxidean UI: Pilot → Targets → "New pairing" — mint a code.
+# 1. In the Oxidean UI: /oxpilot → Computer use → "Connect a system" — mint a code.
 #    Codes live 10 minutes and are single-use.
 
 # 2. Redeem it on the machine that should run actions:
@@ -114,7 +114,7 @@ transport failures (bounded jittered backoff `min(60, 2^n×(1±0.2))`), and
 
 `ox pilot disconnect` deletes the verifier (both backends) and the target
 row — **no server call**. The server-side target and connect grant stay
-alive until revoked in the UI (**Pilot → Targets → revoke**). This matters
+alive until revoked in the UI (**OxPilot → Computer use → Revoke**). This matters
 for lifecycle: revoke in the UI first if you want the forge to stop
 dispatching, then disconnect locally.
 

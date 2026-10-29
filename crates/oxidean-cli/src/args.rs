@@ -459,7 +459,7 @@ const HELP: &[(&str, &str)] = &[
     ),
     (
         "pilot",
-        "ox pilot — connect this machine as an oxpilot computer-use target\n\n  ox pilot pair <code>   redeem a UI-minted pairing code + custody the verifier\n  ox pilot run           claim → execute → report loop (alias: connect)\n  ox pilot disconnect    forget a target locally (server target stays until revoked)\n  ox pilot status        list registered targets + custody probe\n\nPair a machine from the /oxpilot UI, then `ox pilot run` dials out to the\nforge — no inbound listener needed. Capabilities are the closed C3 set\n(exec_shell, fs_read, fs_write); every action requires an owner grant\napproved in the UI. Exit codes pin {0,1} — usage-class errors map to 1.",
+        "ox pilot — connect this machine as an oxpilot computer-use target\n\n  ox pilot pair <code>   redeem a UI-minted pairing code + custody the verifier\n  ox pilot run           claim → execute → report loop (alias: connect)\n  ox pilot disconnect    forget a target locally (server target stays until revoked)\n  ox pilot status        list registered targets + custody probe\n\nPair a machine from the /oxpilot UI, then `ox pilot run` dials out to the\nforge — no inbound listener needed. Capabilities are the closed C3 set\n(exec_shell, fs_read, fs_write); every action requires an owner grant\napproved in the UI. Successful commands exit 0; usage-class errors exit 2.",
     ),
     (
         "pilot pair",

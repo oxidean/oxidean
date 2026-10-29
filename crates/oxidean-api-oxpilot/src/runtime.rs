@@ -751,11 +751,14 @@ async fn finish_turn(
         }
     }
     if accum.any_items {
+        // requests:0 — the request itself was already reserved at
+        // admission (`admit_budget` on the send/enqueue path); turn-end
+        // accounting only lands the token spend.
         if let Err(e) = svc
             .record_usage(
                 &session.user_id,
                 UsageDelta {
-                    requests: 1,
+                    requests: 0,
                     tokens: Some(accum.tokens),
                 },
             )

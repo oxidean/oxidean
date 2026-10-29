@@ -2220,6 +2220,159 @@ pub async fn upsert_usage(
     Ok(())
 }
 
+/// Atomic budget admission (BR6.2) — reserves one request on both
+/// `(user, user_id)` and `(instance, '__instance__')` inside a single
+/// transaction: each scope's increment is conditioned on BOTH axes
+/// staying under its cap, so concurrent senders can no longer pass a
+/// stale `read_counters` check and overspend. `Ok(Some(scope))` is the
+/// refusal — nothing incremented anywhere, the tx dropped
+/// uncommitted; the caller maps the scope to `budget_exceeded`.
+pub async fn admit_usage(
+    pool: &DbPool,
+    user_id: &str,
+    window_day: &str,
+    user_cap: Option<i64>,
+    instance_cap: Option<i64>,
+) -> Result<Option<&'static str>, String> {
+    let keys = [
+        ("user", user_id, user_cap),
+        ("instance", INSTANCE_SCOPE_KEY, instance_cap),
+    ];
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin oxpilot usage admit tx failed: {e}"))?;
+            for (scope, scope_key, cap) in keys {
+                let id = format!("{scope}|{scope_key}|{window_day}");
+                sqlx::query(
+                    "INSERT INTO oxpilot_usage_counters
+                         (id, scope, scope_key, window_day, requests, tokens)
+                     VALUES ($1, $2, $3, $4, 0, 0)
+                     ON CONFLICT (scope, scope_key, window_day) DO NOTHING",
+                )
+                .bind(&id)
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage ensure failed: {e}"))?;
+                let n = sqlx::query(
+                    "UPDATE oxpilot_usage_counters
+                        SET requests = requests + 1,
+                            updated_at = now()
+                      WHERE scope = $1 AND scope_key = $2 AND window_day = $3
+                        AND ($4::bigint IS NULL
+                             OR (requests < $4 AND tokens < $4))",
+                )
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .bind(cap)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage failed: {e}"))?
+                .rows_affected();
+                if n == 0 {
+                    return Ok(Some(scope));
+                }
+            }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit oxpilot usage admit failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin oxpilot usage admit tx failed: {e}"))?;
+            for (scope, scope_key, cap) in keys {
+                let id = format!("{scope}|{scope_key}|{window_day}");
+                sqlx::query(
+                    "INSERT IGNORE INTO oxpilot_usage_counters
+                         (id, scope, scope_key, window_day, requests, tokens)
+                     VALUES (?, ?, ?, ?, 0, 0)",
+                )
+                .bind(&id)
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage ensure failed: {e}"))?;
+                let n = sqlx::query(
+                    "UPDATE oxpilot_usage_counters
+                        SET requests = requests + 1,
+                            updated_at = CURRENT_TIMESTAMP
+                      WHERE scope = ? AND scope_key = ? AND window_day = ?
+                        AND (? IS NULL OR (requests < ? AND tokens < ?))",
+                )
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .bind(cap)
+                .bind(cap)
+                .bind(cap)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage failed: {e}"))?
+                .rows_affected();
+                if n == 0 {
+                    return Ok(Some(scope));
+                }
+            }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit oxpilot usage admit failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin oxpilot usage admit tx failed: {e}"))?;
+            for (scope, scope_key, cap) in keys {
+                let id = format!("{scope}|{scope_key}|{window_day}");
+                sqlx::query(
+                    "INSERT OR IGNORE INTO oxpilot_usage_counters
+                         (id, scope, scope_key, window_day, requests, tokens)
+                     VALUES (?1, ?2, ?3, ?4, 0, 0)",
+                )
+                .bind(&id)
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage ensure failed: {e}"))?;
+                let n = sqlx::query(
+                    "UPDATE oxpilot_usage_counters
+                        SET requests = requests + 1,
+                            updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+                      WHERE scope = ?1 AND scope_key = ?2 AND window_day = ?3
+                        AND (?4 IS NULL OR (requests < ?4 AND tokens < ?4))",
+                )
+                .bind(scope)
+                .bind(scope_key)
+                .bind(window_day)
+                .bind(cap)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("admit oxpilot usage failed: {e}"))?
+                .rows_affected();
+                if n == 0 {
+                    return Ok(Some(scope));
+                }
+            }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit oxpilot usage admit failed: {e}"))?;
+        }
+    }
+    Ok(None)
+}
+
 /// Today's `(user, user_id)` and `(instance, '__instance__')` rows —
 /// `(None, None)`-able, absent reads as zero (BR6.3 posture).
 pub async fn read_counters(

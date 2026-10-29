@@ -152,12 +152,15 @@ fn finish_pair(
             backend.label(),
         ),
         json: json!({
-            "paired": true,
-            "target_id": row.target_id,
-            "connector_id": row.connector_id,
-            "device_label": row.device_label,
-            "granted_caps": row.granted_caps,
-            "custody": backend.label(),
+            "ok": true,
+            "data": {
+                "paired": true,
+                "target_id": row.target_id,
+                "connector_id": row.connector_id,
+                "device_label": row.device_label,
+                "granted_caps": row.granted_caps,
+                "custody": backend.label(),
+            },
         }),
     })
 }
@@ -267,7 +270,7 @@ pub fn disconnect(rt: &Runtime, target: Option<&str>) -> Result<Out, CliError> {
              the server-side grant stays until revoked in the Oxidean UI",
             row.device_label, row.target_id
         ),
-        json: json!({"disconnected": true, "target_id": row.target_id}),
+        json: json!({"ok": true, "data": {"disconnected": true, "target_id": row.target_id}}),
     })
 }
 
@@ -280,7 +283,7 @@ pub fn status(rt: &Runtime) -> Result<Out, CliError> {
     if map.is_empty() {
         return Ok(Out::Report {
             text: "no paired targets — `ox pilot pair <code>` to connect this machine".to_string(),
-            json: json!({"targets": []}),
+            json: json!({"ok": true, "data": {"targets": []}}),
         });
     }
     let mut lines = vec![format!(
@@ -316,6 +319,6 @@ pub fn status(rt: &Runtime) -> Result<Out, CliError> {
     );
     Ok(Out::Report {
         text: lines.join("\n"),
-        json: json!({"targets": json_rows}),
+        json: json!({"ok": true, "data": {"targets": json_rows}}),
     })
 }

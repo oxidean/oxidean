@@ -499,7 +499,7 @@ fn build_vcs_slot(
 
 /// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
 /// Resolve the request's session cookie or PAT Bearer to `(user_id,
-/// pat_identity)`. Cookie session or `Authorization: Bearer *** — asset
+/// pat_identity)`. Cookie session or `Authorization: Bearer <pat>` — asset
 /// up/download is the CLI's path, so PATs (which never mint sessions) are
 /// honored alongside browser cookies. Returns the user id plus the
 /// `PatIdentity` (when bearer-authed) so callers can scope-gate the
@@ -585,7 +585,7 @@ pub fn build_rpc_ctx_with_session(
 }
 
 /// Edge credential for `/api/rpc` (API-02): the session cookie always wins;
-/// `Authorization: Bearer *** is consulted only when no cookie is present.
+/// `Authorization: Bearer <pat>` is consulted only when no cookie is present.
 #[derive(Debug, Clone)]
 pub enum RpcCredential {
     Cookie(String),
@@ -603,7 +603,7 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
-/// `Authorization: Basic *** user:token>` → the token when its password
+/// `Authorization: Basic <base64 user:token>` → the token when its password
 /// slot carries a PAT / job token (same pairs git Smart HTTP accepts —
 /// raw account passwords are never honored). Lets Gitea-style Basic
 /// clients authenticate the whole REST/RPC edge, e.g. `tea` CLI.

@@ -788,15 +788,15 @@ impl RunState {
         match reason {
             TermReason::Signal(s) => LoopExit(Ok(Out::Report {
                 text: format!("received {s} — killed in-flight work; credentials kept"),
-                json: json!({"terminated": s, "target_id": target}),
+                json: json!({"ok": true, "data": {"terminated": s, "target_id": target}}),
             })),
             TermReason::Revoked => LoopExit(Ok(Out::Report {
                 text: format!("target {target} ({label}) was revoked — credentials removed"),
-                json: json!({"terminated": "revoked", "target_id": target}),
+                json: json!({"ok": true, "data": {"terminated": "revoked", "target_id": target}}),
             })),
             TermReason::NotFound => LoopExit(Ok(Out::Report {
                 text: format!("target {target} ({label}) no longer exists — credentials removed"),
-                json: json!({"terminated": "not_found", "target_id": target}),
+                json: json!({"ok": true, "data": {"terminated": "not_found", "target_id": target}}),
             })),
             TermReason::AuthDeath(code) => LoopExit(Err(CliError::Transport(format!(
                 "{code} — verifier rejected; local credentials deleted; re-pair to reconnect"

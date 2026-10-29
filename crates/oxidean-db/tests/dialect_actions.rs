@@ -157,8 +157,9 @@ async fn migrate_reseats_pre_rebase_versions() {
             (90, "oxpilot session target"),
             (91, "oxpilot text defaults"),
             (92, "oxpilot proposal base sha"),
+            (93, "oxpilot connector user fks"),
         ],
-        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84 and oxpilot at 85-92"
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84 and oxpilot at 85-93"
     );
     // Repair is idempotent — a second migrate changes nothing.
     db.migrate().await.expect("idempotent migrate");

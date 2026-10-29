@@ -53,6 +53,9 @@ fn session_json(row: &OxpilotSessionRow) -> Value {
 }
 
 const GOAL_MAX_CHARS: usize = 4_096;
+/// `oxpilot_sessions.branch` is `VARCHAR(255)` — enforce the column bound
+/// at the edge so an overlong value fails `bad_input`, not the insert.
+const BRANCH_MAX_CHARS: usize = 255;
 /// Same free-text ceiling as the SSE route (NFR1.10).
 const CONTENT_MAX_BYTES: usize = 64 * 1024;
 /// `client_msg_id` is an opaque idempotency token — bounded like the
@@ -99,6 +102,11 @@ pub async fn create(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
         .filter(|b| !b.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| accessible.row.default_branch.clone());
+    if branch.chars().count() > BRANCH_MAX_CHARS {
+        return Err(bad_input(format!(
+            "branch exceeds {BRANCH_MAX_CHARS} characters"
+        )));
+    }
     let goal = req
         .goal
         .as_deref()
@@ -344,6 +352,10 @@ pub async fn message_queue(ctx: &RpcCtx, input: Value) -> Result<Value, AppError
                 ));
             }
         }
+        // Atomic budget admission (BR6.2 take two) — inside the
+        // admission lock so the reservation serializes with the turn
+        // re-verify; a refusal leaves the queue untouched.
+        svc.admit_budget(&user.id, caps).await?;
         svc.enqueue(
             &user.id,
             Enqueue {

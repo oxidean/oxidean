@@ -7258,6 +7258,25 @@ impl Database {
         oxpilot::read_counters(self.require_pool()?, user_id, window).await
     }
 
+    /// Atomic per-scope request reservation under `cap` — see
+    /// [`oxpilot::admit_usage`]. `Ok(Some(scope))` is the cap refusal.
+    pub async fn admit_oxpilot_usage(
+        &self,
+        user_id: &str,
+        window: &str,
+        user_cap: Option<i64>,
+        instance_cap: Option<i64>,
+    ) -> Result<Option<&'static str>, String> {
+        oxpilot::admit_usage(
+            self.require_pool()?,
+            user_id,
+            window,
+            user_cap,
+            instance_cap,
+        )
+        .await
+    }
+
     pub async fn insert_oxpilot_pairing(
         &self,
         p: &NewOxpilotPairing<'_>,

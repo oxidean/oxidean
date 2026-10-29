@@ -538,8 +538,18 @@ pub trait SessionService: Send + Sync {
     async fn record_usage(&self, user_id: &str, delta: UsageDelta) -> Result<(), AppError>;
     /// Either axis at/over its configured cap ⇒ `budget_exceeded` with
     /// `data:{scope}` — user breach reported first (BR6.2); absent caps
-    /// are unbounded (BR6.3).
+    /// are unbounded (BR6.3). Read-only — the atomic admission is
+    /// [`admit_budget`](Self::admit_budget).
     async fn check_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError>;
+    /// Atomic budget admission — reserves one request on both scopes
+    /// under `caps` in a single transaction (BR6.2 take two: the
+    /// read-then-spend gap in `check_budget` let concurrent senders
+    /// overspend). Called only at the true admission points — the chat
+    /// POST after every release-armed exit, and `message_queue` inside
+    /// the admission lock — so a refused or deduped send never burns
+    /// budget and turn-end accounting stays token-only. Same
+    /// `budget_exceeded`/`data:{scope}` refusal shape as `check_budget`.
+    async fn admit_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError>;
     /// The `usage_get` backing read — fills all five C1 fields and NEVER
     /// refuses: it is the spend surface itself.
     async fn usage_view(&self, user_id: &str, caps: BudgetCaps) -> Result<UsageView, AppError>;
@@ -1694,6 +1704,9 @@ mod tests {
             unimplemented!()
         }
         async fn check_budget(&self, _u: &str, _c: BudgetCaps) -> Result<(), AppError> {
+            unimplemented!()
+        }
+        async fn admit_budget(&self, _u: &str, _c: BudgetCaps) -> Result<(), AppError> {
             unimplemented!()
         }
         async fn usage_view(&self, _u: &str, _c: BudgetCaps) -> Result<UsageView, AppError> {

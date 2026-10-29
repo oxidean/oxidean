@@ -100,7 +100,7 @@ impl OxpilotSessionService {
     pub fn register_delete_hook(&self, hook: Arc<dyn SessionDeleteHook>) {
         self.hooks
             .lock()
-            .expect("oxpilot hook registry poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .push(hook);
     }
 
@@ -253,11 +253,7 @@ impl SessionService for OxpilotSessionService {
         self.owned(session_id, user_id).await?;
         // Snapshot the registry so a concurrent registrar can't shift
         // ordering mid-delete; hooks run in registration order (C8).
-        let hooks = self
-            .hooks
-            .lock()
-            .expect("oxpilot hook registry poisoned")
-            .clone();
+        let hooks = self.hooks.lock().unwrap_or_else(|e| e.into_inner()).clone();
         for (idx, hook) in hooks.iter().enumerate() {
             hook.on_session_delete(session_id, user_id)
                 .await
@@ -751,6 +747,25 @@ impl SessionService for OxpilotSessionService {
                 .with_data(serde_json::json!({ "scope": "instance" })));
         }
         Ok(())
+    }
+
+    async fn admit_budget(&self, user_id: &str, caps: BudgetCaps) -> Result<(), AppError> {
+        let window = Self::utc_window();
+        match self
+            .db
+            .admit_oxpilot_usage(user_id, &window, caps.user, caps.instance)
+            .await
+            .map_err(db_err)?
+        {
+            Some(scope) => {
+                tracing::debug!(scope, "oxpilot budget refusal");
+                Err(
+                    AppError::new("budget_exceeded", format!("{scope} budget exceeded"))
+                        .with_data(serde_json::json!({ "scope": scope })),
+                )
+            }
+            None => Ok(()),
+        }
     }
 
     async fn usage_view(&self, user_id: &str, caps: BudgetCaps) -> Result<UsageView, AppError> {
@@ -1258,6 +1273,73 @@ mod tests {
         assert_eq!(view.requests_cap, Some(1));
         assert_eq!(view.tokens_cap, Some(1));
         assert_eq!(view.period.chars().count(), "YYYY-MM-DD".len());
+    }
+
+    #[tokio::test]
+    async fn admit_budget_reserves_atomically_per_scope() {
+        let db = test_db().await;
+        let (uid, _repo) = seed(&db, "u3").await;
+        let svc = OxpilotSessionService::new(db);
+
+        // Two admits under a cap of 2 land; the third is refused and —
+        // the atomicity pin — leaves the counter exactly where it was.
+        let caps = BudgetCaps {
+            user: Some(2),
+            instance: None,
+        };
+        svc.admit_budget(&uid, caps).await.unwrap();
+        svc.admit_budget(&uid, caps).await.unwrap();
+        let err = svc.admit_budget(&uid, caps).await.unwrap_err();
+        assert_eq!(err.code, "budget_exceeded");
+        assert_eq!(err.data.as_ref().unwrap()["scope"], "user");
+        let view = svc.usage_view(&uid, BudgetCaps::default()).await.unwrap();
+        assert_eq!(view.requests_used, 2);
+
+        // The instance cap refuses globally — and the user-side
+        // increment rolls back inside the same transaction.
+        let caps = BudgetCaps {
+            user: None,
+            instance: Some(3),
+        };
+        svc.admit_budget(&uid, caps).await.unwrap();
+        let err = svc.admit_budget(&uid, caps).await.unwrap_err();
+        assert_eq!(err.data.as_ref().unwrap()["scope"], "instance");
+        let view = svc.usage_view(&uid, BudgetCaps::default()).await.unwrap();
+        assert_eq!(view.requests_used, 3);
+    }
+
+    #[tokio::test]
+    async fn admit_budget_tokens_axis_and_unbounded() {
+        let db = test_db().await;
+        let (uid, _repo) = seed(&db, "u4").await;
+        let svc = OxpilotSessionService::new(db);
+
+        // Tokens already at cap refuse the admission — the cap covers
+        // both axes at reserve time.
+        svc.record_usage(
+            &uid,
+            UsageDelta {
+                requests: 0,
+                tokens: Some(9),
+            },
+        )
+        .await
+        .unwrap();
+        let err = svc
+            .admit_budget(
+                &uid,
+                BudgetCaps {
+                    user: Some(5),
+                    instance: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "budget_exceeded");
+
+        // Unbounded caps always admit (BR6.3).
+        svc.admit_budget(&uid, BudgetCaps::default()).await.unwrap();
+        svc.admit_budget(&uid, BudgetCaps::default()).await.unwrap();
     }
 
     // ---------- proposals ----------
