@@ -12,6 +12,11 @@ path = "src/lib.rs"
 oxidean-api-core = { path = "../oxidean-api-core" }
 oxidean-core = { path = "../oxidean-core" }
 oxidean-db = { path = "../oxidean-db" }
+# `text_diff::diff_lines` — the canonical propose-diff renderer; the
+# module is `server`-gated upstream.
+oxidean-vcs = { path = "../oxidean-vcs", features = ["server"] }
+# `content_b64` decodes for the generated patch — same pin the CLI uses.
+base64 = "0.22.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

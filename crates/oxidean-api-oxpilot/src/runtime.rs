@@ -695,7 +695,13 @@ async fn fail_pending_calls(
 /// post-cascade `not_found`s are logged and swallowed (WF4.2), and a
 /// drain failure warns + treats as an empty batch (it must never eat
 /// the terminal).
+///
+/// The drain is gated on chain admissibility (BR6.2): queued rows move
+/// to transcript ONLY while a successor could actually run — a disabled
+/// slot or a post-usage `budget_exceeded` leaves them QUEUED for the
+/// next admission, never consumed into the transcript unanswered.
 async fn finish_turn(
+    state: &AppState,
     svc: &Arc<dyn SessionService>,
     session: &OxpilotSessionRow,
     turn: &Arc<ActiveTurn>,
@@ -738,25 +744,65 @@ async fn finish_turn(
             );
         }
     }
-    let drained = match svc.drain_queue(&session.user_id, &session.id).await {
-        Ok(rows) => {
-            if !rows.is_empty() {
-                tracing::debug!(
-                    session_id = %session.id,
-                    drained_count = rows.len(),
-                    generation = turn.generation,
-                    "oxpilot drain chain"
-                );
-            }
-            rows
-        }
-        Err(e) => {
-            tracing::warn!(
+    // The drain gate — evaluated AFTER usage accounting so the recheck
+    // sees this turn's own spend (BR6.2's at/over-the-cap refusal).
+    let chain_open = {
+        let slot = state.oxpilot.slot.read().await;
+        if slot.disabled_reason.is_some() {
+            tracing::debug!(
                 session_id = %session.id,
-                error = %e.message,
-                "oxpilot end-of-turn drain failed"
+                "oxpilot end-of-turn drain skipped — slot disabled"
             );
-            Vec::new()
+            false
+        } else {
+            let caps = slot.budget_caps;
+            drop(slot);
+            match svc.check_budget(&session.user_id, caps).await {
+                Ok(()) => true,
+                Err(e) => {
+                    // A breach keeps rows queued; any other check
+                    // failure fails CLOSED — the budget gate never
+                    // opens on a blind read.
+                    if e.code == "budget_exceeded" {
+                        tracing::debug!(
+                            session_id = %session.id,
+                            "oxpilot end-of-turn drain skipped — budget exhausted"
+                        );
+                    } else {
+                        tracing::warn!(
+                            session_id = %session.id,
+                            error = %e.message,
+                            "oxpilot end-of-turn drain skipped — budget check failed"
+                        );
+                    }
+                    false
+                }
+            }
+        }
+    };
+    let drained = if !chain_open {
+        Vec::new()
+    } else {
+        match svc.drain_queue(&session.user_id, &session.id).await {
+            Ok(rows) => {
+                if !rows.is_empty() {
+                    tracing::debug!(
+                        session_id = %session.id,
+                        drained_count = rows.len(),
+                        generation = turn.generation,
+                        "oxpilot drain chain"
+                    );
+                }
+                rows
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session.id,
+                    error = %e.message,
+                    "oxpilot end-of-turn drain failed"
+                );
+                Vec::new()
+            }
         }
     };
     let (result, code) = match &terminal {
@@ -781,6 +827,31 @@ struct TurnOutcome {
     drained: Vec<OxpilotMessageRow>,
 }
 
+/// Mint the refusal turn's durable assistant row — `streaming`, then
+/// `finish_turn` lands the terminal `error` status on it (the same
+/// insert-then-flip order the live path takes, BR2.4). Returns whether
+/// the row persisted so the status write can skip cleanly on
+/// post-cascade `not_found`.
+async fn mint_refusal_row(
+    svc: &Arc<dyn SessionService>,
+    session: &OxpilotSessionRow,
+    turn: &Arc<ActiveTurn>,
+) -> bool {
+    svc.append_message(
+        &session.user_id,
+        AppendMessage {
+            id: turn.message_id.clone(),
+            session_id: session.id.clone(),
+            role: "assistant".to_string(),
+            content: String::new(),
+            client_msg_id: None,
+            status: "streaming".to_string(),
+        },
+    )
+    .await
+    .is_ok()
+}
+
 /// WF2 — pin the `turn_parts()` triple, mint the assistant row, run the
 /// bounded round loop, and land the terminal sequence. NEVER releases
 /// the claim — the wrapper owns release+recheck (BR5.3).
@@ -797,12 +868,16 @@ async fn run_turn(
     let parts = state.oxpilot.turn_parts().await;
     let Some(provider) = parts.provider else {
         // Post-gate provider-absent — the disabled-class terminal
-        // (a settings write raced the admission gate).
+        // (a settings write raced the admission gate). The refusal row
+        // mints durable-first so a drained follow-up batch never sits
+        // transcript-visible with no outcome.
+        let row_exists = mint_refusal_row(&svc, session, turn).await;
         return Ok(finish_turn(
+            state,
             &svc,
             session,
             turn,
-            false,
+            row_exists,
             Terminal::Error("oxpilot.disabled".to_string()),
             &accum,
         )
@@ -810,12 +885,15 @@ async fn run_turn(
     };
     let Some(model) = parts.model else {
         // Provider with no resolved model — a typed refusal before any
-        // stream opens (NFR4.9), never a fabricated request.
+        // stream opens (NFR4.9), never a fabricated request. Same
+        // durable-refusal row as the provider-absent arm.
+        let row_exists = mint_refusal_row(&svc, session, turn).await;
         return Ok(finish_turn(
+            state,
             &svc,
             session,
             turn,
-            false,
+            row_exists,
             Terminal::Error("no_model".to_string()),
             &accum,
         )
@@ -990,7 +1068,7 @@ async fn run_turn(
         }
         round += 1;
     }
-    Ok(finish_turn(&svc, session, turn, true, terminal, &accum).await)
+    Ok(finish_turn(state, &svc, session, turn, true, terminal, &accum).await)
 }
 
 // ---------- wrapper + chain ----------
@@ -1091,6 +1169,38 @@ async fn drain_and_chain(
             return;
         }
     };
+    // Chain admissibility — the SAME gate the in-turn drain took, now
+    // re-evaluated under the admission lock against the post-usage
+    // counters and the live slot (BR6.2). A blocked chain leaves every
+    // queued row intact for the next admission — the successor claim
+    // can never outrun the daily cap or a settings-write disable.
+    {
+        let slot = state.oxpilot.slot.read().await;
+        if slot.disabled_reason.is_some() {
+            tracing::debug!(
+                session_id = %session.id,
+                "oxpilot chain skipped — slot disabled"
+            );
+            return;
+        }
+        let caps = slot.budget_caps;
+        drop(slot);
+        if let Err(e) = svc.check_budget(&session.user_id, caps).await {
+            if e.code == "budget_exceeded" {
+                tracing::debug!(
+                    session_id = %session.id,
+                    "oxpilot chain skipped — budget exhausted"
+                );
+            } else {
+                tracing::warn!(
+                    session_id = %session.id,
+                    error = %e.message,
+                    "oxpilot chain skipped — budget check failed"
+                );
+            }
+            return;
+        }
+    }
     match svc.drain_queue(&session.user_id, &session.id).await {
         Ok(rows) => {
             if !rows.is_empty() {
@@ -2063,9 +2173,11 @@ mod tests {
         assert_eq!(buf.last().unwrap()["code"], "no_model");
         // Provider never contacted.
         assert!(provider.requests().is_empty());
-        // No row exists yet — nothing persisted (row_exists=false arm).
+        // The refusal mints a durable error row — a drained follow-up
+        // batch keeps a retryable outcome instead of a silent skip.
         let msgs = svc.list_messages(&uid, &session.id).await.unwrap();
-        assert!(msgs.is_empty());
+        let arow = msgs.iter().find(|m| m.id == t.message_id).unwrap();
+        assert_eq!(arow.status, "error");
     }
 
     #[tokio::test]
@@ -2074,10 +2186,14 @@ mod tests {
         let (uid, repo) = seed(&db, "t4").await;
         let session = session_for(&svc(&db), &uid, &repo, "s-t4").await;
         let state = state_with(&db, None, Some("m-1"), None).await;
-        let (t, _svc) = start_turn(&state, &session, 0).await;
+        let (t, svc) = start_turn(&state, &session, 0).await;
         run_turn(&state, &session, &t).await.unwrap();
         let buf = buffered(&t).await;
         assert_eq!(buf.last().unwrap()["code"], "oxpilot.disabled");
+        // Same durable-refusal row as the no_model arm.
+        let msgs = svc.list_messages(&uid, &session.id).await.unwrap();
+        let arow = msgs.iter().find(|m| m.id == t.message_id).unwrap();
+        assert_eq!(arow.status, "error");
     }
 
     #[tokio::test]

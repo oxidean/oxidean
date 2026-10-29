@@ -99,6 +99,21 @@ impl OxpilotTools {
         procedure: &str,
         input: Value,
     ) -> Result<Value, ToolError> {
+        self.dispatch_proc_raw(ctx, procedure, input)
+            .await
+            .map_err(|e| map_proc_error(&e))
+    }
+
+    /// The same dispatch with the proc's raw `AppError` preserved —
+    /// callers that must branch on a code (`repo.path_not_found` is a
+    /// legitimate absent base on the canonical-diff path, which
+    /// `map_proc_error` deliberately collapses) unwrap it themselves.
+    pub(crate) async fn dispatch_proc_raw(
+        &self,
+        ctx: &ToolCtx,
+        procedure: &str,
+        input: Value,
+    ) -> Result<Value, oxidean_core::AppError> {
         let session = oxidean_api_core::auth::session::ResolvedSession {
             session_id: format!("oxpilot:{}", ctx.session_id),
             user_id: ctx.user_id.clone(),
@@ -121,7 +136,7 @@ impl OxpilotTools {
         .await;
         match resp {
             RpcResponse::Ok { data, .. } => Ok(data),
-            RpcResponse::Err { error, .. } => Err(map_proc_error(&error)),
+            RpcResponse::Err { error, .. } => Err(error),
         }
     }
 

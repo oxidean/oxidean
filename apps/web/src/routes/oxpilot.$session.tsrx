@@ -400,11 +400,15 @@ function OxpilotChatSurface(props: {
     return () => window.clearTimeout(t);
   }, []);
 
-  // Live attach — the first post-attach `snapshot` is the seed we already
-  // rendered (skipped via `attached`); every LATER snapshot is a reconnect
-  // replay and reseeds wholesale through the keyed remount. `tool_call` /
-  // `card` frames feed the keyed row maps; a foreign turn's `terminal`
-  // reseeds (an own turn's terminal is useChat's to close out).
+  // Live attach — the first post-attach `snapshot` replays the seed we
+  // rendered, EXCEPT a foreign turn may have finished between the seed
+  // fetch and the attach: persisted ids or the live turn disagreeing
+  // with the seed means the replay carries newer durable state, so it
+  // reseeds instead of being discarded. Every LATER snapshot is a
+  // reconnect replay and reseeds wholesale through the keyed remount.
+  // `tool_call` / `card` frames feed the keyed row maps; a foreign
+  // turn's `terminal` reseeds (an own turn's terminal is useChat's to
+  // close out).
   useEffect(() => {
     let attached = false;
     let dead = false;
@@ -417,6 +421,17 @@ function OxpilotChatSurface(props: {
         if (frame.type === "snapshot") {
           if (!attached) {
             attached = true;
+            // First-attach reconcile — drift in persisted ids or the
+            // live turn means the replay carries newer durable state
+            // than the mount seed; reseed rather than drop it.
+            const seedIds = props.seed.messages.map((m) => m.id).join("");
+            const snapIds = (frame.messages ?? []).map((m) => String(m.id)).join("");
+            const seedTurn = props.seed.activeTurn?.message_id ?? null;
+            const snapTurn = frame.active_turn?.message_id ?? null;
+            if (snapIds !== seedIds || snapTurn !== seedTurn) {
+              setLiveTail({});
+              props.onReseed();
+            }
             return;
           }
           setLiveTail({});

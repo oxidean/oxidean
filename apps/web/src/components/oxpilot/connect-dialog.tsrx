@@ -41,7 +41,9 @@ const CAPS = [
  * name + ≥1 capability + acknowledgement, then `pairing_create` mints the
  * one-shot code.
  *
- * Step 2 — renders ONLY `ox pilot pair <code>` via `CopyCommand`. The
+ * Step 2 — renders ONLY `ox pilot pair <code> --caps <wires>` via
+ * `CopyCommand` — the CLI defaults a bare `pair` to the FULL capability
+ * set, so the narrowed grant must travel on the command line too. The
  * `pairing_code` never leaves this component: no transcript, live region,
  * storage, or logs (SEC-7). `target_list` polls every 2s bounded by the
  * server `expires_at`; a matching `pending_consent` target gets its
@@ -280,7 +282,11 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
             </p>
             @if (pairing) {
               <CopyCommand
-                command={`ox pilot pair ${pairing.pairing_code}`}
+                command={`ox pilot pair ${pairing.pairing_code} --caps ${CAPS.filter(
+                  (c) => caps.has(c.wire),
+                )
+                  .map((c) => c.wire)
+                  .join(",")}`}
                 ariaLabel="Pairing command"
               />;
             }

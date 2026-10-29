@@ -150,6 +150,29 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
     out
 }
 
+/// Byte-level [`scrub`] for binary payloads — replaces each ≥8-char
+/// secret's raw bytes BEFORE base64 encoding. A text scrub of the
+/// encoded string only catches secrets that survive base64's 3-byte
+/// alignment; the encoded wire form must never round-trip back to the
+/// secret. Replacements run right-to-left so earlier hits' offsets
+/// stay valid.
+pub fn scrub_bytes(bytes: &mut Vec<u8>, secrets: &[String]) {
+    for s in secrets {
+        if s.len() < 8 {
+            continue;
+        }
+        let needle = s.as_bytes();
+        let mut hits: Vec<usize> = bytes
+            .windows(needle.len())
+            .enumerate()
+            .filter_map(|(i, w)| (w == needle).then_some(i))
+            .collect();
+        for i in hits.drain(..).rev() {
+            bytes.splice(i..i + needle.len(), b"[redacted]".iter().copied());
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Jail — lexical + canonical resolution under canonical_root, config-dir
 // exclusion in BOTH directions at launch, per-op inward check on resolve.
@@ -442,6 +465,11 @@ pub fn fs_read(
                             bytes.len()
                         )),
                         Ok(_) => {
+                            // Scrub the RAW bytes first — a secret
+                            // inside the file must not survive the
+                            // base64 round-trip. The post-encode text
+                            // scrub stays as the second layer.
+                            scrub_bytes(&mut bytes, secrets);
                             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
                             ActionOutcome::done(scrub(&b64, secrets))
                         }
@@ -737,6 +765,31 @@ mod tests {
                 .unwrap(),
             b"hello"
         );
+    }
+
+    #[test]
+    fn fs_read_scrubs_secret_bytes_before_encoding() {
+        let j = jail();
+        let secret = "sk-supersecretvalue123".to_string();
+        std::fs::write(
+            j.root.join("leak.txt"),
+            format!("prefix {secret} suffix\n\x00\x01{secret}"),
+        )
+        .unwrap();
+        let out = fs_read(&j.root, &j.cfg, "leak.txt", &[secret.clone()]);
+        assert!(matches!(
+            out.status,
+            super::super::client::ReportStatus::Done
+        ));
+        // The decoded payload must not round-trip the secret — the
+        // byte-level scrub ran before base64 (both the text and the
+        // binary trailing copy are gone).
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&out.output)
+            .unwrap();
+        let text = String::from_utf8_lossy(&decoded);
+        assert!(!text.contains(&secret));
+        assert_eq!(text.matches("[redacted]").count(), 2);
     }
 
     #[cfg(unix)]

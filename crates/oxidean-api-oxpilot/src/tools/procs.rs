@@ -99,13 +99,44 @@ pub async fn diff_get(ctx: &RpcCtx, input: Value) -> Result<Value, AppError> {
 }
 
 /// One `ops_json` element — deserialized verbatim; the propose path
-/// already bound + coherence-checked it against `diff_body`.
+/// validated its shape and generated `diff_body` canonically FROM it
+/// (BR4.3) — these ops are the applied side of that pair.
 #[derive(Debug, Deserialize)]
 struct DiffFileOp {
     path: String,
     op: String,
     new_path: Option<String>,
     content_b64: Option<String>,
+}
+
+/// Upload one contiguous create/update run as ONE `repo.file.upload`
+/// commit — a no-op on an empty batch. `pending` clears either way so
+/// a failed flush never replays stale files at the next boundary.
+async fn flush_uploads(
+    ctx: &mut RpcCtx,
+    owner: &str,
+    name: &str,
+    branch: &str,
+    id8: &str,
+    pending: &mut Vec<Value>,
+) -> Result<(), AppError> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let files = std::mem::take(pending);
+    apply_step(
+        ctx,
+        "repo.file.upload",
+        json!({
+            "owner": owner,
+            "name": name,
+            "files": files,
+            "message": format!("Apply oxpilot proposal {id8}"),
+            "branch": branch,
+        }),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Dispatch one backing proc on the caller's own ctx; failures land as
@@ -205,71 +236,50 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
     )
     .await?;
 
-    // b. ops_json in declared order — all create/update ops batch into
-    // ONE `repo.file.upload` commit (≤50, pinned by MAX_PROPOSAL_FILES),
-    // issued at the first create/update's position; each
-    // delete/rename is its own call in sequence.
+    // b. ops_json in DECLARED order — each maximal contiguous
+    // create/update run folds into ONE `repo.file.upload` commit at
+    // its declared position; every delete/rename is its own call in
+    // sequence. Global re-batching would reorder a rename-before-
+    // update pair (e.g. `update old → rename old→new → update new`
+    // must upload `new` only AFTER the rename lands).
     let ops: Vec<DiffFileOp> = serde_json::from_str(&row.ops_json)
         .map_err(|e| AppError::new("oxpilot.internal", format!("ops_json decode: {e}")))?;
-    let upload_files: Vec<Value> = ops
-        .iter()
-        .filter(|o| o.op == "create" || o.op == "update")
-        .map(|o| {
-            json!({
-                "path": o.path,
-                "content_base64": o.content_b64,
-            })
-        })
-        .collect();
-    let mut upload_done = upload_files.is_empty();
+    let mut pending: Vec<Value> = Vec::new();
     for op in &ops {
         match op.op.as_str() {
             "create" | "update" => {
-                if upload_done {
-                    continue;
-                }
-                apply_step(
-                    ctx,
-                    "repo.file.upload",
-                    json!({
-                        "owner": owner,
-                        "name": name,
-                        "files": upload_files,
-                        "message": format!("Apply oxpilot proposal {id8}"),
-                        "branch": branch,
-                    }),
-                )
-                .await?;
-                upload_done = true;
+                pending.push(json!({
+                    "path": op.path,
+                    "content_base64": op.content_b64,
+                }));
             }
-            "delete" => {
-                apply_step(
-                    ctx,
-                    "repo.file.delete",
-                    json!({
-                        "owner": owner,
-                        "name": name,
-                        "path": op.path,
-                        "message": format!("Apply oxpilot proposal {id8}"),
-                        "branch": branch,
-                    }),
-                )
-                .await?;
-            }
-            "rename" => {
-                apply_step(
-                    ctx,
-                    "repo.file.rename",
-                    json!({
-                        "owner": owner,
-                        "name": name,
-                        "from_path": op.path,
-                        "to_path": op.new_path,
-                        "message": format!("Apply oxpilot proposal {id8}"),
-                        "branch": branch,
-                    }),
-                )
-                .await?;
+            "delete" | "rename" => {
+                flush_uploads(ctx, &owner, &name, &branch, &id8, &mut pending).await?;
+                let (proc, input) = if op.op == "delete" {
+                    (
+                        "repo.file.delete",
+                        json!({
+                            "owner": owner,
+                            "name": name,
+                            "path": op.path,
+                            "message": format!("Apply oxpilot proposal {id8}"),
+                            "branch": branch,
+                        }),
+                    )
+                } else {
+                    (
+                        "repo.file.rename",
+                        json!({
+                            "owner": owner,
+                            "name": name,
+                            "from_path": op.path,
+                            "to_path": op.new_path,
+                            "message": format!("Apply oxpilot proposal {id8}"),
+                            "branch": branch,
+                        }),
+                    )
+                };
+                apply_step(ctx, proc, input).await?;
             }
             other => {
                 return Err(AppError::new(
@@ -279,6 +289,7 @@ pub async fn diff_apply(ctx: &mut RpcCtx, input: Value) -> Result<Value, AppErro
             }
         }
     }
+    flush_uploads(ctx, &owner, &name, &branch, &id8, &mut pending).await?;
 
     // c. the PR — body = title + summary + the fixed provenance line
     // (BR5.4; carved out of the no-AI-attribution convention as a
