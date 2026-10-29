@@ -1265,10 +1265,18 @@ impl OxpilotRuntime {
     /// — ONE slot-lock read so a mid-turn settings swap can't tear the
     /// set the in-flight turn is running on (NFR4.5 detach-to-complete
     /// + the C6 pinning amendment). `tools: None` maps to `NullTools`.
+    /// A disabled slot supplies NO provider: chained successors (queue
+    /// drain → `spawn_turn_task`) start without the POST route gate, so
+    /// the check lives here — `run_turn` maps the missing provider to
+    /// the `oxpilot.disabled` terminal either way.
     pub async fn turn_parts(&self) -> TurnParts {
         let slot = self.slot.read().await;
         TurnParts {
-            provider: slot.provider.clone(),
+            provider: if slot.disabled_reason.is_none() {
+                slot.provider.clone()
+            } else {
+                None
+            },
             model: slot.model.clone(),
             executor: slot.tools.clone().unwrap_or_else(|| Arc::new(NullTools)),
         }
