@@ -303,20 +303,74 @@ fn render_hunks(
 ) {
     const CONTEXT: usize = 3;
     let mut hunks = diff_lines(old_lines, new_lines);
-    // A trailing-newline-only change leaves the line vectors equal, so
-    // `diff_lines` reports nothing — force the final line through a
-    // change hunk so the `\ No newline` marker stays visible.
-    if old_no_nl != new_no_nl && !old_lines.is_empty() && !new_lines.is_empty() {
-        let covered = hunks.last().is_some_and(|h| {
-            h.old_start + h.old_len == old_lines.len() && h.new_start + h.new_len == new_lines.len()
-        });
-        if !covered {
-            hunks.push(LineHunk {
-                old_start: old_lines.len() - 1,
-                old_len: 1,
-                new_start: new_lines.len() - 1,
-                new_len: 1,
+    // A side that ends without a trailing newline needs its FINAL line
+    // inside a `-`/`+` pair — context lines carry only the old side's
+    // marker flag, so a shared final line left as context loses the
+    // `\ No newline` marker and the stored patch restores a newline
+    // that was never there. Equal line vectors report no hunks at all,
+    // and a delete/insert reaching both file ends can leave the short
+    // side's last line uncovered — either way the last hunk is grown to
+    // swallow it (GNU diff renders the same pair).
+    if old_no_nl != new_no_nl {
+        let flagged_old = old_no_nl;
+        let flen = if flagged_old {
+            old_lines.len()
+        } else {
+            new_lines.len()
+        };
+        if flen > 0 && !old_lines.is_empty() && !new_lines.is_empty() {
+            let idx = flen - 1;
+            let covered = hunks.last().is_some_and(|h| {
+                let (s, l) = if flagged_old {
+                    (h.old_start, h.old_len)
+                } else {
+                    (h.new_start, h.new_len)
+                };
+                s <= idx && idx < s + l
             });
+            if !covered {
+                match hunks.last_mut() {
+                    Some(h) => {
+                        let (fs, fl, os, ol) = if flagged_old {
+                            (
+                                &mut h.old_start,
+                                &mut h.old_len,
+                                &mut h.new_start,
+                                &mut h.new_len,
+                            )
+                        } else {
+                            (
+                                &mut h.new_start,
+                                &mut h.new_len,
+                                &mut h.old_start,
+                                &mut h.old_len,
+                            )
+                        };
+                        if idx >= *fs + *fl {
+                            // Trailing context — grow forward; the
+                            // unchanged tail pairs 1:1 on both sides.
+                            let k = idx + 1 - (*fs + *fl);
+                            *fl += k;
+                            *ol += k;
+                        } else {
+                            // Leading context — the flagged side's final
+                            // line precedes a zero-width tail hunk; step
+                            // both starts back the same count (k is 1).
+                            let k = (*fs - idx).min(*os);
+                            *fs -= k;
+                            *os -= k;
+                            *fl += k;
+                            *ol += k;
+                        }
+                    }
+                    None => hunks.push(LineHunk {
+                        old_start: old_lines.len() - 1,
+                        old_len: 1,
+                        new_start: new_lines.len() - 1,
+                        new_len: 1,
+                    }),
+                }
+            }
         }
     }
     let mut groups: Vec<Vec<LineHunk>> = Vec::new();
@@ -801,6 +855,26 @@ mod tests {
         assert!(out.contains("@@"));
         assert!(out.contains("-b\n\\ No newline at end of file\n"));
         assert!(out.contains("+b\n"));
+    }
+
+    #[test]
+    fn stanza_delete_tail_still_marks_missing_newline() {
+        // `a\nb\n` -> `a` (no trailing newline): the delete hunk reaches
+        // both file ends, but the new side's last line `a` is shared
+        // context — the marker still has to land on a `+` pair line.
+        let mut out = String::new();
+        render_stanza(&mut out, "x", "x", &text("a\nb\n"), &text("a"));
+        assert!(out.contains("-a\n-b\n+a\n\\ No newline at end of file\n"));
+    }
+
+    #[test]
+    fn stanza_insert_tail_still_marks_missing_newline() {
+        // `a` (no trailing newline) -> `a\nb\n`: the insert hunk sits at
+        // the old side's zero-width tail; the shared `a` must be pulled
+        // back into a `-` line to carry the old side's marker.
+        let mut out = String::new();
+        render_stanza(&mut out, "x", "x", &text("a"), &text("a\nb\n"));
+        assert!(out.contains("-a\n\\ No newline at end of file\n+a\n+b\n"));
     }
 
     #[test]
