@@ -204,7 +204,7 @@ fn fold_ops(
     bases: &BTreeMap<String, Content>,
 ) -> Result<BTreeMap<String, (String, Content)>, ToolError> {
     let mut finals: BTreeMap<String, (String, Content)> = BTreeMap::new();
-    for op in &ops {
+    for op in ops {
         match op.op.as_str() {
             "create" | "update" => {
                 let bytes = base64::engine::general_purpose::STANDARD
@@ -782,9 +782,9 @@ mod tests {
         let mut bases = BTreeMap::new();
         bases.insert("a".to_string(), text("body\n"));
         let finals = fold_ops(&[op("a", "rename", Some("b"), None)], &bases).unwrap();
-        assert_eq!(finals["b"].0, "a");
-        assert!(matches!(finals["b"].1, Content::Text(_)));
-        assert!(matches!(finals["a"].1, Content::Moved));
+        assert_eq!(finals.get("b").unwrap().0, "a");
+        assert!(matches!(finals.get("b").unwrap().1, Content::Text(_)));
+        assert!(matches!(finals.get("a").unwrap().1, Content::Moved));
     }
 
     #[test]
@@ -801,8 +801,8 @@ mod tests {
         .unwrap();
         // The update overwrote the moved content — origin stays `a` so
         // the stanza renders `rename a→b` + hunks, not "new file b".
-        assert_eq!(finals["b"].0, "a");
-        assert!(matches!(&finals["b"].1, Content::Text(c) if c == b"v2\n"));
+        assert_eq!(finals.get("b").unwrap().0, "a");
+        assert!(matches!(&finals.get("b").unwrap().1, Content::Text(c) if c.as_slice() == b"v2\n"));
     }
 
     #[test]

@@ -776,7 +776,7 @@ mod tests {
             format!("prefix {secret} suffix\n\x00\x01{secret}"),
         )
         .unwrap();
-        let out = fs_read(&j.root, &j.cfg, "leak.txt", &[secret.clone()]);
+        let out = fs_read(&j.root, &j.cfg, "leak.txt", std::slice::from_ref(&secret));
         assert!(matches!(
             out.status,
             super::super::client::ReportStatus::Done

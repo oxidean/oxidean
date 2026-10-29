@@ -220,13 +220,15 @@ describe("/oxpilot dialog surfaces (Chromium DOM-race gates)", () => {
         });
       });
 
-      // Step-2 swap — only `ox pilot pair <code>` surfaces; the code
+      // Step-2 swap — only `ox pilot pair <code> --caps <wires>`
+      // surfaces (the narrowed grant must reach the CLI, which
+      // otherwise defaults to the full capability set); the code
       // stays inside CopyCommand's read-only input, never a transcript.
       await waitForSelector('section[aria-label="Pair the connector"]');
       const cmd = (await waitForSelector(
         'input[aria-label="Pairing command"]',
       )) as HTMLInputElement;
-      expect(cmd.value).toBe("ox pilot pair PAIR-TEST-42");
+      expect(cmd.value).toBe("ox pilot pair PAIR-TEST-42 --caps exec_shell");
       await waitForText("Waiting for the connector to check in");
       expectNoOctaneOverlayInDocument();
       tracker.expectNoDomRaces();
