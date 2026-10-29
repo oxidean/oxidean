@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en
+reviews:
+  path_filters:
+    # AI-DLC workflow artifacts (intents, audit shards, learnings) inflate the
+    # diff far past the 300-file review limit — generated bookkeeping, not
+    # shipped code.
+    - "!aidlc/**"
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  suggested_reviewers: true
+  poem: false
+  labeling_instructions: []
+  path_instructions: []
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    ignore_title_keywords: []
+    drafts: false
+    base_branches: []
+tools:
+  shellcheck:
+    enabled: true
+  markdownlint:
+    enabled: false
+  gitleaks:
+    enabled: true
+  checkov:
+    enabled: false
+  hadolint:
+    enabled: true
+  actionlint:
+    enabled: true
+  github-checks:
+    enabled: false
