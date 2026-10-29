@@ -318,6 +318,11 @@ jobs:
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
         run: bun run test
+        env:
+          # Integration runs serialized (fileParallelism: false) inside ONE
+          # worker — its route-import graph can graze the default ~4 GB
+          # old-space ceiling and flake into mark-compact OOMs.
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
       - name: rendered stray-semicolon scan (all prerendered pages, issue #165)
