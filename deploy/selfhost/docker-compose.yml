@@ -69,6 +69,12 @@ services:
       OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
       OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
+      # Oxpilot agentic chat (/oxpilot) — enabled by default; configure a
+      # provider (OXIDEAN_OXPILOT_PROVIDER/_MODEL + API key) to answer chats,
+      # or set OXIDEAN_OXPILOT_ENABLED=0 to hide the feature.
+      OXIDEAN_OXPILOT_ENABLED: ${OXIDEAN_OXPILOT_ENABLED:-1}
+      OXIDEAN_OXPILOT_PROVIDER: ${OXIDEAN_OXPILOT_PROVIDER:-}
+      OXIDEAN_OXPILOT_MODEL: ${OXIDEAN_OXPILOT_MODEL:-}
       # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
       OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}

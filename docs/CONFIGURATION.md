@@ -395,7 +395,7 @@ row) override them per instance.
 
 | Variable | Description |
 |----------|-------------|
-| `OXIDEAN_OXPILOT_ENABLED` | Instance-wide gate (default off). When off, `oxpilot.*` procs and `/api/oxpilot/*` routes answer `oxpilot.disabled`/`flag_off`; `oxpilot.status` stays callable so the UI can render the disabled state. |
+| `OXIDEAN_OXPILOT_ENABLED` | Instance-wide gate (default off in code; Compose and Oxidean Cloud IaC set `1`). When off, `oxpilot.*` procs and `/api/oxpilot/*` routes answer `oxpilot.disabled`/`flag_off`; `oxpilot.status` stays callable so the UI can render the disabled state. |
 | `OXIDEAN_OXPILOT_PROVIDER` | Provider adapter id: `stub` (deterministic, for local dev + e2e), `openai`, `anthropic`, or `ollama`. Unset → `no_provider`; unrecognized → `misconfigured` until settings resolve. |
 | `OXIDEAN_OXPILOT_MODEL` | Default model for the env provider (`stub-1` pairs with `stub`). |
 | `OXIDEAN_OXPILOT_USER_BUDGET` | Per-user UTC-day request cap; unset = unbounded. Row-over-env resolution in `admin.oxpilot.settings_set`. |
