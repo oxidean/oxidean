@@ -242,8 +242,16 @@ function OxpilotSessionContent() @{
     }
   }
 
+  // First-attach reconcile guard — the child reports the divergence
+  // signature it saw; an identical repeat means it survived a full
+  // reseed, so remounting cannot converge (the fresh fetch is never
+  // staler than the replay it read against) and the attach keeps the
+  // seed state instead of looping. Other reseed arms clear it.
+  const reconcileRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!enabled || !sessionId) return;
+    reconcileRef.current = null;
     void reseed();
   }, [enabled, sessionId]);
 
@@ -301,7 +309,15 @@ function OxpilotSessionContent() @{
               key={`s-${seed.version}`}
               sessionId={sessionId}
               seed={seed}
-              onReseed={() => void reseed()}
+              onReseed={(reconcileSig) => {
+                if (reconcileSig !== undefined) {
+                  if (reconcileRef.current === reconcileSig) return;
+                  reconcileRef.current = reconcileSig;
+                } else {
+                  reconcileRef.current = null;
+                }
+                void reseed();
+              }}
               onTurnNotice={(notice) => setTurnNotice(notice)}
               disabledReason={statusQ.data?.reason}
             />;
@@ -319,7 +335,13 @@ function OxpilotSessionContent() @{
 function OxpilotChatSurface(props: {
   sessionId: string;
   seed: Seed;
-  onReseed: () => void;
+  /**
+   * Wholesale reseed request. The first-attach reconcile passes a
+   * `reconcileSig` describing the divergence it saw so the parent can
+   * bound repeats that a reseed cannot converge; every other caller
+   * leaves it unset, which also clears the guard.
+   */
+  onReseed: (reconcileSig?: string) => void;
   /** A foreign turn's non-`done` terminal — surfaced above the remount key. */
   onTurnNotice: (notice: "error" | "aborted") => void;
   /** `status.reason` for the mid-session flag-off swap. */
@@ -430,7 +452,7 @@ function OxpilotChatSurface(props: {
             const snapTurn = frame.active_turn?.message_id ?? null;
             if (snapIds !== seedIds || snapTurn !== seedTurn) {
               setLiveTail({});
-              props.onReseed();
+              props.onReseed(`${seedIds}|${snapIds}|${String(seedTurn)}|${String(snapTurn)}`);
             }
             return;
           }

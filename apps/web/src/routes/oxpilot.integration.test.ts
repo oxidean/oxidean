@@ -955,6 +955,11 @@ describe("/oxpilot/{session} workspace", () => {
           !(String(c[0]).endsWith("/chat") && (c[1] as RequestInit | undefined)?.method === "POST"),
       ),
     ).toBe(true);
+    // The replayed snapshot's active_turn:null disagrees with the seeded
+    // live turn — the first-attach reconcile reseeds once, then the
+    // signature guard suppresses the identical repeat instead of
+    // remounting forever (initial attach + one remount = 2 sources).
+    expect(liveSources.length).toBeLessThanOrEqual(2);
   });
 
   it("{null,null} queue receipt renders no fabricated row", async () => {
@@ -1873,11 +1878,13 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     // Step 2 renders ONLY `ox pilot pair <code>` — the code lives in the
     // CopyCommand input's VALUE, never in rendered text (SEC-14). The
     // input and its copy button share the aria-label, so query the input.
+    // The granted caps ride the command so the paired connector is
+    // scoped to exactly what the dialog showed (SEC-14 follow-through).
     await waitFor(() => {
       const input = document.querySelector(
         'input[aria-label="Pairing command"]',
       ) as HTMLInputElement | null;
-      expect(input?.value).toBe("ox pilot pair PAIR-42-XYZ");
+      expect(input?.value).toBe("ox pilot pair PAIR-42-XYZ --caps exec_shell");
     });
     expect(screen.getByText(/Waiting for the connector to check in/)).toBeInTheDocument();
     expect(document.body.textContent ?? "").not.toContain("PAIR-42-XYZ");
