@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.4.1] - 2026-10-29
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-repo`
+
 ## [0.4.0] - 2026-10-28
 
 ### Features

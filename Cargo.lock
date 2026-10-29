@@ -3687,7 +3687,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api-repo"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "include_dir",

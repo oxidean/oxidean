@@ -3,6 +3,11 @@
 Consolidated release log — each section links every bumped
 component's tag and its component changelog.
 
+## Release 2026-10-29
+
+- `oxidean-api` 0.4.0 → 0.4.1 (tag `oxidean-api-v0.4.1`)
+- `oxidean-api-repo` 0.3.0 → 0.4.0 (tag `oxidean-api-repo-v0.4.0`)
+
 ## Release 2026-10-28
 
 - `api-client` 0.3.0 → 0.3.1 (tag `api-client-v0.3.1`)

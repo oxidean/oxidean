@@ -2,6 +2,12 @@
 
 All notable changes to this component are documented here.
 
+## [0.4.0] - 2026-10-29
+
+### Features
+
+- feat(api-repo): add Watt stack presets and bump Node LTS (#205) (932b324)
+
 ## [0.3.0] - 2026-10-28
 
 ### Features
