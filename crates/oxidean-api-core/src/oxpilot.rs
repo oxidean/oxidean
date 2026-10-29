@@ -1265,6 +1265,7 @@ impl OxpilotRuntime {
     /// — ONE slot-lock read so a mid-turn settings swap can't tear the
     /// set the in-flight turn is running on (NFR4.5 detach-to-complete
     /// + the C6 pinning amendment). `tools: None` maps to `NullTools`.
+    ///
     /// A disabled slot supplies NO provider: chained successors (queue
     /// drain → `spawn_turn_task`) start without the POST route gate, so
     /// the check lives here — `run_turn` maps the missing provider to
