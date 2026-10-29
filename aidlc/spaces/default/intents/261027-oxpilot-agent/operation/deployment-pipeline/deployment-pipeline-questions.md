@@ -21,3 +21,17 @@ Answered from the existing Railway IaC (`.railway/railway.ts`, `docs/DEPLOYMENT.
 ## Q5. Feature flags
 
 **Answer:** `OXIDEAN_OXPILOT_ENABLED` (preserve() — never committed), following the `OXIDEAN_MCP_ENABLED` pattern. Ships flag-off; operators opt in per environment. `OXIDEAN_OXPILOT_PROVIDER`/`OXIDEAN_OXPILOT_MODEL` select the provider; `stub` is the safe default.
+
+## Consolidated Summary Confirmation
+
+- Rolling image-retag deploys on the existing Railway IaC; no new pipeline (Q1).
+- preview -> staging -> production promotion, channel-tagged GHCR images, operator plan/apply approval (Q2, Q3).
+- Rollback = channel retag to prior sha image; additive migrations mean no down-migration (Q4).
+- OXIDEAN_OXPILOT_* via preserve(), ships flag-off; stub provider default (Q5).
+
+Does this all look correct before I write the deployment-pipeline artifacts?
+
+- Looks correct
+- Request changes
+
+[Answer]: Looks correct
