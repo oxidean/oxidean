@@ -106,6 +106,7 @@ export function ConnectDialog(props: { open: boolean; onClose: () => void }) @{
     },
     onSuccess: () => {
       setConsentError(null);
+      setPendingTarget(null);
       invalidateOxpilotQueries(qc);
     },
     onError: (e) => {

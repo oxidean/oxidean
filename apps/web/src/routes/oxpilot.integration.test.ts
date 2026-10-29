@@ -2023,7 +2023,11 @@ describe("/oxpilot index — sessions, targets, dialogs", () => {
     await waitFor(() => {
       expect(grantRespondMock).toHaveBeenCalledWith({ grant_id: "g-d", allow: false });
     });
-    // The wait stays live — a denied connector never flips to connected.
+    // A successful decision dismisses the review card; the wait stays
+    // live — a denied connector never flips to connected.
+    await waitFor(() => {
+      expect(screen.queryByText("Review connection request")).not.toBeInTheDocument();
+    });
     expect(screen.getByText(/Waiting for the connector to check in/)).toBeInTheDocument();
   });
 
