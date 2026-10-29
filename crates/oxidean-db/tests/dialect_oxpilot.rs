@@ -372,7 +372,7 @@ async fn settings_table_shape_and_nullable_columns() {
     // BOOLEAN/BIGINT/TEXT columns on each dialect accept the write.
     pool.exec(
         "UPDATE oxpilot_settings \
-         SET provider_id = 'openai', model = 'm', user_budget = 42, enabled_override = 1 \
+         SET provider_id = 'openai', model = 'm', user_budget = 42, enabled_override = TRUE \
          WHERE id = 1",
     )
     .await
@@ -647,9 +647,11 @@ async fn settings_store_singleton_survives_writes() {
     );
 }
 
-/// Boolean decode is dialect-tolerant: a raw `enabled_override = 0`
-/// (MySQL TINYINT(1) / SQLite INTEGER storage shape) must still decode
-/// `Some(false)` through the facade's bool/i64/i8 fallback chain.
+/// Boolean decode is dialect-tolerant: a stored false value must decode
+/// `Some(false)` through the facade's bool/i64/i8 fallback chain. The
+/// `FALSE` literal stores as int 0 on MySQL TINYINT(1) / SQLite INTEGER
+/// (the int-decode legs this test targets) and as a native bool on
+/// Postgres, whose BOOLEAN column rejects raw int literals.
 #[tokio::test]
 async fn settings_store_bool_decode_from_int_storage() {
     let Some(url) = database_url() else {
@@ -661,7 +663,7 @@ async fn settings_store_bool_decode_from_int_storage() {
     db.migrate().await.expect("migrate");
     let pool = RawPool::connect(&url).await;
 
-    pool.exec("UPDATE oxpilot_settings SET enabled_override = 0, user_budget = 7 WHERE id = 1")
+    pool.exec("UPDATE oxpilot_settings SET enabled_override = FALSE, user_budget = 7 WHERE id = 1")
         .await
         .expect("raw int write");
     let row = db.get_oxpilot_settings().await.expect("get").expect("row");
