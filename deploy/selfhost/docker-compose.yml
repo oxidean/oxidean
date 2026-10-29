@@ -54,6 +54,9 @@ services:
       # dev-compose default.
       OXIDEAN_ACTIONS_SECRETS_KEY: ${OXIDEAN_ACTIONS_SECRETS_KEY:?set OXIDEAN_ACTIONS_SECRETS_KEY in .env}
       OXIDEAN_SECRETS_KEY: ${OXIDEAN_SECRETS_KEY:-}
+      # Shared fallback key for at-rest secret chains (e.g. stored oxpilot
+      # provider keys when OXIDEAN_OXPILOT_SECRETS_KEY is unset).
+      OXIDEAN_SESSION_SECRET: ${OXIDEAN_SESSION_SECRET:-}
       # Branch-protection update-hook helper — shipped in the image; required
       # in production (fail-closed if missing).
       OXIDEAN_PROTECTION_HELPER: /usr/local/bin/oxidean-protection-hook
@@ -83,8 +86,10 @@ services:
       OXIDEAN_OXPILOT_SECRETS_KEY: ${OXIDEAN_OXPILOT_SECRETS_KEY:-}
       OXIDEAN_OXPILOT_USER_BUDGET: ${OXIDEAN_OXPILOT_USER_BUDGET:-}
       OXIDEAN_OXPILOT_INSTANCE_BUDGET: ${OXIDEAN_OXPILOT_INSTANCE_BUDGET:-}
-      # OXIDEAN_ENV=production refuses private/loopback provider egress — a
-      # LAN Ollama needs this opt-in. See docs/CONFIGURATION.md.
+      # OXIDEAN_ENV=production refuses private webhook/git-mirror egress —
+      # self-hosts hooking LAN services opt in here. Unrelated to oxpilot:
+      # `ollama` accepts private provider endpoints without it; other
+      # providers keep the public-egress bound regardless.
       OXIDEAN_EGRESS_ALLOW_PRIVATE: ${OXIDEAN_EGRESS_ALLOW_PRIVATE:-}
       # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
       OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}

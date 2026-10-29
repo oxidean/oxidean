@@ -104,6 +104,9 @@ export default defineRailway((ctx) => {
       // Custody key for provider keys stored via admin.oxpilot.settings_set —
       // without it (or OXIDEAN_SESSION_SECRET) key storage fails closed.
       OXIDEAN_OXPILOT_SECRETS_KEY: preserve(),
+      // Shared fallback for at-rest secret chains (oxpilot provider keys,
+      // OIDC/TOTP custody) — per-environment dashboard secret.
+      OXIDEAN_SESSION_SECRET: preserve(),
       OXIDEAN_OXPILOT_USER_BUDGET: preserve(),
       OXIDEAN_OXPILOT_INSTANCE_BUDGET: preserve(),
       // Reusable runner registration token — must equal the `runner` service's
