@@ -98,6 +98,14 @@ export default defineRailway((ctx) => {
       OXIDEAN_OXPILOT_ENABLED: "1",
       OXIDEAN_OXPILOT_PROVIDER: preserve(),
       OXIDEAN_OXPILOT_MODEL: preserve(),
+      OXIDEAN_OXPILOT_BASE_URL: preserve(),
+      // Provider key for openai/anthropic — per-environment dashboard secret.
+      OXIDEAN_OXPILOT_API_KEY: preserve(),
+      // Custody key for provider keys stored via admin.oxpilot.settings_set —
+      // without it (or OXIDEAN_SESSION_SECRET) key storage fails closed.
+      OXIDEAN_OXPILOT_SECRETS_KEY: preserve(),
+      OXIDEAN_OXPILOT_USER_BUDGET: preserve(),
+      OXIDEAN_OXPILOT_INSTANCE_BUDGET: preserve(),
       // Reusable runner registration token — must equal the `runner` service's
       // OXIDEAN_RUNNER_REGISTRATION_TOKEN so the bundled runner can register.
       // Set per environment in the dashboard (never commit); production should

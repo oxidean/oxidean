@@ -76,6 +76,16 @@ services:
       OXIDEAN_OXPILOT_PROVIDER: ${OXIDEAN_OXPILOT_PROVIDER:-}
       OXIDEAN_OXPILOT_MODEL: ${OXIDEAN_OXPILOT_MODEL:-}
       OXIDEAN_OXPILOT_API_KEY: ${OXIDEAN_OXPILOT_API_KEY:-}
+      OXIDEAN_OXPILOT_BASE_URL: ${OXIDEAN_OXPILOT_BASE_URL:-}
+      # Key-custody source for provider keys stored via admin settings
+      # (AES-256-GCM at rest; falls back to OXIDEAN_SESSION_SECRET). Unset
+      # fails closed — the admin key field then answers crypto.unavailable.
+      OXIDEAN_OXPILOT_SECRETS_KEY: ${OXIDEAN_OXPILOT_SECRETS_KEY:-}
+      OXIDEAN_OXPILOT_USER_BUDGET: ${OXIDEAN_OXPILOT_USER_BUDGET:-}
+      OXIDEAN_OXPILOT_INSTANCE_BUDGET: ${OXIDEAN_OXPILOT_INSTANCE_BUDGET:-}
+      # OXIDEAN_ENV=production refuses private/loopback provider egress — a
+      # LAN Ollama needs this opt-in. See docs/CONFIGURATION.md.
+      OXIDEAN_EGRESS_ALLOW_PRIVATE: ${OXIDEAN_EGRESS_ALLOW_PRIVATE:-}
       # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
       OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}

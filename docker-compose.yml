@@ -93,6 +93,14 @@ services:
       OXIDEAN_OXPILOT_ENABLED: ${OXIDEAN_OXPILOT_ENABLED:-1}
       OXIDEAN_OXPILOT_PROVIDER: ${OXIDEAN_OXPILOT_PROVIDER:-stub}
       OXIDEAN_OXPILOT_MODEL: ${OXIDEAN_OXPILOT_MODEL:-stub-1}
+      OXIDEAN_OXPILOT_BASE_URL: ${OXIDEAN_OXPILOT_BASE_URL:-}
+      OXIDEAN_OXPILOT_API_KEY: ${OXIDEAN_OXPILOT_API_KEY:-}
+      # Local-only default so provider keys stored via admin settings work out
+      # of the box (same contract as OXIDEAN_ACTIONS_SECRETS_KEY below) —
+      # production must set a unique value, never reuse this one.
+      OXIDEAN_OXPILOT_SECRETS_KEY: ${OXIDEAN_OXPILOT_SECRETS_KEY:-compose-dev-oxpilot-secrets-key-not-for-production}
+      OXIDEAN_OXPILOT_USER_BUDGET: ${OXIDEAN_OXPILOT_USER_BUDGET:-}
+      OXIDEAN_OXPILOT_INSTANCE_BUDGET: ${OXIDEAN_OXPILOT_INSTANCE_BUDGET:-}
       # Local-only default so repo Actions secrets work out of the box (D-ACT-17).
       # Production must set a unique OXIDEAN_ACTIONS_SECRETS_KEY — never reuse this value.
       OXIDEAN_ACTIONS_SECRETS_KEY: ${OXIDEAN_ACTIONS_SECRETS_KEY:-compose-dev-actions-secrets-key-not-for-production}
