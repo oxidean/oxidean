@@ -2559,3 +2559,66 @@ async fn queued_delete_scoped_to_session() {
         .expect("list deleted session")
         .is_empty());
 }
+
+// ---- 0093 oxpilot_connector_user_fks — owner delete cascades ----
+
+/// `delete_user` relies on the cascade guarantee (FKs on pg/mysql, the
+/// AFTER DELETE triggers on sqlite): a deleted owner's pairings,
+/// targets, grants, and actions all leave — the verifier lookup can
+/// never resurrect a dead user's connector.
+#[tokio::test]
+async fn user_delete_cascades_connector_rows() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let (uid, repo) = seed(&db, "cascade").await;
+    let sid = "oxps-cascade-1";
+    db.insert_oxpilot_session(&session(sid, &uid, &repo, "t"))
+        .await
+        .expect("session");
+    db.insert_oxpilot_pairing(&pairing(
+        "oxpp-cascade-1",
+        &uid,
+        "h1",
+        "box",
+        "[]",
+        "2030-01-01",
+    ))
+    .await
+    .expect("pairing");
+    db.insert_oxpilot_target(&target(
+        "oxpt-cascade-1",
+        &uid,
+        "oxpp-cascade-1",
+        "box",
+        "[]",
+        "vh1",
+    ))
+    .await
+    .expect("target");
+
+    db.delete_user(&uid).await.expect("delete user");
+
+    // The pairing row is gone…
+    assert!(db
+        .find_oxpilot_pairing_by_code_hash("h1")
+        .await
+        .expect("pairing read")
+        .is_none());
+    // …and the verifier lookup can never resurrect the connector —
+    // the security surface this migration exists to close.
+    assert!(db
+        .find_oxpilot_target_by_verifier_hash("vh1")
+        .await
+        .expect("verifier lookup")
+        .is_none());
+    assert!(db
+        .find_oxpilot_target("oxpt-cascade-1")
+        .await
+        .expect("target read")
+        .is_none());
+}
