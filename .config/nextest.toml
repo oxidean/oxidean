@@ -1,15 +1,15 @@
 # cargo-nextest — parallel, CI-friendly Rust test runner (faster than `cargo test`).
 # https://nexte.st/docs/configuration/
 
-[profile.default]
-# Fail fast in local runs; CI uses --profile ci.
-slow-timeout = { period = "60s", terminate-after = 3 }
-
 # The dialect_oxpilot binary mutates the shared `oxpilot_settings` singleton
 # row on one DATABASE_URL; its in-process `SERIAL` mutex cannot serialize
 # nextest's per-test processes — a test group does, across processes.
-[profile.default.test-groups]
+[test-groups]
 dialect-oxpilot = { max-threads = 1 }
+
+[profile.default]
+# Fail fast in local runs; CI uses --profile ci.
+slow-timeout = { period = "60s", terminate-after = 3 }
 
 [[profile.default.overrides]]
 filter = 'binary_id(oxidean-db::dialect_oxpilot)'
@@ -30,9 +30,6 @@ retries = 1
 
 # Same shared-singleton serialization as profile.default — the db-dialects
 # lane runs PG/MySQL legs without --test-threads=1.
-[profile.ci.test-groups]
-dialect-oxpilot = { max-threads = 1 }
-
 [[profile.ci.overrides]]
 filter = 'binary_id(oxidean-db::dialect_oxpilot)'
 test-group = 'dialect-oxpilot'
