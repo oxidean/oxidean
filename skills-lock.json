@@ -37,6 +37,12 @@
       "skillPath": "skills/rust-best-practices/SKILL.md",
       "computedHash": "0ac6606adb27e64a31bdc8c1ed34e446ae0c14bff1c7648867c46e106adc048f"
     },
+    "security-review": {
+      "source": "getsentry/skills",
+      "sourceType": "github",
+      "skillPath": "skills/security-review/SKILL.md",
+      "computedHash": "194b70d3a2a4e0b23a436866c95496457962d1a818c382c56e4912bcd0cc3424"
+    },
     "tdd": {
       "source": "mattpocock/skills",
       "sourceType": "github",
