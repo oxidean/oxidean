@@ -1,0 +1,1 @@
+echo "local unit verification deferred to CI per user directive" && git diff --check

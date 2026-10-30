@@ -55,7 +55,7 @@ pub fn apply(filter: &str, input: &Value) -> Result<Vec<Value>, String> {
                     return Err(format!(
                         "--jq failed: {}",
                         crate::output::truncate(&e.to_string(), 200)
-                    ))
+                    ));
                 }
                 Err(e) => return Err(format!("--jq failed: {e:?}")),
             },

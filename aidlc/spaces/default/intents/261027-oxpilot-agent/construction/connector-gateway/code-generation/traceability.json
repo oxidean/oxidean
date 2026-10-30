@@ -1,0 +1,1086 @@
+{
+  "stage": "code-generation",
+  "unit": "connector-gateway",
+  "upstream_ids": [
+    "AC4.1.1",
+    "AC4.1.2",
+    "AC4.1.3",
+    "AC4.1.4",
+    "AC4.2.1",
+    "AC4.2.2",
+    "AC4.2.3",
+    "AC4.3.1",
+    "AC4.3.2",
+    "AC4.3.3",
+    "AC4.3.4",
+    "AC4.3.5",
+    "AC4.4.1",
+    "AC4.4.2",
+    "AC4.4.3",
+    "AC5.3.1",
+    "AC5.3.2",
+    "AC5.5.3",
+    "AC5.5.4",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR5.5",
+    "FR5.6",
+    "FR6.6",
+    "NFR1",
+    "NFR4",
+    "NFR5",
+    "NFR9",
+    "C1",
+    "C3",
+    "C5",
+    "C7",
+    "C8",
+    "AC1.2.1",
+    "AC1.2.2",
+    "AC1.2.3",
+    "AC5.3.3",
+    "AC5.5.1",
+    "AC1.5.2",
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR1.11",
+    "NFR1.12",
+    "NFR1.13",
+    "NFR1.14",
+    "NFR1.15",
+    "NFR1.16",
+    "NFR1.17",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR5.3",
+    "NFR5.4",
+    "NFR5.5",
+    "NFR5.6",
+    "NFR5.7",
+    "NFR5.8",
+    "NFR5.9",
+    "NFR5.10",
+    "NFR5.11",
+    "NFR5.12",
+    "NFR5.13",
+    "NFR5.14",
+    "NFR5.15",
+    "NFR5.16",
+    "NFR5.17",
+    "NFR2.1",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.12",
+    "NFR3.13",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR-S1",
+    "NFR-S2",
+    "NFR-S3",
+    "NFR-S4",
+    "NFR-S5",
+    "NFR-S6",
+    "TS1",
+    "TS2",
+    "TS3",
+    "TS4",
+    "TS5",
+    "TS6",
+    "TS7",
+    "TS8",
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR1.4",
+    "BR1.5",
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR2.5",
+    "BR3.1",
+    "BR3.2",
+    "BR3.3",
+    "BR3.4",
+    "BR3.5",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR5.4",
+    "BR5.5",
+    "BR6.1",
+    "BR6.2",
+    "BR6.3",
+    "BR6.4",
+    "BR6.5",
+    "BR6.6",
+    "BR6.7",
+    "BR7.1",
+    "BR7.2",
+    "BR7.3",
+    "BR7.4"
+  ],
+  "coverage": [
+    {
+      "id": "AC4.1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "outbound-only honored — claim long-poll + report + heartbeat; the gateway never dials the connector (BR5.5)"
+    },
+    {
+      "id": "AC4.1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-use code mints target bound to pairing user_id in one claim tx; lazy expiry governs the redeem window"
+    },
+    {
+      "id": "AC4.1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "verifier persisted sha256 only; raw material lives solely in the /pair response"
+    },
+    {
+      "id": "AC4.1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "pairing_code returned exactly once in pairing_create; never audited/persisted/proc-returned again"
+    },
+    {
+      "id": "AC4.2.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "U8 renders the consent dialog; U6 supplies pending connect grant + caps via grant_list/grant_respond"
+    },
+    {
+      "id": "AC4.2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "denied connect grant leaves target pending_consent + audits connect_grant_denied"
+    },
+    {
+      "id": "AC4.2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "status flips connected only inside allow_connect_grant_tx CAS; dispatch refuses not_connected otherwise"
+    },
+    {
+      "id": "AC4.3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "dispatch_action is the only path U5 takes — connected + live grant enforced under the per-target lock"
+    },
+    {
+      "id": "AC4.3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "scope ∈ {once(default),session} stamped at respond; no always flavor exists"
+    },
+    {
+      "id": "AC4.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "action_dispatched/action_result/action_cancelled audits with bounded redacted detail"
+    },
+    {
+      "id": "AC4.3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "liveness-expired target answers Denied{offline} — never a silent drop"
+    },
+    {
+      "id": "AC4.3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "deny resolves the grant denied and mints no Action row; audited"
+    },
+    {
+      "id": "AC4.4.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "U8 owns the confirm UI; U6 procs execute the confirmed disconnect/revoke"
+    },
+    {
+      "id": "AC4.4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "revoke_target_tx flips all grants revoked + in-flight cancel_requested in one tx; cancel sets ride claim/heartbeat"
+    },
+    {
+      "id": "AC4.4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "revoked/disconnected refuse dispatch/claim/respond; report keeps its pinned terminal-close exception"
+    },
+    {
+      "id": "AC5.3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "connect/consent/act/revoke transitions all emit post-commit audit rows"
+    },
+    {
+      "id": "AC5.3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs",
+      "note": "audit spy test: no codes, verifiers, hashes, or unredacted args/output in any event [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs]"
+    },
+    {
+      "id": "AC5.5.3",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "four tables ×3 dialects; dialect_oxpilot legs cover CAS/unique/FIFO/cascade; TESTING.md row updated [also: crates/oxidean-db/migrations/sqlite/0088_oxpilot_connector.sql same file under postgres/ and mysql/ + crates/oxidean-db/tests/dialect_oxpilot.rs]"
+    },
+    {
+      "id": "AC5.5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "ConnectorIdentity is the sole scope source; owner procs scope by session user; cross-user folds not_found [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-oxpilot/src/connector/routes.rs]"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "outbound-only protocol — claim/report/heartbeat long-poll verbs; no inbound listener"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "explicit consent gates activation (connect grant) and each action (once/session scopes only)"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "CONNECTOR_CAPABILITIES closed enum enforced at mint, redeem caps-bound, and dispatch [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-core/src/oxpilot.rs]"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "code+verifier persisted sha256 only; OXPILOT_SECRETS_KEY chain unchanged"
+    },
+    {
+      "id": "FR5.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "server-side redact+bound before persist/audit on args, summaries, and report output"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "revoke_target_tx is one transaction: grants revoked + queued cancelled + in-flight cancel_requested"
+    },
+    {
+      "id": "FR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-db/migrations/sqlite/0088_oxpilot_connector.sql",
+      "note": "oxpilot_pairings/targets/grants/actions ×3 dialects with bounded columns [same file under postgres/ and mysql/]"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secrets redacted before write; bounded field sizes at ingest and store"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "Denied vocabulary; hook-failure-aborts-delete; terminal-close rule — no silent stalls"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "consent/lifecycle audits; auth failures audited; tripped limiter writes nothing"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs",
+      "note": "16-test negative-path matrix: auth, limiter, disabled, mismatch, enumeration, close paths"
+    },
+    {
+      "id": "C1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "the 8 pinned procs registered in PROCEDURES+dispatch verbatim incl. additive pairing_id/lifecycle/scope fields"
+    },
+    {
+      "id": "C3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "pair/claim/report/heartbeat verbatim: 60s clamp, 204+Retry-After, verifier-only auth subtree, {error:code} map"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "get_session scoping via the SessionService seam; delete-hook registry consumed unchanged"
+    },
+    {
+      "id": "C7",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "ConnectorGateway seam with Denied{reason,grant_id?} — dispatch refusal is an error channel [also: crates/oxidean-api-core/src/oxpilot.rs + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "C8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/hook.rs",
+      "note": "hook #2 registered after U3 abort; audited idempotent cancel; failure aborts delete [also: crates/oxidean-api-oxpilot/src/connector/hook.rs + crates/oxidean-api/src/main.rs]"
+    },
+    {
+      "id": "AC1.2.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "U8 owns the dialog; U6 supplies target_list/target_get for the pick"
+    },
+    {
+      "id": "AC1.2.2",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "U2 owns session persistence — U6 only consumes the session seam"
+    },
+    {
+      "id": "AC1.2.3",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "U8 owns dialog chrome; no U6 surface"
+    },
+    {
+      "id": "AC5.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "stored args/summaries + report output secrets-redacted on write"
+    },
+    {
+      "id": "AC5.5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/dispatch.rs",
+      "note": "new procs join the SessionOnly closed set; parity + session-only tests cover them [also: crates/oxidean-api-oxpilot/src/lib.rs + dispatch.rs]"
+    },
+    {
+      "id": "AC1.5.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/migrations/sqlite/0088_oxpilot_connector.sql",
+      "note": "session-scoped rows FK-cascade after the hook cancel transitions land; audits survive [also: crates/oxidean-db/migrations/sqlite/0088_oxpilot_connector.sql same file under postgres/ and mysql/ + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "connector-auth IP bucket checked before hash lookup; miss records+audits; mint user bucket shares the limiter"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "view DTOs project out verifier_hash/last_seen_at/action_args — hashes never serialize"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.14",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.15",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "GrantView carries args_summary only — consent card never sees raw args"
+    },
+    {
+      "id": "NFR1.16",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "secret custody + hashing + bounded redaction implemented per security-design"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "redact-on-ingest: stored args form IS the dedupe key AND the delivered payload"
+    },
+    {
+      "id": "NFR5.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.14",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.15",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.16",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR5.17",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "audit trail shape per observability — post-commit record_with, bounded redacted detail, secrets never emitted"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "failed-auth limiter shared across connector verbs; audit on miss; no audit on tripped check"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "gateway emits the pinned audit event vocabulary; tracing on db errors only (no payload)"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "gateway emits the pinned audit event vocabulary; tracing on db errors only (no payload)"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "gateway emits the pinned audit event vocabulary; tracing on db errors only (no payload)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "Notify armed before first dequeue closes the lost-wakeup window; parked claim wakes on enqueue"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claimed→running flip on any authenticated touch — the next touch proves delivery"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "status derived at read: revoked→revoked; connected+fresh→online; else offline"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claim-loop ordering/liveness semantics per performance-design — per-target lock + Notify, no sweeper"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "single-replica in-process seam; per-target maps are process-local; failure modes refuse fail-closed"
+    },
+    {
+      "id": "NFR-S1",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "NFR-S2",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "NFR-S3",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "NFR-S4",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "NFR-S5",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "NFR-S6",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "one gateway Arc installed in-process — the pinned single-replica boundary; multi-replica pinning documented"
+    },
+    {
+      "id": "TS1",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS2",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS3",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS4",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS5",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS6",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS7",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "TS8",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "in-process gateway + hook on the session service — no new deployable component"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "mint: closed caps subset, name bound, sha256-only persistence, shown-once PairingView, per-user limiter"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "redeem order expiry→used→caps⊆minted; one tx claims+inserts target+connect grant"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "verifier 256-bit rand_hex; sha256 persisted; returned once"
+    },
+    {
+      "id": "BR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "lazy expiry on redeem/read paths — no sweeper"
+    },
+    {
+      "id": "BR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "mint user-bucket 10/15min records every call; /pair unauthenticated carve-out [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs]"
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "absent Bearer resolves through the same unknown-verifier path — limiter + audit apply [also: crates/oxidean-api-oxpilot/src/connector/routes.rs + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "revoked verifier still resolves identity; heartbeat answers revoked:true; claim refuses revoked; report-close allowed"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "verifier-class Bearer only — no cookies/PATs on the connector subtree"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "identity is the sole scope; body target_id mismatch → forbidden"
+    },
+    {
+      "id": "BR2.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "enablement gate first on every route → {error:disabled} 403"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "past-due pending grants lazily expire on observation; consent never gets an un-approvable id"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "owner read of pending_consent target re-mints an expired pending connect grant"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "grant kinds connect/action_once/action_session; scope respond marks the kind"
+    },
+    {
+      "id": "BR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "grant_respond{grant_id,allow,scope?} — owner-scoped not_found [also: crates/oxidean-api-oxpilot/src/connector/procs.rs + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "BR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "pending→allowed|denied only; allowed action_session + deny = BR6.4 revoke arm; else grant_not_pending"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "ordered checks under the per-target lock: session→lifecycle/liveness→caps→live grant→dedupe→Denied"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "allow action grant + materialize Action{queued} in one tx"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "claimed→running flip + last_seen_at touch on every authenticated touch — response alone never marks running"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "Denied marker on data.denied; session checks pass not_found/forbidden through as their own codes [also: crates/oxidean-api-core/src/oxpilot.rs + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "pending dedupe keyed on stored bounded args — identical args join the same card"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "arm Notify before first dequeue, dequeue-before-park, recheck after wake, FIFO-50 scan, 60s clamp"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "idempotent terminal close; unknown/cross-target → not_found kill-local; cancel_requested + report → cancelled"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "heartbeat = liveness touch + flip + re-announced cancel set + revoked flag"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "liveness window HEARTBEAT_LIVENESS_WINDOW_SECS=90 read from last_seen_at"
+    },
+    {
+      "id": "BR5.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/routes.rs",
+      "note": "no server→connector channel exists"
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "disconnect tombstones verifier + direct cancelled closes (dead channel — never cancel_requested)"
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "revoke keeps verifier: grants revoked, queued cancelled, in-flight cancel_requested on heartbeat"
+    },
+    {
+      "id": "BR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "post-lifecycle refusals: dispatch not_connected, claim revoked/unauthorized, respond not_found"
+    },
+    {
+      "id": "BR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "deny on allowed action_session = revoke arm via revoke_oxpilot_session_grant_tx"
+    },
+    {
+      "id": "BR6.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/hook.rs",
+      "note": "session-scoped grants/actions cancel directly pre-cascade; hook failure aborts delete; idempotent"
+    },
+    {
+      "id": "BR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "connect grants (session_id NULL) survive session delete — asserted in the cascade test [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs]"
+    },
+    {
+      "id": "BR6.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "disconnect/revoke idempotent on already-terminal targets (tx returns None → Ok)"
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/procs.rs",
+      "note": "cross-user reads/writes fold to not_found on every owner verb [also: crates/oxidean-api-oxpilot/src/connector/procs.rs + crates/oxidean-api-oxpilot/src/connector/gateway.rs]"
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "post-commit audit fan-out; one event per cancelled row on bulk close paths"
+    },
+    {
+      "id": "BR7.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs",
+      "note": "verifier/code + hashes never stored-audited-logged; spy test scans the feed [also: crates/oxidean-api-oxpilot/src/connector/gateway.rs + crates/oxidean-api-oxpilot/tests/oxpilot_connector.rs]"
+    },
+    {
+      "id": "BR7.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/connector/gateway.rs",
+      "note": "args redacted+bounded at ingest; summaries ≤512; output tail-bounded ≤2KiB"
+    }
+  ]
+}

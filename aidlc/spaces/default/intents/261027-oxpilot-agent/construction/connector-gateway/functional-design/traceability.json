@@ -1,0 +1,296 @@
+{
+ "stage": "functional-design",
+ "unit": "connector-gateway",
+ "upstream_ids": [
+  "AC4.1.1",
+  "AC4.1.2",
+  "AC4.1.3",
+  "AC4.1.4",
+  "AC4.2.1",
+  "AC4.2.2",
+  "AC4.2.3",
+  "AC4.3.1",
+  "AC4.3.2",
+  "AC4.3.3",
+  "AC4.3.4",
+  "AC4.3.5",
+  "AC4.4.1",
+  "AC4.4.2",
+  "AC4.4.3",
+  "AC5.3.1",
+  "AC5.3.2",
+  "AC5.5.3",
+  "AC5.5.4",
+  "FR5.1",
+  "FR5.2",
+  "FR5.3",
+  "FR5.4",
+  "FR5.5",
+  "FR5.6",
+  "FR6.6",
+  "NFR1",
+  "NFR4",
+  "NFR5",
+  "NFR9",
+  "C1",
+  "C3",
+  "C5",
+  "C7",
+  "C8",
+  "AC1.2.1",
+  "AC1.2.2",
+  "AC1.2.3",
+  "AC5.3.3",
+  "AC5.5.1",
+  "AC1.5.2"
+ ],
+ "coverage": [
+  {
+   "id": "AC4.1.1",
+   "status": "OK",
+   "target": "BR5.5, WF3 \u2014 outbound-only: claim long-poll is the push channel; the gateway never opens a connection to the connector"
+  },
+  {
+   "id": "AC4.1.2",
+   "status": "OK",
+   "target": "BR1.1/BR1.2, WF1 \u2014 single-use short-lived code flow mints an audited Target bound to the pairing's user_id; BR1.4 lazy expiry governs the redeem window"
+  },
+  {
+   "id": "AC4.1.3",
+   "status": "OK",
+   "target": "BR1.3, BR7.3 \u2014 verifier stored sha256-hashed; secret material write-only, never on any agent-reachable surface"
+  },
+  {
+   "id": "AC4.1.4",
+   "status": "OK",
+   "target": "BR1.1/BR1.3 \u2014 code returned once in pairing_create; never in transcripts (Pairing rows are never proc-returned) or audit detail"
+  },
+  {
+   "id": "AC4.2.1",
+   "status": "Deferred",
+   "target": "U8 renders the dialog (labels/focus-trap are UI); U6 supplies the pending connect grant + caps it names \u2014 BR3.2, WF1 step 3"
+  },
+  {
+   "id": "AC4.2.2",
+   "status": "OK",
+   "target": "BR3.2, BR7.2 \u2014 denied connect grant stays pending_consent and audits connect_grant_denied"
+  },
+  {
+   "id": "AC4.2.3",
+   "status": "OK",
+   "target": "BR3.2, BR4.1 step 2 \u2014 Target.status flips connected ONLY via grant_respond(allow); dispatch refuses not_connected otherwise \u2014 server-enforced"
+  },
+  {
+   "id": "AC4.3.1",
+   "status": "OK",
+   "target": "BR4.1 \u2014 dispatch requires connected target + live grant; U5's tools reach the target only through this seam"
+  },
+  {
+   "id": "AC4.3.2",
+   "status": "OK",
+   "target": "BR3.3/BR3.4 \u2014 action_once|action_session grant kinds; no 'always' flavor exists; per-action grants carry the card's summary"
+  },
+  {
+   "id": "AC4.3.3",
+   "status": "OK",
+   "target": "BR4.3, BR7.2 \u2014 action_dispatched|action_result|action_cancelled rows with actor/kind/summary, secrets-redacted"
+  },
+  {
+   "id": "AC4.3.4",
+   "status": "OK",
+   "target": "BR4.1 step 2, BR5.4 \u2014 liveness-expired target answers Denied{offline}; U8 surfaces it \u2014 never a silent drop"
+  },
+  {
+   "id": "AC4.3.5",
+   "status": "OK",
+   "target": "BR4.2 \u2014 deny resolves the grant denied and mints NO Action row; the denial is auditable"
+  },
+  {
+   "id": "AC4.4.1",
+   "status": "Deferred",
+   "target": "U8 owns the confirm UI; U6's procs execute only the confirmed call \u2014 BR6.1/BR6.2"
+  },
+  {
+   "id": "AC4.4.2",
+   "status": "OK",
+   "target": "BR6.2 \u2014 revoke flips ALL grants revoked and in-flight cancel_requested, propagated via claim/heartbeat cancel sets"
+  },
+  {
+   "id": "AC4.4.3",
+   "status": "OK",
+   "target": "BR6.3 (plus BR6.1's disconnected state) \u2014 revoked/disconnected targets refuse dispatch, claim, and grant_respond; report retains its C3-pinned terminal-close exception (BR2.2/BR5.2)"
+  },
+  {
+   "id": "AC5.3.1",
+   "status": "OK",
+   "target": "BR7.2 \u2014 connect/consent/act/revoke transition set audits (the write-tool audit half is U5's)"
+  },
+  {
+   "id": "AC5.3.2",
+   "status": "OK",
+   "target": "BR7.2/BR7.3 \u2014 audit detail is bounded summaries only; no codes, verifiers, raw args, or unredacted output"
+  },
+  {
+   "id": "AC5.5.3",
+   "status": "OK",
+   "target": "Scope \u2014 four new tables land in all three dialects + the dialect_oxpilot -E filter per the U2 pattern this feature already follows; BR7.4's bounded fields are exercised by the dialect fixtures + TESTING.md job-table row in the same change"
+  },
+  {
+   "id": "AC5.5.4",
+   "status": "OK",
+   "target": "BR2.4, BR7.1 \u2014 owner-scoped procs + identity-scoped connector routes; cross-user connect/act/revoke denies without existence leak"
+  },
+  {
+   "id": "FR5.1",
+   "status": "OK",
+   "target": "BR5.5 \u2014 outbound-only protocol: claim long-poll + report + heartbeat; no inbound listener server-side"
+  },
+  {
+   "id": "FR5.2",
+   "status": "OK",
+   "target": "BR3.1\u2013BR3.4 \u2014 explicit consent gates activation AND each action; BR3.5: per-action/per-session flavors only, no 'always'"
+  },
+  {
+   "id": "FR5.3",
+   "status": "OK",
+   "target": "BR1.1, BR4.1 step 3, entities Target.caps \u2014 closed {exec_shell, fs_read, fs_write} bound at mint and dispatch"
+  },
+  {
+   "id": "FR5.4",
+   "status": "OK",
+   "target": "BR1.3, BR7.3 \u2014 hashed verifier + code; AES-256-GCM-at-rest pin applies to stored material (env-key chain, U6 nfr stage carries the key-path detail)"
+  },
+  {
+   "id": "FR5.5",
+   "status": "OK",
+   "target": "BR7.2, BR5.2 \u2014 every action audited with redacted bounded detail; server-side redaction is the barrier"
+  },
+  {
+   "id": "FR5.6",
+   "status": "OK",
+   "target": "BR6.2 (and BR6.1 disconnect) \u2014 revoke is immediate: all grants revoked + in-flight cancel_requested in the same transaction"
+  },
+  {
+   "id": "FR6.6",
+   "status": "OK",
+   "target": "Scope \u2014 oxpilot_pairings/targets/grants/actions persist in oxidean-db with migrations for all three dialects (BR7.4 bounds in each)"
+  },
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "BR7.3/BR7.4 \u2014 secrets redacted before write on args/output/audit; bounded field sizes"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "BR4.1 Denied vocabulary, BR6.5 hook-failure-aborts-delete, BR5.2 terminal-close rule \u2014 no silent stalls or dropped outcomes"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "BR7.2 \u2014 consent + lifecycle transitions emit audit rows; auth failures audited rate-limited"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "Negative paths section + the unit-test surface this stage feeds (BR1.2, BR2.1, BR4.1, BR5.1\u2013BR5.3, BR6.x branches)"
+  },
+  {
+   "id": "C1",
+   "status": "OK",
+   "target": "functional-spec \u00a7Procedures + \u00a7Contract deltas \u2014 pinned vocabulary verbatim PLUS the flagged additive amendment (BR3.3's scope respond, BR1.1's pairing_id, WF6's target_get/lifecycle); BR7.1 owner scoping on every proc"
+  },
+  {
+   "id": "C3",
+   "status": "OK",
+   "target": "BR1.2, BR2.1\u2013BR2.4, BR5.1\u2013BR5.3, WF3 \u2014 pair/claim/report/heartbeat verbatim incl. 60 s clamp, 204+Retry-After, verifier-class auth incl. BR2.3's verifier-only auth subtree"
+  },
+  {
+   "id": "C5",
+   "status": "OK",
+   "target": "BR4.1 step 1 (get_session scoping) + BR6.5 (the delete-hook registry) \u2014 consumed unchanged"
+  },
+  {
+   "id": "C7",
+   "status": "OK",
+   "target": "BR4.1\u2013BR4.4 + entities \u00a7ConnectorGateway \u2014 seam implemented with the flagged amendment: user_id-first signatures, Denied{reason, grant_id?} shape, ActionView.result_summary"
+  },
+  {
+   "id": "C8",
+   "status": "OK",
+   "target": "BR6.5, WF5 \u2014 hook #2 registered after U3's abort; audited idempotent cancel; failure aborts delete"
+  },
+  {
+   "id": "AC1.2.1",
+   "status": "Deferred",
+   "target": "U8 owns the dialog; U6 supplies `oxpilot.target_list` (WF6, BR7.1-scoped) for the optional target pick"
+  },
+  {
+   "id": "AC1.2.2",
+   "status": "Deferred",
+   "target": "U2 owns session persistence; U6 contributes nothing to the bind \u2014 Deferred to the owning units"
+  },
+  {
+   "id": "AC1.2.3",
+   "status": "Deferred",
+   "target": "U8 owns dialog labelling/focus-trap/Esc; no U6 surface"
+  },
+  {
+   "id": "AC5.3.3",
+   "status": "OK",
+   "target": "BR7.4 \u2014 U6's half: stored action args/summaries and report output are secrets-redacted on write (transcript rows are U2/U3's)"
+  },
+  {
+   "id": "AC5.5.1",
+   "status": "OK",
+   "target": "Scope paragraph + \u00a7Procedure deltas \u2014 the new target_*/grant_* procs join the pinned OXPILOT_PROCEDURES SessionOnly closed set + dispatch in api-oxpilot (BR7.1 gate order preserves the classification test)"
+  },
+  {
+   "id": "AC1.5.2",
+   "status": "OK",
+   "target": "BR6.5 + entities \u00a7Grant/Action \u2014 session delete removes per-session grant/action rows via ON DELETE CASCADE FKs (the audited cancel transitions land first and survive in audit_events)"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "BR1.5",
+   "status": "N/A",
+   "target": "credential-mint rate limit \u2014 abuse guard consistent with the repo's credential-endpoint limiter pattern; no direct upstream pin"
+  },
+  {
+   "id": "BR2.2",
+   "status": "N/A",
+   "target": "revoked-authenticates choice \u2014 derived from C3's revoked:bool response being deliverable only over an authenticated channel"
+  },
+  {
+   "id": "BR4.5",
+   "status": "N/A",
+   "target": "pending-grant dedupe \u2014 consent-rail spam guard derived from AC4.3.2's card-per-action UX, not a contract pin"
+  },
+  {
+   "id": "BR6.4",
+   "status": "N/A",
+   "target": "session-grant revoke via grant_respond \u2014 semantics pinned in the questions' open-point answer; C1's allow:bool field accommodates it"
+  },
+  {
+   "id": "BR6.6",
+   "status": "N/A",
+   "target": "connect grants outlive sessions \u2014 derived from session_id NULL semantics in components.md, not a written AC"
+  },
+  {
+   "id": "BR5.5",
+   "status": "N/A",
+   "target": "running-state mechanics \u2014 fills the operational gap between claimed and report within C7's pinned state set"
+  },
+  {
+   "id": "BR2.5",
+   "status": "N/A",
+   "target": "connector-subtree enablement gate \u2014 fail-closed extension of the proc-side gate posture (NFR4); no explicit upstream pin names connector routes"
+  },
+  {
+   "id": "BR6.7",
+   "status": "N/A",
+   "target": "terminal-state proc idempotency \u2014 convention matching the shipped delete/get semantics; no AC pins 'already-dead' behavior"
+  }
+ ]
+}

@@ -107,6 +107,16 @@ export async function fetchAdminMcpSettings() {
   return apiClient.admin.mcp.getSettings();
 }
 
+/** admin.oxpilot.settings_get. */
+export async function fetchAdminOxpilotSettings() {
+  return apiClient.admin.oxpilot.settingsGet();
+}
+
+/** admin.oxpilot.providers_list. */
+export async function fetchAdminOxpilotProviders() {
+  return apiClient.admin.oxpilot.providersList();
+}
+
 /** admin.users.list. */
 export async function fetchAdminUsersList(data: {
   query?: string | null;

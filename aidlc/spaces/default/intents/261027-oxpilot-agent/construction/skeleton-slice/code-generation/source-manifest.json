@@ -1,0 +1,178 @@
+{
+  "stage": "code-generation",
+  "unit": "skeleton-slice",
+  "version": 1,
+  "writes": [
+    {
+      "path": "apps/web/e2e/stack/oxpilot.stack.test.ts"
+    },
+    {
+      "path": "apps/web/package.json"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-chat.tsrx"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-queries.ts"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-stream.ts"
+    },
+    {
+      "path": "apps/web/src/lib/oxpilot-stream.unit.test.ts"
+    },
+    {
+      "path": "apps/web/src/lib/route-params.ts"
+    },
+    {
+      "path": "apps/web/src/pages/oxpilot.astro"
+    },
+    {
+      "path": "apps/web/src/pages/oxpilot/[session].astro"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.$session.tsrx"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.browser.test.tsx"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.integration.test.ts"
+    },
+    {
+      "path": "apps/web/src/routes/oxpilot.tsrx"
+    },
+    {
+      "path": "apps/web/src/test/browser-coverage.manifest.ts"
+    },
+    {
+      "path": "apps/web/src/test/route-coverage.manifest.ts"
+    },
+    {
+      "path": "bun.lock"
+    },
+    {
+      "path": "Cargo.lock"
+    },
+    {
+      "path": "Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-core/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/auth/verify_reset.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-api-core/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/CHANGELOG.md"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/dispatch.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/routes.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/session.rs"
+    },
+    {
+      "path": "crates/oxidean-api-oxpilot/src/status.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/app.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/main.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/routes/pages_serve.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/routes/repo_raw.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/routes/template_packs.rs"
+    },
+    {
+      "path": "crates/oxidean-api/src/rpc.rs"
+    },
+    {
+      "path": "crates/oxidean-api/tests/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-core/src/redact.rs"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/mysql/0085_oxpilot.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/postgres/0085_oxpilot.sql"
+    },
+    {
+      "path": "crates/oxidean-db/migrations/sqlite/0085_oxpilot.sql"
+    },
+    {
+      "path": "crates/oxidean-db/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-db/src/oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-db/tests/dialect_oxpilot.rs"
+    },
+    {
+      "path": "crates/oxidean-web/src/shells.rs"
+    },
+    {
+      "path": "docs/CONFIGURATION.md"
+    },
+    {
+      "path": "docs/TESTING.md"
+    },
+    {
+      "path": ".env.example"
+    },
+    {
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "path": "packages/api-client/src/index.ts"
+    },
+    {
+      "path": ".railway/railway.ts"
+    },
+    {
+      "path": "scripts/dev-auth/run-stack-e2e.sh"
+    },
+    {
+      "path": "versioning.toml"
+    }
+  ]
+}

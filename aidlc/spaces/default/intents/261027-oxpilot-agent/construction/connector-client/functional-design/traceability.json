@@ -1,0 +1,150 @@
+{
+ "stage": "functional-design",
+ "unit": "connector-client",
+ "upstream_ids": [
+  "AC4.1.1",
+  "AC4.1.2",
+  "AC4.1.3",
+  "AC4.3.1",
+  "AC4.3.2",
+  "AC4.3.3",
+  "AC4.3.4",
+  "AC4.3.5",
+  "AC4.4.2",
+  "AC4.6.1",
+  "AC4.6.2",
+  "AC4.6.3",
+  "FR5.1",
+  "FR5.3",
+  "FR5.4",
+  "FR5.5",
+  "FR5.6",
+  "C3",
+  "US4.3",
+  "US4.6"
+ ],
+ "coverage": [
+  {
+   "id": "AC4.6.1",
+   "status": "OK",
+   "target": "BR1.1, BR1.2, BR1.3, BR2.1, BR2.2, BR2.3, BR2.4, BR4.1, BR4.2, BR4.3, BR4.4, BR9.1, BR9.2, BR9.3, WF1, WF2 \u2014 pairing auth + outbound channel + exec/fs-only surface"
+  },
+  {
+   "id": "AC4.6.2",
+   "status": "OK",
+   "target": "BR2.1, BR8.1, BR8.2, BR8.3, BR8.4, BR8.5, BR5.4 \u2014 verifier-class Bearer + documented backoff, 15s heartbeat, auth-death/revoked terminals, cancel-only re-poll floor"
+  },
+  {
+   "id": "AC4.6.3",
+   "status": "OK",
+   "target": "BR1.1, BR2.1, BR8.1 \u2014 wiremock outbound-HTTP fixtures exercise the pair/claim/report/heartbeat wire shapes these rules pin (Q12-A)"
+  },
+  {
+   "id": "AC4.1.1",
+   "status": "OK",
+   "target": "BR2.1, BR2.2, BR2.3, BR4.5, BR8.5 \u2014 every wire call is client-initiated; no inbound listener exists in the design"
+  },
+  {
+   "id": "AC4.1.2",
+   "status": "OK",
+   "target": "BR1.1, BR1.2, BR1.3, BR1.4 \u2014 client half of the device-grant-style flow: code \u2192 credentials + verbatim error mapping + code never logged/stored"
+  },
+  {
+   "id": "AC4.1.3",
+   "status": "OK",
+   "target": "BR1.2, BR2.4, BR6.3, BR9.1 \u2014 verifier custody client-side: two-backend seam (keystore + defined file fallback), never echoed/serialized, deleted on disconnect/death"
+  },
+  {
+   "id": "AC4.3.1",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR3.3, BR4.1 \u2014 client re-checks granted_caps before executing (live-grant enforcement is server-side U6)"
+  },
+  {
+   "id": "AC4.3.2",
+   "status": "N/A",
+   "target": "server/UI side \u2014 per-action vs per-session grant scope is minted and answered by U6/U8; U7 only carries grant_id through report"
+  },
+  {
+   "id": "AC4.3.3",
+   "status": "N/A",
+   "target": "server side \u2014 the audit row is minted by U6's gateway; U7's contribution is only supplying the result payload it audits"
+  },
+  {
+   "id": "AC4.3.4",
+   "status": "OK",
+   "target": "BR3.2, BR8.2, BR4.5 \u2014 refused actions report failed not silently drop; transport-dead keeps the loop alive under bounded backoff (in-session error is U5/U8's half)"
+  },
+  {
+   "id": "AC4.3.5",
+   "status": "N/A",
+   "target": "server/UI side \u2014 the denial is minted by U6's dispatch and shown by U8; a denied action never reaches claim so the client sees nothing"
+  },
+  {
+   "id": "AC4.4.2",
+   "status": "OK",
+   "target": "BR5.1, BR5.2 \u2014 cancel sets honored before starting and mid-flight via process-group kill"
+  },
+  {
+   "id": "FR5.1",
+   "status": "OK",
+   "target": "BR2.1, BR4.5, BR8.5 \u2014 dial-out-only: pair/claim/report/heartbeat are all client POSTs; no listener"
+  },
+  {
+   "id": "FR5.3",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR3.3, BR6.2 \u2014 capability bound exec_shell + fs_read + fs_write only; refusal at parse time per components.md"
+  },
+  {
+   "id": "FR5.4",
+   "status": "OK",
+   "target": "BR1.2, BR2.1, BR6.3 \u2014 verifier custody user-side (keystore), never echoed; hashed side is the server's"
+  },
+  {
+   "id": "FR5.5",
+   "status": "OK",
+   "target": "BR7.1, BR7.2, BR7.3, BR7.4 \u2014 output bounded (64KiB exec tail / FS_IO_CAP fs payload < OUTPUT_MAX), truncated-marked, value-scrubbed with the full enumerated secret set before report (server redactor is the second pass)"
+  },
+  {
+   "id": "FR5.6",
+   "status": "OK",
+   "target": "BR8.3, BR8.4 \u2014 revoked:true and auth-death terminate immediately, killing in-flight work first"
+  },
+  {
+   "id": "C3",
+   "status": "OK",
+   "target": "BR1.1, BR2.1, BR2.2, BR2.3, BR2.4, BR5.1, BR5.2, BR5.3, BR5.4, BR8.1 \u2014 client implementation of all four routes: pinned fields, flat error envelope, 204+Retry-After, wait_seconds\u226460, cancel-before-and-during MUST"
+  },
+  {
+   "id": "US4.3",
+   "status": "OK",
+   "target": "BR4.1, BR4.2, BR4.3, BR4.4, BR5.1, BR5.2, BR6.1, BR6.2, BR7.1, BR7.2, BR7.3, BR7.4 \u2014 U7's execution half of 'agent acts on my system' (dispatch/consent halves in U5/U6/U8)"
+  },
+  {
+   "id": "US4.6",
+   "status": "OK",
+   "target": "BR1.1, BR2.1, BR8.1, BR8.2, BR8.3, BR8.4, BR8.5, BR9.1, BR9.2, BR9.3 \u2014 the documented first-party connector + dial-out protocol client"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "BR5.3",
+   "status": "N/A",
+   "target": "cancel-vocabulary ride on failed status \u2014 contract-local reading of the pinned done|failed enum; the server owns the cancelled row state"
+  },
+  {
+   "id": "BR6.3",
+   "status": "N/A",
+   "target": "credential-file-in-jail stance \u2014 derived posture, no upstream pin names the connector's own files inside the sandbox bound"
+  },
+  {
+   "id": "WF3.5",
+   "status": "N/A",
+   "target": "report-404 drop \u2014 mirrors U6-BR6.5's session-delete close path from the client side; no AC pins client behavior on a dead row"
+  },
+  {
+   "id": "BR4.5",
+   "status": "N/A",
+   "target": "infinite-backoff-alive stance \u2014 the supervisor-watchdog split is a posture choice; no upstream pin requires exit-on-dead-server"
+  }
+ ]
+}

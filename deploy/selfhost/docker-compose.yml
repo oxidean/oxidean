@@ -54,6 +54,9 @@ services:
       # dev-compose default.
       OXIDEAN_ACTIONS_SECRETS_KEY: ${OXIDEAN_ACTIONS_SECRETS_KEY:?set OXIDEAN_ACTIONS_SECRETS_KEY in .env}
       OXIDEAN_SECRETS_KEY: ${OXIDEAN_SECRETS_KEY:-}
+      # Shared fallback key for at-rest secret chains (e.g. stored oxpilot
+      # provider keys when OXIDEAN_OXPILOT_SECRETS_KEY is unset).
+      OXIDEAN_SESSION_SECRET: ${OXIDEAN_SESSION_SECRET:-}
       # Branch-protection update-hook helper — shipped in the image; required
       # in production (fail-closed if missing).
       OXIDEAN_PROTECTION_HELPER: /usr/local/bin/oxidean-protection-hook
@@ -69,6 +72,26 @@ services:
       OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
       OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
+      # Oxpilot agentic chat (/oxpilot) — enabled by default; configure a
+      # provider (OXIDEAN_OXPILOT_PROVIDER/_MODEL + API key) to answer chats,
+      # or set OXIDEAN_OXPILOT_ENABLED=0 to hide the feature.
+      OXIDEAN_OXPILOT_ENABLED: ${OXIDEAN_OXPILOT_ENABLED:-1}
+      OXIDEAN_OXPILOT_PROVIDER: ${OXIDEAN_OXPILOT_PROVIDER:-}
+      OXIDEAN_OXPILOT_MODEL: ${OXIDEAN_OXPILOT_MODEL:-}
+      OXIDEAN_OXPILOT_API_KEY: ${OXIDEAN_OXPILOT_API_KEY:-}
+      OXIDEAN_OXPILOT_BASE_URL: ${OXIDEAN_OXPILOT_BASE_URL:-}
+      OXIDEAN_OXPILOT_INSECURE_HTTP: ${OXIDEAN_OXPILOT_INSECURE_HTTP:-}
+      # Key-custody source for provider keys stored via admin settings
+      # (AES-256-GCM at rest; falls back to OXIDEAN_SESSION_SECRET). Unset
+      # fails closed — the admin key field then answers crypto.unavailable.
+      OXIDEAN_OXPILOT_SECRETS_KEY: ${OXIDEAN_OXPILOT_SECRETS_KEY:-}
+      OXIDEAN_OXPILOT_USER_BUDGET: ${OXIDEAN_OXPILOT_USER_BUDGET:-}
+      OXIDEAN_OXPILOT_INSTANCE_BUDGET: ${OXIDEAN_OXPILOT_INSTANCE_BUDGET:-}
+      # OXIDEAN_ENV=production refuses private webhook/git-mirror egress —
+      # self-hosts hooking LAN services opt in here. Unrelated to oxpilot:
+      # `ollama` and `openai-compatible` accept private provider endpoints
+      # without it; other providers keep the public-egress bound regardless.
+      OXIDEAN_EGRESS_ALLOW_PRIVATE: ${OXIDEAN_EGRESS_ALLOW_PRIVATE:-}
       # Git-over-SSH (in-process russh): raw TCP publish, not through caddy.
       OXIDEAN_SSH_ENABLED: ${OXIDEAN_SSH_ENABLED:-true}
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}

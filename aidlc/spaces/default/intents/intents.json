@@ -12,5 +12,12 @@
     "dirName": "261018-agentic-vcs-protocol",
     "scope": "classic",
     "status": "complete"
+  },
+  {
+    "uuid": "01a17ac6-df2f-7900-b991-f2f2548b7a1f",
+    "slug": "oxpilot-agent",
+    "dirName": "261027-oxpilot-agent",
+    "scope": "feature",
+    "status": "complete"
   }
 ]

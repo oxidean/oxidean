@@ -317,7 +317,25 @@ jobs:
       - name: web format check (oxfmt + prettier)
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
-        run: bun run test
+        # ~90 integration files serialize (fileParallelism: false) through ONE
+        # worker — the accumulated route-import graph crosses the heap ceiling
+        # mid-run (mark-compact OOM on consecutive attempts, 6 GB included).
+        # Sequential shards give each slice a fresh process (same pattern as
+        # the browser job below). The oxpilot file mounts the whole route tree,
+        # so it runs solo rather than on top of a shard's accumulated heap.
+        run: |
+          set -eo pipefail
+          bunx turbo run test --filter=@oxidean/api-client
+          cd apps/web
+          bunx vitest run --project unit
+          bunx vitest run --project integration \
+            src/routes/oxpilot.integration.test.ts
+          for shard in 1 2 3 4 5 6; do
+            bunx vitest run --project integration --shard="${shard}/6" \
+              --exclude "src/routes/oxpilot.integration.test.ts"
+          done
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
       - name: rendered stray-semicolon scan (all prerendered pages, issue #165)
@@ -669,6 +687,8 @@ jobs:
         run: make openapi-sync-check
       - name: check-skill-sync
         run: make skill-sync-check
+      - name: check-cli-parity
+        run: make cli-parity-check
       - name: check-workflow-templates
         run: make check-workflow-templates
       - name: check-workflow-templates-upstream
@@ -897,7 +917,7 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions) | binary_id(oxidean-db::dialect_oxpilot)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean

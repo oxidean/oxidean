@@ -1,0 +1,36 @@
+{
+  "stage": "domain-design",
+  "upstream_ids": [
+    "US1.1", "US1.2", "US1.3", "US1.4", "US1.5", "US1.6", "US1.7", "US1.8",
+    "US2.1", "US2.2", "US2.3",
+    "US3.1", "US3.2",
+    "US4.1", "US4.2", "US4.3", "US4.4", "US4.5", "US4.6",
+    "US5.1", "US5.2", "US5.3", "US5.4", "US5.5"
+  ],
+  "coverage": [
+    { "id": "US1.1", "status": "OK", "target": "OxpilotWeb, SessionService.Session" },
+    { "id": "US1.2", "status": "OK", "target": "OxpilotWeb, OxpilotApi, SessionService.Session" },
+    { "id": "US1.3", "status": "OK", "target": "OxpilotWeb, AgentRuntime, OxpilotTools, SessionService.Message/ToolCall" },
+    { "id": "US1.4", "status": "OK", "target": "AgentRuntime (terminal frames), OxpilotWeb" },
+    { "id": "US1.5", "status": "OK", "target": "OxpilotApi, SessionService (delete cascade)" },
+    { "id": "US1.6", "status": "OK", "target": "OxpilotApi (resume SSE route), AgentRuntime (snapshot+append)" },
+    { "id": "US1.7", "status": "OK", "target": "OxpilotWeb, OxpilotApi, ConnectorGateway.Target" },
+    { "id": "US1.8", "status": "OK", "target": "OxpilotWeb, SessionService.QueuedMessage" },
+    { "id": "US2.1", "status": "OK", "target": "SessionService.ProposedDiff, OxpilotWeb (diff card)" },
+    { "id": "US2.2", "status": "OK", "target": "AgentRuntime (PR materialize), OxpilotApi (confirm call)" },
+    { "id": "US2.3", "status": "OK", "target": "SessionService.ProposedDiff (patch view), OxpilotWeb" },
+    { "id": "US3.1", "status": "OK", "target": "OxpilotTools (actions/log read tools)" },
+    { "id": "US3.2", "status": "OK", "target": "AgentRuntime, OxpilotTools (fix via proposal path)" },
+    { "id": "US4.1", "status": "OK", "target": "ConnectorGateway.Pairing/Target, OxpilotConnector" },
+    { "id": "US4.2", "status": "OK", "target": "ConnectorGateway.Grant (connect-scope), OxpilotWeb (consent dialog)" },
+    { "id": "US4.3", "status": "OK", "target": "ConnectorGateway.Action (dispatch+cancel), OxpilotTools (exec/fs), OxpilotConnector" },
+    { "id": "US4.4", "status": "OK", "target": "ConnectorGateway (revoke→cancel_requested→connector kill), OxpilotApi" },
+    { "id": "US4.5", "status": "OK", "target": "OxpilotWeb (rail status), ConnectorGateway.Target" },
+    { "id": "US4.6", "status": "OK", "target": "OxpilotConnector, ConnectorGateway (protocol)" },
+    { "id": "US5.1", "status": "OK", "target": "LlmProviderRegistry (enablement), OxpilotApi (oxpilot.disabled)" },
+    { "id": "US5.2", "status": "OK", "target": "SessionService.UsageCounter (budget + refusal), LlmProviderRegistry" },
+    { "id": "US5.3", "status": "OK", "target": "OxpilotApi, ConnectorGateway (audit emission), SessionService (redaction-on-write)" },
+    { "id": "US5.4", "status": "OK", "target": "LlmProviderRegistry (Ollama adapter)" },
+    { "id": "US5.5", "status": "OK", "target": "OxpilotApi (SessionOnly pin, dialect test, cross-user denial), SessionService" }
+  ]
+}

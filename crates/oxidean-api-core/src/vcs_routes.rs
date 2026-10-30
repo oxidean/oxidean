@@ -100,7 +100,7 @@ async fn resolve(
         _ => {
             return Err(Box::new(err_response(
                 VcsErrorCode::NotFound.app_error("repository not found"),
-            )))
+            )));
         }
     };
 

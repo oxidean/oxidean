@@ -99,135 +99,477 @@ pub fn help_topic(group: &str, sub: &str) -> Option<&'static str> {
 
 /// `(command-path, help text)`. Every leaf lists its own flags.
 const HELP: &[(&str, &str)] = &[
-    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as + token scopes/expiry\n  ox auth refresh     mint a fresh CLI token (device grant), self-revoke the old one\n  ox auth revoke      revoke the current token on the server and log out\n  ox auth switch      change the default instance (picker, or pass the URL)\n  ox auth setup-git   register ox as a git credential helper\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
-    ("auth switch", "ox auth switch [<instance-url>]\n\nChanges the default instance used when neither --instance nor\nOXIDEAN_INSTANCE is set. With no argument, lists logged-in instances and\nprompts for one (TTY only)."),
-    ("auth login", "ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\n--scopes <list> (comma or space separated) picks the scopes the minted\ntoken carries; the default covers the full CLI surface. With no token\nflag and no --web, a piped stdin is used as the token; on a TTY an\ninteractive picker offers browser or token sign-in. The token lives in\nthe OS keyring when one is available (config.json fallback), and the\ninstance becomes the default."),
-    ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login; when the\ncredential is a PAT it also shows the token's name, scopes, expiry,\nand where it's stored (keyring or config file)."),
-    ("auth refresh", "ox auth refresh [--scopes <list>] [--keep-scopes]\n\nMints a fresh CLI token through the browser device grant and self-\nrevokes the old one. With no flags the new token gets the full\nfirst-party scope set; --keep-scopes carries the current token's\nscopes forward (--reset-scopes is accepted as a no-op alias for the\ndefault). Only refreshes stored logins — a token supplied via\nOXIDEAN_TOKEN is env-owned and cannot be refreshed here."),
-    ("auth revoke", "ox auth revoke\n\nRevokes the current PAT on the server (self-revoke) and removes the\nlocal credential. Equivalent to deleting the token at\n{instance}/settings/tokens for the token you're logged in with."),
-    ("auth setup-git", "ox auth setup-git\n\nRegisters `ox` as the git credential helper for the resolved instance\nhost: git config credential.https://<host>.helper '!ox auth\ngit-credential'. After this, `git clone`/`fetch`/`push` over HTTPS\nauthenticate with your stored ox token."),
-    ("auth logout", "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call)."),
-    ("auth token", "ox auth token\n\nPrints the token that would be sent (OXIDEAN_TOKEN wins over the\nstored credential). For scripts: TOKEN=$(ox auth token)."),
-    ("config", "ox config — local config file\n\n  list|get|set\n\nKeys: default_instance · instances.<url>.token\nStored tokens are never printed — they report as set/unset."),
-    ("config get", "ox config get <key>\n\n  default_instance            prints the configured default instance URL\n  instances.<url>.token       prints 'set' or 'unset' (never the secret)"),
-    ("config set", "ox config set <key> <value>\n\n  default_instance <url>      must name a logged-in instance\n  instances.<url>.token <t>   stores the token (600 config file)"),
-    ("completion", "ox completion <bash|zsh|fish|pwsh>\n\nPrints a static completion script for the shell — command and\nsubcommand names (per-leaf flags are not completed).\n\n  bash:  ox completion bash | sudo tee /etc/bash_completion.d/ox\n         or per-shell: source <(ox completion bash)\n  zsh:   save as _ox in a directory on $fpath, then compinit\n  fish:  ox completion fish > ~/.config/fish/completions/ox.fish\n  pwsh:  add to $PROFILE: ox completion pwsh | Out-String | Invoke-Expression"),
-    ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|templates|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
-    ("repo list", "ox repo list [--owner <user|org>]\n\n`--owner` → repo.listByOwner; bare → repo.listMine."),
+    (
+        "auth",
+        "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as + token scopes/expiry\n  ox auth refresh     mint a fresh CLI token (device grant), self-revoke the old one\n  ox auth revoke      revoke the current token on the server and log out\n  ox auth switch      change the default instance (picker, or pass the URL)\n  ox auth setup-git   register ox as a git credential helper\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)",
+    ),
+    (
+        "auth switch",
+        "ox auth switch [<instance-url>]\n\nChanges the default instance used when neither --instance nor\nOXIDEAN_INSTANCE is set. With no argument, lists logged-in instances and\nprompts for one (TTY only).",
+    ),
+    (
+        "auth login",
+        "ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\n--scopes <list> (comma or space separated) picks the scopes the minted\ntoken carries; the default covers the full CLI surface. With no token\nflag and no --web, a piped stdin is used as the token; on a TTY an\ninteractive picker offers browser or token sign-in. The token lives in\nthe OS keyring when one is available (config.json fallback), and the\ninstance becomes the default.",
+    ),
+    (
+        "auth status",
+        "ox auth status\n\nCalls auth.me on the resolved instance and prints the login; when the\ncredential is a PAT it also shows the token's name, scopes, expiry,\nand where it's stored (keyring or config file).",
+    ),
+    (
+        "auth refresh",
+        "ox auth refresh [--scopes <list>] [--keep-scopes]\n\nMints a fresh CLI token through the browser device grant and self-\nrevokes the old one. With no flags the new token gets the full\nfirst-party scope set; --keep-scopes carries the current token's\nscopes forward (--reset-scopes is accepted as a no-op alias for the\ndefault). Only refreshes stored logins — a token supplied via\nOXIDEAN_TOKEN is env-owned and cannot be refreshed here.",
+    ),
+    (
+        "auth revoke",
+        "ox auth revoke\n\nRevokes the current PAT on the server (self-revoke) and removes the\nlocal credential. Equivalent to deleting the token at\n{instance}/settings/tokens for the token you're logged in with.",
+    ),
+    (
+        "auth setup-git",
+        "ox auth setup-git\n\nRegisters `ox` as the git credential helper for the resolved instance\nhost: git config credential.https://<host>.helper '!ox auth\ngit-credential'. After this, `git clone`/`fetch`/`push` over HTTPS\nauthenticate with your stored ox token.",
+    ),
+    (
+        "auth logout",
+        "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call).",
+    ),
+    (
+        "auth token",
+        "ox auth token\n\nPrints the token that would be sent (OXIDEAN_TOKEN wins over the\nstored credential). For scripts: TOKEN=$(ox auth token).",
+    ),
+    (
+        "config",
+        "ox config — local config file\n\n  list|get|set\n\nKeys: default_instance · instances.<url>.token\nStored tokens are never printed — they report as set/unset.",
+    ),
+    (
+        "config get",
+        "ox config get <key>\n\n  default_instance            prints the configured default instance URL\n  instances.<url>.token       prints 'set' or 'unset' (never the secret)",
+    ),
+    (
+        "config set",
+        "ox config set <key> <value>\n\n  default_instance <url>      must name a logged-in instance\n  instances.<url>.token <t>   stores the token (600 config file)",
+    ),
+    (
+        "completion",
+        "ox completion <bash|zsh|fish|pwsh>\n\nPrints a static completion script for the shell — command and\nsubcommand names (per-leaf flags are not completed).\n\n  bash:  ox completion bash | sudo tee /etc/bash_completion.d/ox\n         or per-shell: source <(ox completion bash)\n  zsh:   save as _ox in a directory on $fpath, then compinit\n  fish:  ox completion fish > ~/.config/fish/completions/ox.fish\n  pwsh:  add to $PROFILE: ox completion pwsh | Out-String | Invoke-Expression",
+    ),
+    (
+        "repo",
+        "ox repo — repositories\n\n  list|view|create|fork|sync|clone|templates|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]",
+    ),
+    (
+        "repo list",
+        "ox repo list [--owner <user|org>]\n\n`--owner` → repo.listByOwner; bare → repo.listMine.",
+    ),
     ("repo view", "ox repo view <owner/name>"),
-    ("repo create", "ox repo create [<name>] [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>] [--template <ref>]\n\nOwner defaults to your user; --org creates under that org.\n--template accepts a template ref from `ox repo templates` — a builtin\nstack id, an instance pack slug, or owner/name of a template repo.\nWith no name on a TTY, an interactive wizard walks name, owner,\ntemplate, and visibility; non-interactive use still requires <name>."),
-    ("repo templates", "ox repo templates\n\nList the repository templates the connected instance offers — builtin\nstack presets, admin-provided instance packs, and template repos you\ncan read — plus the gitignore catalog and default visibility."),
-    ("repo fork", "ox repo fork <owner/name> [--into-owner <o>] [--into-name <n>]"),
-    ("repo sync", "ox repo sync <owner/name>\n\nSync a fork with its upstream (repo.forkStatus + repo.syncFork)."),
-    ("repo clone", "ox repo clone <owner/name> [<dir>]\n\nRuns `git clone <instance>/<owner>/<name>.git` locally."),
-    ("repo edit", "ox repo edit <o/n> [--description <d>] [--homepage <u>]\n              [--topics a,b,c] [--visibility public|private]"),
+    (
+        "repo create",
+        "ox repo create [<name>] [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>] [--template <ref>]\n\nOwner defaults to your user; --org creates under that org.\n--template accepts a template ref from `ox repo templates` — a builtin\nstack id, an instance pack slug, or owner/name of a template repo.\nWith no name on a TTY, an interactive wizard walks name, owner,\ntemplate, and visibility; non-interactive use still requires <name>.",
+    ),
+    (
+        "repo templates",
+        "ox repo templates\n\nList the repository templates the connected instance offers — builtin\nstack presets, admin-provided instance packs, and template repos you\ncan read — plus the gitignore catalog and default visibility.",
+    ),
+    (
+        "repo fork",
+        "ox repo fork <owner/name> [--into-owner <o>] [--into-name <n>]",
+    ),
+    (
+        "repo sync",
+        "ox repo sync <owner/name>\n\nSync a fork with its upstream (repo.forkStatus + repo.syncFork).",
+    ),
+    (
+        "repo clone",
+        "ox repo clone <owner/name> [<dir>]\n\nRuns `git clone <instance>/<owner>/<name>.git` locally.",
+    ),
+    (
+        "repo edit",
+        "ox repo edit <o/n> [--description <d>] [--homepage <u>]\n              [--topics a,b,c] [--visibility public|private]",
+    ),
     ("repo rename", "ox repo rename <o/n> <new-name>"),
-    ("repo archive", "ox repo archive <o/n>   /   ox repo unarchive <o/n>"),
-    ("repo delete", "ox repo delete <o/n> --confirm <name>\n\nSoft-deletes the repo; the server requires the repo name echoed back\nas confirmation."),
-    ("repo transfer", "ox repo transfer <o/n> <dest-owner> [--type user|org] --confirm <name>"),
+    (
+        "repo archive",
+        "ox repo archive <o/n>   /   ox repo unarchive <o/n>",
+    ),
+    (
+        "repo delete",
+        "ox repo delete <o/n> --confirm <name>\n\nSoft-deletes the repo; the server requires the repo name echoed back\nas confirmation.",
+    ),
+    (
+        "repo transfer",
+        "ox repo transfer <o/n> <dest-owner> [--type user|org] --confirm <name>",
+    ),
     ("repo star", "ox repo star <o/n>   /   ox repo unstar <o/n>"),
-    ("repo watch", "ox repo watch <o/n>   /   ox repo unwatch <o/n>"),
-    ("repo deploy-key", "ox repo deploy-key list|add|delete <o/n>\n  add --title <t> --key-file <path> [--write]   (key-file '-' = stdin)\n  delete --id <id>"),
-    ("repo collaborator", "ox repo collaborator list|add|set-role|remove <o/n>\n  add <user> --permission read|write|admin\n  set-role <user> --permission read|write|admin\n  remove <user>"),
-    ("repo invites", "ox repo invites list|create|link|revoke <o/n>\n  create --emails a@x,b@y --permission read|write|admin\n  link --permission <p> [--expires <iso>] [--max-uses <n>]\n  revoke --id <invite-id>"),
-    ("repo branch-protection", "ox repo branch-protection list|set|delete <o/n>\n  set --pattern <glob> [--reviews] [--approvals <n>] [--dismiss-stale]\n      [--conversation-resolution] [--last-push-approval]\n      [--status-contexts a,b] [--strict-status] [--force-pushes]\n      [--deletions] [--enforce-admins] [--linear-history] [--lock]\n      [--signed-commits]\n  delete --id <id>"),
-    ("repo tag-protection", "ox repo tag-protection list|set|delete <o/n>\n  set --pattern <glob> [--no-create] [--no-update] [--no-delete]\n      [--enforce-admins]\n  delete --id <id>"),
-    ("repo mirror", "ox repo mirror <o/n>                    show mirror config\n  ox repo mirror set <o/n> --remote-url <u> [--auth-kind <k>]\n      [--username <u>] [--secret <s>] [--ssh-key <k>] [--known-hosts <h>]\n      [--interval <secs>] [--disabled] [--sync-mode merge|exact]\n  ox repo mirror sync|delete|gen-key|rotate-secret <o/n>"),
-    ("repo merge-settings", "ox repo merge-settings <o/n>            show allowed strategies\n  ox repo merge-settings <o/n> --merge on|off --squash on|off --rebase on|off"),
-    ("repo lfs", "ox repo lfs <o/n> [--usage] [--objects] [--enable|--disable]"),
+    (
+        "repo watch",
+        "ox repo watch <o/n>   /   ox repo unwatch <o/n>",
+    ),
+    (
+        "repo deploy-key",
+        "ox repo deploy-key list|add|delete <o/n>\n  add --title <t> --key-file <path> [--write]   (key-file '-' = stdin)\n  delete --id <id>",
+    ),
+    (
+        "repo collaborator",
+        "ox repo collaborator list|add|set-role|remove <o/n>\n  add <user> --permission read|write|admin\n  set-role <user> --permission read|write|admin\n  remove <user>",
+    ),
+    (
+        "repo invites",
+        "ox repo invites list|create|link|revoke <o/n>\n  create --emails a@x,b@y --permission read|write|admin\n  link --permission <p> [--expires <iso>] [--max-uses <n>]\n  revoke --id <invite-id>",
+    ),
+    (
+        "repo branch-protection",
+        "ox repo branch-protection list|set|delete <o/n>\n  set --pattern <glob> [--reviews] [--approvals <n>] [--dismiss-stale]\n      [--conversation-resolution] [--last-push-approval]\n      [--status-contexts a,b] [--strict-status] [--force-pushes]\n      [--deletions] [--enforce-admins] [--linear-history] [--lock]\n      [--signed-commits]\n  delete --id <id>",
+    ),
+    (
+        "repo tag-protection",
+        "ox repo tag-protection list|set|delete <o/n>\n  set --pattern <glob> [--no-create] [--no-update] [--no-delete]\n      [--enforce-admins]\n  delete --id <id>",
+    ),
+    (
+        "repo mirror",
+        "ox repo mirror <o/n>                    show mirror config\n  ox repo mirror set <o/n> --remote-url <u> [--auth-kind <k>]\n      [--username <u>] [--secret <s>] [--ssh-key <k>] [--known-hosts <h>]\n      [--interval <secs>] [--disabled] [--sync-mode merge|exact]\n  ox repo mirror sync|delete|gen-key|rotate-secret <o/n>",
+    ),
+    (
+        "repo merge-settings",
+        "ox repo merge-settings <o/n>            show allowed strategies\n  ox repo merge-settings <o/n> --merge on|off --squash on|off --rebase on|off",
+    ),
+    (
+        "repo lfs",
+        "ox repo lfs <o/n> [--usage] [--objects] [--enable|--disable]",
+    ),
     ("repo quota", "ox repo quota <o/n> [--set <bytes>]"),
-    ("issue", "ox issue — issues\n\n  list|view|create|edit|close|reopen|delete|comment"),
-    ("issue list", "ox issue list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n               [--label <l>] [--search <q>] [--limit <n>]"),
+    (
+        "issue",
+        "ox issue — issues\n\n  list|view|create|edit|close|reopen|delete|comment",
+    ),
+    (
+        "issue list",
+        "ox issue list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n               [--label <l>] [--search <q>] [--limit <n>]",
+    ),
     ("issue view", "ox issue view <o/n> <number>"),
-    ("issue create", "ox issue create <o/n> --title <t> [--body <b> | --body-file -]"),
-    ("issue edit", "ox issue edit <o/n> <number> [--title <t>] [--body <b>]\n              [--label <name>]... [--assignee <user>]...\n\nLabels/assignees are the FULL replacement set (gh-style set semantics):\nnames are resolved to ids via label.listForRepo / issue.assigneeCandidates."),
-    ("issue close", "ox issue close <o/n> <number>   /   reopen   /   delete"),
+    (
+        "issue create",
+        "ox issue create <o/n> --title <t> [--body <b> | --body-file -]",
+    ),
+    (
+        "issue edit",
+        "ox issue edit <o/n> <number> [--title <t>] [--body <b>]\n              [--label <name>]... [--assignee <user>]...\n\nLabels/assignees are the FULL replacement set (gh-style set semantics):\nnames are resolved to ids via label.listForRepo / issue.assigneeCandidates.",
+    ),
+    (
+        "issue close",
+        "ox issue close <o/n> <number>   /   reopen   /   delete",
+    ),
     ("issue reopen", "ox issue reopen <o/n> <number>"),
     ("issue delete", "ox issue delete <o/n> <number>"),
-    ("issue comment", "ox issue comment <o/n> <number> [--body <b> | --body-file -]\n\nWith no --body, a piped stdin is used as the comment text."),
-    ("pr", "ox pr — pull requests\n\n  list|view|create|merge|diff|files|review|comment\n  ready|update-branch|checks|close|reopen|checkout"),
-    ("pr list", "ox pr list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n            [--label <l>] [--search <q>] [--limit <n>]"),
+    (
+        "issue comment",
+        "ox issue comment <o/n> <number> [--body <b> | --body-file -]\n\nWith no --body, a piped stdin is used as the comment text.",
+    ),
+    (
+        "pr",
+        "ox pr — pull requests\n\n  list|view|create|merge|diff|files|review|comment\n  ready|update-branch|checks|close|reopen|checkout",
+    ),
+    (
+        "pr list",
+        "ox pr list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n            [--label <l>] [--search <q>] [--limit <n>]",
+    ),
     ("pr view", "ox pr view <o/n> <number>"),
-    ("pr create", "ox pr create <o/n> --title <t> --base <branch> --head <branch>\n              [--body <b>] [--draft] [--head-owner <o> --head-name <n>]"),
-    ("pr merge", "ox pr merge <o/n> <number> [--method merge|squash|rebase | --merge | --squash | --rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get)."),
-    ("pr diff", "ox pr diff <o/n> <number>     print unified patches for changed files"),
-    ("pr files", "ox pr files <o/n> <number>    list changed files + status"),
-    ("pr review", "ox pr review <o/n> <number> --approve|--request-changes|--comment [--body <b>]\n               --list | --dismiss <review-id> [--reason <r>]\n               --request <user> | --unrequest <user>"),
-    ("pr comment", "ox pr comment <o/n> <number> [--body <b> | --body-file -]"),
-    ("pr ready", "ox pr ready <o/n> <number>           mark ready for review"),
-    ("pr update-branch", "ox pr update-branch <o/n> <number>   merge base into the head branch"),
-    ("pr checks", "ox pr checks <o/n> <number>          commit statuses on the head"),
+    (
+        "pr create",
+        "ox pr create <o/n> --title <t> --base <branch> --head <branch>\n              [--body <b>] [--draft] [--head-owner <o> --head-name <n>]",
+    ),
+    (
+        "pr merge",
+        "ox pr merge <o/n> <number> [--method merge|squash|rebase | --merge | --squash | --rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get).",
+    ),
+    (
+        "pr diff",
+        "ox pr diff <o/n> <number>     print unified patches for changed files",
+    ),
+    (
+        "pr files",
+        "ox pr files <o/n> <number>    list changed files + status",
+    ),
+    (
+        "pr review",
+        "ox pr review <o/n> <number> --approve|--request-changes|--comment [--body <b>]\n               --list | --dismiss <review-id> [--reason <r>]\n               --request <user> | --unrequest <user>",
+    ),
+    (
+        "pr comment",
+        "ox pr comment <o/n> <number> [--body <b> | --body-file -]",
+    ),
+    (
+        "pr ready",
+        "ox pr ready <o/n> <number>           mark ready for review",
+    ),
+    (
+        "pr update-branch",
+        "ox pr update-branch <o/n> <number>   merge base into the head branch",
+    ),
+    (
+        "pr checks",
+        "ox pr checks <o/n> <number>          commit statuses on the head",
+    ),
     ("pr close", "ox pr close <o/n> <number>   /   reopen"),
     ("pr reopen", "ox pr reopen <o/n> <number>"),
-    ("pr checkout", "ox pr checkout <o/n> <number>  fetch the head into a local branch"),
-    ("run", "ox run — actions runs\n\n  list|view|watch|rerun|cancel"),
-    ("run watch", "ox run watch <o/n> <run-id> [--interval <secs>] [--timeout <secs>]\n                  [--exit-status]\n\nPolls the run until it completes (success|failure|cancelled), printing\nstatus changes as they happen and the final run on completion. Default\ninterval is 5s; --exit-status exits nonzero on failure/cancelled."),
-    ("run list", "ox run list <o/n> [--limit n] [--page n] [--status s] [--event e]\n            [--branch b] [--workflow w] [--actor u] [--query q]"),
-    ("run view", "ox run view <o/n> <run-id> [--log] [--job <job-id>]\n\n--log streams the job log (first job unless --job)."),
+    (
+        "pr checkout",
+        "ox pr checkout <o/n> <number>  fetch the head into a local branch",
+    ),
+    (
+        "run",
+        "ox run — actions runs\n\n  list|view|watch|rerun|cancel",
+    ),
+    (
+        "run watch",
+        "ox run watch <o/n> <run-id> [--interval <secs>] [--timeout <secs>]\n                  [--exit-status]\n\nPolls the run until it completes (success|failure|cancelled), printing\nstatus changes as they happen and the final run on completion. Default\ninterval is 5s; --exit-status exits nonzero on failure/cancelled.",
+    ),
+    (
+        "run list",
+        "ox run list <o/n> [--limit n] [--page n] [--status s] [--event e]\n            [--branch b] [--workflow w] [--actor u] [--query q]",
+    ),
+    (
+        "run view",
+        "ox run view <o/n> <run-id> [--log] [--job <job-id>]\n\n--log streams the job log (first job unless --job).",
+    ),
     ("run rerun", "ox run rerun <o/n> <run-id> [--failed-only]"),
     ("run cancel", "ox run cancel <o/n> <run-id>"),
-    ("workflow", "ox workflow — workflow files\n\n  list|view|run|create\n  template list|view"),
+    (
+        "workflow",
+        "ox workflow — workflow files\n\n  list|view|run|create\n  template list|view",
+    ),
     ("workflow list", "ox workflow list <o/n> [--ref <r>]"),
-    ("workflow view", "ox workflow view <o/n> <path-or-name> [--ref <r>]\n\nPrints the workflow file (repo.blob)."),
-    ("workflow run", "ox workflow run <o/n> <workflow-id> [--ref <r>]\n\nDispatches repo.actions.dispatchWorkflow; --ref defaults to the repo's\ndefault branch."),
-    ("workflow create", "ox workflow create [<o/n> | -R o/n] (--template <id> | --file <path>|-)\n                  [--path .github/workflows/<name>.yml] [--pr <n>]\n                  [--branch <base>] [--new-branch <name>] [--no-pr]\n                  [--message <m>] [--pr-title <t>] [--pr-body <b>]\n\nDrafts a workflow file into .github/workflows/. --template pulls from\nthe catalog (see `ox workflow template list`); --file - reads stdin.\n--pr commits onto an open pull request's head branch; --new-branch\nopens a PR (use --no-pr to skip it); otherwise commits to --branch\n(default: the repo's default branch)."),
-    ("workflow template", "ox workflow template — starter-workflow catalog\n\n  list [<o/n> | -R o/n] [--category <c>] [--source builtin|instance|org]\n       [--search <q>] [--suggested]\n  view <id> [<o/n> | -R o/n]\n\nThe catalog is repo-contextual: org templates and the suggested set are\ncomputed from the repository's tree. Ids look like builtin:ci/rust,\ninstance:<slug>, org:<file-stem>."),
+    (
+        "workflow view",
+        "ox workflow view <o/n> <path-or-name> [--ref <r>]\n\nPrints the workflow file (repo.blob).",
+    ),
+    (
+        "workflow run",
+        "ox workflow run <o/n> <workflow-id> [--ref <r>]\n\nDispatches repo.actions.dispatchWorkflow; --ref defaults to the repo's\ndefault branch.",
+    ),
+    (
+        "workflow create",
+        "ox workflow create [<o/n> | -R o/n] (--template <id> | --file <path>|-)\n                  [--path .github/workflows/<name>.yml] [--pr <n>]\n                  [--branch <base>] [--new-branch <name>] [--no-pr]\n                  [--message <m>] [--pr-title <t>] [--pr-body <b>]\n\nDrafts a workflow file into .github/workflows/. --template pulls from\nthe catalog (see `ox workflow template list`); --file - reads stdin.\n--pr commits onto an open pull request's head branch; --new-branch\nopens a PR (use --no-pr to skip it); otherwise commits to --branch\n(default: the repo's default branch).",
+    ),
+    (
+        "workflow template",
+        "ox workflow template — starter-workflow catalog\n\n  list [<o/n> | -R o/n] [--category <c>] [--source builtin|instance|org]\n       [--search <q>] [--suggested]\n  view <id> [<o/n> | -R o/n]\n\nThe catalog is repo-contextual: org templates and the suggested set are\ncomputed from the repository's tree. Ids look like builtin:ci/rust,\ninstance:<slug>, org:<file-stem>.",
+    ),
     ("secret", "ox secret — actions secrets\n\n  list|set|delete"),
     ("secret list", "ox secret list <o/n>"),
-    ("secret set", "ox secret set <o/n> <NAME> [--body <v> | --file <path>]\n\nWith no --body/--file, a piped stdin supplies the value."),
+    (
+        "secret set",
+        "ox secret set <o/n> <NAME> [--body <v> | --file <path>]\n\nWith no --body/--file, a piped stdin supplies the value.",
+    ),
     ("secret delete", "ox secret delete <o/n> <NAME>"),
-    ("release", "ox release — releases\n\n  list|view|create|edit|delete|upload|download|delete-asset"),
+    (
+        "release",
+        "ox release — releases\n\n  list|view|create|edit|delete|upload|download|delete-asset",
+    ),
     ("release list", "ox release list <o/n>"),
     ("release view", "ox release view <o/n> <tag>"),
-    ("release create", "ox release create <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n                 [--draft] [--prerelease]"),
-    ("release edit", "ox release edit <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n               [--draft|--publish] [--prerelease|--no-prerelease]"),
+    (
+        "release create",
+        "ox release create <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n                 [--draft] [--prerelease]",
+    ),
+    (
+        "release edit",
+        "ox release edit <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n               [--draft|--publish] [--prerelease|--no-prerelease]",
+    ),
     ("release delete", "ox release delete <o/n> <tag>"),
-    ("release upload", "ox release upload <o/n> <tag> <file>...\n\nUploads each file as a release asset (multipart POST)."),
-    ("release download", "ox release download <o/n> <tag> [--pattern <glob>] [--dir <d>] [--clobber]"),
-    ("release delete-asset", "ox release delete-asset <o/n> <tag> <filename>"),
-    ("search", "ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]...\n           [--limit <n>]"),
-    ("browse", "ox browse [<o/n>] [--print]\n\nOpens {instance}/{owner}/{name} (or the instance root) in a browser."),
-    ("status", "ox status create <o/n> --sha <s> --context <c>\n                --state pending|success|failure|error\n                [--description <d>] [--target-url <u>]"),
-    ("org", "ox org — organizations\n\n  list|view|create|members|invites"),
+    (
+        "release upload",
+        "ox release upload <o/n> <tag> <file>...\n\nUploads each file as a release asset (multipart POST).",
+    ),
+    (
+        "release download",
+        "ox release download <o/n> <tag> [--pattern <glob>] [--dir <d>] [--clobber]",
+    ),
+    (
+        "release delete-asset",
+        "ox release delete-asset <o/n> <tag> <filename>",
+    ),
+    (
+        "search",
+        "ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]...\n           [--limit <n>]",
+    ),
+    (
+        "browse",
+        "ox browse [<o/n>] [--print]\n\nOpens {instance}/{owner}/{name} (or the instance root) in a browser.",
+    ),
+    (
+        "status",
+        "ox status create <o/n> --sha <s> --context <c>\n                --state pending|success|failure|error\n                [--description <d>] [--target-url <u>]",
+    ),
+    (
+        "org",
+        "ox org — organizations\n\n  list|view|create|members|invites",
+    ),
     ("org list", "ox org list"),
     ("org view", "ox org view <slug>"),
     ("org create", "ox org create <slug> [--name <display-name>]"),
-    ("org members", "ox org members <slug>                      list\n  ox org members add|remove|set-role <slug> <user> [--role owner|admin|member]"),
-    ("org invites", "ox org invites <slug>                        list\n  ox org invites create <slug> --emails a@x,b@y [--role <r>]\n  ox org invites link <slug> [--role <r>] [--expires <iso>] [--max-uses <n>]\n  ox org invites revoke <slug> --id <invite-id>"),
-    ("notification", "ox notification — inbox\n\n  list [--all] [--limit n] · read [<id>...|--all] · unread (count)"),
-    ("user", "ox user — profiles\n\n  view <user> · lookup <prefix> · follow|unfollow <user> · starred · watched"),
-    ("ssh-key", "ox ssh-key list · add --title <t> --key-file <path> [--no-auth|--no-sign]\n           delete --id <id>      (key-file '-' = stdin)"),
-    ("gpg-key", "ox gpg-key list · add --title <t> --key-file <path> · delete --id <id>"),
-    ("email", "ox email list · add <addr> · remove --id <id> · set-primary --id <id>\n         resend --id <id>"),
-    ("label", "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>"),
-    ("webhook", "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>"),
-    ("self-update", "ox self-update [--no-skill-refresh] [--no-mcp-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs and `oxidean`\nMCP config entries are refreshed to the new binary's shape (same\nsweeps as `ox skill install --upgrade` / `ox mcp install --upgrade`,\npreserving each entry's endpoint and credential);\n--no-skill-refresh / --no-mcp-refresh skip those steps."),
-    ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
-    ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
-    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer"),
-    ("mcp", "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config."),
-    ("mcp print", "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens."),
-    ("mcp install", "ox mcp install [--harness <id,...> | --harness all] [--detected]\n               [--project | --global] [--upgrade]\n               [--token <pat> | --token-stdin | --web | --anonymous]\n\nMerges an `oxidean` server entry into each harness's MCP config file\n— existing servers and unrelated keys are preserved, and the\n`oxidean` entry is replaced in place on re-runs (idempotent update).\nFiles are written 0600 since they may embed the bearer.\n\n--upgrade refreshes only files that already carry an `oxidean` entry\n— never prompts, never creates files; bare invocation sweeps every\nharness at both scopes. Entries keep their existing credential\nunless an explicit auth flag is passed, so\n`ox mcp install --upgrade --token-stdin` rotates tokens everywhere.\n\nAuth resolution: --token/--token-stdin use that PAT; --web runs the\nRFC 8628 device grant (browser sign-in, stored like `ox auth login`);\nwith no auth flag the stored `ox` credential for the instance is\nused; --anonymous writes no auth header (public repos only).\n\n--detected selects only harnesses found installed (config dirs, PATH\nbinaries); combined with --harness it intersects. On a TTY it prompts\nfor harnesses and scope; non-interactive requires --harness or\n--detected plus a scope flag.\n\nCodex writes `bearer_token_env_var = \"OXIDEAN_TOKEN\"` instead of the\ntoken itself — export that env var for the harness to pick it up."),
-    ("mcp status", "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401."),
-    ("mcp remove", "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`."),
-    ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
-    ("vcs", "ox vcs — side-by-side agentic source control\n\n  enable|status|commit|log|diff|show|cat|blame|history\n  merge-base|merge|rebase|checkout|ref|import|export\n\nThe VCS protocol runs alongside git on the instance: changesets are\nimmutable, content-addressed, and carry file changes without a git\ncommit. `ox vcs import`/`export` bridge to git when interop is enabled."),
-    ("vcs enable", "ox vcs enable <o/n> [--disable]\n\nToggle the repository's VCS surface (repo admin)."),
-    ("vcs status", "ox vcs status <o/n>\n\nShow enablement, heads, and object/changeset counts."),
-    ("vcs commit", "ox vcs commit <o/n> -m <msg> [--parent <cs>]...\n              [--add <vpath>=<local>]... [--modify <vpath>=<local>]...\n              [--delete <vpath>]... [--rename <old>=<new>]...\n              [--mode 100644|100755|120000]\n\nStage local files into a changeset without a git commit. Files ≤256 KiB\nride inline; larger files upload via the object route first. --mode\napplies to every --add/--modify (default: fs-derived)."),
-    ("vcs log", "ox vcs log <o/n> [--from <ref|cs|git-oid>] [--limit <n>] [--cursor <c>]\n\nFirst-parent history from `main` (or --from). --cursor continues a page."),
-    ("vcs diff", "ox vcs diff <o/n> <from> <to> [--paths <p>]... [--limit <n>] [--cursor <c>]"),
-    ("vcs show", "ox vcs show <o/n> <id>\n\nA changeset's full record — `id` accepts a changeset id or a git oid\n(the server lazy-imports the commit on a miss)."),
-    ("vcs cat", "ox vcs cat <o/n> <cs> <path>\n\nPrint one file's contents to stdout at a changeset."),
-    ("vcs blame", "ox vcs blame <o/n> <path> [--at <cs>] [--limit <n>] [--cursor <c>]"),
-    ("vcs history", "ox vcs history <o/n> <path> [--limit <n>] [--cursor <c>]\n\nEvery change touching <path>."),
+    (
+        "org members",
+        "ox org members <slug>                      list\n  ox org members add|remove|set-role <slug> <user> [--role owner|admin|member]",
+    ),
+    (
+        "org invites",
+        "ox org invites <slug>                        list\n  ox org invites create <slug> --emails a@x,b@y [--role <r>]\n  ox org invites link <slug> [--role <r>] [--expires <iso>] [--max-uses <n>]\n  ox org invites revoke <slug> --id <invite-id>",
+    ),
+    (
+        "notification",
+        "ox notification — inbox\n\n  list [--all] [--limit n] · read [<id>...|--all] · unread (count)",
+    ),
+    (
+        "user",
+        "ox user — profiles\n\n  view <user> · lookup <prefix> · follow|unfollow <user> · starred · watched",
+    ),
+    (
+        "ssh-key",
+        "ox ssh-key list · add --title <t> --key-file <path> [--no-auth|--no-sign]\n           delete --id <id>      (key-file '-' = stdin)",
+    ),
+    (
+        "gpg-key",
+        "ox gpg-key list · add --title <t> --key-file <path> · delete --id <id>",
+    ),
+    (
+        "email",
+        "ox email list · add <addr> · remove --id <id> · set-primary --id <id>\n         resend --id <id>",
+    ),
+    (
+        "label",
+        "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>",
+    ),
+    (
+        "webhook",
+        "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>",
+    ),
+    (
+        "self-update",
+        "ox self-update [--no-skill-refresh] [--no-mcp-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs and `oxidean`\nMCP config entries are refreshed to the new binary's shape (same\nsweeps as `ox skill install --upgrade` / `ox mcp install --upgrade`,\npreserving each entry's endpoint and credential);\n--no-skill-refresh / --no-mcp-refresh skip those steps.",
+    ),
+    (
+        "skill",
+        "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md.",
+    ),
+    (
+        "skill print",
+        "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling.",
+    ),
+    (
+        "skill install",
+        "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer",
+    ),
+    (
+        "pilot",
+        "ox pilot — connect this machine as an oxpilot computer-use target\n\n  ox pilot pair <code>   redeem a UI-minted pairing code + custody the verifier\n  ox pilot run           claim → execute → report loop (alias: connect)\n  ox pilot disconnect    forget a target locally (server target stays until revoked)\n  ox pilot status        list registered targets + custody probe\n\nPair a machine from the /oxpilot UI, then `ox pilot run` dials out to the\nforge — no inbound listener needed. Capabilities are the closed C3 set\n(exec_shell, fs_read, fs_write); every action requires an owner grant\napproved in the UI. Successful commands exit 0; usage-class errors exit 2.",
+    ),
+    (
+        "pilot pair",
+        "ox pilot pair <code> [--label <name>] [--caps <list>] [--verbose]\n\nRedeems a short-lived single-use pairing code minted in the /oxpilot UI,\ncustodies the returned verifier (OS keyring, or the 0600 pilot-secrets.json\nfallback on headless), and writes a pilot-targets.json row.\n\n--caps accepts a comma list and/or repeats (exec_shell, fs_read, fs_write);\nomitted pairs with the full set. The server records the granted caps — the\nloop refuses action kinds outside them locally.",
+    ),
+    (
+        "pilot run",
+        "ox pilot run [--target <id|label>] [--root <dir>] [--wait-seconds <n>]\n              [--exec-timeout <n>] [--verbose]\n\nRuns the claim → execute → report loop for one paired target: claim\nlong-polls, executes granted actions under --root's filesystem jail, and\nreports bounded, secret-scrubbed results. Heartbeats fire every 15s.\nSIGINT/SIGTERM cancel in-flight actions, report them, then exit clean;\na revoked target or dead credential exits without retrying.",
+    ),
+    (
+        "pilot disconnect",
+        "ox pilot disconnect [--target <id|label>]\n\nForgets the target locally — deletes the custodied verifier and the\npilot-targets.json row. Local-only: the server-side target and any\npending grants persist until revoked from the /oxpilot UI.",
+    ),
+    (
+        "pilot status",
+        "ox pilot status\n\nLists registered targets (id, label, caps, paired-at) with a live probe\nof verifier custody — reports keyring/file/missing per row without ever\nprinting secret material.",
+    ),
+    (
+        "pilot connect",
+        "ox pilot connect — alias for `ox pilot run`.",
+    ),
+    (
+        "mcp",
+        "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config.",
+    ),
+    (
+        "mcp print",
+        "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens.",
+    ),
+    (
+        "mcp install",
+        "ox mcp install [--harness <id,...> | --harness all] [--detected]\n               [--project | --global] [--upgrade]\n               [--token <pat> | --token-stdin | --web | --anonymous]\n\nMerges an `oxidean` server entry into each harness's MCP config file\n— existing servers and unrelated keys are preserved, and the\n`oxidean` entry is replaced in place on re-runs (idempotent update).\nFiles are written 0600 since they may embed the bearer.\n\n--upgrade refreshes only files that already carry an `oxidean` entry\n— never prompts, never creates files; bare invocation sweeps every\nharness at both scopes. Entries keep their existing credential\nunless an explicit auth flag is passed, so\n`ox mcp install --upgrade --token-stdin` rotates tokens everywhere.\n\nAuth resolution: --token/--token-stdin use that PAT; --web runs the\nRFC 8628 device grant (browser sign-in, stored like `ox auth login`);\nwith no auth flag the stored `ox` credential for the instance is\nused; --anonymous writes no auth header (public repos only).\n\n--detected selects only harnesses found installed (config dirs, PATH\nbinaries); combined with --harness it intersects. On a TTY it prompts\nfor harnesses and scope; non-interactive requires --harness or\n--detected plus a scope flag.\n\nCodex writes `bearer_token_env_var = \"OXIDEAN_TOKEN\"` instead of the\ntoken itself — export that env var for the harness to pick it up.",
+    ),
+    (
+        "mcp status",
+        "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401.",
+    ),
+    (
+        "mcp remove",
+        "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`.",
+    ),
+    (
+        "api",
+        "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON.",
+    ),
+    (
+        "vcs",
+        "ox vcs — side-by-side agentic source control\n\n  enable|status|commit|log|diff|show|cat|blame|history\n  merge-base|merge|rebase|checkout|ref|import|export\n\nThe VCS protocol runs alongside git on the instance: changesets are\nimmutable, content-addressed, and carry file changes without a git\ncommit. `ox vcs import`/`export` bridge to git when interop is enabled.",
+    ),
+    (
+        "vcs enable",
+        "ox vcs enable <o/n> [--disable]\n\nToggle the repository's VCS surface (repo admin).",
+    ),
+    (
+        "vcs status",
+        "ox vcs status <o/n>\n\nShow enablement, heads, and object/changeset counts.",
+    ),
+    (
+        "vcs commit",
+        "ox vcs commit <o/n> -m <msg> [--parent <cs>]...\n              [--add <vpath>=<local>]... [--modify <vpath>=<local>]...\n              [--delete <vpath>]... [--rename <old>=<new>]...\n              [--mode 100644|100755|120000]\n\nStage local files into a changeset without a git commit. Files ≤256 KiB\nride inline; larger files upload via the object route first. --mode\napplies to every --add/--modify (default: fs-derived).",
+    ),
+    (
+        "vcs log",
+        "ox vcs log <o/n> [--from <ref|cs|git-oid>] [--limit <n>] [--cursor <c>]\n\nFirst-parent history from `main` (or --from). --cursor continues a page.",
+    ),
+    (
+        "vcs diff",
+        "ox vcs diff <o/n> <from> <to> [--paths <p>]... [--limit <n>] [--cursor <c>]",
+    ),
+    (
+        "vcs show",
+        "ox vcs show <o/n> <id>\n\nA changeset's full record — `id` accepts a changeset id or a git oid\n(the server lazy-imports the commit on a miss).",
+    ),
+    (
+        "vcs cat",
+        "ox vcs cat <o/n> <cs> <path>\n\nPrint one file's contents to stdout at a changeset.",
+    ),
+    (
+        "vcs blame",
+        "ox vcs blame <o/n> <path> [--at <cs>] [--limit <n>] [--cursor <c>]",
+    ),
+    (
+        "vcs history",
+        "ox vcs history <o/n> <path> [--limit <n>] [--cursor <c>]\n\nEvery change touching <path>.",
+    ),
     ("vcs merge-base", "ox vcs merge-base <o/n> <a> <b>"),
-    ("vcs merge", "ox vcs merge <o/n> <a> <b> [-m <msg>]\n\nServer-side merge of two heads; conflicts print typed path entries."),
-    ("vcs rebase", "ox vcs rebase <o/n> <cs> --onto <cs> [-m <msg>]\n\nReplay one changeset's files onto a new parent."),
-    ("vcs checkout", "ox vcs checkout <o/n> <cs> [--paths <f>...] [--dir <target>]\n\nSparse working copy: --paths selects subtrees (default all), blobs are\nfetched on demand into a shared local cache, files land atomically.\nA non-empty --dir that was not made by `ox vcs checkout` is refused."),
-    ("vcs ref", "ox vcs ref list <o/n> [--limit <n>] [--cursor <c>]\n  ox vcs ref set <o/n> <name> (--expect <cs> | --create) (--to <cs> | --delete)\n\nNamed heads with compare-and-swap updates — --expect must match the\ncurrent head (or --create requires absence); --delete removes the ref."),
-    ("vcs import", "ox vcs import <o/n> [--from <ref|oid>] [--limit <n>] [--cursor <c>]\n                         [--publish]\n\nImport git history into VCS changesets (resumable via --cursor).\n--publish creates a same-named vcs ref for each imported\nrefs/heads/* tip (create-only CAS — existing refs are left\nuntouched and reported as `exists`)."),
-    ("vcs export", "ox vcs export <o/n> <cs> --branch <b> [--force]\n\nMaterialize a changeset chain as git commits and move <branch> through\nthe protected ref-update path (--force overrides fast-forward only)."),
+    (
+        "vcs merge",
+        "ox vcs merge <o/n> <a> <b> [-m <msg>]\n\nServer-side merge of two heads; conflicts print typed path entries.",
+    ),
+    (
+        "vcs rebase",
+        "ox vcs rebase <o/n> <cs> --onto <cs> [-m <msg>]\n\nReplay one changeset's files onto a new parent.",
+    ),
+    (
+        "vcs checkout",
+        "ox vcs checkout <o/n> <cs> [--paths <f>...] [--dir <target>]\n\nSparse working copy: --paths selects subtrees (default all), blobs are\nfetched on demand into a shared local cache, files land atomically.\nA non-empty --dir that was not made by `ox vcs checkout` is refused.",
+    ),
+    (
+        "vcs ref",
+        "ox vcs ref list <o/n> [--limit <n>] [--cursor <c>]\n  ox vcs ref set <o/n> <name> (--expect <cs> | --create) (--to <cs> | --delete)\n\nNamed heads with compare-and-swap updates — --expect must match the\ncurrent head (or --create requires absence); --delete removes the ref.",
+    ),
+    (
+        "vcs import",
+        "ox vcs import <o/n> [--from <ref|oid>] [--limit <n>] [--cursor <c>]\n                         [--publish]\n\nImport git history into VCS changesets (resumable via --cursor).\n--publish creates a same-named vcs ref for each imported\nrefs/heads/* tip (create-only CAS — existing refs are left\nuntouched and reported as `exists`).",
+    ),
+    (
+        "vcs export",
+        "ox vcs export <o/n> <cs> --branch <b> [--force]\n\nMaterialize a changeset chain as git commits and move <branch> through\nthe protected ref-update path (--force overrides fast-forward only).",
+    ),
 ];
 
 /// argv parse failure — process exit code 2.
@@ -929,6 +1271,31 @@ pub enum Command {
         upgrade: bool,
         detected: bool,
     },
+    /// `pilot pair <code>` — redeem a UI-minted pairing code, custody the
+    /// verifier locally, and register this machine as a connector target.
+    PilotPair {
+        code: String,
+        label: Option<String>,
+        caps: Option<Vec<String>>,
+        verbose: bool,
+    },
+    /// `pilot run` — the claim/execute/report loop against the C3 connector
+    /// routes; exits on auth revocation or a fatal route error.
+    PilotRun {
+        target: Option<String>,
+        root: Option<String>,
+        wait_seconds: Option<u64>,
+        exec_timeout: Option<u64>,
+        verbose: bool,
+    },
+    /// `pilot disconnect` — local forget only; the server-side target and
+    /// grants live until revoked in the UI.
+    PilotDisconnect {
+        target: Option<String>,
+    },
+    /// `pilot status` — list registered targets with a live custody probe
+    /// (never prints secret material).
+    PilotStatus,
     McpPrint {
         harness: Option<String>,
     },
@@ -2656,7 +3023,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     _ => {
                         return Err(usage(
                             "usage: ox workflow template view <id> [<owner/name>]",
-                        ))
+                        ));
                     }
                 }
             };
@@ -3408,6 +3775,83 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 detected: f.bools.contains("--detected"),
             }
         }
+        ("pilot", "pair", "") => {
+            // `--caps` lives ONLY in `multi_flags` — listing it as a
+            // value-flag too made `scan` route every repeat to `f.values`
+            // and drop all but the last.
+            let f = scan(tail, &["--label"], &["--verbose"], &["--caps"])?;
+            let code = f
+                .positionals
+                .first()
+                .cloned()
+                .ok_or_else(|| usage("ox pilot pair: expected <code>"))?;
+            if f.positionals.len() > 1 {
+                return Err(usage("ox pilot pair: unexpected extra arguments"));
+            }
+            // `--caps` accepts a comma list and/or repeats; merged into one
+            // set. The empty-after-split case surfaces as `Some(vec![])` so
+            // `pilot::pair` can refuse with its own message.
+            let caps = if f.multi.iter().any(|(k, _)| k == "--caps") {
+                Some(
+                    f.multi
+                        .iter()
+                        .filter(|(k, _)| k == "--caps")
+                        .map(|(_, v)| v)
+                        .flat_map(|v| v.split(','))
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<String>>(),
+                )
+            } else {
+                None
+            };
+            Command::PilotPair {
+                code,
+                label: f.values.get("--label").cloned(),
+                caps,
+                verbose: f.bools.contains("--verbose"),
+            }
+        }
+        ("pilot", "run", "") | ("pilot", "connect", "") => {
+            let f = scan(
+                tail,
+                &["--target", "--root", "--wait-seconds", "--exec-timeout"],
+                &["--verbose"],
+                &[],
+            )?;
+            expect_no_positionals(&f, "pilot run")?;
+            let parse_secs = |name: &str| -> Result<Option<u64>, UsageError> {
+                f.values
+                    .get(name)
+                    .map(|v| {
+                        v.trim().parse::<u64>().map_err(|_| {
+                            usage(format!(
+                                "ox pilot run: {name} must be a non-negative integer"
+                            ))
+                        })
+                    })
+                    .transpose()
+            };
+            Command::PilotRun {
+                target: f.values.get("--target").cloned(),
+                root: f.values.get("--root").cloned(),
+                wait_seconds: parse_secs("--wait-seconds")?,
+                exec_timeout: parse_secs("--exec-timeout")?,
+                verbose: f.bools.contains("--verbose"),
+            }
+        }
+        ("pilot", "disconnect", "") => {
+            let f = scan(tail, &["--target"], &[], &[])?;
+            expect_no_positionals(&f, "pilot disconnect")?;
+            Command::PilotDisconnect {
+                target: f.values.get("--target").cloned(),
+            }
+        }
+        ("pilot", "status", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "pilot status")?;
+            Command::PilotStatus
+        }
         ("mcp", "print", "") => {
             let f = scan(tail, &["--harness"], &[], &[])?;
             expect_no_positionals(&f, "mcp print")?;
@@ -3786,6 +4230,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "webhook",
                 "self-update",
                 "skill",
+                "pilot",
                 "mcp",
                 "api",
                 "vcs",

@@ -1,0 +1,463 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "oxpilot-tools",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR7",
+  "NFR8",
+  "NFR9"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10, NFR1.11, NFR1.12, NFR1.13, NFR1.14, NFR1.15, NFR1.16, NFR1.17, NFR1.18, NFR1.19, NFR1.20",
+   "note": "security-requirements.md — compiled-in closed 23-entry registry, unknown_tool before everything, schema gate before handler, literal proc/kind allowlists (control procs absent not filtered), ToolCtx sole identity + additionalProperties:false, session re-resolution + session-bound repo injection + post-fetch session pin, synthesized-session rpc_dispatch (no direct db/git), fixed-class write gates, user-only diff_apply, ArtifactScope-bound pr_comment, C7-only dispatch + target resolution + structured denied-marker mapping + consent re-issue hazard pinned. residual: NFR1's session-only-auth/PAT-classification clause binds U1; connector verifier custody binds U6/U7; consent/grant enforcement itself is the gateway's (U6)"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "NFR2.1, NFR2.2, NFR2.3, NFR2.4, NFR1.6, NFR1.7, NFR1.9",
+   "note": "security-requirements.md privacy rows — oxidean_core::redact on every persisted/echoed model string (split pinned across tool/service/gateway), raw exec/fs args never retained by U5, pr_comment body bounded + redacted pre-dispatch (public-artifact egress), audit detail ids, counts, refs, and bounded redacted fields; per-user isolation via ToolCtx identity + session/user-scoped lookups + not_found anti-enumeration. residual: NFR2's transcript-plaintext-after-redaction storage clause binds U2/U3; connector egress disclosure binds U7 docs"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10, NFR3.11, NFR3.12, NFR3.13",
+   "note": "performance-requirements.md — every invoke inside TOOL_CALL_TIMEOUT 60s, one rpc_dispatch per read, no wait_ms on log reads, async dispatch never blocks, list_targets only on fallback, ArtifactScope one query, diff_apply bounded ≤~53 sequential procs, output ceilings 32KiB/2KiB + 512B/2KiB ActionView pass-through, arg-side bounds schema-or-handler-enforced (path/ref/pagination/diff/files/comment/serialized-args), MAX_TOOL_ROUNDS turn discipline, minimal closed-vocabulary validator, pure catalog(). residual: NFR3's first-token/typing-echo/SSE-reconnect clauses bind U1/U3/U8"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12, NFR4.13",
+   "note": "reliability-requirements.md — typed fail-closed ToolError taxonomy (unknown_tool/invalid_args/not_found/forbidden/no_target/ambiguous_target/action_denied/diff_not_pending/apply_failed:<step>), shipped NullTools no_tools, fail-closed denied-marker decode, code-internal/message-model channel split, verbatim proc-code mapping, consent_required as success-shaped progress with the re-issue hazard pinned, async degrade through gateway, best-effort card emit after terminal CAS, post-commit swallowed audit failure, NO propose_diff dedupe stated, apply fail-stop no-rollback, mark_applied double-materialization guard, honest terminals. residual: NFR4's provider-failure surfacing binds U3; connector disconnect degrade binds U6/U7"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "NFR5.1, NFR5.2, NFR5.3, NFR5.4, NFR5.5, NFR5.6, NFR5.7",
+   "note": "observability-requirements.md — the three write-class events (oxpilot.proposal_created / diff_applied / artifact_comment) post-commit via audit::record_with, actor via find_user_by_id w/ None fallback, read-class zero rows (durable card is the read trail), no duplicate dispatch row (U6 owns action_dispatched), detail bounded to ids/counts/refs + redacted. residual: NFR5's connector-action/approval/target-lifecycle vocabulary binds U6"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "NFR6.1, NFR6.2, NFR6.3, NFR6.4, NFR6.5",
+   "note": "observability-requirements.md — durable card row as the per-invocation record, card frames through the existing emit_frame seam, tracing warn!/error! on degraded paths only (no per-call info spam), ids/counts-only log fields, no new observability stack. residual: metrics stay on existing route/proc surfaces"
+  },
+  {
+   "id": "NFR7",
+   "status": "N/A",
+   "target": "N/A",
+   "note": "NFR7 (accessibility/WCAG) binds U8's render surface — U5 emits card kinds + ref ids and bounded strings, never markup; nothing renderable originates here"
+  },
+  {
+   "id": "NFR8",
+   "status": "OK",
+   "target": "NFR4.4, NFR1.18, NFR4.13",
+   "note": "NFR8 (usability — errors name the fix) tool-surface half: ToolError.code never reaches the model so actionable guidance rides message/content — ambiguous_target instructs passing target_id, action_denied carries the reason, consent output pins do-not-re-issue, apply_failed names the failed step. residual: NFR8's disabled/unconfigured explanatory-surface clause binds U1 (flag gate) + U8 (render)"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "TS-7, TS-8, NFR1.1, NFR1.4, NFR4.5",
+   "note": "tech-stack-decisions.md + pin tests — registry-closure test (exactly the 23 names, mutation vocabulary asserted absent, diff_apply entry-less), per-handler stubbed-dispatch tests, apply negative-path tests, diff_* procs on the existing PROCEDURES set + rpc-gen, ops_json migration dialect assertion in dialect_oxpilot.rs. residual: NFR9's collect-only coverage + procedures_list_matches_dispatch clauses bind U1; connector outbound-HTTP fixtures bind U7"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "NFR1.1",
+   "status": "N/A",
+   "target": "BR1.1/BR1.2 closed compiled-in registry — security-requirements.md"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "N/A",
+   "target": "BR1.3 unknown_tool + NullTools no_tools — security-requirements.md"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "N/A",
+   "target": "BR1.4/Q8-A schema gate before handler — security-requirements.md"
+  },
+  {
+   "id": "NFR1.4",
+   "status": "N/A",
+   "target": "BR3.2/BR6.2/BR6.3/BR8.2 literal proc allowlists, absence not filtering — security-requirements.md"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "N/A",
+   "target": "BR1.2/BR7.1 kind vocabulary verbatim — security-requirements.md"
+  },
+  {
+   "id": "NFR1.6",
+   "status": "N/A",
+   "target": "BR2.3 ToolCtx sole identity + additionalProperties:false — security-requirements.md"
+  },
+  {
+   "id": "NFR1.7",
+   "status": "N/A",
+   "target": "BR2.1 session re-resolution + not_found anti-enumeration — security-requirements.md"
+  },
+  {
+   "id": "NFR1.8",
+   "status": "N/A",
+   "target": "BR2.2 session-bound repo injection — security-requirements.md"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "N/A",
+   "target": "BR4.6/BR5.2 post-fetch session pin + user-side relaxation — security-requirements.md"
+  },
+  {
+   "id": "NFR1.10",
+   "status": "N/A",
+   "target": "BR3.1/Q11-A synthesized-session rpc_dispatch — security-requirements.md"
+  },
+  {
+   "id": "NFR1.11",
+   "status": "N/A",
+   "target": "BR2.4/BR2.5 fixed class + post-resolution write gates — security-requirements.md"
+  },
+  {
+   "id": "NFR1.12",
+   "status": "N/A",
+   "target": "BR4.1/BR4.2/BR4.3 pending-only + zero git mutation + coherence — security-requirements.md"
+  },
+  {
+   "id": "NFR1.13",
+   "status": "N/A",
+   "target": "BR5.1/BR5.2/C1 user-only diff_apply — security-requirements.md"
+  },
+  {
+   "id": "NFR1.14",
+   "status": "N/A",
+   "target": "BR5.3/BR5.6 fresh-branch-only apply on caller dispatch — security-requirements.md"
+  },
+  {
+   "id": "NFR1.15",
+   "status": "N/A",
+   "target": "BR8.1/BR8.2 ArtifactScope-bound pr_comment — security-requirements.md"
+  },
+  {
+   "id": "NFR1.16",
+   "status": "N/A",
+   "target": "BR7.1/C7 dispatch_action only — security-requirements.md"
+  },
+  {
+   "id": "NFR1.17",
+   "status": "N/A",
+   "target": "BR7.2 per-kind schemas ≤ ACTION_ARGS_MAX; jail U7-side — security-requirements.md"
+  },
+  {
+   "id": "NFR1.18",
+   "status": "N/A",
+   "target": "BR7.3/BR3.4 target resolution + actionable ambiguity — security-requirements.md"
+  },
+  {
+   "id": "NFR1.19",
+   "status": "N/A",
+   "target": "BR7.4 denied-marker mapping fail-closed — security-requirements.md"
+  },
+  {
+   "id": "NFR1.20",
+   "status": "N/A",
+   "target": "BR7.4/WF6.4 consent dedupe hazard pinned in output — security-requirements.md"
+  },
+  {
+   "id": "NFR2.1",
+   "status": "N/A",
+   "target": "BR9.5/BR8.3 redact() on every persisted/echoed string — security-requirements.md"
+  },
+  {
+   "id": "NFR2.2",
+   "status": "N/A",
+   "target": "BR7.7 raw exec/fs args never retained — security-requirements.md"
+  },
+  {
+   "id": "NFR2.3",
+   "status": "N/A",
+   "target": "BR8.3/NFR2 public-artifact body bound + pre-dispatch redact — security-requirements.md"
+  },
+  {
+   "id": "NFR2.4",
+   "status": "N/A",
+   "target": "BR9.3 audit detail ids, counts, refs, and bounded redacted fields — security-requirements.md"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "N/A",
+   "target": "BR1.4/BR2.1 inside TOOL_CALL_TIMEOUT 60s — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.2",
+   "status": "N/A",
+   "target": "BR3.2/BR6.4 one dispatch per read, no wait_ms — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.3",
+   "status": "N/A",
+   "target": "BR7.5 async dispatch never blocks — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.4",
+   "status": "N/A",
+   "target": "BR7.3 list_targets only on fallback — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.5",
+   "status": "N/A",
+   "target": "BR8.1/Q10-A ArtifactScope one session query — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.6",
+   "status": "N/A",
+   "target": "BR5.3/BR4.4/UPLOAD_MAX_FILES bounded apply fan-out — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.7",
+   "status": "N/A",
+   "target": "BR9.4 self-bounded under TOOL_OUTPUT_MAX/OUTPUT_SUMMARY_MAX — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.8",
+   "status": "N/A",
+   "target": "BR6.4 tail-bounded paged log reads — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.9",
+   "status": "N/A",
+   "target": "entities ActionView verbatim SUMMARY_MAX/RESULT_MAX — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "N/A",
+   "target": "BR3.3/BR4.4/BR8.3/BR7.2 schema-or-handler-enforced arg bounds — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.11",
+   "status": "N/A",
+   "target": "MAX_TOOL_ROUNDS=8 turn discipline — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.12",
+   "status": "N/A",
+   "target": "BR1.4/Q8-A minimal closed-vocabulary validator — performance-requirements.md"
+  },
+  {
+   "id": "NFR3.13",
+   "status": "N/A",
+   "target": "entities/WF1 pure catalog() once per turn — performance-requirements.md"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "N/A",
+   "target": "BR1.3/BR1.4/BR2.1/BR4.6/BR7.3-7.6/BR5.2/BR5.7/BR8.1 typed taxonomy — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.2",
+   "status": "N/A",
+   "target": "WF1/oxpilot.rs:127–141 NullTools no_tools — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.3",
+   "status": "N/A",
+   "target": "BR7.4 fail-closed denied-marker decode — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.4",
+   "status": "N/A",
+   "target": "BR3.4/BR7.3/BR7.4 code-internal/message-model split — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.5",
+   "status": "N/A",
+   "target": "BR3.4 verbatim proc-code mapping — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.6",
+   "status": "N/A",
+   "target": "BR7.4/U6-WF2 consent success-shape — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "N/A",
+   "target": "BR7.5/BR7.6 async degrade + open state vocabulary — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.8",
+   "status": "N/A",
+   "target": "BR4.5/BR7.4 terminalled-turn emit drop — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.9",
+   "status": "N/A",
+   "target": "BR9.1/BR9.3 post-commit swallowed audit failure — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "N/A",
+   "target": "BR4.1/entities no propose_diff dedupe — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.11",
+   "status": "N/A",
+   "target": "BR5.7 apply fail-stop no-rollback — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.12",
+   "status": "N/A",
+   "target": "BR5.2/BR5.5 mark_applied double-materialization guard — reliability-requirements.md"
+  },
+  {
+   "id": "NFR4.13",
+   "status": "N/A",
+   "target": "BR7.4/BR5.7 honest terminals — reliability-requirements.md"
+  },
+  {
+   "id": "NFR5.1",
+   "status": "N/A",
+   "target": "BR9.1 oxpilot.proposal_created — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.2",
+   "status": "N/A",
+   "target": "BR9.1/BR5.5 oxpilot.diff_applied — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.3",
+   "status": "N/A",
+   "target": "BR9.1/BR8.2 oxpilot.artifact_comment — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.4",
+   "status": "N/A",
+   "target": "BR9.1/BR9.3 record_with post-commit + actor fallback — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.5",
+   "status": "N/A",
+   "target": "BR9.2/C6 read-class zero audit rows — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.6",
+   "status": "N/A",
+   "target": "BR9.1/U6-BR7 no duplicate dispatch row — observability-requirements.md"
+  },
+  {
+   "id": "NFR5.7",
+   "status": "N/A",
+   "target": "BR9.3/NFR2.4 bounded redacted detail — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "N/A",
+   "target": "BR9.2 durable card read trail — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "N/A",
+   "target": "BR4.5/BR7.4 card frames via emit_frame seam — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "N/A",
+   "target": "NFR6/BR9.3 warn/error-only tracing — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "N/A",
+   "target": "BR9.3/NFR2 ids/counts-only log fields — observability-requirements.md"
+  },
+  {
+   "id": "NFR6.5",
+   "status": "N/A",
+   "target": "NFR6 no new observability stack — observability-requirements.md"
+  },
+  {
+   "id": "NFR-S1",
+   "status": "N/A",
+   "target": "entities/oxpilot.rs:1046 stateless shared executor — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S2",
+   "status": "N/A",
+   "target": "BR1.1/entities static pure registry — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S3",
+   "status": "N/A",
+   "target": "BR7.1/gateway.rs lock_for per-target serialization — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S4",
+   "status": "N/A",
+   "target": "BR3.1/Q11 per-call synthesized ctx — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S5",
+   "status": "N/A",
+   "target": "NFR3.2-3.6 bounded per-call fan-out — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S6",
+   "status": "N/A",
+   "target": "BR8.1/entities ephemeral O(session) derived state — scalability-requirements.md"
+  },
+  {
+   "id": "NFR-S7",
+   "status": "N/A",
+   "target": "BR1.1/Q7-A catalog growth as code-review event — scalability-requirements.md"
+  },
+  {
+   "id": "TS-1",
+   "status": "N/A",
+   "target": "BR4.5 emit_frame pub(crate) → same-crate placement — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-2",
+   "status": "N/A",
+   "target": "BR3.1/Q11-A rpc_dispatch + build_rpc_ctx_with_session — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-3",
+   "status": "N/A",
+   "target": "BR9.1 audit::record_with ctx-free entry — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-4",
+   "status": "N/A",
+   "target": "BR9.5 oxidean_core::redact free function — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-5",
+   "status": "N/A",
+   "target": "BR1.4/Q8-A hand-rolled validator; schemars is generation-only, no runtime crate exists — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-6",
+   "status": "N/A",
+   "target": "serde_json/base64 already linked — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-7",
+   "status": "N/A",
+   "target": "C1/AC5.3.3 diff_* procs + ops_json additive migration ×3 — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-8",
+   "status": "N/A",
+   "target": "Q13-A registry-closure + handler + apply-negative pin tests — tech-stack-decisions.md"
+  },
+  {
+   "id": "TS-9",
+   "status": "N/A",
+   "target": "AGENTS.md dependency discipline — tech-stack-decisions.md"
+  }
+ ]
+}

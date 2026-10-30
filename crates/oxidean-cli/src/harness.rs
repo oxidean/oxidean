@@ -276,7 +276,9 @@ fn prompt_harnesses<'a, T: HarnessRow>(
     for (i, h) in detected.iter().chain(&rest).enumerate() {
         eprintln!("  {:2}. {}", i + 1, h.label());
     }
-    eprintln!("numbers comma-separated, 'd' for detected, or 'a' for all — `--harness <id>` skips this prompt:");
+    eprintln!(
+        "numbers comma-separated, 'd' for detected, or 'a' for all — `--harness <id>` skips this prompt:"
+    );
     let mut line = String::new();
     std::io::stdin()
         .read_line(&mut line)

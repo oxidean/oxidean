@@ -57,8 +57,7 @@ macro_rules! map_settings {
     }};
 }
 
-const SELECT: &str =
-    "SELECT default_ttl_days, max_ttl_days, allow_never_expire FROM instance_pat_settings WHERE id = 1";
+const SELECT: &str = "SELECT default_ttl_days, max_ttl_days, allow_never_expire FROM instance_pat_settings WHERE id = 1";
 
 pub async fn get_pat_settings(pool: &DbPool) -> Result<PatSettingsRow, String> {
     match pool {

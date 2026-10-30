@@ -2380,7 +2380,15 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     }
     const log = page.locator('[data-testid="repo-actions-job-log"]');
     await log.waitFor({ state: "visible", timeout: 30_000 });
-    const logText = (await log.innerText?.()) ?? "";
+    // Same settle race as the run detail above: the log pane paints its
+    // "Loading log…" placeholder before the content query resolves —
+    // poll the text until the marker lands instead of reading once.
+    let logText = "";
+    for (let i = 0; i < 30; i++) {
+      logText = (await log.innerText?.()) ?? "";
+      if (logText.includes(marker)) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     if (!logText.includes(marker)) {
       throw new Error(`job log missing marker ${marker}: ${logText.slice(0, 500)}`);
     }

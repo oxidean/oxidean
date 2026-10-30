@@ -1,0 +1,1072 @@
+{
+  "stage": "code-generation",
+  "unit": "oxpilot-ui",
+  "upstream_ids": [
+    "AC1.1.1",
+    "AC1.1.2",
+    "AC1.1.3",
+    "AC1.1.4",
+    "AC1.1.5",
+    "AC1.2.1",
+    "AC1.2.2",
+    "AC1.2.3",
+    "AC1.3.1",
+    "AC1.3.2",
+    "AC1.3.3",
+    "AC1.3.4",
+    "AC1.3.5",
+    "AC1.3.6",
+    "AC1.4.1",
+    "AC1.4.2",
+    "AC1.5.1",
+    "AC1.5.2",
+    "AC1.5.3",
+    "AC1.6.1",
+    "AC1.7.1",
+    "AC1.7.2",
+    "AC1.7.3",
+    "AC1.8.1",
+    "AC1.8.2",
+    "AC2.1.1",
+    "AC2.1.2",
+    "AC2.2.1",
+    "AC2.2.2",
+    "AC2.2.3",
+    "AC2.2.4",
+    "AC2.3.1",
+    "AC3.1.1",
+    "AC3.1.2",
+    "AC3.1.3",
+    "AC3.2.1",
+    "AC4.1.1",
+    "AC4.1.2",
+    "AC4.1.3",
+    "AC4.1.4",
+    "AC4.2.1",
+    "AC4.2.2",
+    "AC4.2.3",
+    "AC4.3.1",
+    "AC4.3.2",
+    "AC4.3.3",
+    "AC4.3.4",
+    "AC4.3.5",
+    "AC4.4.1",
+    "AC4.4.2",
+    "AC4.4.3",
+    "AC4.5.1",
+    "AC5.1.1",
+    "AC5.1.5",
+    "AC5.2.2",
+    "AC5.5.4",
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR1.4",
+    "BR10.1",
+    "BR10.2",
+    "BR10.3",
+    "BR10.4",
+    "BR11.1",
+    "BR11.2",
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR3.1",
+    "BR3.2",
+    "BR3.3",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR5.4",
+    "BR5.5",
+    "BR5.6",
+    "BR6.1",
+    "BR6.2",
+    "BR6.3",
+    "BR7.1",
+    "BR7.2",
+    "BR7.3",
+    "BR7.4",
+    "BR8.1",
+    "BR8.2",
+    "BR9.1",
+    "BR9.2",
+    "BR9.3",
+    "NFR1.1",
+    "NFR1.10",
+    "NFR1.11",
+    "NFR1.12",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR2.3",
+    "NFR2.4",
+    "NFR2.5",
+    "NFR3.1",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.12",
+    "NFR3.13",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR4.1",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR4.13",
+    "NFR4.14",
+    "NFR4.15",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR7.1",
+    "NFR7.2",
+    "NFR7.3",
+    "NFR7.4",
+    "NFR7.5",
+    "NFR8.1",
+    "NFR8.2"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/session-row.tsrx",
+      "note": "BR1.2, BR1.3 \u2014 WF1 (sessions list over oxpilot.session_list, newest-first server order), OxpilotSess"
+    },
+    {
+      "id": "AC1.1.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/session-row.tsrx",
+      "note": "BR1.2, BR1.3 \u2014 WF1, OxpilotSessionRow \u2014 title link, owner/repo \u00b7 branch, status badge, formatRelativ"
+    },
+    {
+      "id": "AC1.1.3",
+      "status": "OK",
+      "target": "apps/web/src/test/route-coverage.manifest.ts",
+      "note": "BR11.1, BR11.2, BR1.2, BR1.3 \u2014 Procedure/file deltas \u2014 U1's registration triangle (SHELLS + astro + "
+    },
+    {
+      "id": "AC1.1.4",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "BR1.2, BR1.3 \u2014 WF1 \u2014 sessions EmptyState pointing at New session"
+    },
+    {
+      "id": "AC1.1.5",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "BR1.2, BR1.3 \u2014 WF1 step 1 \u2014 auth.me gate only; no role check exists or is added (FR1.6)"
+    },
+    {
+      "id": "AC1.2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "BR2.1, BR2.2, BR2.3 \u2014 WF2, NewSessionDialog \u2014 repo Select, branch Select, goal Textarea, optional ta"
+    },
+    {
+      "id": "AC1.2.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "BR2.1, BR2.2, BR2.3 \u2014 WF2 step 3 \u2014 session_create proc call + navigate; persistence itself is the se"
+    },
+    {
+      "id": "AC1.2.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "BR2.1, BR2.2, BR2.3 \u2014 WF2, NewSessionDialog \u2014 labelled, focus-trapped, Esc-dismissable Dialog"
+    },
+    {
+      "id": "AC1.3.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 WF4 (POST fetch-reader send), WF5 (EventSource attach, snapshot\u2192append) \u2014 clie"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 WF3 step 4, WF11 \u2014 three-pane layout: nav rail + main transcript + complementa"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 WF3 step 3 \u2014 remount re-seeds from the snapshot; reopening restores the transc"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 Accessibility pins \u2014 aria-live=polite+aria-atomic=false boundary announcements"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 server/tool side \u2014 repo context is served by U5's tool catalog, not the UI"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "BR3.1, BR3.2, BR4.2 \u2014 WF6, OxpilotToolCall \u2014 tool frames + snapshot tool_calls rows render name + su"
+    },
+    {
+      "id": "AC1.4.1",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR2.4, BR9.1, BR9.2 \u2014 WF12 \u2014 terminal{error,code} renders the inline error notice + Retry (the prova"
+    },
+    {
+      "id": "AC1.4.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR9.1, BR9.2 \u2014 WF12, WF4 \u2014 composer stays usable after error; transcript preserved (reseed never dro"
+    },
+    {
+      "id": "AC1.5.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/confirm-dialog.tsrx",
+      "note": "BR6.3, BR9.1 \u2014 WF9, OxpilotConfirmDialog \u2014 explicit delete confirmation (contribution; the cascade i"
+    },
+    {
+      "id": "AC1.5.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/session-row.tsrx",
+      "note": "BR6.3, BR9.1 \u2014 server side \u2014 U2's delete cascade removes the rows; the UI only calls session_delete "
+    },
+    {
+      "id": "AC1.5.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/confirm-dialog.tsrx",
+      "note": "BR6.3, BR9.1 \u2014 WF9 \u2014 invalidate + the row vanishes from the index on delete"
+    },
+    {
+      "id": "AC1.6.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR4.2 \u2014 WF5, Q4-A/Q5-A \u2014 EventSource auto-reconnect, snapshot wholesale-replaces state, append dedup"
+    },
+    {
+      "id": "AC1.7.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "BR1.3, BR1.4, BR7.1, BR7.4 \u2014 WF1 (Computer use section), WF8 (connect), WF9 (disconnect/revoke), Oxp"
+    },
+    {
+      "id": "AC1.7.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/settings/ai.tsrx",
+      "note": "BR1.3, BR1.4, BR7.1 \u2014 WF1 \u2014 id=targets anchor; Procedure/file deltas \u2014 settings/ai.tsrx gains the Ap"
+    },
+    {
+      "id": "AC1.7.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "BR1.3, BR1.4, BR7.1 \u2014 WF1 \u2014 targets EmptyState explains the connector + Connect CTA (M1 copy)"
+    },
+    {
+      "id": "AC1.8.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "BR4.1, BR5.1 \u2014 WF4 step 2, Q6-A \u2014 live-turn sends route to oxpilot.message_queue; queued rows delive"
+    },
+    {
+      "id": "AC1.8.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/queued-row.tsrx",
+      "note": "BR4.1, BR5.1 \u2014 WF6, OxpilotQueuedRow \u2014 \u25d0 queued chip visible in transcript as pending"
+    },
+    {
+      "id": "AC2.1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "BR5.1, BR5.3 \u2014 WF10, OxpilotDiffCard + ContextDrawer diff pane \u2014 per-file patch view via parseUnifie"
+    },
+    {
+      "id": "AC2.1.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR5.1, BR5.3 \u2014 WF6/WF10 \u2014 card{diff} resolves ref_id to the persisted proposal; the card IS the arti"
+    },
+    {
+      "id": "AC2.2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR5.3, BR5.5, BR6.3 \u2014 WF10 step 4 + WF9 \u2014 Create branch + PR requires the explicit confirm; diff_app"
+    },
+    {
+      "id": "AC2.2.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "BR5.3, BR6.3 \u2014 WF10 \u2014 {pr_ref} renders an AppLink to the created pull request + toast"
+    },
+    {
+      "id": "AC2.2.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR5.3, BR6.3 \u2014 WF10 step 4 \u2014 the UI never calls diff_apply outside the explicit confirm path; no aut"
+    },
+    {
+      "id": "AC2.2.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR5.3, BR6.3 \u2014 server side \u2014 the PR-body provenance line is minted by U5's diff_apply, not the UI"
+    },
+    {
+      "id": "AC2.3.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "BR5.3 \u2014 WF10 step 3 \u2014 Show patch toggles the raw unified diff in a copyable pre"
+    },
+    {
+      "id": "AC3.1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "BR5.1, BR5.4 \u2014 tool side \u2014 U5's actions_* read tools perform the listing/fetch"
+    },
+    {
+      "id": "AC3.1.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "BR5.1, BR5.4 \u2014 WF6, OxpilotToolCall \u2014 the in-transcript cards render the inspected run/job/log calls"
+    },
+    {
+      "id": "AC3.1.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "BR5.1, BR5.4 \u2014 Scope/WF6 \u2014 no rerun/cancel/approve control exists anywhere in the design (absence is"
+    },
+    {
+      "id": "AC3.2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "BR5.3, BR9.1 \u2014 WF10 \u2014 a CI fix proposal rides the identical diff card + confirm + apply path (contri"
+    },
+    {
+      "id": "AC4.1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR1.4, BR7.1, BR7.2 \u2014 connector side \u2014 U7's dial-out client; the UI only displays the pair command t"
+    },
+    {
+      "id": "AC4.1.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR7.3, BR1.4, BR7.1, BR7.2 \u2014 WF8 \u2014 pairing_create mints the short-lived code; the two-step dialog is"
+    },
+    {
+      "id": "AC4.1.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR1.4, BR7.1, BR7.2 \u2014 custody side \u2014 verifier hashing/encryption is U6/U7; no secret material ever r"
+    },
+    {
+      "id": "AC4.1.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR1.4, BR7.1, BR7.2 \u2014 WF8 step 2 \u2014 code rendered once in CopyCommand, never re-fetched, never stored"
+    },
+    {
+      "id": "AC4.2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR6.1, BR7.1 \u2014 WF8 step 1 \u2014 the dialog names exec_shell + fs_read/fs_write caps, GUI disabled+noted;"
+    },
+    {
+      "id": "AC4.2.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "BR6.1, BR7.1 \u2014 WF8 \u2014 Cancel/Esc before Continue creates nothing; Deny paths leave grants denied (aud"
+    },
+    {
+      "id": "AC4.2.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "BR6.1, BR7.1 \u2014 server-enforced \u2014 the UI only ever calls grant_respond; it cannot fabricate a connect"
+    },
+    {
+      "id": "AC4.3.1",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.1, BR6.2, BR7.2 \u2014 server side \u2014 live-grant enforcement is U6's dispatch check; U5/U7 execute"
+    },
+    {
+      "id": "AC4.3.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/consent-card.tsrx",
+      "note": "BR5.5, BR6.1, BR6.2, BR7.2 \u2014 WF7, OxpilotConsentCard + Q9-A \u2014 per-action grants render the in-transc"
+    },
+    {
+      "id": "AC4.3.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.1, BR6.2, BR7.2 \u2014 server side \u2014 audit rows are emitted by U6/U5"
+    },
+    {
+      "id": "AC4.3.4",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.1, BR6.2, BR7.2 \u2014 WF12, WF7 \u2014 offline/disconnected target surfaces the tool-call error card + De"
+    },
+    {
+      "id": "AC4.3.5",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.1, BR6.2, BR7.2 \u2014 WF7 step 3 \u2014 the frozen Denied outcome line tells the user; the agent continue"
+    },
+    {
+      "id": "AC4.4.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/confirm-dialog.tsrx",
+      "note": "BR6.3 \u2014 WF9 \u2014 Revoke/Disconnect require the explicit AlertDialog confirm naming the target"
+    },
+    {
+      "id": "AC4.4.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.3 \u2014 server side \u2014 pending-grant termination on revoke is U6's transition"
+    },
+    {
+      "id": "AC4.4.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "BR6.3 \u2014 server side \u2014 refusal of new actions is U6's; the UI renders the revoked lifecycle row verba"
+    },
+    {
+      "id": "AC4.5.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/sessions-rail.tsrx",
+      "note": "BR8.2, BR3.1, BR8.1 \u2014 WF11, SessionsRail \u2014 target name + status text chips in the rail footer; rail "
+    },
+    {
+      "id": "AC5.1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/flag-off.tsrx",
+      "note": "BR1.1, BR6.3 \u2014 WF1 step 3, OxpilotFlagOff (M7) \u2014 explanatory disable state naming OXIDEAN_OXPILOT_* "
+    },
+    {
+      "id": "AC5.1.5",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "BR1.1, BR6.3 \u2014 WF1 step 3 \u2014 no interactive controls render when disabled; denials are server-enforce"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR9.2 \u2014 WF4 step 3, WF12 \u2014 budget_exceeded renders the named-env in-session notice; composer stays u"
+    },
+    {
+      "id": "AC5.5.4",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "BR3.3, BR9.1 \u2014 Negative paths \u2014 foreign session snapshot/session_get not_found renders the error not"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "rules.md BR1.1"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "rules.md BR1.2"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "rules.md BR1.3"
+    },
+    {
+      "id": "BR1.4",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "rules.md BR1.4"
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "rules.md BR2.1"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "rules.md BR2.2"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "rules.md BR2.3"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/new-session-dialog.tsrx",
+      "note": "rules.md BR2.4"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "rules.md BR3.1"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "rules.md BR3.2"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "rules.md BR3.3"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "rules.md BR4.1"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "rules.md BR4.2"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "rules.md BR4.3"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "rules.md BR5.1"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "rules.md BR5.2"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "rules.md BR5.3"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/tool-call-card.tsrx",
+      "note": "rules.md BR5.4"
+    },
+    {
+      "id": "BR5.5",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/diff-card.tsrx",
+      "note": "rules.md BR5.5"
+    },
+    {
+      "id": "BR5.6",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/queued-row.tsrx",
+      "note": "rules.md BR5.6"
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/consent-card.tsrx",
+      "note": "rules.md BR6.1"
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/consent-card.tsrx",
+      "note": "rules.md BR6.2"
+    },
+    {
+      "id": "BR6.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/confirm-dialog.tsrx",
+      "note": "rules.md BR6.3"
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "rules.md BR7.1"
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "rules.md BR7.2"
+    },
+    {
+      "id": "BR7.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "rules.md BR7.3"
+    },
+    {
+      "id": "BR7.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "rules.md BR7.4"
+    },
+    {
+      "id": "BR8.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "rules.md BR8.1"
+    },
+    {
+      "id": "BR8.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "rules.md BR8.2"
+    },
+    {
+      "id": "BR9.1",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx",
+      "note": "rules.md BR9.1"
+    },
+    {
+      "id": "BR9.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "rules.md BR9.2"
+    },
+    {
+      "id": "BR9.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/composer.tsrx",
+      "note": "rules.md BR9.3"
+    },
+    {
+      "id": "BR10.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/composer.tsrx",
+      "note": "rules.md BR10.1"
+    },
+    {
+      "id": "BR10.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "rules.md BR10.2"
+    },
+    {
+      "id": "BR10.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/queued-row.tsrx",
+      "note": "rules.md BR10.3"
+    },
+    {
+      "id": "BR10.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "rules.md BR10.4"
+    },
+    {
+      "id": "BR11.1",
+      "status": "OK",
+      "target": "apps/web/src/test/route-coverage.manifest.ts",
+      "note": "rules.md BR11.1"
+    },
+    {
+      "id": "BR11.2",
+      "status": "OK",
+      "target": "apps/web/src/test/browser-coverage.manifest.ts",
+      "note": "rules.md BR11.2"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.1"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.2"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.3"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.4"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.5"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.6"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.7"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.8"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.9"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.10"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.11"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/connect-dialog.tsrx",
+      "note": "nfr-requirements NFR1.12"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "nfr-requirements NFR2.1"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "nfr-requirements NFR2.2"
+    },
+    {
+      "id": "NFR2.3",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "nfr-requirements NFR2.3"
+    },
+    {
+      "id": "NFR2.4",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "nfr-requirements NFR2.4"
+    },
+    {
+      "id": "NFR2.5",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/target-row.tsrx",
+      "note": "nfr-requirements NFR2.5"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.1"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.2"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.3"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.4"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.5"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.6"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.7"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.8"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.9"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.10"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.11"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.12"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR3.13"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.1"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.2"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.3"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.4"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.5"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.6"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.7"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.8"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.9"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.10"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.11"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.12"
+    },
+    {
+      "id": "NFR4.13",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.13"
+    },
+    {
+      "id": "NFR4.14",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.14"
+    },
+    {
+      "id": "NFR4.15",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts",
+      "note": "nfr-requirements NFR4.15"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "nfr-requirements NFR5.1"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "apps/web/src/components/oxpilot/transcript.tsrx",
+      "note": "nfr-requirements NFR5.2"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "nfr-requirements NFR6.1"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "nfr-requirements NFR6.2"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "nfr-requirements NFR6.3"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-queries.ts",
+      "note": "nfr-requirements NFR6.4"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "nfr-requirements NFR7.1"
+    },
+    {
+      "id": "NFR7.2",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "nfr-requirements NFR7.2"
+    },
+    {
+      "id": "NFR7.3",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "nfr-requirements NFR7.3"
+    },
+    {
+      "id": "NFR7.4",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "nfr-requirements NFR7.4"
+    },
+    {
+      "id": "NFR7.5",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx",
+      "note": "nfr-requirements NFR7.5"
+    },
+    {
+      "id": "NFR8.1",
+      "status": "OK",
+      "target": "apps/web/vite-plugins/tanstack-ai-octane.ts",
+      "note": "nfr-requirements NFR8.1"
+    },
+    {
+      "id": "NFR8.2",
+      "status": "OK",
+      "target": "apps/web/vite-plugins/tanstack-ai-octane.ts",
+      "note": "nfr-requirements NFR8.2"
+    }
+  ]
+}

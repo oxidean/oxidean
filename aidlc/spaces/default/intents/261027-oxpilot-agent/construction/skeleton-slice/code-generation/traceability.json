@@ -1,0 +1,126 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-skeleton-slice",
+  "upstream_ids": [
+    "AC1.1.1", "AC1.1.3", "AC1.1.5", "AC1.2.2", "AC1.3.1", "AC1.3.2",
+    "AC1.3.3", "AC1.3.4", "AC1.3.5", "AC1.3.6", "AC5.1.1", "AC5.1.3",
+    "AC5.1.4", "AC5.1.5", "AC5.3.3", "AC5.5.1", "AC5.5.2", "AC5.5.3",
+    "AC5.5.4"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs; apps/web/src/lib/oxpilot-queries.ts",
+      "note": "caller-scoped newest-first session_list proc + query factory; index render is u8's share"
+    },
+    {
+      "id": "AC1.1.3",
+      "status": "OK",
+      "target": "crates/oxidean-web/src/shells.rs; apps/web/src/pages/oxpilot.astro; apps/web/src/pages/oxpilot/[session].astro; apps/web/src/lib/route-params.ts; apps/web/src/test/route-coverage.manifest.ts",
+      "note": "full route-registration set: SHELLS x2, astro x2, RESERVED_TOP_SEGMENTS, manifest rows x2"
+    },
+    {
+      "id": "AC1.1.5",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.tsrx; apps/web/src/routes/oxpilot.integration.test.ts",
+      "note": "flag-off explanatory state rendered from oxpilot.status (gate-exempt), names OXIDEAN_OXPILOT_ENABLED"
+    },
+    {
+      "id": "AC1.2.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs; crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "sessions persisted with owner, repo context, goal; repo_id validated against caller-visible repo"
+    },
+    {
+      "id": "AC1.3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs (post_chat)",
+      "note": "POST claims ActiveTurn atomically and detaches the turn task; claim conflict -> 409 turn_active"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs (run_turn); crates/oxidean-api-core/src/oxpilot.rs (StubProvider)",
+      "note": "deterministic stub streams append deltas then terminal done; assistant row persisted complete"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs (get_stream); apps/web/src/lib/oxpilot-stream.ts",
+      "note": "snapshot -> append* -> terminal contract; GET emits snapshot then live fanout"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs (emitted_deltas replay, Lagged resync)",
+      "note": "mid-turn attach replays buffered deltas; Lagged reader resyncs from buffer; transport close detaches"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-chat.tsrx; apps/web/src/routes/oxpilot.$session.tsrx",
+      "note": "useChat fetcher translates Oxpilot frames to AG-UI events; streamed reply renders via chat.messages"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "OK",
+      "target": "apps/web/src/lib/oxpilot-stream.ts (createAppendDedupe)",
+      "note": "(message_id, seq) dedupe prevents double-render across snapshot/live boundary"
+    },
+    {
+      "id": "AC5.1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/lib.rs (PROCEDURES/dispatch); crates/oxidean-api/tests/oxpilot.rs::pat_credential_denied_session_only",
+      "note": "all oxpilot procs SessionOnly; PAT denied"
+    },
+    {
+      "id": "AC5.1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs; crates/oxidean-api/tests/oxpilot.rs::session_create_list_and_cross_user_isolation",
+      "note": "ownership-filtered reads; cross-user access denied without enumeration"
+    },
+    {
+      "id": "AC5.1.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs (enablement); crates/oxidean-api/tests/oxpilot.rs::sse_routes_deny_when_disabled",
+      "note": "fail-closed when OXIDEAN_OXPILOT_ENABLED unset; SSE routes deny identically"
+    },
+    {
+      "id": "AC5.1.5",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/redact.rs; crates/oxidean-api-oxpilot/src/routes.rs (persist path)",
+      "note": "assistant content redacted via ***-mask pattern table before persistence"
+    },
+    {
+      "id": "AC5.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs (sweep); crates/oxidean-db/src/oxpilot.rs (sweep_oxpilot_streaming_messages)",
+      "note": "boot sweep marks orphaned streaming rows error; interrupted transcripts render correctly"
+    },
+    {
+      "id": "AC5.5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api/tests/oxpilot.rs (10 tests); crates/oxidean-db/tests/dialect_oxpilot.rs; crates/oxidean-api-oxpilot/src/lib.rs (parity tests)",
+      "note": "standard strategy: RPC+SSE integration, dialect parity, dispatch/SessionOnly closed-set units"
+    },
+    {
+      "id": "AC5.5.2",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.integration.test.ts; apps/web/src/lib/oxpilot-stream.unit.test.ts; apps/web/e2e/stack/oxpilot.stack.test.ts",
+      "note": "happy-dom mount/flag-off/denial + stream units + HTTP-level SSE stack test with smoke ceilings"
+    },
+    {
+      "id": "AC5.5.3",
+      "status": "OK",
+      "target": "apps/web/src/routes/oxpilot.browser.test.tsx; apps/web/src/test/browser-coverage.manifest.ts",
+      "note": "Chromium Select/portal interaction proof + manifest row (DOM-race class)"
+    },
+    {
+      "id": "AC5.5.4",
+      "status": "OK",
+      "target": ".env.example; docs/CONFIGURATION.md; .railway/railway.ts; scripts/dev-auth/run-stack-e2e.sh",
+      "note": "env vars documented, preserve()-marked, exported for stack e2e"
+    }
+  ]
+}

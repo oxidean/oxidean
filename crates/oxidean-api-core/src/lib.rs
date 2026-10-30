@@ -29,6 +29,7 @@ pub mod mirror;
 pub mod notify;
 pub mod oauth;
 pub mod org;
+pub mod oxpilot;
 pub mod packages;
 pub mod pages;
 pub mod pat;

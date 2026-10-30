@@ -315,6 +315,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+  {
+    route: "admin/oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/oxpilot.integration.test.ts",
+      },
+    ],
+  },
 
   // --- forge repo chrome + code browse (11.1-04) ---
   {
@@ -782,6 +791,26 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/notifications.integration.test.ts",
+      },
+    ],
+  },
+
+  // --- /oxpilot (skeleton slice → full surface in the oxpilot-ui unit) ---
+  {
+    route: "oxpilot.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oxpilot.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "oxpilot.$session.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oxpilot.integration.test.ts",
       },
     ],
   },

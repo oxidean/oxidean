@@ -439,6 +439,10 @@ ox self-update                          # swap this binary for the instance's bu
 ox skill print|install                  # embedded agent SKILL.md → harness dirs
 ox mcp print|install|status|remove      # wire /api/mcp into harness MCP configs
                                         #   (install --upgrade refreshes existing entries)
+ox pilot pair <code>                    # redeem a /oxpilot pairing code, custody the verifier
+ox pilot run|connect                    # claim → execute → report loop (dials out; no inbound)
+ox pilot disconnect [--target]          # local forget; revoke server-side in the UI
+ox pilot status                         # registered targets + custody probe (never secrets)
 ox config list|get|set                  # local config file (tokens redacted)
 ox completion bash|zsh|fish|pwsh        # static shell completion script
 ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]

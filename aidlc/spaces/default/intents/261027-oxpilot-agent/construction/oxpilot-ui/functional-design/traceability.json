@@ -1,0 +1,635 @@
+{
+ "stage": "functional-design",
+ "unit": "oxpilot-ui",
+ "upstream_ids": [
+  "AC1.1.1",
+  "AC1.1.2",
+  "AC1.1.3",
+  "AC1.1.4",
+  "AC1.1.5",
+  "AC1.2.1",
+  "AC1.2.2",
+  "AC1.2.3",
+  "AC1.3.1",
+  "AC1.3.2",
+  "AC1.3.3",
+  "AC1.3.4",
+  "AC1.3.5",
+  "AC1.3.6",
+  "AC1.4.1",
+  "AC1.4.2",
+  "AC1.5.1",
+  "AC1.5.2",
+  "AC1.5.3",
+  "AC1.6.1",
+  "AC1.7.1",
+  "AC1.7.2",
+  "AC1.7.3",
+  "AC1.8.1",
+  "AC1.8.2",
+  "AC2.1.1",
+  "AC2.1.2",
+  "AC2.2.1",
+  "AC2.2.2",
+  "AC2.2.3",
+  "AC2.2.4",
+  "AC2.3.1",
+  "AC3.1.1",
+  "AC3.1.2",
+  "AC3.1.3",
+  "AC3.2.1",
+  "AC4.1.1",
+  "AC4.1.2",
+  "AC4.1.3",
+  "AC4.1.4",
+  "AC4.2.1",
+  "AC4.2.2",
+  "AC4.2.3",
+  "AC4.3.1",
+  "AC4.3.2",
+  "AC4.3.3",
+  "AC4.3.4",
+  "AC4.3.5",
+  "AC4.4.1",
+  "AC4.4.2",
+  "AC4.4.3",
+  "AC4.5.1",
+  "AC5.1.1",
+  "AC5.1.5",
+  "AC5.2.2",
+  "AC5.5.4",
+  "FR1.1",
+  "FR1.2",
+  "FR1.3",
+  "FR1.4",
+  "FR1.5",
+  "FR1.6",
+  "FR1.7",
+  "FR2.1",
+  "FR2.2",
+  "FR2.4",
+  "FR2.5",
+  "FR3.1",
+  "FR3.2",
+  "FR3.3",
+  "FR5.2",
+  "FR5.6",
+  "FR6.1",
+  "NFR3",
+  "NFR4",
+  "NFR7",
+  "NFR8",
+  "NFR9",
+  "C1",
+  "C2",
+  "US1.1",
+  "US1.2",
+  "US1.3",
+  "US1.4",
+  "US1.5",
+  "US1.6",
+  "US1.7",
+  "US1.8",
+  "US2.1",
+  "US2.3",
+  "US4.1",
+  "US4.2",
+  "US4.3",
+  "US4.4",
+  "US4.5"
+ ],
+ "coverage": [
+  {
+   "id": "AC1.1.1",
+   "status": "OK",
+   "target": "BR1.2, BR1.3 \u2014 WF1 (sessions list over oxpilot.session_list, newest-first server order), OxpilotSessionRow \u2014 index renders the signed-in user's rows only"
+  },
+  {
+   "id": "AC1.1.2",
+   "status": "OK",
+   "target": "BR1.2, BR1.3 \u2014 WF1, OxpilotSessionRow \u2014 title link, owner/repo \u00b7 branch, status badge, formatRelative time"
+  },
+  {
+   "id": "AC1.1.3",
+   "status": "OK",
+   "target": "BR11.1, BR11.2, BR1.2, BR1.3 \u2014 Procedure/file deltas \u2014 U1's registration triangle (SHELLS + astro + RESERVED_TOP_SEGMENTS + routeTree) kept; route-coverage rows maintained; Q12-A"
+  },
+  {
+   "id": "AC1.1.4",
+   "status": "OK",
+   "target": "BR1.2, BR1.3 \u2014 WF1 \u2014 sessions EmptyState pointing at New session"
+  },
+  {
+   "id": "AC1.1.5",
+   "status": "OK",
+   "target": "BR1.2, BR1.3 \u2014 WF1 step 1 \u2014 auth.me gate only; no role check exists or is added (FR1.6)"
+  },
+  {
+   "id": "AC1.2.1",
+   "status": "OK",
+   "target": "BR2.1, BR2.2, BR2.3 \u2014 WF2, NewSessionDialog \u2014 repo Select, branch Select, goal Textarea, optional target RadioGroup, Cancel + Start (Q2-A, Q3-A)"
+  },
+  {
+   "id": "AC1.2.2",
+   "status": "OK",
+   "target": "BR2.1, BR2.2, BR2.3 \u2014 WF2 step 3 \u2014 session_create proc call + navigate; persistence itself is the server's (U2)"
+  },
+  {
+   "id": "AC1.2.3",
+   "status": "OK",
+   "target": "BR2.1, BR2.2, BR2.3 \u2014 WF2, NewSessionDialog \u2014 labelled, focus-trapped, Esc-dismissable Dialog"
+  },
+  {
+   "id": "AC1.3.1",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 WF4 (POST fetch-reader send), WF5 (EventSource attach, snapshot\u2192append) \u2014 client half of the dedicated /api/ SSE pair"
+  },
+  {
+   "id": "AC1.3.2",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 WF3 step 4, WF11 \u2014 three-pane layout: nav rail + main transcript + complementary drawer, breakpoints per interaction-spec"
+  },
+  {
+   "id": "AC1.3.3",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 WF3 step 3 \u2014 remount re-seeds from the snapshot; reopening restores the transcript (persistence is server-side)"
+  },
+  {
+   "id": "AC1.3.4",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 Accessibility pins \u2014 aria-live=polite+aria-atomic=false boundary announcements; labelled composer form; real buttons"
+  },
+  {
+   "id": "AC1.3.5",
+   "status": "N/A",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 server/tool side \u2014 repo context is served by U5's tool catalog, not the UI"
+  },
+  {
+   "id": "AC1.3.6",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, BR4.2 \u2014 WF6, OxpilotToolCall \u2014 tool frames + snapshot tool_calls rows render name + summarized inputs + status text"
+  },
+  {
+   "id": "AC1.4.1",
+   "status": "OK",
+   "target": "BR2.4, BR9.1, BR9.2 \u2014 WF12 \u2014 terminal{error,code} renders the inline error notice + Retry (the provable, non-silent state)"
+  },
+  {
+   "id": "AC1.4.2",
+   "status": "OK",
+   "target": "BR9.1, BR9.2 \u2014 WF12, WF4 \u2014 composer stays usable after error; transcript preserved (reseed never drops persisted rows)"
+  },
+  {
+   "id": "AC1.5.1",
+   "status": "OK",
+   "target": "BR6.3, BR9.1 \u2014 WF9, OxpilotConfirmDialog \u2014 explicit delete confirmation (contribution; the cascade itself is U2)"
+  },
+  {
+   "id": "AC1.5.2",
+   "status": "N/A",
+   "target": "BR6.3, BR9.1 \u2014 server side \u2014 U2's delete cascade removes the rows; the UI only calls session_delete after confirm"
+  },
+  {
+   "id": "AC1.5.3",
+   "status": "OK",
+   "target": "BR6.3, BR9.1 \u2014 WF9 \u2014 invalidate + the row vanishes from the index on delete"
+  },
+  {
+   "id": "AC1.6.1",
+   "status": "OK",
+   "target": "BR4.2 \u2014 WF5, Q4-A/Q5-A \u2014 EventSource auto-reconnect, snapshot wholesale-replaces state, append dedupes (message_id,seq); no Last-Event-ID"
+  },
+  {
+   "id": "AC1.7.1",
+   "status": "OK",
+   "target": "BR1.3, BR1.4, BR7.1, BR7.4 \u2014 WF1 (Computer use section), WF8 (connect), WF9 (disconnect/revoke), OxpilotTargetRow \u2014 list + status + actions incl. the pending_consent [Connect] re-offer"
+  },
+  {
+   "id": "AC1.7.2",
+   "status": "OK",
+   "target": "BR1.3, BR1.4, BR7.1 \u2014 WF1 \u2014 id=targets anchor; Procedure/file deltas \u2014 settings/ai.tsrx gains the AppLink to /oxpilot#targets"
+  },
+  {
+   "id": "AC1.7.3",
+   "status": "OK",
+   "target": "BR1.3, BR1.4, BR7.1 \u2014 WF1 \u2014 targets EmptyState explains the connector + Connect CTA (M1 copy)"
+  },
+  {
+   "id": "AC1.8.1",
+   "status": "OK",
+   "target": "BR4.1, BR5.1 \u2014 WF4 step 2, Q6-A \u2014 live-turn sends route to oxpilot.message_queue; queued rows deliver after the turn (server drain)"
+  },
+  {
+   "id": "AC1.8.2",
+   "status": "OK",
+   "target": "BR4.1, BR5.1 \u2014 WF6, OxpilotQueuedRow \u2014 \u25d0 queued chip visible in transcript as pending"
+  },
+  {
+   "id": "AC2.1.1",
+   "status": "OK",
+   "target": "BR5.1, BR5.3 \u2014 WF10, OxpilotDiffCard + ContextDrawer diff pane \u2014 per-file patch view via parseUnifiedDiffLines/highlightDiffLines"
+  },
+  {
+   "id": "AC2.1.2",
+   "status": "OK",
+   "target": "BR5.1, BR5.3 \u2014 WF6/WF10 \u2014 card{diff} resolves ref_id to the persisted proposal; the card IS the artifact linkage in the transcript"
+  },
+  {
+   "id": "AC2.2.1",
+   "status": "OK",
+   "target": "BR5.3, BR5.5, BR6.3 \u2014 WF10 step 4 + WF9 \u2014 Create branch + PR requires the explicit confirm; diff_apply is called only from that path; mount recovery (diff_list{session_id}) reconstructs the pending card so the affordance survives remount"
+  },
+  {
+   "id": "AC2.2.2",
+   "status": "OK",
+   "target": "BR5.3, BR6.3 \u2014 WF10 \u2014 {pr_ref} renders an AppLink to the created pull request + toast"
+  },
+  {
+   "id": "AC2.2.3",
+   "status": "OK",
+   "target": "BR5.3, BR6.3 \u2014 WF10 step 4 \u2014 the UI never calls diff_apply outside the explicit confirm path; no auto-apply affordance exists"
+  },
+  {
+   "id": "AC2.2.4",
+   "status": "N/A",
+   "target": "BR5.3, BR6.3 \u2014 server side \u2014 the PR-body provenance line is minted by U5's diff_apply, not the UI"
+  },
+  {
+   "id": "AC2.3.1",
+   "status": "OK",
+   "target": "BR5.3 \u2014 WF10 step 3 \u2014 Show patch toggles the raw unified diff in a copyable pre"
+  },
+  {
+   "id": "AC3.1.1",
+   "status": "N/A",
+   "target": "BR5.1, BR5.4 \u2014 tool side \u2014 U5's actions_* read tools perform the listing/fetch"
+  },
+  {
+   "id": "AC3.1.2",
+   "status": "OK",
+   "target": "BR5.1, BR5.4 \u2014 WF6, OxpilotToolCall \u2014 the in-transcript cards render the inspected run/job/log calls (artifact linkage via args/output summaries)"
+  },
+  {
+   "id": "AC3.1.3",
+   "status": "OK",
+   "target": "BR5.1, BR5.4 \u2014 Scope/WF6 \u2014 no rerun/cancel/approve control exists anywhere in the design (absence is pinned, not filtered)"
+  },
+  {
+   "id": "AC3.2.1",
+   "status": "OK",
+   "target": "BR5.3, BR9.1 \u2014 WF10 \u2014 a CI fix proposal rides the identical diff card + confirm + apply path (contribution; the proposal itself is U5)"
+  },
+  {
+   "id": "AC4.1.1",
+   "status": "N/A",
+   "target": "BR1.4, BR7.1, BR7.2 \u2014 connector side \u2014 U7's dial-out client; the UI only displays the pair command text"
+  },
+  {
+   "id": "AC4.1.2",
+   "status": "OK",
+   "target": "BR7.3, BR1.4, BR7.1, BR7.2 \u2014 WF8 \u2014 pairing_create mints the short-lived code; the two-step dialog is the user-confirmable flow (server side is U6)"
+  },
+  {
+   "id": "AC4.1.3",
+   "status": "N/A",
+   "target": "BR1.4, BR7.1, BR7.2 \u2014 custody side \u2014 verifier hashing/encryption is U6/U7; no secret material ever reaches the UI (C1 notes)"
+  },
+  {
+   "id": "AC4.1.4",
+   "status": "OK",
+   "target": "BR1.4, BR7.1, BR7.2 \u2014 WF8 step 2 \u2014 code rendered once in CopyCommand, never re-fetched, never stored/logged, never in transcript/audit, never announced into the live region"
+  },
+  {
+   "id": "AC4.2.1",
+   "status": "OK",
+   "target": "BR6.1, BR7.1 \u2014 WF8 step 1 \u2014 the dialog names exec_shell + fs_read/fs_write caps, GUI disabled+noted; labelled + focus-trapped"
+  },
+  {
+   "id": "AC4.2.2",
+   "status": "OK",
+   "target": "BR6.1, BR7.1 \u2014 WF8 \u2014 Cancel/Esc before Continue creates nothing; Deny paths leave grants denied (audit rows are U6's)"
+  },
+  {
+   "id": "AC4.2.3",
+   "status": "N/A",
+   "target": "BR6.1, BR7.1 \u2014 server-enforced \u2014 the UI only ever calls grant_respond; it cannot fabricate a connected state (renders lifecycle verbatim)"
+  },
+  {
+   "id": "AC4.3.1",
+   "status": "N/A",
+   "target": "BR6.1, BR6.2, BR7.2 \u2014 server side \u2014 live-grant enforcement is U6's dispatch check; U5/U7 execute"
+  },
+  {
+   "id": "AC4.3.2",
+   "status": "OK",
+   "target": "BR5.5, BR6.1, BR6.2, BR7.2 \u2014 WF7, OxpilotConsentCard + Q9-A \u2014 per-action grants render the in-transcript card; scope once|session only, never always; mount recovery (grant_list{session_id} amendment) reconstructs pending cards after remount"
+  },
+  {
+   "id": "AC4.3.3",
+   "status": "N/A",
+   "target": "BR6.1, BR6.2, BR7.2 \u2014 server side \u2014 audit rows are emitted by U6/U5"
+  },
+  {
+   "id": "AC4.3.4",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, BR7.2 \u2014 WF12, WF7 \u2014 offline/disconnected target surfaces the tool-call error card + Denied reason text + consent card cancelled \u2014 target offline state"
+  },
+  {
+   "id": "AC4.3.5",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, BR7.2 \u2014 WF7 step 3 \u2014 the frozen Denied outcome line tells the user; the agent continues (no transcript block)"
+  },
+  {
+   "id": "AC4.4.1",
+   "status": "OK",
+   "target": "BR6.3 \u2014 WF9 \u2014 Revoke/Disconnect require the explicit AlertDialog confirm naming the target"
+  },
+  {
+   "id": "AC4.4.2",
+   "status": "N/A",
+   "target": "BR6.3 \u2014 server side \u2014 pending-grant termination on revoke is U6's transition"
+  },
+  {
+   "id": "AC4.4.3",
+   "status": "N/A",
+   "target": "BR6.3 \u2014 server side \u2014 refusal of new actions is U6's; the UI renders the revoked lifecycle row verbatim"
+  },
+  {
+   "id": "AC4.5.1",
+   "status": "OK",
+   "target": "BR8.2, BR3.1, BR8.1 \u2014 WF11, SessionsRail \u2014 target name + status text chips in the rail footer; rail collapsible via aria-expanded toggle"
+  },
+  {
+   "id": "AC5.1.1",
+   "status": "OK",
+   "target": "BR1.1, BR6.3 \u2014 WF1 step 3, OxpilotFlagOff (M7) \u2014 explanatory disable state naming OXIDEAN_OXPILOT_* envs + docs/CONFIGURATION.md (contribution; flag+provider config is U4)"
+  },
+  {
+   "id": "AC5.1.5",
+   "status": "OK",
+   "target": "BR1.1, BR6.3 \u2014 WF1 step 3 \u2014 no interactive controls render when disabled; denials are server-enforced regardless (UI half)"
+  },
+  {
+   "id": "AC5.2.2",
+   "status": "OK",
+   "target": "BR9.2 \u2014 WF4 step 3, WF12 \u2014 budget_exceeded renders the named-env in-session notice; composer stays usable"
+  },
+  {
+   "id": "AC5.5.4",
+   "status": "OK",
+   "target": "BR3.3, BR9.1 \u2014 Negative paths \u2014 foreign session snapshot/session_get not_found renders the error notice + back link; all reads are session-cookie scoped (UI half of the cross-user denial)"
+  },
+  {
+   "id": "FR1.1",
+   "status": "OK",
+   "target": "BR1.1 \u2014 Procedure/file deltas \u2014 the U1-registered triangle is kept intact; coverage-manifest rows maintained/extended (shared ownership with U1)"
+  },
+  {
+   "id": "FR1.2",
+   "status": "OK",
+   "target": "BR1.1, BR1.2, BR1.3 \u2014 WF1 \u2014 sessions list with title/repo/status/last-activity"
+  },
+  {
+   "id": "FR1.3",
+   "status": "OK",
+   "target": "BR2.1, BR2.3 \u2014 WF2 \u2014 new-session surface: repo + branch select, goal, optional target (M3)"
+  },
+  {
+   "id": "FR1.4",
+   "status": "OK",
+   "target": "BR1.2 \u2014 WF1 \u2014 Computer use section on the index (list/connect/disconnect/revoke) + settings/ai link into #targets"
+  },
+  {
+   "id": "FR1.5",
+   "status": "OK",
+   "target": "BR1.2 \u2014 WF1 step 3 \u2014 flag-off state names OXIDEAN_OXPILOT_* + docs/CONFIGURATION.md"
+  },
+  {
+   "id": "FR1.6",
+   "status": "OK",
+   "target": "BR1.1 \u2014 WF1 step 1 \u2014 any authenticated user; no role gate"
+  },
+  {
+   "id": "FR1.7",
+   "status": "OK",
+   "target": "BR1.1 \u2014 WF9 \u2014 delete-own-session behind confirm (the per-user scope is enforced server-side; the UI surfaces the affordance only on own rows)"
+  },
+  {
+   "id": "FR2.1",
+   "status": "OK",
+   "target": "BR3.1 \u2014 WF3, WF11 \u2014 rail + transcript + toggled context drawer per M2"
+  },
+  {
+   "id": "FR2.2",
+   "status": "OK",
+   "target": "BR4.1, BR9.1 \u2014 WF4, WF5 \u2014 SSE streamed replies without reload; per-turn reply or visible error"
+  },
+  {
+   "id": "FR2.4",
+   "status": "OK",
+   "target": "BR3.1 \u2014 WF3 step 3 \u2014 reopen after navigation/new browser session restores via snapshot seed"
+  },
+  {
+   "id": "FR2.5",
+   "status": "OK",
+   "target": "BR5.1 \u2014 Accessibility pins \u2014 aria-live message boundaries; labelled composer; real buttons in tab order"
+  },
+  {
+   "id": "FR3.1",
+   "status": "OK",
+   "target": "BR4.2 \u2014 WF10 \u2014 reviewable per-file diff view in-session"
+  },
+  {
+   "id": "FR3.2",
+   "status": "OK",
+   "target": "BR4.2 \u2014 WF10, WF9 \u2014 explicit action materializes via diff_apply and links the PR"
+  },
+  {
+   "id": "FR3.3",
+   "status": "OK",
+   "target": "BR4.3 \u2014 WF10 \u2014 the UI exposes no push/merge/auto-apply path; every materialization requires the confirm"
+  },
+  {
+   "id": "FR5.2",
+   "status": "OK",
+   "target": "BR7.1, BR7.2, BR7.4 \u2014 WF7, WF8 \u2014 consent before activation: named caps shown, grants per-action/per-session, no always-allow affordance; pending_consent rows re-offer consent via the Manage expander"
+  },
+  {
+   "id": "FR5.6",
+   "status": "OK",
+   "target": "BR9.1 \u2014 WF9 \u2014 disconnect/revoke behind confirm; immediate effect (server)"
+  },
+  {
+   "id": "FR6.1",
+   "status": "OK",
+   "target": "BR1.1 \u2014 lib/oxpilot-chat.tsrx \u2014 useOxpilotChat rides @tanstack/ai-octane useChat (the mandated framework) over the C2 fetcher"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "BR4.2 \u2014 WF5, Q5-A \u2014 snapshot-replace + (message_id,seq) dedupe \u21d2 reconnect resumes without duplicating messages"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "BR9.1, BR9.3 \u2014 WF12 \u2014 error surfaces incl. the es.onerror fatal-close probe; notices name the fix, never a dead spinner"
+  },
+  {
+   "id": "NFR7",
+   "status": "OK",
+   "target": "BR10.1, BR10.2, BR10.3, BR10.4, BR5.6 \u2014 Accessibility section \u2014 the full WCAG 2.1 AA checklist pinned (landmarks, boundary announcements, dialog traps, keyboard reachability, non-color status, at-bottom-only transcript autoscroll)"
+  },
+  {
+   "id": "NFR8",
+   "status": "OK",
+   "target": "BR9.1 \u2014 WF1 step 3, WF12 \u2014 disabled/error states name the fix (env vars, docs), never a dead page"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "BR9.1 \u2014 Procedure/file deltas, Q12-A \u2014 route-coverage rows for both routes + browser-coverage rows per high-risk surface; happy-dom client test extended"
+  },
+  {
+   "id": "C1",
+   "status": "OK",
+   "target": "BR1.1, BR2.3, BR4.1, BR6.1, BR7.2 \u2014 frontend-components.md API table \u2014 every UI call rides a pinned oxpilot.* proc via the generated apiClient surface (placeholder names resolved in Contract deltas)"
+  },
+  {
+   "id": "C2",
+   "status": "OK",
+   "target": "BR4.1, BR4.2, BR5.1 \u2014 WF4, WF5, WF6 \u2014 POST fetch-reader + GET EventSource; snapshot/append/tool/card/terminal/ping consumed; (message_id,seq) dedupe; 409\u2192message_queue path"
+  },
+  {
+   "id": "US1.1",
+   "status": "OK",
+   "target": "BR1.1, BR1.3 \u2014 WF1 \u2014 index over session_list"
+  },
+  {
+   "id": "US1.2",
+   "status": "OK",
+   "target": "BR2.1, BR2.3 \u2014 WF2 \u2014 new-session dialog + bind (Q3-A amendment carries the target pick)"
+  },
+  {
+   "id": "US1.3",
+   "status": "OK",
+   "target": "BR3.1, BR3.2 \u2014 WF3\u2013WF6 \u2014 workspace, streaming transcript, tool-call cards, a11y (client half; U3 owns the loop)"
+  },
+  {
+   "id": "US1.4",
+   "status": "OK",
+   "target": "BR5.2, BR4.1, BR4.2 \u2014 WF12 \u2014 visible terminal-error surface + preserved transcript/composer (render half; U3 emits the frames)"
+  },
+  {
+   "id": "US1.5",
+   "status": "OK",
+   "target": "BR6.3, BR9.1 \u2014 WF9, OxpilotConfirmDialog \u2014 delete-own-session confirm + invalidate + row removal (UI half; the cascade is U2)"
+  },
+  {
+   "id": "US1.6",
+   "status": "OK",
+   "target": "BR5.1 \u2014 WF5 \u2014 snapshot-resume replay applied client-side"
+  },
+  {
+   "id": "US1.7",
+   "status": "OK",
+   "target": "BR1.3, BR7.1 \u2014 WF1, WF8, WF9 \u2014 target manager surfaces end-to-end"
+  },
+  {
+   "id": "US1.8",
+   "status": "OK",
+   "target": "BR4.1, BR5.1 \u2014 WF4, WF6 \u2014 queue send path + pending chip (client half; U2/U3 drain)"
+  },
+  {
+   "id": "US2.1",
+   "status": "OK",
+   "target": "BR5.3 \u2014 WF10 \u2014 diff card + per-file patch view (render half; U5 produces proposals)"
+  },
+  {
+   "id": "US2.3",
+   "status": "OK",
+   "target": "BR5.3, BR9.1 \u2014 WF10 step 3 \u2014 plain patch view"
+  },
+  {
+   "id": "US4.1",
+   "status": "OK",
+   "target": "BR7.1, BR7.2 \u2014 WF8 \u2014 pairing dialog: code mint + shown-once + two-step UX (UI half; U6/U7 pair)"
+  },
+  {
+   "id": "US4.2",
+   "status": "OK",
+   "target": "BR6.1, BR7.1 \u2014 WF8 step 1 \u2014 connect-consent dialog naming caps (UI half; U6 enforces)"
+  },
+  {
+   "id": "US4.3",
+   "status": "OK",
+   "target": "BR6.1, BR8.1 \u2014 WF6, WF7, WF12 \u2014 consent card, denied/cancelled states, visible offline errors (render half; U5/U6/U7 execute)"
+  },
+  {
+   "id": "US4.4",
+   "status": "OK",
+   "target": "BR6.3, BR7.4 \u2014 WF9 + WF1 \u2014 revoke/disconnect confirms naming the target + the pending_consent grant-answer surface (UI half; pending-grant termination is U6)"
+  },
+  {
+   "id": "US4.5",
+   "status": "OK",
+   "target": "BR1.3, BR8.1 \u2014 WF1, WF11 \u2014 status chips on index rows + rail footer"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "WF12-row:terminal{aborted}",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 aborted-result rendering is a derived stance \u2014 C2 pins the result vocabulary; no AC pins the UI copy for an aborted turn"
+  },
+  {
+   "id": "liveTail foreign-turn overlay",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 attach-rendering of another client's live turn is a posture choice \u2014 AC1.3.x pins streamed replies; no upstream pin covers a foreign turn's tail"
+  },
+  {
+   "id": "turn_cancel Stop affordance",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 optional \u2014 the C1 proc exists but no mockup/AC pins a Stop button; carried as an optional surface, not a requirement"
+  },
+  {
+   "id": "usage_get unread",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 no mockup pins a budget meter; the proc stays available for a later surface \u2014 recorded so the unread proc isn't an orphan surprise"
+  },
+  {
+   "id": "keyed remount reseed (s-${version})",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 implementation stance realizing AC1.6.1's snapshot-replace \u2014 no upstream pin names the mechanism"
+  },
+  {
+   "id": "generic unknown-card notice",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 additive-tolerance posture derived from C2's ignore-unknown-fields rule; no AC names the fallback"
+  },
+  {
+   "id": "no inline queue-cancel (gap note)",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 M8/[ix]'s inline queued-message cancel is required-but-unprocced \u2014 queue_delete flagged as a third proposed C1 amendment; v1 drops the affordance only if the amendment is refused"
+  },
+  {
+   "id": "connected\u00b7busy derivation",
+   "status": "N/A",
+   "target": "BR11.1 \u2014 client-derived busy state from in-flight tool cards \u2014 TargetView carries no busy field; the interaction-spec's busy label is best-effort"
+  },
+  {
+   "id": "mount-time card recovery read",
+   "status": "N/A",
+   "target": "BR5.5 \u2014 grant_list{session_id} + diff_list{session_id} refetch on mount/reseed \u2014 realizes AC4.3.2/AC2.2.1 post-remount; the grant_list session_id field is a flagged C1 amendment"
+  },
+  {
+   "id": "M1 rename affordance dropped",
+   "status": "N/A",
+   "target": "BR7.4 \u2014 no target_rename proc exists \u2014 the Manage expander ships label/caps/pending-grants/Disconnect only; deviation recorded in Contract deltas"
+  },
+  {
+   "id": "M4 local/remote radio dropped",
+   "status": "N/A",
+   "target": "BR7.1 \u2014 pairing_create{target_name,caps} carries no type field and OxpilotTargetView has none to render \u2014 deviation recorded in Contract deltas"
+  }
+ ]
+}

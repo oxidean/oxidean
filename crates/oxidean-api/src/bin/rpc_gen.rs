@@ -5296,6 +5296,365 @@ export type CommentHistoryResponse = {
   revisions: CommentRevisionPublic[];
 };
 
+// --- Oxpilot agentic surface (the `oxpilot.*` + `admin.oxpilot.*` family) ---
+
+/** Closed error-code set the oxpilot routes + procs emit. Session/RPC
+ * and REST codes are the top block; the connector surface
+ * (`/api/oxpilot/connector/*`) emits the bottom block. */
+export type OxpilotErrorCode =
+  | "unauthenticated"
+  | "oxpilot.disabled"
+  | "oxpilot.internal"
+  | "oxpilot.action_denied"
+  | "invalid_body"
+  | "bad_input"
+  | "forbidden"
+  | "not_found"
+  | "turn_active"
+  | "no_active_turn"
+  | "session_active_turn_absent"
+  | "budget_exceeded"
+  | "diff_not_pending"
+  | `apply_failed:${string}`
+  | "unauthorized"
+  | "rate_limited"
+  | "revoked"
+  | "pairing_expired"
+  | "pairing_used"
+  | "disabled"
+  | "internal";
+
+/** `oxpilot.status` — the gate-exempt enablement probe. */
+export interface OxpilotStatusResponse {
+  enabled: boolean;
+  provider: { id: string; model: string } | null;
+  /** `flag_off | no_provider | misconfigured | restricted` when `enabled` is false. */
+  reason: string | null;
+}
+
+export interface OxpilotSession {
+  id: string;
+  user_id: string;
+  repo_id: string;
+  repo_owner: string;
+  repo_name: string;
+  branch: string;
+  goal: string | null;
+  title: string;
+  status: string;
+  created_at: string;
+  last_activity_at: string;
+  /** U8 — the optional computer-use target binding (`null` = "no
+   *  target", the shipped default). */
+  computer_use_target_id: string | null;
+}
+
+export interface OxpilotSessionCreateRequest {
+  repo_owner: string;
+  repo_name: string;
+  branch?: string;
+  goal?: string;
+  /** U8 — optional `connected` target pick; absent keeps "no target". */
+  target_id?: string;
+}
+
+export interface OxpilotSessionListResponse {
+  sessions: OxpilotSession[];
+}
+
+export interface OxpilotSessionRefRequest {
+  session_id: string;
+}
+
+/** Durable tool-call card merged onto a message (sorted by `call_index`). */
+export interface OxpilotToolCallCard {
+  call_id: string;
+  call_index: number;
+  tool: string;
+  status: string;
+  args_summary: string | null;
+  output_summary: string | null;
+}
+
+export interface OxpilotMessage {
+  id: string;
+  session_id: string;
+  seq: number;
+  role: string;
+  content: string;
+  client_msg_id: string | null;
+  status: string;
+  created_at: string;
+  tool_calls?: OxpilotToolCallCard[];
+}
+
+export interface OxpilotMessageQueueRequest {
+  session_id: string;
+  content: string;
+  client_msg_id?: string;
+}
+
+/** `oxpilot.message_queue` receipt — `{null,null}` on a transcript merge. */
+export interface OxpilotQueuedReceipt {
+  queued_id: string | null;
+  position: number | null;
+}
+
+export interface OxpilotQueuedMessage {
+  id: string;
+  queue_seq: number;
+  content: string;
+  client_msg_id: string | null;
+  created_at: string;
+}
+
+export interface OxpilotQueueListResponse {
+  queued: OxpilotQueuedMessage[];
+}
+
+/** `oxpilot.queue_delete` — U8's inline queued-message cancel; owned
+ *  session + queued row, `not_found` on foreign/absent. */
+export interface OxpilotQueueDeleteRequest {
+  session_id: string;
+  queued_id: string;
+}
+
+export interface OxpilotQueueDeleteResponse {
+  deleted: boolean;
+}
+
+export interface OxpilotTurnCancelResponse {
+  aborted: boolean;
+}
+
+export interface OxpilotUsageView {
+  period: string;
+  tokens_used: number;
+  tokens_cap: number | null;
+  requests_used: number;
+  requests_cap: number | null;
+}
+
+/** `oxpilot.usage_get` — the caller's UTC-day rollup against budget caps. */
+export type OxpilotUsageResponse = OxpilotUsageView;
+
+// ── SSE stream frames (`/api/oxpilot/sessions/{id}/chat*`) ────────────────
+
+export interface OxpilotActiveTurn {
+  turn_id: string;
+  started_seq: number;
+  message_id: string;
+  last_delta_seq: number;
+}
+
+/** The `snapshot` frame — persisted messages + pending queue + live turn. */
+export interface OxpilotSnapshot {
+  type: "snapshot";
+  messages: OxpilotMessage[];
+  pending_queue: OxpilotQueuedMessage[];
+  active_turn: OxpilotActiveTurn | null;
+}
+
+export interface OxpilotAppendFrame {
+  type: "append";
+  message_id: string;
+  seq: number;
+  role: string;
+  delta: string;
+}
+
+export interface OxpilotToolCallFrame {
+  type: "tool_call";
+  call_id: string;
+  call_index?: number;
+  tool: string;
+  status: string;
+  message_id?: string;
+  args_summary?: string | null;
+  output_summary?: string | null;
+}
+
+export interface OxpilotCardFrame {
+  type: "card";
+  card_kind: string;
+  ref_id: string;
+}
+
+export interface OxpilotTerminalFrame {
+  type: "terminal";
+  message_id: string;
+  result: string;
+  code?: string;
+}
+
+export interface OxpilotPingFrame {
+  type: "ping";
+}
+
+export type OxpilotFrame =
+  | OxpilotSnapshot
+  | OxpilotAppendFrame
+  | OxpilotToolCallFrame
+  | OxpilotCardFrame
+  | OxpilotTerminalFrame
+  | OxpilotPingFrame;
+
+// ── Connector (C3) owner surface ─────────────────────────────────────────
+
+/** `oxpilot.pairing_create` — the code is shown ONCE; never stored or
+ *  returned again. */
+export interface OxpilotPairingCreateRequest {
+  target_name: string;
+  caps: string[];
+}
+
+export interface OxpilotPairingView {
+  pairing_id: string;
+  pairing_code: string;
+  expires_at: string;
+}
+
+export interface OxpilotTargetView {
+  id: string;
+  label: string;
+  status: string;
+  lifecycle: string;
+  pairing_id: string;
+  granted_caps: string[];
+}
+
+export interface OxpilotTargetRefRequest {
+  target_id: string;
+}
+
+export interface OxpilotTargetListResponse {
+  targets: OxpilotTargetView[];
+}
+
+export interface OxpilotGrantView {
+  id: string;
+  kind: string;
+  capability: string;
+  args_summary: string | null;
+  /** The grant's bound session — `null` on connect grants (target-scoped). */
+  session_id: string | null;
+  state: string;
+  expires_at: string;
+}
+
+export interface OxpilotGrantRefRequest {
+  grant_id: string;
+}
+
+export interface OxpilotGrantListRequest {
+  target_id?: string;
+  /** U8 — narrows to the named session's bound grants (mount/recovery). */
+  session_id?: string;
+}
+
+export interface OxpilotGrantListResponse {
+  grants: OxpilotGrantView[];
+}
+
+export interface OxpilotGrantRespondRequest {
+  grant_id: string;
+  allow: boolean;
+  scope?: string;
+}
+
+export interface OxpilotGrantRespondResponse {
+  state: string;
+}
+
+export interface OxpilotOkResponse {
+  ok: boolean;
+}
+
+// ── `oxpilot.diff_*` proposal surface (U5) ───────────────────────────────
+
+/** `ProposedDiff` wire shape — `files[{path,patch}]` derives from the
+ *  stored unified `diff_body`; the `ops_json` apply plan never reaches
+ *  the wire. */
+export interface OxpilotProposedDiff {
+  id: string;
+  session_id: string;
+  title: string;
+  base: string;
+  /** `pending | applied`. */
+  status: string;
+  /** `<owner>/<name>#<n>` — set only once `status` is `applied`. */
+  pr_ref: string | null;
+  files: { path: string; patch: string }[];
+  created_at: string;
+}
+
+export interface OxpilotDiffListRequest {
+  session_id: string;
+}
+
+export interface OxpilotDiffListResponse {
+  diffs: OxpilotProposedDiff[];
+}
+
+export interface OxpilotDiffRefRequest {
+  proposal_id: string;
+}
+
+/** `oxpilot.diff_apply` — the explicit-confirm materialization. */
+export interface OxpilotDiffApplyResponse {
+  proposal_id: string;
+  /** `<owner>/<name>#<n>` correlation ref for the created pull request. */
+  pr_ref: string;
+}
+
+// ── `admin.oxpilot.*` provider/settings surface ──────────────────────────
+
+/** `admin.oxpilot.settings_get` — resolved config + override provenance.
+ *  The key itself never leaves the server (`key_set`/`key_last4` only). */
+export interface OxpilotSettingsResponse {
+  enabled: boolean;
+  enabled_overridden: boolean;
+  provider_id: string | null;
+  provider_id_overridden: boolean;
+  model: string | null;
+  model_overridden: boolean;
+  base_url: string | null;
+  base_url_overridden: boolean;
+  user_budget: number | null;
+  user_budget_overridden: boolean;
+  instance_budget: number | null;
+  instance_budget_overridden: boolean;
+  key_set: boolean;
+  key_last4: string | null;
+  key_source: "db" | "env" | "none";
+  disabled_reason: string | null;
+  updated_at: string | null;
+}
+
+/** Tri-state write — absent = untouched, null = clear, value = set. */
+export interface OxpilotSettingsSetRequest {
+  enabled?: boolean | null;
+  provider_id?: string | null;
+  model?: string | null;
+  base_url?: string | null;
+  api_key?: string;
+  clear_key?: boolean;
+  clear_overrides?: boolean;
+  user_budget?: number | null;
+  instance_budget?: number | null;
+}
+
+export interface OxpilotProviderDescriptor {
+  id: string;
+  models: string[];
+  requires_key: boolean;
+  configured: boolean;
+}
+
+export interface OxpilotProvidersListResponse {
+  providers: OxpilotProviderDescriptor[];
+}
+
 // --- Agentic VCS protocol (contract C1 — the `vcs.*` family) ---
 
 /** Opaque server-minted changeset id (`cs_<ulid>`) — never a git oid. */
@@ -7048,6 +7407,60 @@ export function createClient(opts: CreateClientOptions) {
         revoke: (input: AdminInvitesRevokeRequest) =>
           rpcCall<{ ok: boolean }>(opts, "admin.invites.revoke", input),
       },
+      oxpilot: {
+        settingsGet: () =>
+          rpcCall<OxpilotSettingsResponse>(opts, "admin.oxpilot.settings_get", {}),
+        settingsSet: (input: OxpilotSettingsSetRequest) =>
+          rpcCall<OxpilotSettingsResponse>(opts, "admin.oxpilot.settings_set", input),
+        providersList: () =>
+          rpcCall<OxpilotProvidersListResponse>(
+            opts,
+            "admin.oxpilot.providers_list",
+            {},
+          ),
+      },
+    },
+    oxpilot: {
+      status: () => rpcCall<OxpilotStatusResponse>(opts, "oxpilot.status", {}),
+      sessionCreate: (input: OxpilotSessionCreateRequest) =>
+        rpcCall<OxpilotSession>(opts, "oxpilot.session_create", input),
+      sessionList: () =>
+        rpcCall<OxpilotSessionListResponse>(opts, "oxpilot.session_list", {}),
+      sessionGet: (input: OxpilotSessionRefRequest) =>
+        rpcCall<OxpilotSession>(opts, "oxpilot.session_get", input),
+      sessionDelete: (input: OxpilotSessionRefRequest) =>
+        rpcCall<{ deleted: boolean }>(opts, "oxpilot.session_delete", input),
+      messageQueue: (input: OxpilotMessageQueueRequest) =>
+        rpcCall<OxpilotQueuedReceipt>(opts, "oxpilot.message_queue", input),
+      queueList: (input: OxpilotSessionRefRequest) =>
+        rpcCall<OxpilotQueueListResponse>(opts, "oxpilot.queue_list", input),
+      queueDelete: (input: OxpilotQueueDeleteRequest) =>
+        rpcCall<OxpilotQueueDeleteResponse>(opts, "oxpilot.queue_delete", input),
+      usageGet: () => rpcCall<OxpilotUsageResponse>(opts, "oxpilot.usage_get", {}),
+      turnCancel: (input: OxpilotSessionRefRequest) =>
+        rpcCall<OxpilotTurnCancelResponse>(opts, "oxpilot.turn_cancel", input),
+      pairingCreate: (input: OxpilotPairingCreateRequest) =>
+        rpcCall<OxpilotPairingView>(opts, "oxpilot.pairing_create", input),
+      targetList: () =>
+        rpcCall<OxpilotTargetListResponse>(opts, "oxpilot.target_list", {}),
+      targetGet: (input: OxpilotTargetRefRequest) =>
+        rpcCall<OxpilotTargetView>(opts, "oxpilot.target_get", input),
+      targetDisconnect: (input: OxpilotTargetRefRequest) =>
+        rpcCall<OxpilotOkResponse>(opts, "oxpilot.target_disconnect", input),
+      targetRevoke: (input: OxpilotTargetRefRequest) =>
+        rpcCall<OxpilotOkResponse>(opts, "oxpilot.target_revoke", input),
+      grantList: (input: OxpilotGrantListRequest) =>
+        rpcCall<OxpilotGrantListResponse>(opts, "oxpilot.grant_list", input),
+      grantGet: (input: OxpilotGrantRefRequest) =>
+        rpcCall<OxpilotGrantView>(opts, "oxpilot.grant_get", input),
+      grantRespond: (input: OxpilotGrantRespondRequest) =>
+        rpcCall<OxpilotGrantRespondResponse>(opts, "oxpilot.grant_respond", input),
+      diffList: (input: OxpilotDiffListRequest) =>
+        rpcCall<OxpilotDiffListResponse>(opts, "oxpilot.diff_list", input),
+      diffGet: (input: OxpilotDiffRefRequest) =>
+        rpcCall<OxpilotProposedDiff>(opts, "oxpilot.diff_get", input),
+      diffApply: (input: OxpilotDiffRefRequest) =>
+        rpcCall<OxpilotDiffApplyResponse>(opts, "oxpilot.diff_apply", input),
     },
     vcs: {
       repoEnable: (input: VcsRepoEnableRequest) =>
@@ -8614,6 +9027,69 @@ export const mutationOptions = {
   twoFactorEmailSend: twoFactorEmailSendMutationOptions,
   adminUsersResetTwoFactor: adminUsersResetTwoFactorMutationOptions,
 };
+
+export function oxpilotStatusQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oxpilot", "status"] as const,
+    queryFn: async () => {
+      const res = await client.oxpilot.status();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oxpilotSessionListQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oxpilot", "sessionList"] as const,
+    queryFn: async () => {
+      const res = await client.oxpilot.sessionList();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data.sessions;
+    },
+  };
+}
+
+export function oxpilotUsageGetQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oxpilot", "usageGet"] as const,
+    queryFn: async () => {
+      const res = await client.oxpilot.usageGet();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oxpilotTargetListQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oxpilot", "targetList"] as const,
+    queryFn: async () => {
+      const res = await client.oxpilot.targetList();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data.targets;
+    },
+  };
+}
+
+export function oxpilotGrantListQueryOptions(
+  client: OxideanClient,
+  input: OxpilotGrantListRequest = {},
+) {
+  return {
+    queryKey: [
+      "oxpilot",
+      "grantList",
+      input.target_id ?? null,
+      input.session_id ?? null,
+    ] as const,
+    queryFn: async () => {
+      const res = await client.oxpilot.grantList(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data.grants;
+    },
+  };
+}
 
 export * from "./languages";
 export * from "./scope-catalog";

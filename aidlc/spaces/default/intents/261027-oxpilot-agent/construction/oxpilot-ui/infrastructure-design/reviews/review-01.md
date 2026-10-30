@@ -1,0 +1,34 @@
+### Architecture Review — oxpilot-ui infrastructure-design (iteration 1)
+
+### Review
+
+**Reviewer:** aidlc-architecture-reviewer-agent
+**Verdict:** NOT-READY
+
+**Iteration:** 1
+
+### New findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|----|----------|----------|---------|-----------------|--------|
+| R-01 | Major | cicd-pipeline.md "Coverage manifest rows" table + infrastructure-design-questions.md Q3-A | The manifest-row plan conflicts with the shipped gate's mechanics. scripts/browser-coverage-check.ts:32 discovers a surface only when its file textually matches HIGH_RISK_RE (Checkbox, RadioGroup(Item), form.Subscribe, SelectRoot/Portal/Trigger, Switch, DialogPortal, AlertDialogPortal, DropdownMenu), and lines 255-259 then FAIL on "manifest entries with no high-risk surface file" — a manifest row for a non-discovered file is an orphan error, not optional documentation. Of the 8 pinned rows, only oxpilot-new-session (RadioGroup + Select* in the dialog) and oxpilot-connect (Checkbox) land on files that plausibly match; consent-card ("three `Button`s", functional-spec:308), sessions-rail collapse, session-row/target-row actions, diff-card buttons, and context-drawer are button/toggle-only per the functional spec — rows for them would trip the orphan check. The claim that these files "surface automatically" is false for those 6. Separately, "keeps `oxpilot-repo-trigger` (:564-570)" is asserted unconditionally, but the repo Select* today lives inline in routes/oxpilot.tsrx:197-235 and the spec moves it into new-session-dialog.tsrx (NewSessionCard replaced by NewSessionDialog, functional-spec:535) — if the route drops its last scanned identifier, the kept row orphans too. The gate also fails the other direction: any pinned-set file that DOES end up matching (e.g. an AlertDialogPortal in confirm-dialog) without a row is a missingFromManifest failure. | Audit each pinned row's surface file against HIGH_RISK_RE on the post-rework layout; bind manifest rows only to surfaces that actually match (multiple subject-keyed coverage entries may share one discovered surface — e.g. re-surface `oxpilot-repo-trigger` onto the file that ends up holding the Select); drop manifest rows for files with no scanned primitive and let the browser-test subjects stand on their own; if the row-per-component-file pin is load-bearing, send it back upstream (nfr-design Q7-A / frontend-components coverage column) for correction before codegen. | Open |
+| R-02 | Minor | infrastructure-specification.md "Amendments — flagged, not shipped" (:65-76) | Numbering contradicts the pinned contract deltas: the section heads with "Three consumer-proposed additive deltas" but its table lists the `0090` migration as a third delta and then calls `queue_delete` "a fourth flagged amendment". Upstream functional-spec §Contract deltas numbers exactly three amendments — (1) session target fields + the `0090` backing column as ONE delta, (2) grant_list.session_id, (3) queue_delete. cicd-pipeline.md itself calls the migration "flagged amendment #1", consistent with upstream; only this section splits it out and bumps queue_delete to #4. | Reword: keep the migration as its own infra-posture row but label it the backing artifact of amendment #1 (as Q8-A and cicd-pipeline do), and call `queue_delete` the third flagged amendment — cross-referenced ordinals must match the functional-spec pin. | Open |
+| R-03 | Nit | cicd-pipeline.md lane table, `coverage-weighted` row | Cite "`make coverage-contract` + `make coverage-web` (`Makefile:362-372`)" — the range covers `coverage-web` (Makefile:362-372) only; `coverage-contract` lives at Makefile:394-395. | Extend or split the cite (e.g. `Makefile:394-395,362-372`). | Open |
+| R-04 | Nit | infrastructure-design-questions.md Q6-A | "the `components/ui/*` primitive set incl. `CopyCommand`" mislocates CopyCommand — it ships at `components/settings/copy-command.tsrx` (upstream TS-4 locates it correctly: "reused from `components/settings/`"); `components/ui/` contains no copy-command. | Rephrase so CopyCommand is cited as the shipped settings component, not folded into the `components/ui/*` set. | Open |
+
+### Verification notes (what was checked and held up)
+
+- CI job names/line cites all verified against `.github/workflows/ci.yml`: `web-octane`:299, `dead-code`:329 (knip :349-350), `web-browser`:363 (5-shard loop + `VITEST_BROWSER_CONNECTION_CLOSED` retry :384-405), `route-coverage`:410, `browser-coverage`:442 (`make browser-coverage-check` + `ui-coverage-change.contract.sh` :468-469), `coverage-weighted`:474 (`coverage-contract` :505, `coverage-web` :535, floor 0.70 :533), `rpc-sync`:639 (`rpc-sync-check` :666-667), `db-dialects`:855 (`-E` filterset incl. `dialect_oxpilot` :902), `commit-lint`:114. `rust-build` nextest archive is workspace-wide as claimed.
+- `Makefile:414-421` `web-lint` contents verified verbatim; `route-coverage.manifest.ts:789-807` two oxpilot rows bound to `oxpilot.integration.test.ts` happy-dom; `browser-coverage.manifest.ts:562-572` `oxpilot-repo-trigger` row.
+- `.env.example:166-167`, `docs/CONFIGURATION.md:398-399`, `.railway/railway.ts:97-99` `preserve()` — all correct. `apps/web/package.json`:30,35 dep versions correct (`@octanejs/tanstack-query` ^0.1.67 at :30, `@tanstack/ai-octane` ^0.9.1 at :35 — the infra docs correctly cite repo truth over the stale ^0.1.63 in TS-2). `apps/web/Dockerfile:1-3`, `images.yml:11-14`, `docs/TESTING.md:198-205`/`:316-334`/`:324`, `vitest.config.ts` projects (:123-147 spans unit :127 + integration :143) all verified.
+- Repo-state claims verified: both `/oxpilot*` routes registered (`shells.rs`:146-154, `RESERVED_TOP_SEGMENTS` incl. "oxpilot"), `lib/oxpilot-{stream,queries,chat}` + all three test files shipped, `components/oxpilot/` absent (consistent with "14 new files" matching the frontend-components inventory), migrations `0085`-`0089` present, `0090` absent (flagged amendment consistent), `dialect_oxpilot` test binary + `migration_parity` test real, `text/event-stream` compression exclusion in `oxidean-web` (`main.rs`:122), `DIFF_HIGHLIGHT_SOFT_MAX_CHARS` 200_000, `PAIRING_POLL_MS` 2 s pin, `oxpilot.status` `retry:false`.
+- Monitoring-design server-owned cites all verified: U3 agent-runtime tracing span table, U6 connector-gateway audit/operator signals, U5 oxpilot-tools audit vocabulary, U1 skeleton-slice tracing + status, U7 connector-client stderr/status — cited, not duplicated; zero client telemetry consistent with NFR6.1/OBS-3.
+- Traceability.json covers every requirement-table ID (NFR9 is a category reference, not a table row — correctly absent); N/A statuses are honestly applied to code-level pins.
+
+**Findings:** 4 total (0 Blocker, 1 Major, 1 Minor, 2 Nit)
+
+### Findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|---|---|---|---|---|---|
+| - | - | - | No findings | No action required | Resolved |

@@ -1,0 +1,358 @@
+{
+ "stage": "functional-design",
+ "unit": "oxpilot-tools",
+ "upstream_ids": [
+  "AC2.1.1",
+  "AC2.1.2",
+  "AC2.2.1",
+  "AC2.2.2",
+  "AC2.2.3",
+  "AC2.2.4",
+  "AC2.3.1",
+  "AC3.1.1",
+  "AC3.1.2",
+  "AC3.1.3",
+  "AC3.2.1",
+  "AC4.3.1",
+  "AC4.3.2",
+  "AC4.3.3",
+  "AC4.3.4",
+  "AC4.3.5",
+  "AC5.3.1",
+  "AC5.3.2",
+  "AC5.5.1",
+  "AC5.5.2",
+  "AC5.5.4",
+  "FR2.3",
+  "FR3.1",
+  "FR3.2",
+  "FR3.3",
+  "FR4.1",
+  "FR4.2",
+  "FR4.3",
+  "FR5.2",
+  "FR5.3",
+  "FR5.5",
+  "FR7.1",
+  "FR7.2",
+  "FR7.3",
+  "FR7.4",
+  "FR7.5",
+  "NFR1",
+  "NFR2",
+  "NFR5",
+  "NFR9",
+  "C1",
+  "C6",
+  "C7",
+  "US2.1",
+  "US2.2",
+  "US2.3",
+  "US3.1",
+  "US3.2",
+  "US4.3",
+  "US5.3",
+  "US5.5",
+  "AC5.3.3",
+  "AC5.5.3"
+ ],
+ "coverage": [
+  {
+   "id": "AC2.1.1",
+   "status": "OK",
+   "target": "BR4.1, BR4.3, BR4.5, WF4 \u2014 pending ProposedDiff row + emitted diff card feed the in-session per-file diff view (U8 renders from oxpilot.diff_get)"
+  },
+  {
+   "id": "AC2.1.2",
+   "status": "OK",
+   "target": "BR4.5, BR4.6, WF4 \u2014 card{card_kind:diff, ref_id} + ToolOutput carry the artifact linkage the reply asserts"
+  },
+  {
+   "id": "AC2.2.1",
+   "status": "OK",
+   "target": "BR5.1, BR5.2, BR5.3, WF5 \u2014 user-only oxpilot.diff_apply runs branchCreate \u2192 file ops \u2192 pull.create through existing repo/PR RPC on the caller's own dispatch"
+  },
+  {
+   "id": "AC2.2.2",
+   "status": "OK",
+   "target": "BR5.5, WF5.4 \u2014 svc.mark_applied(user_id, proposal_id, pr_ref) records pr_ref=owner/name#number; diff_get/diff_list surface it back to the session"
+  },
+  {
+   "id": "AC2.2.3",
+   "status": "OK",
+   "target": "BR4.2, BR5.1, BR5.6, BR2.5 \u2014 zero git mutation at propose; no catalog entry maps to apply; the write-class gate runs after session resolution; apply never pushes/merges/touches the default branch"
+  },
+  {
+   "id": "AC2.2.4",
+   "status": "OK",
+   "target": "BR5.4, Pins \u2014 fixed 'Produced by an /oxpilot agent session: <session_id> (proposal <id>)' line appended to every generated PR body"
+  },
+  {
+   "id": "AC2.3.1",
+   "status": "OK",
+   "target": "BR4.6, Contract deltas \u2014 U5 supplies the raw unified diff (diff_body verbatim) through oxpilot.diff_get/ProposedDiff; U8 owns 'Show patch' rendering (contribution \u2014 story map US2.3 \u2192 U8 (U5))"
+  },
+  {
+   "id": "AC3.1.1",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, WF3 \u2014 six read-class Actions tools bound to the session repo through rpc_dispatch"
+  },
+  {
+   "id": "AC3.1.2",
+   "status": "OK",
+   "target": "BR6.2, WF3 \u2014 tool outputs carry the run/job/log identifiers the reply links (artifact linkage is U3 card + U8 render; U5 supplies the ids \u2014 contribution)"
+  },
+  {
+   "id": "AC3.1.3",
+   "status": "OK",
+   "target": "BR6.3 \u2014 control/mutation Actions procs are absent from the registry by construction; no rerun/cancel/approve/dispatch name can dispatch"
+  },
+  {
+   "id": "AC3.2.1",
+   "status": "OK",
+   "target": "BR4.1, BR4.5, BR6.2, WF3.3, WF4 \u2014 CI failure analysis produces fixes through the same propose_diff \u2192 diff card \u2192 diff_apply review path as any change"
+  },
+  {
+   "id": "AC4.3.1",
+   "status": "OK",
+   "target": "BR7.1, BR7.2, BR7.3, WF6 \u2014 exec/fs dispatch only via C7 dispatch_action whose gateway chain enforces connected+liveness+caps+live grant before insert"
+  },
+  {
+   "id": "AC4.3.2",
+   "status": "OK",
+   "target": "BR7.4, WF6.4 \u2014 U5's share: consent_required maps to the in-transcript consent card + 'consent requested' output; grant shape/scope itself is U6's action_session grant (contribution \u2014 story map US4.3 \u2192 U7 (U5, U6))"
+  },
+  {
+   "id": "AC4.3.3",
+   "status": "OK",
+   "target": "BR7.7, BR9.1, BR9.3 \u2014 U5's share: raw args never retained by the tool layer; the actor/action/time/result audit row is U6's oxpilot.action_dispatched (contribution)"
+  },
+  {
+   "id": "AC4.3.4",
+   "status": "OK",
+   "target": "BR7.4 \u2014 offline/not_connected/capability denials return ToolError{action_denied} carrying the reason, surfaced in-session via the card; never a silent drop"
+  },
+  {
+   "id": "AC4.3.5",
+   "status": "OK",
+   "target": "BR7.4, WF6.4 \u2014 the denied path returns before action insert (nothing runs), and the consent card / denial error tells the user what happened"
+  },
+  {
+   "id": "AC5.3.1",
+   "status": "OK",
+   "target": "BR9.1 \u2014 U5's share of the lifecycle rows: oxpilot.proposal_created, oxpilot.diff_applied, oxpilot.artifact_comment (connect/consent/act/revoke rows are U6's \u2014 contribution)"
+  },
+  {
+   "id": "AC5.3.2",
+   "status": "OK",
+   "target": "BR7.7, BR9.2, BR9.3, BR9.5 \u2014 audit detail carries ids/counts/refs only, redacted; read-class tools emit no audit rows; no secret material on any retained surface"
+  },
+  {
+   "id": "AC5.5.1",
+   "status": "OK",
+   "target": "BR5.1, Procedure deltas \u2014 U5's diff_* procs register in oxidean-api-oxpilot under the same SessionOnly classification + closed-set rules (contribution \u2014 AC owns the pinned PAT-refusal test in U1)"
+  },
+  {
+   "id": "AC5.5.2",
+   "status": "OK",
+   "target": "BR8.1, BR8.2, WF7 \u2014 pr_comment bound to ArtifactScope (this session's applied pr_refs) via pull.comments.create unanchored (PRs share the issue number counter, not the issue tables); everything else is forbidden"
+  },
+  {
+   "id": "AC5.5.4",
+   "status": "OK",
+   "target": "BR2.1, BR4.6, BR5.2, BR7.3, BR7.6, Negative paths \u2014 foreign session/proposal/action/target ids all resolve to not_found or the gateway's own denial; session-scoped proposal reads pin post-fetch row.session_id == ctx.session_id since svc.proposal is user-scoped (contribution \u2014 the session/transcript half is U2's)"
+  },
+  {
+   "id": "FR2.3",
+   "status": "OK",
+   "target": "BR2.1, BR2.2, BR3.1, WF2 \u2014 repo-aware context through typed tools bound to the session's repository"
+  },
+  {
+   "id": "FR3.1",
+   "status": "OK",
+   "target": "BR4.1, BR4.3, BR4.5, WF4 \u2014 reviewable ProposedDiff with diff\u2194ops coherence so the review shows what apply writes"
+  },
+  {
+   "id": "FR3.2",
+   "status": "OK",
+   "target": "BR5.1, BR5.3, WF5 \u2014 explicit user proc materializes branch + PR"
+  },
+  {
+   "id": "FR3.3",
+   "status": "OK",
+   "target": "BR4.2, BR5.1, BR5.6 \u2014 no push/merge/default-branch mutation is reachable by the agent"
+  },
+  {
+   "id": "FR4.1",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, WF3 \u2014 runs/jobs/log read surface"
+  },
+  {
+   "id": "FR4.2",
+   "status": "OK",
+   "target": "BR4.1, BR6.2, WF3.3, WF4 \u2014 CI failures feed the same proposal path"
+  },
+  {
+   "id": "FR4.3",
+   "status": "OK",
+   "target": "BR6.3 \u2014 no rerun/cancel/approval controls exist in the catalog"
+  },
+  {
+   "id": "FR5.2",
+   "status": "OK",
+   "target": "BR7.1, BR7.4 \u2014 every exec/fs call passes the gateway's consent/grant gate; denial paths mapped"
+  },
+  {
+   "id": "FR5.3",
+   "status": "OK",
+   "target": "BR7.1, BR7.2 \u2014 the kind vocabulary is the closed C7 set; no GUI/screenshot tool exists to register"
+  },
+  {
+   "id": "FR5.5",
+   "status": "OK",
+   "target": "BR7.7, BR9.3, BR9.5 \u2014 redacted summaries only on retained surfaces; audit detail carries no secrets"
+  },
+  {
+   "id": "FR7.1",
+   "status": "OK",
+   "target": "BR3.1, BR3.2, WF2 \u2014 repository read tools via rpc_dispatch on the literal allowlist"
+  },
+  {
+   "id": "FR7.2",
+   "status": "OK",
+   "target": "BR4.1, BR5.1, BR5.3 \u2014 proposed diff + branch/PR creation gated on approval"
+  },
+  {
+   "id": "FR7.3",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, BR6.3 \u2014 read-only CI tools"
+  },
+  {
+   "id": "FR7.4",
+   "status": "OK",
+   "target": "BR7.1, BR7.4 \u2014 connector tools behind consent + audit always"
+  },
+  {
+   "id": "FR7.5",
+   "status": "OK",
+   "target": "BR8.1, BR8.2 \u2014 comments only on artifacts this session materialized"
+  },
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "BR2.1, BR2.3, BR5.1 \u2014 session-bound identity everywhere; ToolCtx sole authority; user procs keep the oxpilot.* SessionOnly gates"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "BR7.7, BR8.3, BR9.5 \u2014 redact() on every persisted/echoed model-derived surface"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "BR9.1, BR9.3 \u2014 post-commit write-class audit events with bounded redacted detail"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "BR1.1, BR1.3, BR1.4, BR3.3, BR3.4, BR4.4, BR7.2 \u2014 closed registry + schema validation + pinned bounds + verbatim-code mapping make the surface testable and fail-closed"
+  },
+  {
+   "id": "C1",
+   "status": "OK",
+   "target": "BR4.1, BR4.5, BR5.1, BR5.3 \u2014 Contract deltas: diff_list/diff_get/diff_apply proc shapes + ProposedDiff payload; tool-name open question resolved to the flat domain_verb set"
+  },
+  {
+   "id": "C6",
+   "status": "OK",
+   "target": "WF1, BR2.4 \u2014 ToolExecutor{catalog, invoke} carried verbatim; class member kept internal (D-01); ToolCtx.proposal_id stays None (G-2 documented)"
+  },
+  {
+   "id": "C7",
+   "status": "OK",
+   "target": "BR7.1, BR7.4, BR7.5, BR7.6, WF6 \u2014 dispatch_action/action_status/list_targets consumed verbatim; denied marker read from AppError.data"
+  },
+  {
+   "id": "US2.1",
+   "status": "OK",
+   "target": "BR4.1, BR4.3, BR4.5, WF4 + AC2.1.1/AC2.1.2 coverage"
+  },
+  {
+   "id": "US2.2",
+   "status": "OK",
+   "target": "BR5.1, BR5.2, BR5.3, BR5.5, BR5.6, WF5 + AC2.2.1\u2013AC2.2.4 coverage"
+  },
+  {
+   "id": "US2.3",
+   "status": "OK",
+   "target": "BR4.5, BR4.6 \u2014 U5 supplies the raw diff (AC2.3.1 coverage); U8 renders"
+  },
+  {
+   "id": "US3.1",
+   "status": "OK",
+   "target": "BR6.1, BR6.2, BR6.3, WF3 + AC3.1.1\u2013AC3.1.3 coverage"
+  },
+  {
+   "id": "US3.2",
+   "status": "OK",
+   "target": "BR4.1, BR6.2, WF3.3/WF4 + AC3.2.1 coverage"
+  },
+  {
+   "id": "US4.3",
+   "status": "OK",
+   "target": "BR7.1, BR7.2, BR7.4, BR7.5, WF6 + AC4.3.1\u2013AC4.3.5 coverage \u2014 U5 is the tool half of the U5\u2192U6\u2192U7 chain"
+  },
+  {
+   "id": "US5.3",
+   "status": "OK",
+   "target": "BR9.1, BR9.3, BR9.5 + AC5.3.1/AC5.3.2 coverage \u2014 U5 audits its write-class tools"
+  },
+  {
+   "id": "US5.5",
+   "status": "OK",
+   "target": "BR1.1, BR1.4, BR8.1, BR8.2 + AC5.5.1/AC5.5.2/AC5.5.4 coverage \u2014 registration, artifact scoping, cross-user denial"
+  },
+  {
+   "id": "AC5.3.3",
+   "status": "N/A",
+   "target": "U3-owned \u2014 stored transcript content is redacted by the turn loop that writes it; U5 contributes BR9.5 (redact() on every persisted/echoed model string the tools emit)"
+  },
+  {
+   "id": "AC5.5.3",
+   "status": "OK",
+   "target": "BR4.1, entities \u2014 the additive ops_json column ships via a NEW migration NNNN_oxpilot_proposals_ops.sql in all three dialects (applied migrations are append-only; 0087 is never edited) plus NewOxpilotProposal/OxpilotProposalRow/ProposalWrite/save_proposal, and lands a dialect assertion in dialect_oxpilot.rs alongside U2's tables"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "BR1.2",
+   "status": "N/A",
+   "target": "provider-legal tool-name charset \u2014 derived from OpenAI/Anthropic adapter constraints, no upstream AC names it"
+  },
+  {
+   "id": "BR4.3",
+   "status": "N/A",
+   "target": "diff\u2194ops path-set coherence \u2014 integrity derivation of 'review exactly what applies'; FR3.1 pins the reviewable diff but not this check"
+  },
+  {
+   "id": "BR5.7",
+   "status": "N/A",
+   "target": "fail-stop/no-rollback apply policy \u2014 derived failure posture; AC2.2.x pins success semantics, not partial-failure handling"
+  },
+  {
+   "id": "BR6.4",
+   "status": "N/A",
+   "target": "no-wait_ms log reads \u2014 derived from the 60 s tool-call window; AC3.1.2 pins log retrieval, not the polling shape"
+  },
+  {
+   "id": "BR7.3",
+   "status": "N/A",
+   "target": "single-connected-target auto-select + ambiguity error \u2014 UX derivation; AC4.3.1 pins the connected+granted gate, not resolution ergonomics"
+  },
+  {
+   "id": "BR9.4",
+   "status": "N/A",
+   "target": "handler self-bounding under the U3 output ceilings \u2014 carries the shipped pins forward; no AC names tool-internal truncation"
+  }
+ ]
+}

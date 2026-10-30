@@ -1,0 +1,71 @@
+{
+ "stage": "nfr-requirements",
+ "unit": "agent-runtime",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR7",
+  "NFR8",
+  "NFR9"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10, NFR1.11",
+   "note": "security-requirements.md \u2014 SessionOnly+gate turn_cancel, owner-bound ToolCtx.user_id, ToolExecutor-exclusive authz, key material behind U4's Arc<dyn LlmProvider>, second redact() pass on tool-result ChatMsg, zero secret-capable frame payloads, owner-scoped prompt assembly"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "NFR2.1, NFR2.2",
+   "note": "id-only spans/logs (never prompt/tool content); pending_content transient and redacted at the U2 write boundary"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10, NFR11.5, NFR11.6",
+   "note": "performance-requirements.md \u2014 bounded prompt window (PROMPT_TRANSCRIPT_MAX_BYTES=128 KiB newest-first byte window), capped card/frame summaries, ping-cadence liveness, per-session admission lock with zero cross-session contention, TOOL_CALL_TIMEOUT/TURN_MAX_DURATION bounds; scalability rows pin flat request size and per-session parallelism"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12",
+   "note": "reliability-requirements.md \u2014 claim-before-persist + release-on-all-exits, panic/JoinError release, admission-lock atomic enqueue-vs-recheck, terminal first-wins CAS, no_model/card_persist typed failures, persist-before-emit card ordering | residual: NFR4's connector-degrade clause binds U6/U8"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "NFR5.1, NFR5.2, NFR5.3",
+   "note": "observability-requirements.md audit section \u2014 turn_cancel is routine (no audit row), tool invocations audit via durable tool_call rows, credentials never logged | residual: NFR5's connector-action/PR-materialization audit clauses bind U5/U6"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "NFR6.1, NFR6.2, NFR6.3, NFR6.4",
+   "note": "existing tracing surfaces only \u2014 per-turn id-only span (BR7.1's pinned lines: turn-start info!, tool/drain/terminal debug!, abort warn!), warn! on degraded arms; no new metrics registry"
+  },
+  {
+   "id": "NFR7",
+   "status": "Deferred",
+   "note": "NFR7 (accessibility) binds the web UI surface \u2014 U8 owns it; the runtime emits protocol frames, not rendered output",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui"
+  },
+  {
+   "id": "NFR8",
+   "status": "Deferred",
+   "note": "NFR8 (usability) binds client presentation \u2014 U8; the runtime contributes the SSE vocabulary C2 already pins",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "NFR10.8, NFR10.9, NFR10.10",
+   "note": "tech-stack-decisions.md \u2014 nextest + mock provider/fake executor seams, SSE route smoke extension, PROCEDURES closed-set pin for turn_cancel; collect-only coverage posture"
+  }
+ ]
+}

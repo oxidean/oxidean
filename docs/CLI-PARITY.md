@@ -127,6 +127,7 @@ surface and fails when an `implemented`/`partial` row drifts.
 | — | `repo templates` | ox-only | template catalog (builtin packs, instance packs, template repos) |
 | — | `self-update` | ox-only | instance-served upgrades |
 | — | `skill print|install`, `mcp …` | ox-only | agent/harness integration |
+| — | `pilot pair|run|disconnect|status` | ox-only | implemented — oxpilot computer-use connector (C3 routes, not /api/rpc) |
 | — | `status create` | ox-only | commit status API |
 | — | `vcs …` (16 subs) | ox-only | side-by-side agentic source control — immutable changesets, CAS refs, git import/export |
 

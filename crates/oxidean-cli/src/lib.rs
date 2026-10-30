@@ -18,6 +18,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod output;
 pub mod pager;
+pub mod pilot;
 pub mod prompt;
 pub mod rpc;
 pub mod self_update;

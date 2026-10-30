@@ -1,0 +1,64 @@
+{
+  "stage": "code-generation",
+  "unit": "connector-client",
+  "version": 1,
+  "writes": [
+    {
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "path": "Cargo.lock"
+    },
+    {
+      "path": "crates/oxidean-cli/Cargo.toml"
+    },
+    {
+      "path": "crates/oxidean-cli/src/args.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/commands.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/completion.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/config.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/lib.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/client.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/custody.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/exec.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/mod.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/openapi.yaml"
+    },
+    {
+      "path": "crates/oxidean-cli/src/pilot/state.rs"
+    },
+    {
+      "path": "crates/oxidean-cli/tests/pilot_connector.rs"
+    },
+    {
+      "path": "docs/CLI-PARITY.md"
+    },
+    {
+      "path": "docs/CLI.md"
+    },
+    {
+      "path": "docs/CONNECTOR.md"
+    },
+    {
+      "path": "docs/TESTING.md"
+    }
+  ]
+}

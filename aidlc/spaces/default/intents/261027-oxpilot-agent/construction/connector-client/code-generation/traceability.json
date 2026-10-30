@@ -1,0 +1,757 @@
+{
+  "stage": "code-generation",
+  "unit": "connector-client",
+  "upstream_ids": [
+    "AC4.1.1",
+    "AC4.1.2",
+    "AC4.1.3",
+    "AC4.3.1",
+    "AC4.3.2",
+    "AC4.3.3",
+    "AC4.3.4",
+    "AC4.3.5",
+    "AC4.4.2",
+    "AC4.6.1",
+    "AC4.6.2",
+    "AC4.6.3",
+    "BR1",
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR1.4",
+    "BR2",
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR3",
+    "BR3.1",
+    "BR3.2",
+    "BR3.3",
+    "BR4",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR5",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR5.4",
+    "BR6",
+    "BR6.1",
+    "BR6.2",
+    "BR6.3",
+    "BR7",
+    "BR7.1",
+    "BR7.2",
+    "BR7.3",
+    "BR7.4",
+    "BR8",
+    "BR8.1",
+    "BR8.2",
+    "BR8.3",
+    "BR8.4",
+    "BR8.5",
+    "BR9",
+    "BR9.1",
+    "BR9.2",
+    "BR9.3",
+    "FR5.1",
+    "FR5.3",
+    "FR5.4",
+    "FR5.5",
+    "FR5.6",
+    "NFR1",
+    "NFR1.1",
+    "NFR1.10",
+    "NFR1.11",
+    "NFR1.12",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR2",
+    "NFR3.1",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR4",
+    "NFR4.1",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR6",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR9"
+  ],
+  "coverage": [
+    {
+      "id": "AC4.1.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/args.rs",
+      "note": "pilot group parses + help registered"
+    },
+    {
+      "id": "AC4.1.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "pair redeem \u2192 custody store, verifier never printed"
+    },
+    {
+      "id": "AC4.1.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "run loop claims/executes/reports inside jail"
+    },
+    {
+      "id": "AC4.3.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "capability-gated execution of granted kinds only"
+    },
+    {
+      "id": "AC4.3.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "cancel ids from claim/heartbeat close out actions once"
+    },
+    {
+      "id": "AC4.4.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "disconnect is local forget \u2014 verifier+row deleted, no server call"
+    },
+    {
+      "id": "AC4.6.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "{0,1} exit contract for the whole pilot surface"
+    },
+    {
+      "id": "AC4.6.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "revoked/auth-death/not_found terminals per table"
+    },
+    {
+      "id": "AC4.6.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "status rows + live verifier probe, secrets never shown"
+    },
+    {
+      "id": "BR1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "pair verb \u2014 rollup"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/args.rs",
+      "note": "pair args + --instance/--label/--caps/--verbose flags"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "200 \u2192 keyring+file verifier store, then metadata row w/ compensation"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "pairing_used/pairing_expired/caps-exceeded \u2192 exit 1 named messages"
+    },
+    {
+      "id": "BR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "pairing code + verifier never printed/logged/Debug-leaked"
+    },
+    {
+      "id": "BR2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "C3 wire client \u2014 rollup"
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "bearer verifier auth on claim/report/heartbeat"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "C3 request bodies pinned verbatim (target_id, wait, caps, action_id, status, output)"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "flat {\"error\"} envelope decode \u2192 typed C3Error taxonomy"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "custody backends: keystore composite key \u2192 pilot-secrets.json 0600 atomic"
+    },
+    {
+      "id": "BR3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "capability gating \u2014 rollup"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "execute only kinds inside granted caps"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "out-of-caps kind \u2192 failed:capability_refused before execution"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "args failing validation \u2192 failed:invalid_args, no side effects"
+    },
+    {
+      "id": "BR4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "action execution \u2014 rollup"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "serial executor, one in-flight action"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "exec_shell via platform shell, pgid, env strip, group kill"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "fs_read lexical+canonical jail chain, 128KiB cap, b64 out"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "fs_write same jail + b64 decode + cap, regular-file constraint"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "run exit semantics: 0 on revoke/signal, 1 on auth death/bad_input"
+    },
+    {
+      "id": "BR5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "cancellation \u2014 rollup"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "cancel set applied before any start decision"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "running-action cancel kills process group \u2192 cancelled:mid-flight"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "report vocabulary stays done|failed per C3"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "cancel-only claim responses handled without an action row"
+    },
+    {
+      "id": "BR6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "jail + env hygiene \u2014 rollup"
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "--root default cwd, canonicalize, config-dir exclusion both directions"
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "FS_IO_CAP 128 KiB shared read/write"
+    },
+    {
+      "id": "BR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "verifier never in child env; sensitive env names stripped"
+    },
+    {
+      "id": "BR7",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "output bounds + scrub \u2014 rollup"
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "exec output = last \u226464KiB combined with truncation marker"
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "value-scrub verifier/env/config/secret-map values \u22658 chars"
+    },
+    {
+      "id": "BR7.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "exit_code only for process exits; fs ops carry none"
+    },
+    {
+      "id": "BR7.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "one terminal report per action, no streaming"
+    },
+    {
+      "id": "BR8",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "errors, backoff, heartbeat \u2014 rollup"
+    },
+    {
+      "id": "BR8.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "retry_after body + Retry-After header honored verbatim"
+    },
+    {
+      "id": "BR8.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "transport/5xx \u2192 jittered exp backoff clamped 60s"
+    },
+    {
+      "id": "BR8.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "unauthorized/forbidden \u2192 credential+row delete, exit 1"
+    },
+    {
+      "id": "BR8.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "revoked terminals \u2192 clean exit 0, creds+row deleted"
+    },
+    {
+      "id": "BR8.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "15s heartbeat timer carrying re-announced cancel set"
+    },
+    {
+      "id": "BR9",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "local verbs \u2014 rollup"
+    },
+    {
+      "id": "BR9.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "disconnect deletes verifier (both backends)+row, idempotent"
+    },
+    {
+      "id": "BR9.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "status lists metadata + verifier probe, --json shape"
+    },
+    {
+      "id": "BR9.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "missing row/verifier/zombie/corrupt-file named refusals"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "pair flow per functional spec"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "run loop claim\u2192execute\u2192report per spec"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "disconnect local-forget per spec"
+    },
+    {
+      "id": "FR5.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "status probe per spec"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/commands.rs",
+      "note": "CLI surface wiring per spec"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "custody/secret hygiene \u2014 rollup"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "verifier in Zeroizing wrapper, custom Debug redacted"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "verifier never written to metadata/logs/stdout"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "custody delete attempts both backends"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "pilot-targets.json 0600 atomic, no verifier fields"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "fs jail canonical containment"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "config-dir hard exclusion both directions"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "regular-file-only leaf enforcement"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "child env strip of secret-ish names"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "output scrub before report"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "bearer-auth header on the three authed routes"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "flat-error decode, never RPC-envelope semantics"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "caps violation refused pre-execution"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "secrets-in-memory \u2014 rollup"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "wait_seconds clamp 1\u201360, request timeout wait+15"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "pair/report/heartbeat 30s request timeouts"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "cancel applied pre-start"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "15s heartbeat cadence"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "retry hints honored"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "64KiB output tail"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "128KiB fs cap"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "bounded output/report sizes"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "serial executor bounds memory"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "O(output) scrub"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "RunState bounds in-flight bookkeeping"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "reliability \u2014 rollup"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "transport backoff+jitter \u226460s"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "rate_limited \u2192 Retry-After verbatim"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "unauthorized \u2192 delete creds, exit 1"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "BR8.4 terminal-on-revocation"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "bad_input \u2192 report-cancel + exit 1 keeps creds"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "SIGINT/SIGTERM \u2192 kill in-flight, cancelled:<sig>, exit 0"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "idempotent report reposts (server acks terminal states)"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "every cancel closes exactly once (settled dedupe)"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "mid-flight cancel kills pgid"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "creds preserved across ordinary reconnect/backoff"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "action outcome funnels through single report path"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "exec timeout default 300s, kills group"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/mod.rs",
+      "note": "reuse-of-conventions \u2014 rollup"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/commands.rs",
+      "note": "hand-written parser/completion/dispatch wiring (no codegen)"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "keystore/config/pager conventions reused"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/tests/pilot_connector.rs",
+      "note": "wiremock test precedent of rpc_http.rs"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "device.rs HTTP client precedent"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/args.rs",
+      "note": "global --instance/--json flags via existing parser"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/tests/pilot_connector.rs",
+      "note": "docs+CI parity wiring conventions"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/custody.rs",
+      "note": "tech-stack decisions honored (base64/zeroize/libc only)"
+    },
+    {
+      "id": "AC4.3.2",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/state.rs",
+      "note": "client honors grant scoping \u2014 executes only actions the server dispatches under a live grant; heartbeat-delivered cancel closes mid-flight; no cross-session state exists client-side"
+    },
+    {
+      "id": "AC4.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/client.rs",
+      "note": "result path reports outcome/reason/exit-code/output per action \u2014 the server's audit row input; client-side lifecycle lines carry the same envelope"
+    },
+    {
+      "id": "AC4.3.5",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/pilot/exec.rs",
+      "note": "client rechecks action caps and refuses/report-fails unsupported kinds rather than executing; denied actions never reach claim"
+    }
+  ]
+}

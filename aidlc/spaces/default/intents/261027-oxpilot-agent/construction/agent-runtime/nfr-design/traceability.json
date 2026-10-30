@@ -1,0 +1,484 @@
+{
+ "stage": "nfr-design",
+ "unit": "agent-runtime",
+ "upstream_ids": [
+  "NFR1",
+  "NFR2",
+  "NFR3",
+  "NFR4",
+  "NFR5",
+  "NFR6",
+  "NFR10",
+  "NFR11",
+  "NFR1.1",
+  "NFR1.2",
+  "NFR1.3",
+  "NFR1.4",
+  "NFR1.5",
+  "NFR1.6",
+  "NFR1.7",
+  "NFR1.8",
+  "NFR1.9",
+  "NFR1.10",
+  "NFR1.11",
+  "NFR2.1",
+  "NFR2.2",
+  "NFR3.1",
+  "NFR3.2",
+  "NFR3.3",
+  "NFR3.4",
+  "NFR3.5",
+  "NFR3.6",
+  "NFR3.7",
+  "NFR3.8",
+  "NFR3.9",
+  "NFR3.10",
+  "NFR4.1",
+  "NFR4.2",
+  "NFR4.3",
+  "NFR4.4",
+  "NFR4.5",
+  "NFR4.6",
+  "NFR4.7",
+  "NFR4.8",
+  "NFR4.9",
+  "NFR4.10",
+  "NFR4.11",
+  "NFR4.12",
+  "NFR5.1",
+  "NFR5.2",
+  "NFR5.3",
+  "NFR6.1",
+  "NFR6.2",
+  "NFR6.3",
+  "NFR6.4",
+  "NFR10.1",
+  "NFR10.2",
+  "NFR10.3",
+  "NFR10.4",
+  "NFR10.5",
+  "NFR10.6",
+  "NFR10.7",
+  "NFR10.8",
+  "NFR10.9",
+  "NFR10.10",
+  "NFR11.1",
+  "NFR11.2",
+  "NFR11.3",
+  "NFR11.4",
+  "NFR11.5",
+  "NFR11.6",
+  "NFR7",
+  "NFR8"
+ ],
+ "coverage": [
+  {
+   "id": "NFR1.1",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.2",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.3",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.4",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.5",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.6",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.7",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.8",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.9",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.10",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1.11",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR2.1",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR2.2",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.1",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.2",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.3",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.4",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.5",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.6",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.7",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.8",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.9",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR3.10",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.1",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.2",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.3",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.4",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.5",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.6",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.7",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.8",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.9",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.10",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.11",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR4.12",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.1",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.2",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR5.3",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.1",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.2",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.3",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR6.4",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.1",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.2",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.3",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.4",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.5",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.6",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.7",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.8",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.9",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR10.10",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.1",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.2",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.3",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.4",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.5",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR11.6",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "element covered by the referenced section"
+  },
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "parent covered via NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10, NFR1.11"
+  },
+  {
+   "id": "NFR2",
+   "status": "OK",
+   "target": "nfr-design/security-design.md",
+   "note": "parent covered via NFR2.1, NFR2.2"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "nfr-design/performance-design.md",
+   "note": "parent covered via NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "nfr-design/reliability-design.md",
+   "note": "parent covered via NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12"
+  },
+  {
+   "id": "NFR5",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "parent covered via NFR5.1, NFR5.2, NFR5.3"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "nfr-design/observability-design.md",
+   "note": "parent covered via NFR6.1, NFR6.2, NFR6.3, NFR6.4"
+  },
+  {
+   "id": "NFR10",
+   "status": "OK",
+   "target": "nfr-design/logical-components.md",
+   "note": "parent covered via NFR10.1, NFR10.2, NFR10.3, NFR10.4, NFR10.5, NFR10.6, NFR10.7, NFR10.8, NFR10.9, NFR10.10"
+  },
+  {
+   "id": "NFR11",
+   "status": "OK",
+   "target": "nfr-design/scalability-design.md",
+   "note": "parent covered via NFR11.1, NFR11.2, NFR11.3, NFR11.4, NFR11.5, NFR11.6"
+  },
+  {
+   "id": "NFR7",
+   "status": "Deferred",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui",
+   "note": "accessibility binds rendered UI \u2014 U8"
+  },
+  {
+   "id": "NFR8",
+   "status": "Deferred",
+   "target": "unit-of-work.md \u00a7U8 oxpilot-ui",
+   "note": "usability binds client presentation \u2014 U8"
+  }
+ ]
+}

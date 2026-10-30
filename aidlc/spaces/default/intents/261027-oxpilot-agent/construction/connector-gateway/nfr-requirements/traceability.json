@@ -1,0 +1,458 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "connector-gateway",
+  "upstream_ids": [
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5, NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10, NFR1.11, NFR1.12, NFR1.13, NFR1.14, NFR1.15, NFR1.16, NFR1.17",
+      "note": "security-requirements.md \u2014 SessionOnly+gate procs, /pair sole unauth route + verifier-class Bearer elsewhere, ConnectorIdentity binding (forbidden on mismatch), ordered admission-lock authz incl. liveness-fresh, dequeue re-check, single-show custody, pairing_expired/used/forbidden vocabulary, entropy floors, secret-free projections, per-user mint limit + per-IP auth limiter, once-consume + session-scope grants, args_summary-only consent card, atomic materialization, owner-scoped reads. residual: NFR1's stored-transcript secrets-redaction clause binds U2/U3 (C5 write boundary), not this unit"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "NFR1.17, NFR2.1",
+      "note": "per-user isolation via owner-scoped reads + not_found anti-enumeration (security NFR1.17); operator egress disclosure pinned at observability NFR2.1. residual: NFR2's transcript-plaintext/redaction clause binds U2/U3"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "NFR3.1, NFR3.2, NFR3.3, NFR3.4, NFR3.5, NFR3.6, NFR3.7, NFR3.8, NFR3.9, NFR3.10, NFR3.11, NFR3.12, NFR3.13",
+      "note": "performance-requirements.md \u2014 CLAIM_WAIT_MAX clamp, C3-verbatim {actions,cancel,retry_after} + 204/Retry-After, locked dequeue re-check, claimed\u2192running on next touch, at-most-once residual, heartbeat cancel set, liveness touches, HEARTBEAT_LIVENESS_WINDOW=90s derived status, BR3.2 re-mint + connect_grant_pending audit, BR7.4 bounds, per-target lock, flagged CLAIM_ACTIONS_MAX=50, same-migration indexes. residual: NFR3's first-token/typing-echo/SSE-reconnect clauses bind U1/U3, not this unit"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "NFR4.1, NFR4.2, NFR4.3, NFR4.4, NFR4.5, NFR4.6, NFR4.7, NFR4.8, NFR4.9, NFR4.10, NFR4.11, NFR4.12, NFR-S2",
+      "note": "reliability-requirements.md \u2014 idempotent report + 404 kill-local + {ack:true}, first-wins state-conditional transitions, full C7 state enum in action_status, cancel-set re-announce + cancel_requested report-close, disabled fail-closed ({error:disabled} C3-side), offline-vs-not_connected split + tombstoned verifier 401, revoked-keeps-verifier model (heartbeat {revoked:true}+cancel, report terminal-close exception), pinned session-delete order (direct cancelled, audit survives, connect grants untouched), pairing expiry-first, dead-target idempotence, admission-lock concurrency, index FIFO. residual: NFR4's provider-failure/silent-stall clause binds U3/U4"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "NFR5.1, NFR5.2, NFR5.3, NFR5.4, NFR5.5, NFR5.6, NFR5.7, NFR5.8, NFR5.9, NFR5.10, NFR5.11, NFR5.12, NFR5.13, NFR5.14, NFR5.15, NFR5.16, NFR5.17",
+      "note": "security NFR5.1\u20135.4 (BR7.2 verbatim vocabulary obligation, honest fire-and-forget emission, no-FK survival, server-side redacted bounded report output) + observability NFR5.5\u20135.17 (per-event vocabulary incl. connect_grant_pending re-mint audit + connector_auth_failed + pairing_used). residual: NFR5's PR/branch-materialization-attributable clause binds U5"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "NFR6.1, NFR6.2, NFR6.3",
+      "note": "observability-requirements.md \u2014 oxpilot_connector tracing target (count-only dequeue lines, never args), hashes-or-ids-only log fields, existing metrics hooks only, no new stack"
+    },
+    {
+      "id": "NFR7",
+      "status": "Deferred",
+      "target": "construction/oxpilot-ui",
+      "note": "Accessibility (WCAG AA) is U8's rendering surface \u2014 U6 contributes only named error codes the UI can present accessibly"
+    },
+    {
+      "id": "NFR8",
+      "status": "Deferred",
+      "target": "construction/oxpilot-ui",
+      "note": "Usability/explanatory-disabled-state is U8's page concern \u2014 U6 contributes the oxpilot.disabled error + consent-card data the UI renders"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "TS5, TS8, NFR1.11, NFR3.13, nfr-requirements-questions.md Q8",
+      "note": "SessionOnly pin + verifier-not-cookie pin + no-secret-in-store pin + procedures-dispatch tests; integration matrix (pairing/claim/consent/revoke/idempotency/cross-user); outbound-HTTP fixture for C3; dialect_oxpilot.rs + db-dialects -E + TESTING.md row in the same change (TS5). residual: NFR9's SSE-route/happy-dom/manifest/collect-only clauses bind U1/U8"
+    }
+  ],
+  "reverse": [
+    {
+      "id": "NFR1.1",
+      "status": "N/A",
+      "target": "SessionOnly+gate procs, BR7.1 anti-enumeration \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "N/A",
+      "target": "BR1.2/BR2.1/BR2.3 credential classes + FailedAuthLimiter + connector_auth_failed \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "N/A",
+      "target": "BR2.4 ConnectorIdentity binding, forbidden/unauthorized split \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "N/A",
+      "target": "BR4.1 ordered checks incl. liveness-fresh \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "N/A",
+      "target": "BR3.5/BR6.3/BR6.4 respond domain \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "N/A",
+      "target": "BR5.1 dequeue re-check \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "N/A",
+      "target": "BR1.3/BR7.3 code custody \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "N/A",
+      "target": "BR1.3/BR6.1/BR7.3 verifier custody + no-rotation \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "N/A",
+      "target": "BR1.2/BR1.4 pending\u2192claimed, expiry-first vocabulary \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "N/A",
+      "target": "spec Pins entropy floors \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "N/A",
+      "target": "BR7.3 + entities TargetView secrecy \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "N/A",
+      "target": "BR1.5 per-user mint limit, BR2.1 per-IP auth limiter, no redeem limit \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.13",
+      "status": "N/A",
+      "target": "BR4.1/BR4.2 once-consume transaction \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.14",
+      "status": "N/A",
+      "target": "BR3.3/BR6.4 session-scope + withdrawal \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.15",
+      "status": "N/A",
+      "target": "BR3.3/BR7.4 + entities GrantView args_summary-only \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.16",
+      "status": "N/A",
+      "target": "BR4.2 atomic materialize + BR5.1 dead-grant dequeue-cancel \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "N/A",
+      "target": "BR7.1/BR4.4 owner scoping \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "N/A",
+      "target": "BR7.2/BR7.4 audit vocabulary + detail contract \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "N/A",
+      "target": "BR7.2 + audit.rs fire-and-forget honesty \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR5.3",
+      "status": "N/A",
+      "target": "entities obs FK posture + BR6.5 \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "N/A",
+      "target": "BR5.2/BR7.4 bounded redacted report output \u2014 security-requirements.md"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "N/A",
+      "target": "NFR2 egress disclosure, U7 README boundary \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "N/A",
+      "target": "BR5.1 CLAIM_WAIT_MAX clamp \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "N/A",
+      "target": "BR5.1/C3 pinned claim shape + 204 arm \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "N/A",
+      "target": "BR5.1/BR4.1 locked dequeue + lock-free scans \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "N/A",
+      "target": "BR4.3 claimed\u2192running on next touch \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "N/A",
+      "target": "BR5.1 at-most-once residual \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "N/A",
+      "target": "BR5.3 heartbeat shape + cancel set \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "N/A",
+      "target": "BR5.x liveness touches \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "N/A",
+      "target": "BR5.4 derived status, HEARTBEAT_LIVENESS_WINDOW \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "N/A",
+      "target": "BR3.2 no-live-grant re-mint + audit \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "N/A",
+      "target": "BR7.4 field bounds \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "N/A",
+      "target": "BR4.1/BR5.1 per-target lock scope \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "N/A",
+      "target": "NFR-introduced CLAIM_ACTIONS_MAX flag \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "N/A",
+      "target": "BR5.1/NFR9 index set \u2014 performance-requirements.md"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "N/A",
+      "target": "BR5.2 idempotent report + 404 \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "N/A",
+      "target": "BR4.3/BR5.2 first-wins transitions \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "N/A",
+      "target": "BR4.4/C7 full state enum \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "N/A",
+      "target": "BR5.2/BR5.3 cancel-requested close + re-announce \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "N/A",
+      "target": "BR2.5 disabled fail-closed \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "N/A",
+      "target": "BR4.1/BR6.1/BR6.3 offline-vs-not_connected + tombstone \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "N/A",
+      "target": "BR2.2/BR6.2/BR6.3/BR5.2 revoked model \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "N/A",
+      "target": "BR6.5/BR6.6/C8 session-delete order \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "N/A",
+      "target": "BR1.2/BR1.4 pairing expiry-first \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "N/A",
+      "target": "BR6.7 dead-target idempotence \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "N/A",
+      "target": "BR4.1/BR5.1 admission lock \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "N/A",
+      "target": "BR5.1 index FIFO \u2014 reliability-requirements.md"
+    },
+    {
+      "id": "NFR-S1",
+      "status": "N/A",
+      "target": "BR4.1 per-target keying \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR-S2",
+      "status": "N/A",
+      "target": "BR5.1/NFR4 parked-future caveat \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR-S3",
+      "status": "N/A",
+      "target": "BR5.1 + consent-bounded queue \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR-S4",
+      "status": "N/A",
+      "target": "BR7.4 bounded surfaces \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR-S5",
+      "status": "N/A",
+      "target": "BR5.1/NFR9 index set \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR-S6",
+      "status": "N/A",
+      "target": "single-replica N/A \u2014 scalability-requirements.md"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "N/A",
+      "target": "spec Observability + NFR6 tracing reuse \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "N/A",
+      "target": "BR7.3 hashes-or-ids logs \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "N/A",
+      "target": "spec/NFR6 existing metrics only \u2014 observability-requirements.md"
+    },
+    {
+      "id": "TS1",
+      "status": "N/A",
+      "target": "fd entities placement \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS2",
+      "status": "N/A",
+      "target": "BR1.3/BR2.1 + bearer.rs find-by-hash \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS3",
+      "status": "N/A",
+      "target": "BR4.1/BR5.1 lock primitive \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS4",
+      "status": "N/A",
+      "target": "BR5.1/BR5.5 notify primitive \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS5",
+      "status": "N/A",
+      "target": "NFR9 same-change dialect \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS6",
+      "status": "N/A",
+      "target": "BR7.2/entities audit reuse \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS7",
+      "status": "N/A",
+      "target": "NFR1/NFR6 dep posture \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "TS8",
+      "status": "N/A",
+      "target": "spec negative paths + C3 delta split-domain codes \u2014 tech-stack-decisions.md"
+    },
+    {
+      "id": "NFR5.5",
+      "status": "N/A",
+      "target": "BR7.2 pairing_created \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.6",
+      "status": "N/A",
+      "target": "BR7.2 pairing_claimed \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "N/A",
+      "target": "BR7.2 pairing_expired \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "N/A",
+      "target": "BR7.2 pairing_used \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.9",
+      "status": "N/A",
+      "target": "BR7.2/BR3.2 connect_grant_pending incl. re-mints \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.10",
+      "status": "N/A",
+      "target": "BR7.2 connect_grant lifecycle \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.11",
+      "status": "N/A",
+      "target": "BR7.2 action_grant lifecycle \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.12",
+      "status": "N/A",
+      "target": "BR7.2 grant_revoked/cancelled + reasons incl. grant_revoked for BR6.4 \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.13",
+      "status": "N/A",
+      "target": "BR7.2 action_dispatched \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.14",
+      "status": "N/A",
+      "target": "BR7.2 action_result{done|failed} \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.15",
+      "status": "N/A",
+      "target": "BR7.2 action_cancelled + reasons \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.16",
+      "status": "N/A",
+      "target": "BR7.2 target lifecycle events \u2014 observability-requirements.md"
+    },
+    {
+      "id": "NFR5.17",
+      "status": "N/A",
+      "target": "BR7.2/BR2.1 connector_auth_failed \u2014 observability-requirements.md"
+    }
+  ]
+}

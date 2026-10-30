@@ -1,0 +1,722 @@
+{
+  "stage": "code-generation",
+  "unit": "session-core",
+  "upstream_ids": [
+    "AC1.3.1",
+    "AC1.3.2",
+    "AC1.3.3",
+    "AC1.3.4",
+    "AC1.3.5",
+    "AC1.3.6",
+    "AC1.5.1",
+    "AC1.5.2",
+    "AC1.5.3",
+    "AC1.6.1",
+    "AC1.8.1",
+    "AC1.8.2",
+    "AC5.2.1",
+    "AC5.2.2",
+    "AC5.3.3",
+    "AC5.5.1",
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR3.1",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR6.1",
+    "BR6.2",
+    "BR6.3",
+    "BR7.1",
+    "BR7.2",
+    "BR7.3",
+    "FR1.2",
+    "FR1.7",
+    "FR2.4",
+    "FR5.6",
+    "FR6.6",
+    "FR6.7",
+    "NFR1",
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR2",
+    "NFR2.1",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR5.3",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR9",
+    "NFR10.1",
+    "NFR10.2",
+    "NFR10.3",
+    "NFR10.4",
+    "NFR10.5",
+    "NFR10.6",
+    "NFR10.7",
+    "NFR10.8",
+    "NFR10.9",
+    "NFR10.10",
+    "NFR11.1",
+    "NFR11.2",
+    "NFR11.3",
+    "NFR11.4",
+    "NFR11.5",
+    "NFR11.6"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.3.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "U3 owns SSE frames; U2 ships persisted messages/tool_calls/queue rows the snapshot + turn stream reads"
+    },
+    {
+      "id": "AC1.3.2",
+      "status": "Deferred",
+      "target": "crates/oxidean-api/tests/oxpilot.rs",
+      "note": "U8 owns the three-pane UI; U2 supplies session/transcript/queue/usage reads it consumes"
+    },
+    {
+      "id": "AC1.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "transcript rows persist with per-session seq ordering; snapshot read orders by seq"
+    },
+    {
+      "id": "AC1.3.4",
+      "status": "Deferred",
+      "target": "crates/oxidean-api/tests/oxpilot.rs",
+      "note": "U8 owns aria-live/composer; no U2 surface"
+    },
+    {
+      "id": "AC1.3.5",
+      "status": "Deferred",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "U5 owns the tool catalog; U2 stores oxpilot_tool_calls rows those calls produce"
+    },
+    {
+      "id": "AC1.3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "ToolCallWrite keyed (message_id, call_id) with redacted args_summary persists the durable card"
+    },
+    {
+      "id": "AC1.5.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "U8 owns the confirm dialog; U2 ships the oxpilot.session_delete entrypoint behind the SessionOnly + enablement gates"
+    },
+    {
+      "id": "AC1.5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "register_delete_hook ordered-then-abort + FK cascade over messages/tool_calls/queued/proposals; usage survives"
+    },
+    {
+      "id": "AC1.5.3",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "user-scoped list_sessions stops returning the deleted row"
+    },
+    {
+      "id": "AC1.6.1",
+      "status": "Deferred",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "store-layer union dedupe (transcript+queue) is U2's half; the snapshot-replace transport half is U3 SSE"
+    },
+    {
+      "id": "AC1.8.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "enqueue under live turn + drain_queue_tx appends transcript rows in delivery order, exactly once"
+    },
+    {
+      "id": "AC1.8.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "oxpilot.queue_list returns the non-consuming pending list in queue_seq order"
+    },
+    {
+      "id": "AC5.2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "usage counters keyed (scope, scope_key, window-day); unset caps = unbounded; check_budget refuses at/over cap"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "budget_exceeded with data.scope user|instance, user scope reported first"
+    },
+    {
+      "id": "AC5.3.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "redact() runs at the service boundary on every body-bearing write before persistence"
+    },
+    {
+      "id": "AC5.5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/dispatch.rs",
+      "note": "five new procs pin inside the closed PROCEDURES set, SessionOnly + require_enabled; regenerated client"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "BR7.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": ""
+    },
+    {
+      "id": "FR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "user-scoped session reads; last_activity_at newest-first ordering"
+    },
+    {
+      "id": "FR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "delete_session resolves owned row then cascades every session-owned child"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "transcript persists ordered, resumable via snapshot read"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "SessionDeleteHook seam + ordered Vec<Arc<dyn SessionDeleteHook>> registry is U6's revocation mount"
+    },
+    {
+      "id": "FR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-db/migrations/sqlite/0087_oxpilot_session_core.sql",
+      "note": "session/message/tool_call/queued/proposal/usage_counter tables across all three dialects"
+    },
+    {
+      "id": "FR6.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "dual-scope daily counters, unbounded defaults, refusal before enqueue/turn spend"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/dispatch.rs",
+      "note": "all five procs SessionOnly (PAT denied auth.pat_scope) + redact on stored content"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "SessionService takes caller user_id first on every verb"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "find_owned_session -> not_found uniform; no existence leak"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/dispatch.rs",
+      "note": "SessionOnly + require_enabled ordering per proc; typed error surfaces"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "store fns are user/session-scoped; no unscoped find_by_id on these tables"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "shared secrets redaction before persistence on content/args_summary"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "store layer only ever sees redacted bytes"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "audit detail is identifiers/result metadata only \u2014 hook_index + result, never bodies"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "OnceLock install_sessions; sessions() -> oxpilot.internal when unset; no production registrars outside main/test seam"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "single unconditional install site after app-state construction"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "64 KiB content cap + 128-byte client_msg_id cap at the proc boundary, same as SSE route"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "every method takes caller user_id; foreign rows resolve not_found uniformly"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "docs/CONFIGURATION.md",
+      "note": "OXPILOT budget/provider envs documented; usage_get/error vocabulary match"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "transcript read returns full history ordered by seq for U3 prompt assembly"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/migrations/sqlite/0087_oxpilot_session_core.sql",
+      "note": "index names asserted in the 0087 shape test"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "next_message_seq = MAX(seq)+1 under the session row's transaction"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "single-statement seq allocation matches shipped impl"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "dedupe re-check inside the same serialize window"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "O(content) redact scan at the service top"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "enqueue is one INSERT with unique (session_id, client_msg_id)"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "drain_queue_tx deletes RETURNING and sorts by queue_seq per dialect"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "queue position computed as ordinal among live queued rows"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "transcript-first/queue-second dedupe arms implemented verbatim"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "drain tx rolls back on error \u2014 queued rows intact"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/routes.rs",
+      "note": "turn start sweeps residual queued rows into transcript before streaming"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "bounded retry/dedupe behavior verified by service tests"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "hook Err returns before DELETE \u2014 session row survives"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "cascade proof: session delete removes all child rows, keeps usage"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "unique (scope, scope_key, window) upsert is atomic"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "usage rows carry no session FK \u2014 survive session and user deletion"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "queue_seq allocated under the session-scoped insert; concurrent inserts serialize"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "tool-call (message_id, call_id) identity persists repeated same-tool calls"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "proposal pending->applied transition guarded by current status"
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "idempotent enqueue re-read returns the existing receipt"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/session.rs",
+      "note": "audit rows record event_type/target/result field names only"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "error vocabulary pinned: not_found/forbidden/budget_exceeded/hook_failed/session_active_turn_absent"
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "crates/oxidean-api/tests/oxpilot.rs",
+      "note": "integration tests pin receipt/error shapes incl {null,null} dedupe receipt"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/dispatch.rs",
+      "note": "proc set extends closed PROCEDURES + dispatch parity tests"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "SessionService/SessionDeleteHook are the crate-seam contracts U3/U6/U8 consume"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/services.rs",
+      "note": "service composes Database facade \u2014 no sqlx at the API layer"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-api-oxpilot/src/settings.rs",
+      "note": "budget_caps stamped on every slot path; rebuild preserves sessions OnceLock"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "crates/oxidean-api-core/src/oxpilot.rs",
+      "note": "QueuedReceipt/UsageView/queued_message_json are the C1/C2 wire shapes"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "packages/api-client/src/index.ts",
+      "note": "regenerated typed client carries the five new procs"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "dialect_oxpilot 0087 legs + PROCEDURES closed-set update ride the same change"
+    },
+    {
+      "id": "NFR10.1",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "0087 ships all three dialects; sqlite leg green"
+    },
+    {
+      "id": "NFR10.2",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "per-dialect drain/unique/cascade proofs"
+    },
+    {
+      "id": "NFR10.3",
+      "status": "OK",
+      "target": "crates/oxidean-db/migrations/sqlite/0087_oxpilot_session_core.sql",
+      "note": "FK cascade declarations per dialect"
+    },
+    {
+      "id": "NFR10.4",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "schema-shape assertions cover tables + unique keys"
+    },
+    {
+      "id": "NFR10.5",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "usage survival + dual-scope upsert proven per dialect"
+    },
+    {
+      "id": "NFR10.6",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "exactly-once ordered drain proven via drain_queue_tx test"
+    },
+    {
+      "id": "NFR10.7",
+      "status": "OK",
+      "target": "crates/oxidean-db/src/oxpilot.rs",
+      "note": "dialect-dispatched store impls share the facade signature set"
+    },
+    {
+      "id": "NFR10.8",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_oxpilot.rs",
+      "note": "RETURNING-based drain per dialect (no ORDER BY on DELETE)"
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": "crates/oxidean-db/tests/dialect_actions.rs",
+      "note": "reseat ledger updated for 0087 across the shared ledger test"
+    },
+    {
+      "id": "NFR10.10",
+      "status": "OK",
+      "target": "docs/TESTING.md",
+      "note": "db-dialects row names 0087 queue/cascade/unique-key + drain proofs"
+    },
+    {
+      "id": "NFR11.1",
+      "status": "OK",
+      "target": "aidlc/spaces/default/intents/261027-oxpilot-agent/construction/session-core/code-generation/code-generation-plan.md",
+      "note": "13-step plan executed and ticked"
+    },
+    {
+      "id": "NFR11.2",
+      "status": "OK",
+      "target": "docs/TESTING.md",
+      "note": "testing doc row updated in-step"
+    },
+    {
+      "id": "NFR11.3",
+      "status": "OK",
+      "target": "packages/api-client/src/index.ts",
+      "note": "make rpc-gen output regenerated; deterministic on re-run"
+    },
+    {
+      "id": "NFR11.4",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/main.rs",
+      "note": "install_sessions wired in the shell entrypoint"
+    },
+    {
+      "id": "NFR11.5",
+      "status": "OK",
+      "target": "crates/oxidean-api/tests/oxpilot.rs",
+      "note": "proc auth/disabled/audit matrix under nextest"
+    },
+    {
+      "id": "NFR11.6",
+      "status": "OK",
+      "target": "aidlc/spaces/default/intents/261027-oxpilot-agent/construction/session-core/code-generation/code-summary.md",
+      "note": "summary + manifest + traceability recorded"
+    }
+  ]
+}

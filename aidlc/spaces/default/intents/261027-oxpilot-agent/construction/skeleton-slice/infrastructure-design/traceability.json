@@ -1,0 +1,326 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "skeleton-slice",
+  "upstream_ids": [
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR1.11",
+    "NFR1.12",
+    "NFR1.13",
+    "NFR2.1",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.12",
+    "NFR3.13",
+    "NFR3.14",
+    "NFR3.15",
+    "NFR3.16",
+    "NFR3.17",
+    "NFR3.18",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR5.3",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR7.1",
+    "NFR8.1",
+    "NFR8.2"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 SessionOnly classification is a code-level proc_classes test, not infrastructure"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 session auth on web routes is app-level, existing ingress unchanged"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 check-order parity is code structure inside existing api service"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 ownership filter is query-level"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "infrastructure-spec.md \u2014 flag defaults off; enablement is an env flip not a deploy"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 status proc as operator diagnostic"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 no secrets anywhere; env vars are config strings"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "infrastructure-spec.md shared resources \u2014 redact() in oxidean-core"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 metadata-only surfaces are code conventions"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 atomic claim is in-process map semantics"
+    },
+    {
+      "id": "NFR1.11",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 client_msg_id uniqueness is a table constraint (covered by schema, not a service)"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "infrastructure-spec.md resource sizing \u2014 64 KiB body cap bounds per-turn memory"
+    },
+    {
+      "id": "NFR1.13",
+      "status": "Deferred",
+      "target": "Deferred \u2014 per-message/per-user budget enforcement is U2 scope (FR6.7), including its infra answer if any"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 disclosure copy ships in docs/CONFIGURATION.md (file change, not a resource)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 first-frame bound is in-process pipeline latency, asserted by stack test"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 snapshot read bound rides the (session_id,seq) index (covered under NFR3.11 schema)"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 keep-alive cadence is Sse::keep_alive config inside api service"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 list bound rides the (user_id,last_activity_at) index (covered under NFR3.10 schema)"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 status/create bounds are single reads on existing tables"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "infrastructure-spec.md sizing \u2014 turns <= live sessions on existing api pod"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "infrastructure-spec.md sizing \u2014 O(in-flight message) memory"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 single-scan snapshot is query design"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 composer echo is client-local"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "infrastructure-spec.md storage \u2014 (user_id,last_activity_at) index"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "infrastructure-spec.md storage \u2014 (session_id,seq) index"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 live-turn bound is ActiveTurn map key semantics"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "infrastructure-spec.md compute \u2014 single-replica posture on api service"
+    },
+    {
+      "id": "NFR3.14",
+      "status": "OK",
+      "target": "infrastructure-spec.md services \u2014 oxidean-db only, no new store"
+    },
+    {
+      "id": "NFR3.15",
+      "status": "OK",
+      "target": "infrastructure-spec.md networking \u2014 SSE on existing ingress, fd-bound readers"
+    },
+    {
+      "id": "NFR3.16",
+      "status": "OK",
+      "target": "infrastructure-spec.md storage \u2014 cascade FK + growth bound"
+    },
+    {
+      "id": "NFR3.17",
+      "status": "OK",
+      "target": "infrastructure-spec.md services \u2014 no cache/queue provisioned"
+    },
+    {
+      "id": "NFR3.18",
+      "status": "OK",
+      "target": "infrastructure-spec.md sizing \u2014 closed resource envelope"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 terminal-error path is code behaviour"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "infrastructure-spec.md compute \u2014 in-process turn tasks, no worker service"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 orphan-sweep-count startup signal (sweep itself is pre-accept api boot code, reliability-design.md)"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 Lagged-resync count as buffer-pressure signal"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 flag-off rollback lever; monitoring-design.md gate-denial signal"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 409 degradation is code behaviour"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 persist-before-provider is code ordering"
+    },
+    {
+      "id": "NFR4.8",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 partial-output durability is row-write design"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "Deferred",
+      "target": "Deferred \u2014 session delete + hook chain is U2 scope; U1 registers no seam"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 constructor-only injection flag, no new env"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 audit_events fire-and-forget, create-only"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 audit detail ids-only payload"
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 optional denial audit"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 tracing stdout via Railway logs; zero new infra"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 signal table (span/event set)"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 metadata-only log content"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "monitoring-design.md SLIs \u2014 stack-test probe, N=1"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 status proc = operator surface"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 baseline semantics are page markup in the existing web service"
+    },
+    {
+      "id": "NFR8.1",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 env docs in .env.example + CONFIGURATION.md in the same change"
+    },
+    {
+      "id": "NFR8.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 typed error codes are wire contract, not resources"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+import { AppLink } from "@/components/ui/app-link";
+
+/** Generic 404 block for in-app surfaces that must render as absent. */
+export function PageNotFound() @{
+  <div className="mx-auto max-w-lg px-4 py-16 text-center">
+    <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
+      Page not found
+    </h1>
+    <p className="mt-3 text-[16px] text-muted-foreground">We couldn't find that page.</p>
+    <p className="mt-8">
+      <AppLink
+        href="/"
+        className="text-[14px] font-semibold text-primary underline-offset-4 hover:underline"
+      >
+        Back to home
+      </AppLink>
+    </p>
+  </div>;
+}

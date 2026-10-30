@@ -8,6 +8,7 @@ import {
   RECHARTS_TYPE_ONLY_IMPORT_FIX,
 } from "./vite-plugins/fix-type-only-imports.ts";
 import { swBuildIdPlugin } from "./vite-plugins/sw-build-id.ts";
+import { tanstackAiOctaneSource } from "./vite-plugins/tanstack-ai-octane.ts";
 import { parseViteAllowedHosts } from "./vite-plugins/vite-allowed-hosts.ts";
 import { webmcpWellKnownPlugin } from "./vite-plugins/webmcp-well-known.ts";
 
@@ -92,6 +93,9 @@ export default defineConfig({
       // oxidean-web in production; middleware keeps them real in dev/preview.
       webmcpWellKnownPlugin(),
       fixTypeOnlyImports(RECHARTS_TYPE_ONLY_IMPORT_FIX),
+      // @octanejs/astro skips node_modules outside @octanejs/* — serve
+      // @tanstack/ai-octane's raw .tsrx hooks under virtual ids instead.
+      tanstackAiOctaneSource(rootDir),
       tailwindcss(),
     ],
     server: {

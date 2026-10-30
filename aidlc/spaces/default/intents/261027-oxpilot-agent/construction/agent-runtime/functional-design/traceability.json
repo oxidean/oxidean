@@ -1,0 +1,259 @@
+{
+ "stage": "functional-design",
+ "unit": "agent-runtime",
+ "upstream_ids": [
+  "AC1.3.1",
+  "AC1.3.2",
+  "AC1.3.3",
+  "AC1.3.4",
+  "AC1.3.5",
+  "AC1.3.6",
+  "AC1.4.1",
+  "AC1.4.2",
+  "AC1.6.1",
+  "AC1.8.1",
+  "AC1.8.2",
+  "AC5.2.2",
+  "FR2.1",
+  "FR2.2",
+  "FR2.3",
+  "FR2.4",
+  "FR6.1",
+  "FR6.3",
+  "FR6.7",
+  "FR7.1",
+  "FR7.3",
+  "NFR1",
+  "NFR3",
+  "NFR4",
+  "NFR6",
+  "NFR9",
+  "ADR-008",
+  "ADR-010",
+  "C2",
+  "C4",
+  "C5",
+  "C6",
+  "C8",
+  "C1"
+ ],
+ "coverage": [
+  {
+   "id": "AC1.3.1",
+   "status": "OK",
+   "target": "WF1/WF2 (BR2.1) \u2014 SSE snapshot-then-append over /api/ is the shipped plumbing U3's loop emits through; no reload"
+  },
+  {
+   "id": "AC1.3.2",
+   "status": "Deferred",
+   "target": "U8 oxpilot-ui owns rail+transcript+drawer; U3 supplies the frames and rows it renders"
+  },
+  {
+   "id": "AC1.3.3",
+   "status": "OK",
+   "target": "BR2.1/BR2.3 \u2014 transcript persists via C5; reopening restores it via the C2 snapshot read U3 keeps service-routed"
+  },
+  {
+   "id": "AC1.3.4",
+   "status": "Deferred",
+   "target": "U8 oxpilot-ui owns aria-live + labelled composer; U3 emits the message-boundary frames it announces"
+  },
+  {
+   "id": "AC1.3.5",
+   "status": "Deferred",
+   "target": "BR3.1 \u2014 U3 declares `tools` from the executor catalog and binds repo identity into the system prompt; Deferred to U5 \u2014 the repo read tools themselves"
+  },
+  {
+   "id": "AC1.3.6",
+   "status": "OK",
+   "target": "BR2.4/BR3.1 \u2014 tool cards persist durable-first (name + summarized inputs) then emit as C2 tool frames; U8 renders from the rows"
+  },
+  {
+   "id": "AC1.4.1",
+   "status": "OK",
+   "target": "BR5.2, WF2 step 4\u20135 \u2014 every failure path produces a terminal frame with a stable code; never a silent stall"
+  },
+  {
+   "id": "AC1.4.2",
+   "status": "OK",
+   "target": "BR5.2 \u2014 the assistant row persists `error` with partial content; transcript and composer survive"
+  },
+  {
+   "id": "AC1.6.1",
+   "status": "OK",
+   "target": "WF6 + BR2.1 \u2014 snapshot-replace + append contract through the shipped GET route; no Last-Event-ID; (message_id, seq) dedupe makes attach replay exactly-once"
+  },
+  {
+   "id": "AC1.8.1",
+   "status": "OK",
+   "target": "BR4.1/BR4.3 \u2014 end-of-turn atomic drain delivers queued rows into the transcript and chains the next turn"
+  },
+  {
+   "id": "AC1.8.2",
+   "status": "OK",
+   "target": "BR3.4, WF5 \u2014 card{queued, ref_id} pushed into the live turn's buffer+fanout at insert; resolves via queue_list"
+  },
+  {
+   "id": "AC5.2.2",
+   "status": "OK",
+   "target": "BR6.2, WF1 step 3 \u2014 turn-start check_budget refuses with 429 budget_exceeded before claim"
+  },
+  {
+   "id": "FR2.1",
+   "status": "Deferred",
+   "target": "U8 owns the three-pane workspace; U3 serves the frames it renders"
+  },
+  {
+   "id": "FR2.2",
+   "status": "OK",
+   "target": "WF2 + BR3.1 \u2014 provider streaming through the C2 frame contract, snapshot/append/tool/terminal"
+  },
+  {
+   "id": "FR2.3",
+   "status": "OK",
+   "target": "BR2.3 \u2014 session's repo binding in system prompt + tool catalog for on-demand repo reads"
+  },
+  {
+   "id": "FR2.4",
+   "status": "OK",
+   "target": "BR2.1 \u2014 server-side transcript via C5; multi-turn state persists per user"
+  },
+  {
+   "id": "FR6.1",
+   "status": "OK",
+   "target": "WF2 + BR3.1 \u2014 the turn loop is the ai-octane-shaped runtime: ChatRequest/ChatStream through the C4 trait"
+  },
+  {
+   "id": "FR6.3",
+   "status": "OK",
+   "target": "WF1/WF6 (BR1.1) \u2014 dedicated SSE route under /api/, snapshot-then-wake-append per stream_job_log precedent"
+  },
+  {
+   "id": "FR6.7",
+   "status": "OK",
+   "target": "BR6.1/BR6.2 \u2014 dual-axis usage recording at terminal + turn-start budget refusal"
+  },
+  {
+   "id": "FR7.1",
+   "status": "Deferred",
+   "target": "BR3.1 \u2014 the catalog declaration + invoke loop is U3's; the repo read tools themselves are U5's registry entries (tool implementations deferred)"
+  },
+  {
+   "id": "FR7.3",
+   "status": "Deferred",
+   "target": "BR3.1/BR3.3 \u2014 the dispatch+timeout mechanics are U3's; CI tools land in U5's catalog (deferred)"
+  },
+  {
+   "id": "NFR1",
+   "status": "OK",
+   "target": "BR7.2 \u2014 redact() on every frame's user-derived field and every provider-bound tool result"
+  },
+  {
+   "id": "NFR3",
+   "status": "OK",
+   "target": "BR2.3/BR3.3 \u2014 bounded prompt window + bounded rounds keep first-token and turn latency finite; reconnect dedupe by (message_id, seq)"
+  },
+  {
+   "id": "NFR4",
+   "status": "OK",
+   "target": "BR5.1/BR5.2/BR5.3 \u2014 abort hook, terminal-on-every-failure, guaranteed claim release"
+  },
+  {
+   "id": "NFR6",
+   "status": "OK",
+   "target": "BR7.1 \u2014 pinned log lines reuse tracing; no new stack"
+  },
+  {
+   "id": "NFR9",
+   "status": "OK",
+   "target": "BR5.2 negative paths + the unit-test list this stage feeds (turn loop, abort, chain, card emit)"
+  },
+  {
+   "id": "ADR-008",
+   "status": "OK",
+   "target": "BR3.1 \u2014 ToolCtx identity envelope on every invoke; executors never trust caller-supplied scope"
+  },
+  {
+   "id": "ADR-010",
+   "status": "OK",
+   "target": "BR1.3 + BR5.1 \u2014 provider pinned per turn via turn_parts(); delete aborts the live turn before cascade"
+  },
+  {
+   "id": "C2",
+   "status": "OK",
+   "target": "WF1/WF5/WF6 \u2014 frame vocabulary incl. card{queued} + terminal{aborted}; non-2xx pre-stream vocabulary pinned in BR1.1"
+  },
+  {
+   "id": "C4",
+   "status": "OK",
+   "target": "BR3.2 \u2014 ChatMsg extension is the flagged additive amendment; adapters map native tool round-trips"
+  },
+  {
+   "id": "C5",
+   "status": "OK",
+   "target": "WF1\u2013WF3 (BR1.2, BR2.1) \u2014 every transcript/queue/usage/tool-call read-write flows through the SessionService port, never state.db"
+  },
+  {
+   "id": "C6",
+   "status": "OK",
+   "target": "BR3.1/BR3.2 + entities.md ToolExecutor/ToolCtx/ToolCall/ToolOutput/ToolError \u2014 U3 defines the seam U5 implements"
+  },
+  {
+   "id": "C8",
+   "status": "OK",
+   "target": "BR5.1, WF4 \u2014 OxpilotTurnAbortHook registered first at boot; idempotent, never waits"
+  },
+  {
+   "id": "C1",
+   "status": "OK",
+   "target": "BR1.1/BR5.1 \u2014 429 budget_exceeded + 409 turn_active on the POST vocabulary; U3 claims the previously-orphaned oxpilot.turn_cancel proc (abort machinery is this unit's)"
+  }
+ ],
+ "reverse": [
+  {
+   "id": "BR1.2",
+   "status": "N/A",
+   "target": "one-live-turn mechanics \u2014 the load-bearing invariant under exactly-once drain (U2 BR4.2), contract-pinned by C2's 409 arm"
+  },
+  {
+   "id": "BR2.2",
+   "status": "N/A",
+   "target": "restated U2 union-dedupe for ordering context \u2014 U3 doesn't change the rule, only where it runs in BR1.1"
+  },
+  {
+   "id": "BR2.4",
+   "status": "N/A",
+   "target": "durable-first ordering \u2014 crash-safety pin derived from NFR4's no-silent-stall requirement"
+  },
+  {
+   "id": "BR3.3",
+   "status": "N/A",
+   "target": "round/timeout bounds \u2014 spend-protection mechanics under FR6.7's budget intent"
+  },
+  {
+   "id": "BR4.2",
+   "status": "N/A",
+   "target": "U2 WF5.3 residual-drain placement decision (Q5) \u2014 mechanics pinned by the consumed spec"
+  },
+  {
+   "id": "BR4.3",
+   "status": "N/A",
+   "target": "chain-depth bound \u2014 runaway protection, paired with BR3.3's round cap"
+  },
+  {
+   "id": "BR5.3",
+   "status": "N/A",
+   "target": "release-guarantee mechanics \u2014 prevents permanent 409 pinning; NFR4-adjacent infrastructure rule"
+  },
+  {
+   "id": "BR6.1",
+   "status": "N/A",
+   "target": "exchange accounting shape \u2014 counting semantics under AC5.2.2's refusal requirement (Q7 decision)"
+  },
+  {
+   "id": "BR5.4",
+   "status": "N/A",
+   "target": "first-wins terminal emission mechanics \u2014 C2's 'frames after terminal are never emitted' enforced against three writers (hook, turn exit, wrapper arm)"
+  }
+ ]
+}

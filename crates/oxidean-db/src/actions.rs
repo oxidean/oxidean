@@ -2011,7 +2011,9 @@ pub async fn runner_busy(pool: &DbPool, runner_id: &str) -> Result<bool, String>
         DbPool::Postgres(_) => {
             "SELECT EXISTS(SELECT 1 FROM action_jobs WHERE runner_id = $1 AND status = 'in_progress')"
         }
-        _ => "SELECT EXISTS(SELECT 1 FROM action_jobs WHERE runner_id = ? AND status = 'in_progress')",
+        _ => {
+            "SELECT EXISTS(SELECT 1 FROM action_jobs WHERE runner_id = ? AND status = 'in_progress')"
+        }
     };
     match pool {
         DbPool::Postgres(p) => sqlx::query_scalar::<_, bool>(sql)

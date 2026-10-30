@@ -486,7 +486,7 @@ pub async fn expand_call(
         Err(e) => {
             return Ok(fail(format!(
                 "reusable workflow '{uses_spec}': file unreadable at '{treeish}': {e}"
-            )))
+            )));
         }
     };
     let yaml = match String::from_utf8(bytes) {
@@ -499,7 +499,7 @@ pub async fn expand_call(
             return Ok(fail(format!(
                 "reusable workflow '{uses_spec}': parse failed: {}",
                 e.message
-            )))
+            )));
         }
     };
     if !doc.triggers.workflow_call {

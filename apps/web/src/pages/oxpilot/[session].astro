@@ -1,0 +1,12 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OxpilotSessionPage } from "@/routes/oxpilot.$session.tsrx";
+
+export function getStaticPaths() {
+	return [{ params: { session: "_" } }];
+}
+---
+
+<AppShell title="Oxpilot session · Oxidean">
+	<OxpilotSessionPage client:load />
+</AppShell>

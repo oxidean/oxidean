@@ -116,7 +116,7 @@ pub async fn upsert(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirror
             return Err(AppError::new(
                 "repo.mirror.invalid_auth",
                 "auth_kind must be https_token or ssh_key",
-            ))
+            ));
         }
     };
 
@@ -193,7 +193,7 @@ pub async fn upsert(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirror
             return Err(AppError::new(
                 "repo.mirror.invalid_sync_mode",
                 "sync_mode must be merge or exact",
-            ))
+            ));
         }
         None => existing
             .as_ref()

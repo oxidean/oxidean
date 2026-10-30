@@ -1,0 +1,28 @@
+{
+  "stage": "code-generation",
+  "unit": "oxpilot-tools",
+  "version": 1,
+  "writes": [
+    { "path": "crates/oxidean-api-core/src/oxpilot.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/dispatch.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/lib.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/comment.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/dispatch.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/mod.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/procs.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/propose.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/read.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/registry.rs" },
+    { "path": "crates/oxidean-api-oxpilot/src/tools/validate.rs" },
+    { "path": "crates/oxidean-api/src/main.rs" },
+    { "path": "crates/oxidean-api/tests/oxpilot.rs" },
+    { "path": "crates/oxidean-db/migrations/mysql/0089_oxpilot_proposals_ops.sql" },
+    { "path": "crates/oxidean-db/migrations/postgres/0089_oxpilot_proposals_ops.sql" },
+    { "path": "crates/oxidean-db/migrations/sqlite/0089_oxpilot_proposals_ops.sql" },
+    { "path": "crates/oxidean-db/src/oxpilot.rs" },
+    { "path": "crates/oxidean-db/tests/dialect_oxpilot.rs" },
+    { "path": "packages/api-client/src/index.ts" },
+    { "path": "packages/api-client/src/languages.ts" },
+    { "path": "packages/api-client/src/scope-catalog.ts" }
+  ]
+}

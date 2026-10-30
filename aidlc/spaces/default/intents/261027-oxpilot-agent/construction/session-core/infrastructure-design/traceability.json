@@ -1,0 +1,408 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "session-core",
+  "upstream_ids": [
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR2.1",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR5.3",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR10.1",
+    "NFR10.2",
+    "NFR10.3",
+    "NFR10.4",
+    "NFR10.5",
+    "NFR10.6",
+    "NFR10.7",
+    "NFR10.8",
+    "NFR10.9",
+    "NFR10.10",
+    "NFR11.1",
+    "NFR11.2",
+    "NFR11.3",
+    "NFR11.4",
+    "NFR11.5",
+    "NFR11.6"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.3",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 redacted payloads never in logs/audit",
+      "note": "Logs & Tracing closing note"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 redacted payloads never in logs/audit",
+      "note": "same row covers the store-side boundary"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.8",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.9",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR1.10",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR2.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.3",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.5",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.6",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.7",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.8",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.9",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 drain_queue SLI + cicd-pipeline.md rollback item 3",
+      "note": "drain tx is code-level; its deploy-side consequence is covered"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 residual queue rows self-heal at next turn start",
+      "note": "rollback posture item 3"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 cascade FK storage choice",
+      "note": "ON DELETE CASCADE is the pinned delete mechanism"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 usage_counters scope-keyed non-cascade",
+      "note": "counter rows survive deletes by design"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 budget_exceeded refusal signal + cicd-pipeline.md flag-off lever",
+      "note": "loud refusal is the designed signal"
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 dual-scope upsert tx in Capacity & limits",
+      "note": "the atomic +delta upsert's row-pair arity"
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 single-replica posture note",
+      "note": "check\u2192act window documented as single-replica caveat"
+    },
+    {
+      "id": "NFR4.11",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.12",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 session_delete audit rows",
+      "note": "proc-layer audit is the deletion surface"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 hook_index in audit detail",
+      "note": "hook failure attribution"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 turn span attrs, no user_id",
+      "note": "existing span; nothing added"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 internal-error warn signal",
+      "note": "oxpilot.internal surfaces store failures"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 drain-completed debug! {session_id, drained_count}",
+      "note": "the pinned crash-recovery signal"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "monitoring-design.md \u2014 budget_exceeded refusal signal",
+      "note": "typed error = the spend-pressure signal"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.1",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 four 0087 tables \u00d73 dialects",
+      "note": "storage strategy row"
+    },
+    {
+      "id": "NFR10.2",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 TESTING.md row updated in-change",
+      "note": "same-change registration"
+    },
+    {
+      "id": "NFR10.3",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.5",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.6",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 queue is a DB table, not a broker",
+      "note": "Infrastructure Services row"
+    },
+    {
+      "id": "NFR10.7",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.8",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 closed OXPILOT_PROCEDURES test +5",
+      "note": "registration pinning test"
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": "cicd-pipeline.md \u2014 dialect_oxpilot binary extends to 0087",
+      "note": "dialect-pairing rule"
+    },
+    {
+      "id": "NFR10.10",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.1",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.2",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.3",
+      "status": "OK",
+      "target": "infrastructure-specification.md \u2014 single-replica note",
+      "note": "multi-replica convergence bound documented"
+    },
+    {
+      "id": "NFR11.4",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.5",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.6",
+      "status": "N/A",
+      "target": "No infra footprint \u2014 code-level pin (trait surface, redaction, dedupe, drain tx, store fns, proc wiring)",
+      "note": ""
+    }
+  ],
+  "reverse": []
+}

@@ -36,6 +36,7 @@ pub static PROCEDURES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     v.extend_from_slice(oxidean_api_deployment::PROCEDURES);
     v.extend_from_slice(oxidean_api_notification::PROCEDURES);
     v.extend_from_slice(oxidean_api_vcs::PROCEDURES);
+    v.extend_from_slice(oxidean_api_oxpilot::PROCEDURES);
     v.extend_from_slice(oxidean_api_issues::PROCEDURES);
     v.extend_from_slice(oxidean_api_org::PROCEDURES);
     v.extend_from_slice(oxidean_api_pulls::PROCEDURES);
@@ -127,6 +128,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         return resp;
     }
     if let Some(resp) = oxidean_api_vcs::dispatch(ctx, &req.procedure, req.input.clone()).await {
+        return resp;
+    }
+    if let Some(resp) = oxidean_api_oxpilot::dispatch(ctx, &req.procedure, req.input.clone()).await
+    {
         return resp;
     }
     if let Some(resp) = oxidean_api_issues::dispatch(ctx, &req.procedure, req.input.clone()).await {

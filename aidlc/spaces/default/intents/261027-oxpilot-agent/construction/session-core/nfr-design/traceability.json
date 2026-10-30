@@ -1,0 +1,408 @@
+{
+  "stage": "nfr-design",
+  "unit": "session-core",
+  "upstream_ids": [
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR2.1",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR4.5",
+    "NFR4.6",
+    "NFR4.7",
+    "NFR4.8",
+    "NFR4.9",
+    "NFR4.10",
+    "NFR4.11",
+    "NFR4.12",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR5.3",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR10.1",
+    "NFR10.2",
+    "NFR10.3",
+    "NFR10.4",
+    "NFR10.5",
+    "NFR10.6",
+    "NFR10.7",
+    "NFR10.8",
+    "NFR10.9",
+    "NFR10.10",
+    "NFR11.1",
+    "NFR11.2",
+    "NFR11.3",
+    "NFR11.4",
+    "NFR11.5",
+    "NFR11.6"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "security-design.md \u2014 service trait: caller_user_id first arg on every method + unconditional write-bind",
+      "note": "Q1 trait + ownership-binding skeleton"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "security-design.md \u2014 find_owned_session\u2192NotFound uniform path",
+      "note": "ok_or(NotFound) on owned lookup"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "security-design.md \u2014 defense-in-depth table + proc pinning table",
+      "note": "SessionOnly+gate per proc with error surface"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "security-design.md \u2014 no unscoped find_by_id for these tables",
+      "note": "store-layer scoping"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "security-design.md \u2014 redact_in_place listing BR3.1's exact field set + identifier carve-out (client_msg_id/base/call_id excluded)",
+      "note": "Q5"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "security-design.md \u2014 redact before store call",
+      "note": "store only sees redacted bytes"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "security-design.md \u2014 NOT-redacted identifier list (client_msg_id, base, call_id)",
+      "note": "same carve-out"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "security-design.md \u2014 delete seam ordered hooks \u2192 one cascade DELETE",
+      "note": "Q2 + NFR4.5"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "security-design.md \u2014 U2 ships hooks:vec![] + ProbeHook only",
+      "note": "zero production registrars"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "security-design.md \u2014 usage_get proc self-scope",
+      "note": "proc table + Q6 read_counters(user_id)"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "Deferred",
+      "target": "codegen step: docs/CONFIGURATION.md oxpilot section update",
+      "note": "docs/CONFIGURATION.md oxpilot section update ships at code-generation (design pins the obligation; nothing to design)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "performance-design.md \u2014 transcript query plan (one index-covered scan, full set)",
+      "note": "BR7.2 honored"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "performance-design.md \u2014 list_sessions uses shipped idx_oxpilot_sessions_user_activity",
+      "note": "verified index name"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "performance-design.md \u2014 queue_list plan on UNIQUE(session_id,queue_seq)",
+      "note": ""
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "performance-design.md \u2014 seq mint detail (MAX+1 read then insert, per-session)",
+      "note": "matches shipped next_message_seq"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "performance-design.md \u2014 queue_seq mint + bounded retry loop",
+      "note": "8 attempts"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "performance-design.md \u2014 redact_in_place once per write",
+      "note": "O(content) scan at service top"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "performance-design.md \u2014 record_usage upsert row",
+      "note": "single statement"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "performance-design.md \u2014 drain tx shape",
+      "note": "Q3 per-dialect \u2014 RETURNING rows sorted in-memory by queue_seq (no ORDER BY on DELETE)"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 drain lifecycle diagram (turn-start residual arm)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 dedupe decision table incl. streaming-status cmid lookup + pure resend_matches",
+      "note": "BR2.2 arms verbatim"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 crash-window table mid-drain row",
+      "note": "uncommitted tx \u21d2 rows intact"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 drain lifecycle + mid-turn crash row",
+      "note": "turn-start residual"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "performance-design.md \u2014 seq minting detail retry bound",
+      "note": "8 attempts"
+    },
+    {
+      "id": "NFR4.5",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 delete integrity bullet 1",
+      "note": "Err before DELETE"
+    },
+    {
+      "id": "NFR4.6",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 delete integrity bullet 2 (counters not cascade children)",
+      "note": "BR5.3"
+    },
+    {
+      "id": "NFR4.7",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 delete integrity bullet 3 (no ActiveTurns short-circuit)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.8",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 AppError{budget_exceeded,data:{scope}} typed refusal",
+      "note": ""
+    },
+    {
+      "id": "NFR4.9",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 atomic upsert bullet",
+      "note": ""
+    },
+    {
+      "id": "NFR4.10",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 non-transactional check\u2192act documented bound",
+      "note": ""
+    },
+    {
+      "id": "NFR4.11",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 crash-window table stranded-streaming row (U1 sweep reused)",
+      "note": ""
+    },
+    {
+      "id": "NFR4.12",
+      "status": "OK",
+      "target": "reliability-design.md \u2014 collision-handling paragraph under dedupe table",
+      "note": "idempotent re-read+return"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "observability-design.md \u2014 audit rows table; proc-layer audit::record (service holds no RpcCtx)",
+      "note": "field-names only"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "observability-design.md \u2014 no audit on budget_exceeded",
+      "note": ""
+    },
+    {
+      "id": "NFR5.3",
+      "status": "OK",
+      "target": "observability-design.md \u2014 result values incl. hook_failed",
+      "note": ""
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "observability-design.md \u2014 span attr policy (ids only, user_id forbidden)",
+      "note": ""
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "observability-design.md \u2014 err.code log lines",
+      "note": ""
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "observability-design.md \u2014 drain debug line {session_id, drained_count}",
+      "note": ""
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "observability-design.md \u2014 counters as telemetry",
+      "note": ""
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "observability-design.md \u2014 C1-pinned usage_get payload + null caps",
+      "note": ""
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "observability-design.md \u2014 no new status proc (omission)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.1",
+      "status": "OK",
+      "target": "logical-components.md \u2014 migration 0087 catalogue row + Q8 table set",
+      "note": ""
+    },
+    {
+      "id": "NFR10.2",
+      "status": "OK",
+      "target": "logical-components.md \u2014 U1 seam deltas TESTING.md row",
+      "note": ""
+    },
+    {
+      "id": "NFR10.3",
+      "status": "OK",
+      "target": "logical-components.md \u2014 dependency shape (no cross-crate dialect imports)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.4",
+      "status": "OK",
+      "target": "logical-components.md \u2014 trait port + oxpilot::SessionService namespace + runtime OnceLock<sessions>/sessions() accessor + slot budget_caps",
+      "note": ""
+    },
+    {
+      "id": "NFR10.5",
+      "status": "OK",
+      "target": "security-design.md \u2014 redact_in_place boundary calling oxidean_core::redact (the single detector)",
+      "note": ""
+    },
+    {
+      "id": "NFR10.6",
+      "status": "OK",
+      "target": "logical-components.md \u2014 oxpilot_queued_messages real table",
+      "note": ""
+    },
+    {
+      "id": "NFR10.7",
+      "status": "OK",
+      "target": "performance-design.md \u2014 bound 8 in mint detail",
+      "note": ""
+    },
+    {
+      "id": "NFR10.8",
+      "status": "OK",
+      "target": "security-design.md \u2014 PROCEDURES pinning control",
+      "note": ""
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": "logical-components.md \u2014 dialect test extends to 0087",
+      "note": ""
+    },
+    {
+      "id": "NFR10.10",
+      "status": "OK",
+      "target": "security-design.md \u2014 ProbeHook cfg(test)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.1",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 contention map seq/queue_seq rows",
+      "note": ""
+    },
+    {
+      "id": "NFR11.2",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 documented limit 1 (single-replica turn ownership)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.3",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 documented limit 2 (cross-replica over-admit)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.4",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 counter shape at scale",
+      "note": ""
+    },
+    {
+      "id": "NFR11.5",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 documented limit 3 (unbounded growth)",
+      "note": ""
+    },
+    {
+      "id": "NFR11.6",
+      "status": "OK",
+      "target": "scalability-design.md \u2014 documented limit 4 (queue depth)",
+      "note": ""
+    }
+  ],
+  "reverse": []
+}

@@ -624,6 +624,7 @@ pub struct UpdateAuthSettingsRequest {
 
 const RESERVED_USERNAMES: &[&str] = &[
     "admin",
+    "oxpilot",
     "api",
     "settings",
     "login",
@@ -735,6 +736,9 @@ mod tests {
     fn validate_username_rejects_reserved() {
         let err = validate_username("admin").unwrap_err();
         assert!(err.contains("reserved"));
+        // literal first-segment routes — an owner sharing the name
+        // shadows the route tree (literal arms win dispatch).
+        assert!(validate_username("oxpilot").is_err());
         // dist/ asset dirs — an owner sharing the name would shadow assets
         // and its own dotted repos would 404 at the web tier.
         for name in ["brand", "Brand", "EMOJI", "fonts", "icons"] {

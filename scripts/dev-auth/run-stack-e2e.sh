@@ -138,6 +138,13 @@ export OXIDEAN_WORKOS_BASE_URL="http://127.0.0.1:9092"
 export OXIDEAN_OIDC_ALLOW_INSECURE=1
 export OXIDEAN_OIDC_ISSUER="http://127.0.0.1:9090/default"
 export OXIDEAN_OIDC_CLIENT_ID="oxidean-dev"
+# Oxpilot: flag on + deterministic stub provider so stack e2e can drive
+# /api/oxpilot SSE without a real LLM key. The stub descriptor advertises
+# no model list ("any model id"), so a model must be named explicitly —
+# without one the turn lands the designed `no_model` refusal (NFR4.9).
+export OXIDEAN_OXPILOT_ENABLED=1
+export OXIDEAN_OXPILOT_PROVIDER=stub
+export OXIDEAN_OXPILOT_MODEL=stub-1
 export OXIDEAN_OIDC_CLIENT_SECRET="oxidean-dev"
 export OXIDEAN_ADMIN_EMAIL="admin@oxidean.local"
 export OXIDEAN_ADMIN_PASSWORD="password1"
