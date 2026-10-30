@@ -24,14 +24,20 @@
 | Location | Contents |
 |----------|----------|
 | `aidlc/` (39 MB) | `spaces/default/{memory,knowledge,codekb,intents}` + untracked `active-memory/` mirror + machine-local runtime (`.aidlc-*`, sessions) |
-| `.claude/` (8.2 MB) | Almost entirely AI-DLC: `CLAUDE.md`, `agents/` (14 `aidlc-*` personas), `aidlc-common/`, `hooks/` + wiring, `knowledge/`, `rules/aidlc.md`, `scopes/`, `sensors/`, `settings.json` (aidlc perms/hooks/statusLine), `settings.local.json.example`, `tools/` (~80 `aidlc-*.ts` engine sources), `skills/` (42 real `aidlc-*` dirs + 2 symlinks) |
+| `.claude/` (8.2 MB) | Almost entirely AI-DLC: `CLAUDE.md`, `agents/` (14 `aidlc-*` personas), `aidlc-common/`, `hooks/` + wiring, `knowledge/`, `rules/aidlc.md`, `scopes/`, `sensors/`, `settings.json` (aidlc perms/hooks/statusLine), `settings.local.json.example`, `tools/` (~80 `aidlc-*.ts` engine sources), `skills/` (42 real `aidlc-*` dirs + 3 symlinks into `.agents/skills/`: `clean-user-facing-text`, `remove-ai-marks`, `security-review`) |
 | `.cursor/` (8.4 MB) | Same AI-DLC surface: `agents/`, `aidlc-common/`, `cli.json` (aidlc-only perm), `hooks/` + `hooks.json` (all aidlc engine calls), `knowledge/`, `scopes/`, `sensors/`, `skills/` (47 aidlc dirs), `tools/` + `data/stage-graph.json`, and 6 aidlc rules in `rules/` |
 | `.agents/skills/` | `aidlc*` entries are **symlinks into `.cursor/skills/`**; the real project skills (octane, ox, tdd, rust-*, semver-conventions, …) live here already |
 | `AGENTS.md` | "Planning / AI-DLC" section (~L99–102) + `BEGIN/END AI-DLC:agents` block (~L114–174) |
 | `ROADMAP.md` | 1 line: "executable planning runs through AI-DLC (`/aidlc`; workspace under `aidlc/`)" |
-| `docs/CODE_PRACTICES.md` | 1 line referencing `aidlc/` + `docs/archive/planning/` |
-| `.gitignore` | AI-DLC block (~L60–118) |
-| Global | `~/.local/bin/aidlc` binary (`aidlc 2.11.1`) + scattered global skill dirs (`~/.claude/skills`, `~/.codeium/windsurf/skills`, `~/.config/devin/skills`, `~/.copilot/skills`) — handled in Phase 5 |
+| `docs/CODE_PRACTICES.md` | 1 line referencing `aidlc/` + `docs/archive/planning/` (L74) |
+| `docs/TESTING.md` | Link into `docs/archive/planning/milestones/…` (L361) |
+| `docs/dev-auth.md` | Link into `docs/archive/planning/milestones/…` (L126) |
+| `ROADMAP.md` | `aidlc`/`docs/archive/planning/` references at L3, L9, L150 — and the file itself moves to `agent-os/product/`, so all relative links get rewritten anyway |
+| `.coderabbit.yaml` | `!aidlc/**` path filter (L8) — exists to stay under CodeRabbit's 300-file cap; becomes stale after Phase 6. Also `!.claude/skills/security-review` — dead once `.claude/skills` is a symlink |
+| `.dockerignore` | `aidlc` entry (L8) — stale after Phase 6; `agent-os/` belongs in the same not-shipped class as `docs`/`.agents` |
+| `.gitignore` | AI-DLC block (`# BEGIN/END AI-DLC:gitignore` markers, L33–125) |
+| `.devin/skills/` | `security-review` is a committed symlink into `.agents/skills/` — already conforms to agentcanon; untouched |
+| Global | `~/.local/bin/aidlc` binary (`aidlc 2.11.1`) + scattered global skill dirs (`~/.claude/skills`, `~/.codeium/windsurf/skills`, `~/.config/devin/skills`, `~/.copilot/skills`, `~/.cursor/skills`) — handled in Phase 5 |
 
 ### Non-AI-DLC files that must survive inside `.claude/` and `.cursor/`
 
@@ -44,22 +50,26 @@
 
 ### Spec material to preserve ("merge into agent-os")
 
-1. **AI-DLC intents** under `aidlc/spaces/default/intents/`:
+1. **AI-DLC intents** under `aidlc/spaces/default/intents/` — all three are
+   committed on `main` (PR #203 merged as `42e154ab`), so all three migrate
+   in Phase 3:
    - `261014-semver-rollout` — completed; full phase/stage artifact tree +
      audit shards committed.
    - `261018-agentic-vcs-protocol` — completed; same structure.
-   - `261027-oxpilot-agent` — **in flight**. Its committed artifacts
+   - `261027-oxpilot-agent` — merged with PR #203; committed artifacts
      (`aidlc-state.md`, `project-description.json`, `ideation/`, `inception/`,
-     `construction/`, `verification/`, `audit/`) live on branch
-     `feat/oxpilot-agent` (draft PR #203). On this branch the record dir
-     holds only gitignored runtime state.
+     `construction/`, `verification/`, `audit/`) are on `main`. The
+     `audit/athrox-1-*.md` file in the working tree is an untracked
+     runtime session shard (a lone `SESSION_STARTED` event) — disposable,
+     dropped with `aidlc/` in Phase 6, not migrated.
 2. **AI-DLC memory/method**: `aidlc/spaces/default/memory/` (and its
    `active-memory/` copy): `org.md`, `team.md`, `project.md`,
    `phases/{ideation,inception,construction,operation}.md`. Contains real,
    affirmed practices — trunk-based dev, worktree usage, squash-merge,
    SemVer commit grammar, guard policy `relaxed`, testing posture learnings.
-3. **AI-DLC knowledge**: `aidlc/spaces/default/knowledge/` (user docs under
-   `knowledge/documents/`; derived `documentkb/` catalog).
+3. **AI-DLC knowledge**: `aidlc/spaces/default/knowledge/` — verified to have
+   **zero committed files** (no `knowledge/documents/` user originals; only
+   derived/untracked runtime). Nothing to migrate; step dropped.
 4. **GSD archive**: `docs/archive/planning/` (6.2 MB, read-only) — `STATE.md`,
    `PROJECT.md`, `REQUIREMENTS.md`, `MILESTONES.md`, `ROADMAP.md`,
    `milestones/v1.0-*` (per-phase `PLAN`/`SUMMARY`/`CONTEXT`/`RESEARCH`/
@@ -108,7 +118,7 @@ agent-os/
   agent-os-shape-spec/
   bm-prd-creator/
   ...existing project skills (unchanged)...
-.claude/skills -> ../.agents/skills    # agentcanon symlink (replaces 44 entries)
+.claude/skills -> ../.agents/skills    # agentcanon symlink (replaces 45 entries)
 CLAUDE.md -> AGENTS.md                 # agentcanon symlink at repo root
 AGENTS.md                              # real instructions; AI-DLC block → Agent OS section
 ```
@@ -135,8 +145,8 @@ Notes on the mapping:
   `intents.json`, cursor files, and the `active-memory/` mirror are dropped
   (runtime/derived state). `audit/` shards are kept — they're the committed
   decision record.
-- **knowledge/**: `knowledge/documents/` (user originals) → `docs/knowledge/`;
-  `documentkb/` catalog and `codekb/` are derived indexes — dropped.
+- **knowledge/**: verified empty of committed files — nothing moves.
+  `documentkb/`/`codekb/` derived indexes and untracked runtime are dropped.
 - **`.claude/` after migration**: `settings.json`, `settings.local.json.example`,
   `agents/`, `aidlc-common/`, `hooks/`, `knowledge/`, `rules/`, `scopes/`,
   `sensors/`, `tools/`, `CLAUDE.md` all delete. If a minimal
@@ -148,23 +158,12 @@ Notes on the mapping:
   the 7 project `.mdc` files (delete `aidlc.mdc`, `aidlc-onboarding.mdc`, and
   the 4 `aidlc-phase-*.mdc`).
 
-## Sequencing — the in-flight `261027-oxpilot-agent` intent
+## Sequencing — `261027-oxpilot-agent` (resolved)
 
-Recommended: **let `feat/oxpilot-agent` finish and merge under AI-DLC first**,
-then run this migration. Rationale: the migration deletes `aidlc/` and all
-`.claude`/`.cursor` engine files; if it merges first, the oxpilot branch's
-rebase must convert its intent record to `agent-os/specs/_archive/aidlc/261027-oxpilot-agent/`
-and continue under the new system mid-flight — doable but noisy.
-
-Status note: draft PR #203 is current — its rebased head now also carries the
-last codegen bookkeeping commit (`b9297be6`), and the `tmp/oxpilot-wt`
-worktree has been removed, so the branch is the only place that intent lives.
-
-Alternative (if migration must land first): on the oxpilot branch, move the
-committed record into `agent-os/specs/_archive/aidlc/261027-oxpilot-agent/`,
-delete `aidlc/`, and continue the remaining construction work from the
-converted spec. The plan below assumes the recommended order but works either
-way — the conversion step is identical, just run on a different branch.
+PR #203 merged on `main` (`42e154ab`) before this migration landed, so the
+ordering question is moot: the `261027-oxpilot-agent` intent record is
+committed history like the other two and migrates wholesale in Phase 3 — no
+branch conversion needed. This branch already contains that merge.
 
 ## Work plan
 
@@ -220,10 +219,20 @@ way — the conversion step is identical, just run on a different branch.
     `runtime-graph.json`) — only committed files move anyway.
 14. `git mv aidlc/spaces/default/memory agent-os/specs/_archive/aidlc/memory`
     (raw method files; distilled versions live in `standards/`).
-15. `git mv aidlc/spaces/default/knowledge/documents docs/knowledge` if any
-    user originals exist (check first — may be empty).
-16. Update the 3 referring spots: `AGENTS.md` §Planning, `ROADMAP.md`,
-    `docs/CODE_PRACTICES.md` line ~74.
+15. ~~knowledge move~~ — dropped; `aidlc/spaces/default/knowledge/` has zero
+    committed files.
+16. Update every referring spot (all verified to exist):
+    - `AGENTS.md` §Planning (L101) — rewritten in Phase 6 anyway.
+    - `docs/CODE_PRACTICES.md` L74 — drop the `aidlc/` + `docs/archive/planning/`
+      references for `agent-os/`.
+    - `docs/TESTING.md` L361 — retarget link to
+      `agent-os/specs/_archive/gsd/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md`.
+    - `docs/dev-auth.md` L126 — retarget link to
+      `agent-os/specs/_archive/gsd/milestones/v1.0-phases/04-auth-sessions-email/04-USER-SETUP.md`.
+    - `ROADMAP.md` L3, L9, L150 — the file moves to
+      `agent-os/product/roadmap.md` in Phase 2; rewrite `aidlc` mentions and
+      repoint `docs/archive/planning/…` links to `../specs/_archive/gsd/…`
+      (relative, stays inside `agent-os/`).
 
 ### Phase 4 — agentcanon pass (repo)
 
@@ -232,28 +241,36 @@ way — the conversion step is identical, just run on a different branch.
 18. Delete `.claude/CLAUDE.md`; add repo-root `CLAUDE.md` symlink → `AGENTS.md`.
     (`.claude/CLAUDE.md` today is the AI-DLC onboarding doc — nothing to keep.)
 19. Keep `.cursor/` as-is otherwise — Cursor reads `.agents/skills/` natively
-    and its remaining `rules/*.mdc` stay put. Document the convention in
-    `AGENTS.md` so new skills land in `.agents/skills/`.
+    and its remaining `rules/*.mdc` stay put. `.devin/skills/` already
+    conforms (committed symlink into `.agents/skills`) — untouched. Document
+    the convention in `AGENTS.md` so new skills land in `.agents/skills/`.
 
 ### Phase 5 — agentcanon pass (user-level, decided)
 
 Same convention globally — one real copy in `~/.agents/skills/`, every
 harness dir a symlink:
 
-20. `mkdir -p ~/.agents/skills`; consolidate any real skill folders currently
-    in `~/.claude/skills`, `~/.codeium/windsurf/skills`,
-    `~/.config/devin/skills`, `~/.copilot/skills` into `~/.agents/skills/`
-    (inspect first; same-name skills that differ get a manual pick).
-21. Replace each of those dirs with a symlink → `~/.agents/skills`
+20. `~/.agents/skills/` **already exists** (21 real skills — the global canon
+    is half-done). Consolidate the unique real folders from the harness dirs
+    into it: `browser-use` (in `~/.copilot/skills` + `~/.cursor/skills`) and
+    `ripple` (in `~/.cursor/skills`) are absent from `~/.agents/skills` —
+    copy those in. For same-name skills present on both sides (`ox`,
+    `frontend-design`, `tauri-v2`, `use-railway`, `systematic-debugging`,
+    `ui-ux-pro-max`, `web-design-guidelines`, `agent-md-refactor`,
+    `better-auth-best-practices`, `next-best-practices`), `diff -r` first;
+    identical → skip, divergent → manual pick.
+21. Replace each harness dir with a symlink → `~/.agents/skills`
     (`~/.claude/skills`, `~/.config/devin/skills`, `~/.codeium/windsurf/skills`,
-    `~/.copilot/skills`).
+    `~/.copilot/skills`, `~/.cursor/skills`).
 22. Remove `~/.local/bin/aidlc` and any `~/.aidlc*`/runtime leftovers.
 23. (Optional) Install `agentcanon-repo`/`agentcanon-manifest` skills globally
     per the agentcanon repo's instructions.
 
 ### Phase 6 — Remove AI-DLC
 
-24. Delete `aidlc/` (incl. untracked `active-memory/`).
+24. Delete `aidlc/` (incl. untracked `active-memory/` and the
+    `audit/athrox-1-*.md` session shard — runtime state, not a decision
+    record).
 25. Delete from `.claude/`: `agents/`, `aidlc-common/`, `hooks/`, `knowledge/`,
     `rules/`, `scopes/`, `sensors/`, `tools/`, `settings.json`,
     `settings.local.json.example`, `CLAUDE.md`.
@@ -261,9 +278,16 @@ harness dir a symlink:
     `hooks.json`, `knowledge/`, `scopes/`, `sensors/`, `skills/`, `tools/`, and
     `rules/aidlc*.mdc` (6 files).
 27. Delete `.agents/skills/aidlc*` symlinks (all point into `.cursor/skills/`).
-28. `.gitignore`: drop the AI-DLC block (~L60–118); keep
-    `.claude/settings.local.json`. Add nothing for `agent-os/` — all of it
-    commits.
+28. `.gitignore`: drop the AI-DLC block (`# BEGIN/END AI-DLC:gitignore`,
+    L33–125); keep `.claude/settings.local.json`. Add nothing for `agent-os/`
+    — all of it commits.
+28a. `.coderabbit.yaml`: replace `!aidlc/**` with `!agent-os/specs/_archive/**`
+    (same 300-file-cap rationale — Phase 3 lands ~6 MB of archived markdown in
+    this PR); drop `!.claude/skills/security-review` (dead path once
+    `.claude/skills` is a symlink; `!.agents/skills/security-review/**` still
+    covers it).
+28b. `.dockerignore`: drop `aidlc`, add `agent-os` (same not-shipped class as
+    `docs`/`.agents`).
 29. `AGENTS.md`: rewrite "Planning / AI-DLC" → a short "Planning / Agent OS"
     section (skills live in `.agents/skills`, specs/product/standards under
     `agent-os/`, archives under `specs/_archive/`); delete the whole
@@ -304,18 +328,16 @@ Resolved:
 
 Still open:
 
-1. **Timing vs `feat/oxpilot-agent`**: recommended path is merge oxpilot first
-   (draft PR #203), then migrate. Alternative: convert its intent record to
-   `agent-os/specs/_archive/aidlc/261027-oxpilot-agent/` when the branch
-   rebases onto post-migration main.
+1. ~~**Timing vs `feat/oxpilot-agent`**~~ — resolved: PR #203 merged
+   (`42e154ab`); the intent record is committed and migrates with the rest.
 2. **`bm-skill-builder` / other bm-skills**: only `bm-prd-creator` requested;
    `bm-skill-builder`, `bm-design-system`, `bm-favicon-creator` are available
    in the same repo if wanted later.
 
 ## Out of scope
 
-- The `feat/oxpilot-agent` feature work itself (continues on its branch /
-  draft PR #203; the `tmp/oxpilot-wt` worktree was already removed).
+- The `feat/oxpilot-agent` feature work itself (shipped via PR #203; any
+  follow-up work happens under the new spec setup, not AI-DLC).
 - Any code changes to `apps/`, `crates/`, `packages/` — this is a
   tooling/process migration only.
 - Removing unrelated vendored skills or touching `skills-lock.json` entries
