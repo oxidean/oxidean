@@ -30,10 +30,10 @@ entities:
       Static registry metadata for one adapter — what `admin.oxpilot.providers_list`
       returns per entry. Never holds key material.
     attributes:
-      - { name: id, type: text, required: true, unique: true, allowed_values: ["openai", "anthropic", "ollama", "stub"] }
+      - { name: id, type: text, required: true, unique: true, allowed_values: ["openai", "anthropic", "ollama", "openai-compatible", "stub"] }
       - { name: models, type: "text[]", required: true, description: "advertised model ids the adapter accepts" }
-      - { name: configured, type: boolean, required: true, description: "selectable now — key material resolvable for key-required adapters (env OXIDEAN_OXPILOT_API_KEY or stored key), always true for keyless adapters (ollama, stub)" }
-      - { name: requires_key, type: boolean, required: true, description: "false only for ollama + stub" }
+      - { name: configured, type: boolean, required: true, description: "selectable now — key material resolvable for key-required adapters (env OXIDEAN_OXPILOT_API_KEY or stored key), always true for keyless/key-optional adapters (ollama, openai-compatible, stub)" }
+      - { name: requires_key, type: boolean, required: true, description: "false for ollama, openai-compatible (key optional), stub" }
 
   - name: EffectiveProviderConfig
     kind: computed

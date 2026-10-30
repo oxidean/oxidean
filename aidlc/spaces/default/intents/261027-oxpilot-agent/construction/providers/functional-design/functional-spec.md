@@ -35,7 +35,7 @@ erDiagram
         timestamp updated_at
     }
     PROVIDER_DESCRIPTOR {
-        text id PK "openai|anthropic|ollama|stub"
+        text id PK "openai|anthropic|ollama|openai-compatible|stub"
         text[] models
         bool configured "selectable now"
         bool requires_key
@@ -66,7 +66,9 @@ pairing close the set (BR5.x).
 1. Load the singleton `oxpilot_settings` row (absent ⇒ all-NULL).
 2. For each field: DB value when non-NULL else the matching
    `OXIDEAN_OXPILOT_*` env var (BR2.1).
-3. Classify the resolved `provider_id`: absent ⇒ `no_provider`; not in the
+3. Classify the resolved `provider_id`: absent ⇒ the deterministic `stub`
+   default (sys-admin-gated downstream; `no_provider` survives only as a
+   defensive backstop for hand-built slots); not in the
    registry ⇒ `misconfigured`; present ⇒ construction decides (BR1.3).
 4. Emit `EffectiveProviderConfig` — resolved fields plus
    `disabled_reason ∈ {flag_off, no_provider, misconfigured, null}`.
@@ -126,7 +128,14 @@ installed slot, and audit order can never diverge.
    entries (U1's captured-Arc contract; R-03/R-04).
 5. `OXIDEAN_OXPILOT_PROVIDER=stub` still resolves the U1 `StubProvider` —
    dev/test stacks keep working without real keys; `stub` is
-   registry-internal only (BR1.4).
+   registry-internal only (BR1.4) — omitted from `providers_list`,
+   refused by `settings_set` on release builds, resolved as the unset
+   default, and sys-admin-gated at every surface (post-build BR2.6).
+6. `openai-compatible` reuses the OpenAI chat-completions adapter against
+   an operator `base_url` (LiteLLM, vLLM, NIM, llama.cpp-style servers):
+   `base_url` required, API key optional (a keyless endpoint sends no
+   `Authorization` header), and private/LAN egress exempt like `ollama`
+   (post-build registry addition).
 
 ## WF4 — Stream adaptation (per adapter)
 
@@ -154,7 +163,8 @@ installed slot, and audit order can never diverge.
 2. `providers_list` → `require_admin` then one `ProviderDescriptor` per
    registry entry: `{id, models, configured}` — `configured` = selectable
    now: key material resolvable (env `OXIDEAN_OXPILOT_API_KEY` or stored
-   key) for key-required adapters; always true for `ollama`/`stub`;
+   key) for key-required adapters; always true for `ollama`/`stub` and
+   `openai-compatible` (key-optional);
    `stub` is omitted from the response (BR1.4).
 
 ## Negative paths

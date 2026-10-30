@@ -43,9 +43,15 @@ disconnect, revoke) linked from `/settings/ai`; `/settings/ai` remains the
 external-agent integration surface.
 FR1.5 When the feature is disabled or unconfigured, the index renders an
 operator-disable state naming the `OXIDEAN_OXPILOT_*` env vars and pointing
-at `docs/CONFIGURATION.md`.
-FR1.6 Any authenticated user may use `/oxpilot` when the feature flag and
-provider are configured; there is no additional role gate in v1.
+at `docs/CONFIGURATION.md`. (Amended post-build: under the resolved `stub`
+provider, non-sys-admin users instead get the `restricted` status reason and
+the surface renders not-found — see FR1.6.)
+FR1.6 Any authenticated user may use `/oxpilot` when the feature flag and a
+real provider are configured. Role gate (post-build amendment): the resolved
+`stub` provider — the default when no provider is configured — is a
+sys-admin-only preview; every `oxpilot.*` surface, connector flow, and
+status payload is hidden from non-sys-admins (`restricted`), and anonymous
+or PAT callers keep their own auth denials.
 FR1.7 Users can delete their own sessions and transcripts; deletion is
 per-user scoped and removes the persisted rows.
 
@@ -119,10 +125,15 @@ FR6.3 Chat streaming uses a dedicated SSE route under `/api/` (verified
 `stream_job_log` precedent — snapshot then wake-append); the web tier's
 `text/event-stream` compression exclusion already permits it.
 FR6.4 The LLM provider is operator-configured via `OXIDEAN_OXPILOT_*` env
-vars — OpenAI, Anthropic, or Ollama adapters (all verified at 1.0.0); the
-feature is off unless a provider is configured and the flag is enabled.
+vars — OpenAI, Anthropic, Ollama, or a generic OpenAI-compatible endpoint
+(LiteLLM, vLLM, NIM, llama.cpp-style servers; `base_url` required, API key
+optional, LAN/private egress exempt like Ollama). When no provider is
+configured the runtime resolves the deterministic `stub` provider — a
+sys-admin-only preview (see FR1.6) — rather than reporting unconfigured.
 FR6.5 The feature flag follows the `OXIDEAN_MCP_ENABLED` +
-`admin.mcp.*` env-default + DB-override pattern.
+`admin.mcp.*` env-default + DB-override pattern, surfaced to system
+administrators through the `/admin/oxpilot` settings page
+(`admin.oxpilot.settings_get`/`settings_set`/`providers_list`).
 FR6.6 Sessions, messages, tool calls, computer-use targets, and grants
 persist in `oxidean-db` with migrations for all three dialects.
 FR6.7 Per-user and per-instance message/token budgets are operator-

@@ -18,7 +18,9 @@ activity), so that I can pick up where I left off.
 - AC1.1.4 With zero sessions the index shows an explanatory empty state
   with the new-session entry point.
 - AC1.1.5 The route admits any authenticated user — no additional role
-  gate in v1 (FR1.6).
+  gate for real providers (FR1.6). Post-build: under the resolved `stub`
+  provider the route is sys-admin-only (`restricted` ⇒ not-found for
+  everyone else).
 
 ### US1.2 — Start a session [Must]
 As Dana, I want a new-session dialog (repository, branch, goal, optional
@@ -198,7 +200,9 @@ to enable the feature and pick a provider, so that I control rollout and
 cost.
 - AC5.1.1 Flag off / no provider → explanatory disable state naming the env
   vars and `docs/CONFIGURATION.md`.
-- AC5.1.2 Providers: OpenAI, Anthropic, Ollama; key/base-url env vars.
+- AC5.1.2 Providers: OpenAI, Anthropic, Ollama, OpenAI-compatible
+  (base-url required, key optional); key/base-url env vars; `stub`
+  resolves by default and is sys-admin-only.
 - AC5.1.3 Flag follows the `admin.mcp.*` env-default + DB-override pattern.
 - AC5.1.4 Every new env var is documented in `.env.example` + CONFIGURATION.
 - AC5.1.5 With the flag off or no provider configured, `oxpilot.*` RPC

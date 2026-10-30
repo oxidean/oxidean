@@ -100,6 +100,12 @@ shared-schema:
       first: flag/provider absent → `oxpilot.disabled` before any other
       logic. `oxpilot.status` is gate-exempt — it is how the flag-off UI
       learns `reason`.
+    - Post-build: `reason` additionally carries `restricted` — the resolved
+      `stub` provider (the unset-provider default) is sys-admin-only, so
+      non-sys-admin status calls return `{enabled:false, provider:null,
+      reason:"restricted"}` and gated procs answer `oxpilot.disabled`
+      without revealing the stub identity. Anonymous/PAT callers keep
+      their own `auth.*` denials — the restriction never masks them.
 ```
 
 ## C2 — SSE chat routes
@@ -187,7 +193,7 @@ sets MUST be honoured before starting and during execution of an action.
 shared-schema:
   trait: |
     trait LlmProvider: Send + Sync {
-      fn id(&self) -> &'static str;                 # "openai" | "anthropic" | "ollama" | "stub"
+      fn id(&self) -> &'static str;                 # "openai" | "anthropic" | "ollama" | "openai-compatible" | "stub"
       async fn stream(&self, req: ChatRequest) -> Result<ChatStream, ProviderError>;
     }
     struct ChatRequest { model: String, system: String, messages: Vec<ChatMsg>, tools: Vec<ToolSpec> }

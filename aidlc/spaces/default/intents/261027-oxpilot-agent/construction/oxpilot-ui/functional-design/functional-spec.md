@@ -74,6 +74,17 @@ link, and the coverage-manifest rows. Everything the UI calls
 already exists: every C1 proc is generated in `apiClient.oxpilot.*`
 and the SSE routes are live.
 
+Post-build scope addition: the `/admin/oxpilot` sys-admin settings
+page (`admin-settings-nav` entry, `AdminSettingsLayout`) — provider
+Select with an "Environment default" sentinel that writes
+`provider_id: null` (resolved `stub` is release-refused as a direct
+write), model/base_url/key fields, enablement Switch, user/instance
+budget inputs, and `fetchAdminOxpilotSettings` /
+`fetchAdminOxpilotProviders` hydration. Client-side requires
+`base_url` for `openai-compatible`. `reason:"restricted"` renders
+`PageNotFound` on every `/oxpilot` surface (WF1) and hides the
+`/settings/ai` oxpilot section for non-admins.
+
 Out of scope: any proc, route, DTO, or server behavior change
 (the UI enforces nothing — [domain]); the `action_status` poll —
 no C1 user proc exists for it and none is added (U5's
@@ -98,7 +109,9 @@ and composition.
 
 1. `auth.me` → unauthenticated/error ⇒ `usePageRedirect` to
    `/login?returnTo=/oxpilot` (any authenticated user admitted —
-   FR1.6, AC1.1.5; no role gate exists or is added).
+   FR1.6, AC1.1.5; the post-build sys-admin gate applies only under
+   the resolved `stub` provider — real providers admit any
+   authenticated user as specified).
 2. `oxpilot.status` (gate-exempt, retry:false, staleTime 15s —
    shipped query options) resolves `{enabled, provider, reason}`.
    Pending ⇒ `Skeleton` block (M8 loading row).
@@ -108,6 +121,10 @@ and composition.
    `OXIDEAN_OXPILOT_PROVIDER`, `docs/CONFIGURATION.md` link. No
    interactive controls render (AC5.1.1, NFR8); every gated proc
    would still deny server-side (AC5.1.5).
+   Post-build: `reason:"restricted"` (sys-admin-only `stub` resolved)
+   renders `PageNotFound` instead — a non-admin learns nothing about
+   the feature, including on the session route and mid-session
+   disable swaps.
 4. `enabled===true` ⇒ two sections:
    - `[+ New session]` `Button` in the `PageHeader` actions slot →
      WF2.

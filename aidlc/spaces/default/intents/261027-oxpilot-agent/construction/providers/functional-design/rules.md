@@ -34,9 +34,12 @@ rules:
 
   - id: BR1.4
     statement: >
-      The registry is a closed static set {openai, anthropic, ollama, stub}.
+      The registry is a closed static set {openai, anthropic, ollama,
+      openai-compatible, stub}. `openai-compatible` reuses the OpenAI
+      chat-completions adapter: `base_url` required, key optional.
       `stub` is excluded from `providers_list` and refused by `settings_set`
-      (`invalid_provider`) outside test builds — it exists for tests only.
+      (`invalid_provider`) on release builds — it resolves as the unset
+      default and is sys-admin-gated at every surface (BR2.6).
     rationale: Stub must not be selectable as a production provider.
 
   # ---- BR2 — resolution & enablement ----
@@ -80,6 +83,29 @@ rules:
     rationale: Resolved-view ambiguity makes overrides invisible (R-08);
       field names and key-source scope pinned (R-21).
 
+  - id: BR2.5
+    statement: >
+      An unset provider resolves the deterministic `stub` provider — the
+      feature is previewable out of the box instead of reporting
+      `no_provider`; `no_provider` survives only as a defensive backstop
+      for hand-built slots (post-build change).
+    rationale: Stub default keeps every deployment path enabled-with-a-
+      provider by default; preview/e2e determinism without real keys.
+
+  - id: BR2.6
+    statement: >
+      The resolved `stub` provider is sys-admin-only: `stub_restricted`
+      keys on the resolved provider identity (enabled or not), every
+      gated `oxpilot.*` proc and connector owner path returns
+      `oxpilot.disabled` for non-sys-admin authenticated callers, and
+      `oxpilot.status` masks the stub identity
+      (`{enabled:false, provider:null, reason:"restricted"}`).
+      Session-less callers (anonymous/PAT) bypass the mask so their own
+      `auth.*` denials still surface (post-build change).
+    rationale: The deterministic preview must never read as a configured
+      provider to end users; hiding the identity avoids leaking that a
+      stub is active at all.
+
   # ---- BR3 — validation (binds the RESOLVED config) ----
 
   - id: BR3.1
@@ -110,15 +136,17 @@ rules:
       must be http(s) — no resolved provider ⇒ the http(s) shape check still
       runs but the private-target bound is skipped (no consumer). With a
       resolved provider:
-      non-`ollama` resolved providers additionally forbid private/loopback/
-      link-local/metadata targets. Host forms classified: literal IP in any
+      hosted (`openai`, `anthropic`) resolved providers additionally forbid
+      private/loopback/link-local/metadata targets; `ollama`,
+      `openai-compatible`, and `stub` (non-networked) are the exempt set.
+      Host forms classified: literal IP in any
       notation (dotted, hex, octal, integer, IPv6, IPv4-mapped-IPv6) AND
       DNS names resolved at validation time — every resolved address must
-      be public. DNS can re-resolve differently at connect (documented
-      TOCTOU bound); operators pinning a private network segment should
-      use the Ollama adapter or a literal public IP.
-    rationale: SSRF bound on an admin-supplied egress URL; `ollama` is the
-      blessed self-hosted exception (US5.4/AC5.4.1).
+      be public, and the provider client's `PublicOnlyResolver` re-validates
+      fresh DNS answers on every connect (the DNS-rebinding bound;
+      post-build replacement for the documented TOCTOU residual).
+    rationale: SSRF bound on an admin-supplied egress URL; self-hosted
+      providers are the blessed exceptions (US5.4/AC5.4.1).
 
   - id: BR3.3
     statement: >
@@ -175,7 +203,8 @@ rules:
     statement: >
       `ollama` is keyless: builds without key material; missing base_url
       defaults to `http://127.0.0.1:11434`. Its private-target exemption
-      is the SSRF exception (BR3.2).
+      is the SSRF exception (BR3.2). `openai-compatible` shares the
+      exemption: key-optional, but `base_url` is required (no default).
     rationale: AC5.4.1 — self-host without hosted-provider keys.
 
   - id: BR4.5

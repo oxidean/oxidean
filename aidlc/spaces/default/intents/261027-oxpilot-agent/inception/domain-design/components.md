@@ -36,7 +36,10 @@ components:
     summary: `oxidean-api-oxpilot` domain crate — `oxpilot.*` RPC surface + `/api/oxpilot/*` HTTP routes (SSE chat send/resume, connector claim/report/heartbeat).
     behaviour: >
       SessionOnly-classified procedures; fail-closed `oxpilot.disabled`
-      when the feature flag or provider is absent; per-user scoping on
+      when the feature flag is off, and for non-sys-admin callers under
+      the sys-admin-only resolved `stub` provider (post-build BR2.6 —
+      anonymous/PAT callers keep their own `auth.*` denials);
+      per-user scoping on
       every read/write (cross-user denial). Mounts three HTTP route
       families under `/api/oxpilot/`: the SSE chat send/resume pair
       (session-cookie auth) and the connector claim/report/heartbeat
@@ -197,16 +200,17 @@ components:
     entities: []
 
   - name: LlmProviderRegistry
-    summary: Provider trait + adapters (OpenAI, Anthropic, Ollama) + enablement/config resolution; rebuildable slot on RpcCtx.
+    summary: Provider trait + adapters (OpenAI, Anthropic, Ollama, OpenAI-compatible) + enablement/config resolution; rebuildable slot on RpcCtx.
     behaviour: >
       `Arc<RwLock<Arc<dyn LlmProvider>>>` slot (email_slot shape, Q2):
       resolved from `OXIDEAN_OXPILOT_*` env with `oxpilot_settings`
-      DB-override via `admin.oxpilot.*`. Absent/misconfigured → `None` →
+      DB-override via `admin.oxpilot.*`. An unset provider resolves the
+      deterministic `stub` default (sys-admin-gated); misconfigured → `None` →
       `oxpilot.disabled` denials (fail-closed). Provider keys are
       retrievable secrets: AES-256-GCM at rest under the OXPILOT key chain;
       never emitted to RPC/SSE/logs.
     responsibilities:
-      - LlmProvider trait + three adapters
+      - LlmProvider trait + adapters (openai, anthropic, ollama, openai-compatible, stub)
       - Enablement resolution (env + DB override) + slot rebuild
       - Provider-key custody (encrypted retrievable class)
     depends_on: []
