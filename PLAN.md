@@ -178,6 +178,7 @@ branch conversion needed. This branch already contains that merge.
 1. Base install (machine-local, not committed):
    `git clone https://github.com/buildermethods/agent-os ~/agent-os` — pin to a
    commit; record the SHA (there are no release tags; `config.yml` says v3.0).
+   Pinned: agent-os `e892e61d` (2026-10-07), bm-skills `7bee3357` (2026-10-08).
 2. Run `~/agent-os/scripts/project-install.sh` from the repo root → creates
    `agent-os/` + `agent-os/standards/` + `.claude/commands/agent-os/`. Delete
    the `.claude/commands/` tree immediately — commands would be a second,

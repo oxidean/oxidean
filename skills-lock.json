@@ -1,6 +1,42 @@
 {
   "version": 1,
   "skills": {
+    "agent-os-discover-standards": {
+      "source": "buildermethods/agent-os",
+      "sourceType": "github",
+      "skillPath": "commands/agent-os/discover-standards.md",
+      "computedHash": "8b59226d47cb474242ae2028d9f3175287ebce01a4ecc5c445ab58db903e70f7"
+    },
+    "agent-os-index-standards": {
+      "source": "buildermethods/agent-os",
+      "sourceType": "github",
+      "skillPath": "commands/agent-os/index-standards.md",
+      "computedHash": "c07a24671288a611554d7ed4db0c80557975f7e588eacb8bd1461d5bebb3e8a3"
+    },
+    "agent-os-inject-standards": {
+      "source": "buildermethods/agent-os",
+      "sourceType": "github",
+      "skillPath": "commands/agent-os/inject-standards.md",
+      "computedHash": "d3485a766b7d5ae9aa7f25310ca8d584a7f2117ac63d73c9b7986105eab147b9"
+    },
+    "agent-os-plan-product": {
+      "source": "buildermethods/agent-os",
+      "sourceType": "github",
+      "skillPath": "commands/agent-os/plan-product.md",
+      "computedHash": "b5da23c21361e5b6e3422bbaf47c1d76fc61961ee9b7bfc1423bccd598b99d53"
+    },
+    "agent-os-shape-spec": {
+      "source": "buildermethods/agent-os",
+      "sourceType": "github",
+      "skillPath": "commands/agent-os/shape-spec.md",
+      "computedHash": "3e6893481636daf0dabc31ea688580ba4a18e07a66bca57b8c2375101bbf918a"
+    },
+    "bm-prd-creator": {
+      "source": "buildermethods/bm-skills",
+      "sourceType": "github",
+      "skillPath": "skills/bm-prd-creator/SKILL.md",
+      "computedHash": "25e9bdfab0c1e29a8031333964972e5aaa5327b91d0fb08697bade1097b171a1"
+    },
     "codebase-design": {
       "source": "mattpocock/skills",
       "sourceType": "github",
