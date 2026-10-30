@@ -767,10 +767,14 @@ pub fn dispatch(path: &str) -> Option<Match> {
         .title
         .map(|tpl| interpolate(tpl, &segs, &bindings, shell.pattern, true));
     // Redirect targets keep raw (still percent-encoded) segments — they're
-    // URLs, not markup.
+    // URLs, not markup. Drop targets that carry `\` or control chars: a
+    // bound segment like `\evil` would emit `Location: /\evil/...`, which
+    // browsers normalize to the protocol-relative `//evil/...` (open
+    // redirect); fail closed and serve the shell instead.
     let redirect = shell
         .redirect
-        .map(|tpl| interpolate(tpl, &segs, &bindings, shell.pattern, false));
+        .map(|tpl| interpolate(tpl, &segs, &bindings, shell.pattern, false))
+        .filter(|t| !t.contains('\\') && !t.chars().any(char::is_control));
     Some(Match {
         file: shell.file,
         title,
@@ -824,8 +828,9 @@ pub(crate) fn redirect_stub_target(html: &str) -> Option<&str> {
     let tag = html[start..].split('>').next()?;
     let content = tag.split("content=\"").nth(1)?.split('"').next()?;
     let url = content.split("url=").nth(1)?.trim();
-    // Same-origin paths only — never redirect to a scheme or protocol-relative URL.
-    (url.starts_with('/') && !url.starts_with("//")).then_some(url)
+    // Same-origin paths only — never redirect to a scheme or protocol-relative
+    // URL. `\` is refused too: `Location: /\host` normalizes to `//host`.
+    (url.starts_with('/') && !url.starts_with("//") && !url.contains('\\')).then_some(url)
 }
 
 /// Minimal escaping for values interpolated into `<title>`/meta text.
@@ -951,11 +956,28 @@ mod tests {
         assert_eq!(redirect_stub_target("<html><body>app</body></html>"), None);
         let big = format!("<html>{}</html>", "x".repeat(3000));
         assert_eq!(redirect_stub_target(&big), None);
-        // Protocol-relative / external targets are refused.
+        // Protocol-relative / external / backslash targets are refused.
         let evil = r#"<html><meta http-equiv="refresh" content="0;url=//evil.test/x"></html>"#;
         assert_eq!(redirect_stub_target(evil), None);
         let ext = r#"<html><meta http-equiv="refresh" content="0;url=https://evil.test"></html>"#;
         assert_eq!(redirect_stub_target(ext), None);
+        let bs = r#"<html><meta http-equiv="refresh" content="0;url=/\evil.test/x"></html>"#;
+        assert_eq!(redirect_stub_target(bs), None);
+    }
+
+    #[test]
+    fn redirect_rejects_backslash_params() {
+        // `/\evil/x/settings` binds owner=`\evil` — the interpolated target
+        // would be `Location: /\evil/x/settings/general`, which browsers
+        // read as `//evil/x/settings/general`. No redirect is emitted.
+        let m = dispatch("/\\evil/x/settings").unwrap();
+        assert!(m.redirect.is_none());
+        // Honest owners still redirect.
+        let m = dispatch("/jesse/app/settings").unwrap();
+        assert_eq!(m.redirect.as_deref(), Some("/jesse/app/settings/general"));
+        // Control chars in bound segments fail closed the same way.
+        let m = dispatch("/jesse\napp/x/settings").unwrap();
+        assert!(m.redirect.is_none());
     }
 
     #[test]

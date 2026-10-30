@@ -116,6 +116,8 @@ aidlc/diagnostics/
 # which was proven to corrupt the multi-line audit blocks) ·
 # aidlc/spaces/*/intents/*/<phase>/<stage>/*.md (artifacts + diary).
 .claude/settings.local.json
+.devin/config.local.json
+.devin/config.local.json
 
 # cursor harness
 aidlc/.aidlc-cursor-subagents/

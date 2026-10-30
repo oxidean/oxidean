@@ -25,4 +25,16 @@ describe("safeReturnTo", () => {
     expect(safeReturnTo("data:text/html,hi")).toBe("/");
     expect(safeReturnTo("settings")).toBe("/");
   });
+
+  it("rejects backslash escapes that normalize to // on navigation", () => {
+    expect(safeReturnTo("/\\evil.example")).toBe("/");
+    expect(safeReturnTo("/\\\\evil.example")).toBe("/");
+    expect(safeReturnTo("/a\\b")).toBe("/");
+  });
+
+  it("rejects control characters (server parity)", () => {
+    expect(safeReturnTo("/ok\r\nX: 1")).toBe("/");
+    expect(safeReturnTo("/ok\x00")).toBe("/");
+    expect(safeReturnTo("/ok\tX")).toBe("/");
+  });
 });

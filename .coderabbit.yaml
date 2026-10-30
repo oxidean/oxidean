@@ -6,6 +6,14 @@ reviews:
     # diff far past the 300-file review limit — generated bookkeeping, not
     # shipped code.
     - "!aidlc/**"
+    # Vendored third-party skill content is installed verbatim via `npx skills
+    # add` and locked by skills-lock.json — its example snippets are teaching
+    # material, not shipped product code, and flagging them produces review
+    # noise. Extend the list when more skills are vendored; team-authored
+    # skills stay in scope.
+    - "!.agents/skills/security-review/**"
+    - "!.claude/skills/security-review"
+    - "!.devin/skills/security-review"
   profile: chill
   tools:
     shellcheck:
