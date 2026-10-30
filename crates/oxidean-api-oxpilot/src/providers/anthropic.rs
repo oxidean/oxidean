@@ -44,6 +44,18 @@ pub(in crate::providers) async fn build(
             code: "invalid_provider".to_string(),
             message: e,
         })?;
+    // CWE-319 — same cleartext-key bound as the openai adapter: a
+    // public `http://` base_url passes the egress shape check and would
+    // send the resolved key readable on the wire; refused unless the
+    // operator opted in via OXIDEAN_OXPILOT_INSECURE_HTTP=1.
+    if egress::cleartext_http(&base_url) && !egress::http_key_opted_in() {
+        return Err(ProviderError {
+            code: "invalid_provider".to_string(),
+            message: "key material over cleartext http:// refused — use https, \
+                      or set OXIDEAN_OXPILOT_INSECURE_HTTP=1"
+                .to_string(),
+        });
+    }
     Ok(Arc::new(AnthropicProvider {
         client: egress::provider_http_client(true),
         base_url,

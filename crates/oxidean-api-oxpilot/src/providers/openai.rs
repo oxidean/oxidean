@@ -75,11 +75,7 @@ async fn build_inner(
     // base_url — refused unless the operator deliberately opts in via
     // OXIDEAN_OXPILOT_INSECURE_HTTP=1 (LAN LiteLLM-style keyed
     // deployments keep an escape hatch, on their own risk).
-    if api_key.is_some()
-        && base_url.len() >= 7
-        && base_url[..7].eq_ignore_ascii_case("http://")
-        && !egress::http_key_opted_in()
-    {
+    if api_key.is_some() && egress::cleartext_http(&base_url) && !egress::http_key_opted_in() {
         return Err(err(
             "key material over cleartext http:// refused — use https, \
              drop the key, or set OXIDEAN_OXPILOT_INSECURE_HTTP=1",

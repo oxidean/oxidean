@@ -418,9 +418,10 @@ async fn validate(
             .await
             .map_err(|e| AppError::new("invalid_provider", e))?;
     }
-    // CWE-319 — key-bearing cleartext: a resolved `openai-compatible`
-    // (or `openai`) over http:// must not hold key material unless the
-    // operator opted in (OXIDEAN_OXPILOT_INSECURE_HTTP=1). Binds only
+    // CWE-319 — key-bearing cleartext: a resolved `openai`,
+    // `openai-compatible`, or `anthropic` over http:// must not hold key
+    // material unless the operator opted in (OXIDEAN_OXPILOT_INSECURE_HTTP=1).
+    // Binds only
     // writes that name a provider-relevant field — env-sourced combos
     // degrade to a misconfigured slot at build, never wedged here.
     let provider_write =
@@ -428,12 +429,9 @@ async fn validate(
     if provider_write
         && matches!(
             cfg.provider_id.as_deref(),
-            Some("openai") | Some("openai-compatible")
+            Some("openai") | Some("openai-compatible") | Some("anthropic")
         )
-        && cfg
-            .base_url
-            .as_deref()
-            .is_some_and(|u| u.len() >= 7 && u[..7].eq_ignore_ascii_case("http://"))
+        && cfg.base_url.as_deref().is_some_and(egress::cleartext_http)
         && (cfg.key_ciphertext.is_some() || cfg.api_key_env.is_some())
         && !egress::http_key_opted_in()
     {
@@ -1150,20 +1148,35 @@ mod tests {
         // base_url + resolved key must refuse (CWE-319) — but only for
         // writes naming provider fields; a pure budget write must not
         // wedge on the env-sourced combo.
+        // compat carries the self-host exemption (LAN http reaches the
+        // cleartext bound); anthropic doesn't — only a *public* http
+        // literal passes its egress shape check and rides cleartext.
+        for (provider, url) in [
+            ("openai-compatible", "http://litellm.lan:4000"),
+            ("anthropic", "http://8.8.8.8"),
+        ] {
+            let mut cfg = cfg_with(provider, true);
+            cfg.base_url = Some(url.to_string());
+            assert!(
+                cfg.api_key_env.is_some() || cfg.key_ciphertext.is_some(),
+                "fixture must resolve key material"
+            );
+            let refused = validate(
+                &cfg,
+                &set_req(json!({"base_url": url})),
+                cfg!(debug_assertions),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(refused.code, "invalid_provider", "{provider}");
+            assert!(
+                refused.message.contains("cleartext"),
+                "{provider}: refusal must name the cleartext bound, got: {}",
+                refused.message
+            );
+        }
         let mut cfg = cfg_with("openai-compatible", true);
         cfg.base_url = Some("http://litellm.lan:4000".to_string());
-        assert!(
-            cfg.api_key_env.is_some() || cfg.key_ciphertext.is_some(),
-            "fixture must resolve key material"
-        );
-        let refused = validate(
-            &cfg,
-            &set_req(json!({"base_url": "http://litellm.lan:4000"})),
-            cfg!(debug_assertions),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(refused.code, "invalid_provider");
         // Budget-only write is untouched by the env-sourced combo.
         validate(
             &cfg,

@@ -108,6 +108,18 @@ pub fn http_key_opted_in() -> bool {
     std::env::var("OXIDEAN_OXPILOT_INSECURE_HTTP").as_deref() == Ok("1")
 }
 
+/// Does `base_url` ride a cleartext transport? Compares the parsed
+/// scheme — raw prefix matching misses forms `url::Url` still parses
+/// as http (`http:\\host`, `http:/host`, leading whitespace). An
+/// unparseable value answers true (fail closed): the shape validator
+/// owns the real shape error, and a key must never guess transport.
+pub fn cleartext_http(base_url: &str) -> bool {
+    match url::Url::parse(base_url.trim()) {
+        Ok(u) => u.scheme() == "http",
+        Err(_) => true,
+    }
+}
+
 /// Redirect-free provider client — connect 10 s, total 300 s
 /// (NFR4.7/NFR4.9). `enforce_public` installs the validating resolver:
 /// literal-IP URLs skip DNS entirely, domain URLs get the per-connect
