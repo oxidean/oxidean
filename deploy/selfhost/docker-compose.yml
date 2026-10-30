@@ -80,6 +80,7 @@ services:
       OXIDEAN_OXPILOT_MODEL: ${OXIDEAN_OXPILOT_MODEL:-}
       OXIDEAN_OXPILOT_API_KEY: ${OXIDEAN_OXPILOT_API_KEY:-}
       OXIDEAN_OXPILOT_BASE_URL: ${OXIDEAN_OXPILOT_BASE_URL:-}
+      OXIDEAN_OXPILOT_INSECURE_HTTP: ${OXIDEAN_OXPILOT_INSECURE_HTTP:-}
       # Key-custody source for provider keys stored via admin settings
       # (AES-256-GCM at rest; falls back to OXIDEAN_SESSION_SECRET). Unset
       # fails closed — the admin key field then answers crypto.unavailable.

@@ -418,6 +418,30 @@ async fn validate(
             .await
             .map_err(|e| AppError::new("invalid_provider", e))?;
     }
+    // CWE-319 — key-bearing cleartext: a resolved `openai-compatible`
+    // (or `openai`) over http:// must not hold key material unless the
+    // operator opted in (OXIDEAN_OXPILOT_INSECURE_HTTP=1). Binds only
+    // writes that name a provider-relevant field — env-sourced combos
+    // degrade to a misconfigured slot at build, never wedged here.
+    let provider_write =
+        req.provider_id.is_some() || req.base_url.is_some() || req.api_key.is_some();
+    if provider_write
+        && matches!(
+            cfg.provider_id.as_deref(),
+            Some("openai") | Some("openai-compatible")
+        )
+        && cfg
+            .base_url
+            .as_deref()
+            .is_some_and(|u| u.len() >= 7 && u[..7].eq_ignore_ascii_case("http://"))
+        && (cfg.key_ciphertext.is_some() || cfg.api_key_env.is_some())
+        && !egress::http_key_opted_in()
+    {
+        return Err(AppError::new(
+            "invalid_provider",
+            "key material over cleartext http:// refused — use https, drop the key, or set OXIDEAN_OXPILOT_INSECURE_HTTP=1".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -1114,6 +1138,48 @@ mod tests {
         validate(
             &cfg,
             &set_req(json!({"base_url": "http://127.0.0.1"})),
+            cfg!(debug_assertions),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_key_bearing_cleartext_refused_for_provider_writes() {
+        // env() resolves api_key + provider over env; an http://
+        // base_url + resolved key must refuse (CWE-319) — but only for
+        // writes naming provider fields; a pure budget write must not
+        // wedge on the env-sourced combo.
+        let mut cfg = cfg_with("openai-compatible", true);
+        cfg.base_url = Some("http://litellm.lan:4000".to_string());
+        assert!(
+            cfg.api_key_env.is_some() || cfg.key_ciphertext.is_some(),
+            "fixture must resolve key material"
+        );
+        let refused = validate(
+            &cfg,
+            &set_req(json!({"base_url": "http://litellm.lan:4000"})),
+            cfg!(debug_assertions),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, "invalid_provider");
+        // Budget-only write is untouched by the env-sourced combo.
+        validate(
+            &cfg,
+            &set_req(json!({"user_budget": 5})),
+            cfg!(debug_assertions),
+        )
+        .await
+        .unwrap();
+        // Keyless combo stays legal — http:// + no key is the
+        // documented self-host shape.
+        let mut keyless = cfg.clone();
+        keyless.api_key_env = None;
+        keyless.key_ciphertext = None;
+        validate(
+            &keyless,
+            &set_req(json!({"base_url": "http://litellm.lan:4000"})),
             cfg!(debug_assertions),
         )
         .await

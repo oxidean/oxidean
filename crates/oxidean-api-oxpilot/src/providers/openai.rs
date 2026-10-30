@@ -71,6 +71,20 @@ async fn build_inner(
     egress::validate_base_url(Some(id), &base_url)
         .await
         .map_err(|e| err(&e))?;
+    // CWE-319: a resolved key must never ride a cleartext http://
+    // base_url — refused unless the operator deliberately opts in via
+    // OXIDEAN_OXPILOT_INSECURE_HTTP=1 (LAN LiteLLM-style keyed
+    // deployments keep an escape hatch, on their own risk).
+    if api_key.is_some()
+        && base_url.len() >= 7
+        && base_url[..7].eq_ignore_ascii_case("http://")
+        && !egress::http_key_opted_in()
+    {
+        return Err(err(
+            "key material over cleartext http:// refused — use https, \
+             drop the key, or set OXIDEAN_OXPILOT_INSECURE_HTTP=1",
+        ));
+    }
     Ok(Arc::new(OpenAiProvider {
         client: egress::provider_http_client(!compat),
         base_url,

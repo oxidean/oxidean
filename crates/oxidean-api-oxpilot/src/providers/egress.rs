@@ -98,6 +98,16 @@ fn proxy_env_hosts() -> std::collections::HashSet<String> {
     out
 }
 
+/// `OXIDEAN_OXPILOT_INSECURE_HTTP=1` — the deliberate operator opt-in
+/// for sending resolved provider keys to an `http://` base_url
+/// (CWE-319: a network observer reads the bearer). Absent the opt-in,
+/// key-bearing cleartext is refused at build and (for write-chosen
+/// values) at `settings_set` validate. Self-hosted keyless `http://`
+/// endpoints stay unaffected — the bound keys on resolved key material.
+pub fn http_key_opted_in() -> bool {
+    std::env::var("OXIDEAN_OXPILOT_INSECURE_HTTP").as_deref() == Ok("1")
+}
+
 /// Redirect-free provider client — connect 10 s, total 300 s
 /// (NFR4.7/NFR4.9). `enforce_public` installs the validating resolver:
 /// literal-IP URLs skip DNS entirely, domain URLs get the per-connect

@@ -186,7 +186,11 @@ export function AdminOxpilotContent() @{
     initialData: loaderData?.kind === "ready" ? loaderData.settings : undefined,
     queryFn: async (): Promise<OxpilotSettingsResponse> => {
       const res = await fetchAdminOxpilotSettings();
-      if (!res.ok) throw new Error(res.error.message || FORBIDDEN);
+      if (!res.ok) {
+        throw Object.assign(new Error(res.error.message || FORBIDDEN), {
+          code: res.error.code,
+        });
+      }
       return res.data;
     },
   });
@@ -262,11 +266,13 @@ export function AdminOxpilotContent() @{
     setDraftReady(true);
   }
 
+  // Seed the draft once — later refetches must not clobber unsaved
+  // edits; save/clear handlers re-apply from the server response.
   useEffect(() => {
-    if (settingsQ.isSuccess && settingsQ.data) {
+    if (!draftReady && settingsQ.isSuccess && settingsQ.data) {
       applySettings(settingsQ.data);
     }
-  }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt]);
+  }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt, draftReady]);
 
   async function clearOverrides() {
     setPending(true);

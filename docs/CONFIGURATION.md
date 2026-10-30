@@ -400,6 +400,7 @@ row) override them per instance.
 | `OXIDEAN_OXPILOT_MODEL` | Default model for the env provider (`stub-1` pairs with `stub`). |
 | `OXIDEAN_OXPILOT_BASE_URL` | Provider endpoint override (e.g. an Ollama host). Unset = the adapter default. |
 | `OXIDEAN_OXPILOT_API_KEY` | Provider key for key-required adapters (`openai`/`anthropic`); optional for `openai-compatible` — sent as a bearer token when set. Stored-key writes via `admin.oxpilot.settings_set` take precedence over this env value. |
+| `OXIDEAN_OXPILOT_INSECURE_HTTP` | `1` opts in to sending resolved provider keys over an `http://` `OXIDEAN_OXPILOT_BASE_URL` — the key travels readable on the network (CWE-319). Unset (default) refuses key material over cleartext http at provider build and at `settings_set`. Keyless `http://` endpoints are unaffected. |
 | `OXIDEAN_OXPILOT_SECRETS_KEY` | AES-256-GCM key material for provider keys stored via `admin.oxpilot.settings_set` at rest; falls back to `OXIDEAN_SESSION_SECRET`. Fails closed when neither is set (`crypto.unavailable` on the settings write). |
 | `OXIDEAN_OXPILOT_USER_BUDGET` | Per-user UTC-day request cap; unset = unbounded. Row-over-env resolution in `admin.oxpilot.settings_set`. |
 | `OXIDEAN_OXPILOT_INSTANCE_BUDGET` | Instance-wide UTC-day request cap; unset = unbounded. |
