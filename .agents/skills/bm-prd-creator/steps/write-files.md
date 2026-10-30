@@ -2,6 +2,8 @@
 
 Once everything is locked, generate the files. **Just write them.** Don't show a draft for approval first — the user already approved each piece during the interview.
 
+Before writing, check whether each target already exists (`agent-os/product/prd.html`, `agent-os/product/prd.md`, each milestone `prompt.md`). If any target exists, stop and ask via AskUserQuestion whether to replace it, preserve it (choose a different filename), or abort — never overwrite an existing file without that explicit decision.
+
 ## What to write, based on the format choice
 
 Recall the format the user picked in the **Format choice** phase:

@@ -11,7 +11,7 @@
       "source": "buildermethods/agent-os",
       "sourceType": "github",
       "skillPath": "commands/agent-os/index-standards.md",
-      "computedHash": "c07a24671288a611554d7ed4db0c80557975f7e588eacb8bd1461d5bebb3e8a3"
+      "computedHash": "76fa15ac5b824574fc3b15194b7a1d7b59635cfdc7e0d885b1133a017d06c1cc"
     },
     "agent-os-inject-standards": {
       "source": "buildermethods/agent-os",
@@ -35,7 +35,7 @@
       "source": "buildermethods/bm-skills",
       "sourceType": "github",
       "skillPath": "skills/bm-prd-creator/SKILL.md",
-      "computedHash": "25e9bdfab0c1e29a8031333964972e5aaa5327b91d0fb08697bade1097b171a1"
+      "computedHash": "9a8c7374825547c8a57845cd53b5211fc5609e88ff396a82e8430a9b199c2844"
     },
     "codebase-design": {
       "source": "mattpocock/skills",

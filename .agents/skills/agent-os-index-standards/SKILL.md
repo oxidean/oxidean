@@ -37,7 +37,7 @@ Compare the file scan with the existing index:
 
 - **New files** — Standards files without index entries
 - **Deleted files** — Index entries for files that no longer exist
-- **Existing files** — Already indexed, keep as-is
+- **Existing files** — Re-read any indexed standard whose file was edited; if its scope or summary drifted, ask via AskUserQuestion whether to update the description. Keep unchanged entries as-is
 
 ### Step 4: Handle New Files
 

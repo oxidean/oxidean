@@ -6,6 +6,8 @@ When the user picked **HTML** or **Both** in the format-choice phase, write `age
 
 Start every `prd.html` from this scaffold. Fill in the `{{PLACEHOLDERS}}` and section blocks as described under "Section visual treatments" below. Do not rename CSS classes — they work as written with Tailwind Play CDN.
 
+Escape every user-derived `{{PLACEHOLDER}}` value for the context it lands in: HTML-escape values placed in text nodes (`&`, `<`, `>`, quotes) and attribute-escape values placed inside attributes. The exception is `{{LUCIDE_ICON}}` — validate it against the icon names in "Lucide icon hints" below (never a raw user string) instead of escaping it.
+
 ```html
 <!doctype html>
 <html lang="en">
@@ -132,7 +134,8 @@ Start every `prd.html` from this scaffold. Fill in the `{{PLACEHOLDERS}}` and se
   <script>
     (function () {
       var html = document.documentElement;
-      var stored = localStorage.getItem('prd-theme');
+      var stored = null;
+      try { stored = localStorage.getItem('prd-theme'); } catch (e) { /* file:// or privacy mode */ }
       var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       var initial = stored ? stored : (prefersDark ? 'dark' : 'light');
       if (initial === 'dark') html.classList.add('dark');
@@ -140,7 +143,7 @@ Start every `prd.html` from this scaffold. Fill in the `{{PLACEHOLDERS}}` and se
       if (btn) {
         btn.addEventListener('click', function () {
           var isDark = html.classList.toggle('dark');
-          localStorage.setItem('prd-theme', isDark ? 'dark' : 'light');
+          try { localStorage.setItem('prd-theme', isDark ? 'dark' : 'light'); } catch (e) { /* non-fatal */ }
         });
       }
       if (window.lucide) window.lucide.createIcons();

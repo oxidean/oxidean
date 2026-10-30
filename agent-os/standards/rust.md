@@ -3,9 +3,13 @@
 Crate-level conventions live in `.cursor/rules/rust-crates.mdc` and the
 in-repo skills `rust-best-practices` / `rust-async-patterns`. Core points:
 
-- Workspace layout: `oxidean-web` (edge) → `oxidean-api` (router + RPC
-  dispatch + domain handlers) → `oxidean-db` `Database` façade +
-  `oxidean-git` `GitBackend`; `oxidean-core` is types only, no I/O.
+- Workspace layout: `oxidean-web` (edge) → `oxidean-api` (server shell:
+  binaries, route wiring, dispatch assembly, `rpc-gen`) →
+  `oxidean-api-<domain>` crates (domain RPC handlers — issues, pulls, org,
+  repo, …; add new handlers to the existing domain crate) on top of
+  `oxidean-api-core` (shared machinery: `AppState`/`RpcCtx`, auth/session,
+  domain engines) → `oxidean-db` `Database` façade + `oxidean-git`
+  `GitBackend`; `oxidean-core` is types only, no I/O.
 - No `services/` layer — domain internals are named structs on
   `AppState`/`RpcCtx`.
 - New subsystems get a trait+adapter seam (the `GitBackend`/`CliGitBackend`

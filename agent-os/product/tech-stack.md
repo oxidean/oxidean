@@ -15,7 +15,7 @@ workspace (`crates/*`). Do not invent alternatives; extend existing patterns.
 | CLI | `ox` (`crates/oxidean-cli`) — companion CLI over the same RPC surface |
 | Email | `EmailSender` trait: log sink (unconfigured), SMTP (`OXIDEAN_SMTP_URL`), Resend |
 | Runtime | Docker Compose (local + self-host, Traefik edge); Oxidean Cloud on Railway (Caddy gateway, same images, `.railway/railway.ts` IaC) |
-| Package manager | Bun 1.4.0 (`bun install --frozen-lockfile`; `npm ci` only inside `.railway/`); GNU Make is the task façade |
+| Package manager | Bun 1.4.4 (`bun install --frozen-lockfile`; `npm ci` only inside `.railway/`); GNU Make is the task façade |
 | CI | GitHub Actions inside self-owned digest-pinned `oxidean-ci:*` images; Rust via cargo-nextest, web via Vitest 5 + Playwright Chromium |
 
 Canonical docs: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md),

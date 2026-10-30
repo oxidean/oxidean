@@ -6,9 +6,16 @@ user_invocable: true
 
 <!--
 Vendored from buildermethods/bm-skills (see skills-lock.json).
-Local patch: output paths `_build_plan/` → `agent-os/product/` (PRD, milestones/,
-milestone-log.md), and the "temporary build plan" wording adjusted — product
-docs are the permanent Agent OS product record, not a scratch folder.
+Local patches:
+- output paths `_build_plan/` → `agent-os/product/` (PRD, milestones/,
+  milestone-log.md), and the "temporary build plan" wording adjusted —
+  product docs are the permanent Agent OS product record, not a scratch
+  folder.
+- steps/write-files.md: stop and ask before overwriting an existing
+  prd.html/prd.md/prompt.md (CodeRabbit review).
+- steps/prd-html-template.md: require context-appropriate escaping for
+  user-derived placeholders + Lucide-icon allowlist validation; guard
+  localStorage access so file:// can't abort theme init (CodeRabbit review).
 -->
 
 # PRD Creator

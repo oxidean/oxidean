@@ -6,34 +6,42 @@ reviews:
     # inflates the diff far past the 300-file review limit — read-only
     # planning records, not shipped code.
     - "!agent-os/specs/_archive/**"
-    # Retired AI-DLC harness surface deleted by the spec-setup migration —
-    # these paths no longer exist post-merge, so the filters only ever match
-    # that PR's deletions (581 files, otherwise over the 300-file review cap).
-    # Prune this block once `.claude`/`.cursor` aidlc paths are forgotten.
+    # Retired AI-DLC harness surface deleted by the spec-setup migration.
+    # Filters are narrowed to the retired paths only (aidlc-named files plus
+    # the handful of engine files with generic names) so future non-AI-DLC
+    # additions under `.claude/`/`.cursor/` still get reviewed. Prune this
+    # whole block post-merge — the paths no longer exist.
     - "!aidlc/**"
     - "!.claude/CLAUDE.md"
     - "!.claude/settings.json"
     - "!.claude/settings.local.json.example"
-    - "!.claude/agents/**"
+    - "!.claude/agents/aidlc-*"
     - "!.claude/aidlc-common/**"
-    - "!.claude/hooks/**"
-    - "!.claude/knowledge/**"
-    - "!.claude/rules/**"
-    - "!.claude/scopes/**"
-    - "!.claude/sensors/**"
-    - "!.claude/skills/**"
-    - "!.claude/tools/**"
-    - "!.cursor/agents/**"
+    - "!.claude/hooks/aidlc-*"
+    - "!.claude/hooks/review-freeze-command.ts"
+    - "!.claude/hooks/runtime-integrity.ts"
+    - "!.claude/knowledge/aidlc-*"
+    - "!.claude/rules/aidlc*"
+    - "!.claude/scopes/aidlc-*"
+    - "!.claude/sensors/aidlc-*"
+    - "!.claude/skills/aidlc*"
+    - "!.claude/skills/clean-user-facing-text"
+    - "!.claude/skills/remove-ai-marks"
+    - "!.claude/skills/security-review"
+    - "!.claude/tools/aidlc-*"
+    - "!.cursor/agents/aidlc-*"
     - "!.cursor/aidlc-common/**"
     - "!.cursor/cli.json"
-    - "!.cursor/hooks/**"
+    - "!.cursor/hooks/aidlc-*"
+    - "!.cursor/hooks/review-freeze-command.ts"
+    - "!.cursor/hooks/runtime-integrity.ts"
     - "!.cursor/hooks.json"
-    - "!.cursor/knowledge/**"
-    - "!.cursor/scopes/**"
-    - "!.cursor/sensors/**"
-    - "!.cursor/skills/**"
-    - "!.cursor/tools/**"
-    - "!.cursor/rules/aidlc*.mdc"
+    - "!.cursor/knowledge/aidlc-*"
+    - "!.cursor/scopes/aidlc-*"
+    - "!.cursor/sensors/aidlc-*"
+    - "!.cursor/skills/aidlc*"
+    - "!.cursor/tools/aidlc-*"
+    - "!.cursor/rules/aidlc*"
     # Vendored third-party skill content is installed verbatim via `npx skills
     # add` and locked by skills-lock.json — its example snippets are teaching
     # material, not shipped product code, and flagging them produces review

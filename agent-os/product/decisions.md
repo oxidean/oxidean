@@ -10,13 +10,18 @@ raw decision/audit trail). Do not re-ask these in planning.
   Docker-based release train (no hosted-vs-self-host brand split).
 - v1 bar is the GitHub-shaped slice; Forgejo/Gitea-class parity work is the
   current backlog ([roadmap](roadmap.md)).
-- Auth shipped email+password first; OAuth login and 2FA are backlog
-  (SEC-01/SEC-02), not regressions.
+- Auth shipped email+password first; 2FA (TOTP + recovery codes,
+  WebAuthn/passkeys) is shipped. OAuth login (SEC-01) stays backlog —
+  OIDC/WorkOS exist, consumer providers do not.
 - Git transports authenticate with PAT/pubkey only — session cookies are
   never accepted on protocol/machine surfaces.
-- Per-repo feature toggles (`repo.issues.*`, `repo.pulls.*`, …): an absent
-  flag row denies the surface entirely; `enabled=false` denies writes only,
-  reads still succeed.
+- Per-repo feature toggles (`repo.issues.*`, `repo.pulls.*`, …): missing
+  flag rows/columns default to enabled; `enabled=false` rejects reads,
+  writes, and admin maintenance on that unit's RPC surface with a stable
+  `repo.<unit>.disabled` code. Toggle management
+  (`repo.<unit>.getEnabled`/`setEnabled`) and `repo.*` surfaces (settings,
+  `repo.mergeSettings.update`) are not unit-gated, so a repo can't be
+  wedged and re-enable is immediate.
 
 ## Delivery
 
