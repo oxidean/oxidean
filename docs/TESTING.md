@@ -116,10 +116,10 @@ overlays for the standard images `postgres:18-alpine` / `mysql:26.7`).
 
 ```bash
 # DB layer: dialect_probe + dialect_actions honor DATABASE_URL.
-DATABASE_URL=postgres://oxidean:***@127.0.0.1:5432/oxidean \
+DATABASE_URL=postgres://oxidean:oxidean@127.0.0.1:5432/oxidean \
   OXIDEAN_DB_DIALECT=postgres \
   cargo nextest run -p oxidean-db --test dialect_probe --test dialect_actions
-DATABASE_URL=mysql://oxidean:***@127.0.0.1:3306/oxidean \
+DATABASE_URL=mysql://oxidean:oxidean@127.0.0.1:3306/oxidean \
   OXIDEAN_DB_DIALECT=mysql \
   cargo nextest run -p oxidean-db --test dialect_probe --test dialect_actions
 # Same pair through make (DATABASE_URL in env):
@@ -128,20 +128,20 @@ make db-matrix
 
 For the API layer, `crates/oxidean-api/tests/support/mod.rs` reads
 `OXIDEAN_TEST_DATABASE_URL` — a **server-level admin URL** with `CREATE
-DATABASE` privilege (e.g. `postgres://oxidean:***@127.0.0.1:5432/postgres`,
-`mysql://root:***@127.0.0.1:3306/`). When set, every test that goes through
+DATABASE` privilege (e.g. `postgres://oxidean:oxidean@127.0.0.1:5432/postgres`,
+`mysql://root:oxidean@127.0.0.1:3306/`). When set, every test that goes through
 the support helper provisions a fresh `oxt_<uuid>` database and migrates it;
 when unset the historical per-file SQLite behaviour is unchanged. Provisioned
 databases are intentionally **not dropped** — run against throwaway servers.
 
 ```bash
 # Every actions_* API binary + the workflow-conformance corpus on both engines:
-OXIDEAN_TEST_PG_URL=postgres://oxidean:***@127.0.0.1:5432/postgres \
-OXIDEAN_TEST_MYSQL_URL=mysql://root:***@127.0.0.1:3306/ \
+OXIDEAN_TEST_PG_URL=postgres://oxidean:oxidean@127.0.0.1:5432/postgres \
+OXIDEAN_TEST_MYSQL_URL=mysql://root:oxidean@127.0.0.1:3306/ \
   make actions-db-matrix
 
 # Single engine / single binary manually:
-OXIDEAN_TEST_DATABASE_URL=postgres://oxidean:***@127.0.0.1:5432/postgres \
+OXIDEAN_TEST_DATABASE_URL=postgres://oxidean:oxidean@127.0.0.1:5432/postgres \
   cargo nextest run -p oxidean-api --test workflow_conformance
 ```
 
@@ -415,7 +415,7 @@ make test-e2e-actions
 ACT_RUNNER_HOST_MODE=1 ./scripts/e2e-act-runner.sh
 
 # Seed only (works against any origin incl. preview/staging):
-#   OXIDEAN_ORIGIN=https://<gateway> OXIDEAN_SEED_USER=… OXIDEAN_SEED_PASSWORD=*** \
+#   OXIDEAN_ORIGIN=https://<gateway> OXIDEAN_SEED_USER=… OXIDEAN_SEED_PASSWORD=… \
 #     make seed-actions-demo
 
 # Targeted API coverage

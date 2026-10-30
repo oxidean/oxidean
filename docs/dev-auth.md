@@ -95,7 +95,7 @@ Then:
 ## Resend stub
 
 1. Comment out `OXIDEAN_SMTP_URL`.
-2. Set `OXIDEAN_RESEND_API_KEY=*** and `OXIDEAN_RESEND_BASE_URL=http://127.0.0.1:9092`.
+2. Set `OXIDEAN_RESEND_API_KEY=re_dev_local` and `OXIDEAN_RESEND_BASE_URL=http://127.0.0.1:9092`.
 3. Set admin email provider to **resend** (or rely on boot ENV selection).
 4. Stub logs accept any Bearer token and return `{ "id": "email_dev_local" }`.
 
