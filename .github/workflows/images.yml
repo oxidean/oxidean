@@ -63,7 +63,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: images-${{ github.ref }}
+  # workflow_run legs get a group per triggering run: GitHub keeps at most
+  # one pending run per group and cancels older queued ones regardless of
+  # cancel-in-progress, so a repin queued behind a main-push build would be
+  # dropped — and still read as a failed deployment on the commit (#206).
+  group: images-${{ github.event_name == 'workflow_run' && format('wr-{0}', github.event.workflow_run.id) || github.ref }}
   cancel-in-progress: false # never cancel mid-publish or mid-deploy
 
 permissions:
@@ -78,6 +82,12 @@ jobs:
   # which publish mechanism (build | retag | release-layer).
   meta:
     name: meta
+    # A workflow_run leg only has work when the triggering ox-v* run
+    # succeeded — a failed/cancelled tag lane resolves all-skipped here
+    # instead of spending a meta pass on a run that can publish nothing.
+    if: |
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.m.outputs.services }}
