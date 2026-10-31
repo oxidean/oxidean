@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schemas.platformatic.dev/wattpm/3.75.0.json",
+  "entrypoint": "gateway",
+  "autoload": {
+    "path": "services"
+  },
+  "logger": {
+    "level": "{PLT_SERVER_LOGGER_LEVEL}"
+  },
+  "managementApi": "{PLT_MANAGEMENT_API}",
+  "server": {
+    "hostname": "{PLT_SERVER_HOSTNAME}",
+    "port": "{PORT}"
+  }
+}

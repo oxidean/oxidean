@@ -1,0 +1,57 @@
+# PoC overlay for issue #209 — one Platformatic Watt process (gateway + web
+# worker threads) replaces the traefik + web pair. api and postgres run
+# unchanged; watt binds :80 directly — no proxy in front.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.watt.yml up -d postgres api watt
+# (scripts/bench-web-edge.sh drives both lanes.)
+
+services:
+  api:
+    environment:
+      # Seed an admin so the bench can log in without the /setup flow —
+      # same env seed the other e2e/bench harnesses use.
+      OXIDEAN_ADMIN_EMAIL: ${OXIDEAN_ADMIN_EMAIL:-bench-admin@oxidean.local}
+      OXIDEAN_ADMIN_PASSWORD: ${OXIDEAN_ADMIN_PASSWORD:-password1}
+
+  watt:
+    image: oxidean-poc-watt:ci
+    build:
+      context: .
+      dockerfile: docker/poc-watt/Dockerfile
+    environment:
+      PORT: "80"
+      PLT_SERVER_HOSTNAME: 0.0.0.0
+      PLT_SERVER_LOGGER_LEVEL: ${PLT_SERVER_LOGGER_LEVEL:-info}
+      PLT_MANAGEMENT_API: "false"
+      # API upstream — same origin the baseline web tier proxies to.
+      OXIDEAN_API_ORIGIN: http://api:8080
+      # Internal watt mesh address of the `web` worker application.
+      OXIDEAN_WEB_ORIGIN: http://web.plt.local
+      OXIDEAN_WEB_DIST: /app/dist
+      # Browser-facing origin — same contract as the web service env.
+      OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_COMPOSE_PUBLIC_ORIGIN:-http://localhost}
+      OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
+      OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
+      # The gateway worker is the edge and sanitizes X-Forwarded-* before it
+      # reaches the web worker — same trust shape as Traefik + web.
+      OXIDEAN_WEB_BEHIND_PROXY: "1"
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Public-surface probe through the gateway → web worker → dist, so the
+      # healthy signal covers both worker threads, not just the API link.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    networks:
+      - oxidean

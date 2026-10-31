@@ -712,6 +712,8 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.sqlite.yml config
       - name: docker compose dev-auth stubs config
         run: docker compose -f docker-compose.dev-auth.yml --profile dev-auth config
+      - name: docker compose watt PoC overlay config
+        run: docker compose -f docker-compose.yml -f docker-compose.watt.yml config
 
   # Drift gate for the self-host operator example (deploy/selfhost/):
   # compose parses on every profile combo, image refs stay in the published
