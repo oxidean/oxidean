@@ -1,0 +1,20 @@
+[package]
+name = "oxidean-storage"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "BlobStore abstraction over fs + S3-compatible object storage for non-git persistent stores (issue #210)"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.23"
+bytes = "1"
+futures-util = "0.3"
+http = "1"
+object_store = { version = "0.14", default-features = false, features = ["aws"] }
+sha2 = "0.11"
+thiserror = "2"
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

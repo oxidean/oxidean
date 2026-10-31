@@ -390,6 +390,16 @@ globs = ["crates/oxidean-vcs/**"]
 scopes = ["vcs"]
 depends_on = ["oxidean-core", "oxidean-db"]
 
+[[component]]
+id = "oxidean-storage"
+kind = "crate"
+manifest_path = "crates/oxidean-storage/Cargo.toml"
+tag_prefix = "oxidean-storage-v"
+changelog_path = "crates/oxidean-storage/CHANGELOG.md"
+globs = ["crates/oxidean-storage/**"]
+scopes = ["storage"]
+depends_on = []
+
 # --- Bun workspaces --------------------------------------------------------
 
 [[component]]
