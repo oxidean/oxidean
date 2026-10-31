@@ -70,10 +70,10 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_ACTIONS_MAX_LOG_BYTES` | Optional | `67108864` (64 MiB) | Per-job log cap — appends past it are rejected (bounded log surface; D-ACT-15). |
 | `OXIDEAN_ACTIONS_LOG_RETENTION_DAYS` | Optional | `90` | Finished-run logs older than this are deleted by the log sweep; terminal logs gzip regardless (`0` keeps forever). |
 | `OXIDEAN_ACTIONS_LOG_SWEEP_SECS` | Optional | `3600` | Log maintenance sweep interval (`0` disables). |
-| `OXIDEAN_ACTIONS_ARTIFACTS_DIR` | Optional | `var/actions-artifacts` | Artifact payload store (`{run_id}/{artifact_id}.tgz`); distinct from repos/LFS/packages volumes. |
+| `OXIDEAN_ACTIONS_ARTIFACTS_DIR` | Optional | `var/actions-artifacts` | Artifact payload store (`{run_id}/{artifact_id}.tgz`); distinct from repos/LFS/packages volumes. Compose binds `./var/actions-artifacts:/var/actions-artifacts` and sets `/var/actions-artifacts`. |
 | `OXIDEAN_ACTIONS_ARTIFACT_MAX_BYTES` | Optional | `2147483648` (2 GiB) | Max single-artifact upload (`413` past the cap). |
 | `OXIDEAN_ACTIONS_ARTIFACT_RETENTION_DAYS` | Optional | `90` | Default artifact expiry (per-upload `retention_days` overrides; `0` = keep indefinitely). |
-| `OXIDEAN_ACTIONS_CACHE_DIR` | Optional | `var/actions-cache` | `actions/cache` payload store (`{repo_id}/{cache_id}.tgz`); distinct from artifact/log volumes. |
+| `OXIDEAN_ACTIONS_CACHE_DIR` | Optional | `var/actions-cache` | `actions/cache` payload store (`{repo_id}/{cache_id}.tgz`); distinct from artifact/log volumes. Compose binds `./var/actions-cache:/var/actions-cache` and sets `/var/actions-cache`. |
 | `OXIDEAN_ACTIONS_CACHE_MAX_BYTES` | Optional | `10737418240` (10 GiB) | Per-repo cache ceiling — commits past it evict least-recently-used entries (GitHub's repo cap). |
 | `OXIDEAN_ACTIONS_CACHE_TOKEN_HOURS` | Optional | `12` | `ACTIONS_RUNTIME_TOKEN` lifetime minted per claimed job (clamped 1–72). |
 | `OXIDEAN_ACTIONS_CACHE_RESERVE_MINS` | Optional | `30` | Abandoned `reserved` cache rows older than this are reaped (their `.part` payloads unlinked). |
@@ -84,6 +84,7 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_ACTIONS_REQUIRE_SHA_PIN` | Optional | `false` | When `true`, remote `uses:` refs must be full commit SHAs — movable tags/branches are rejected (supply-chain hardening). |
 | `OXIDEAN_ACTIONS_ENABLED` | Optional | `true` | Instance-wide Actions gate. When `false`/`0`/`off`, no workflows are evaluated (D-ACT-06). Per-repo Admin toggle still applies when instance gate is on. |
 | `OXIDEAN_ACTIONS_REST_SHIM` | Optional | `true` | GitHub-shape compatibility on `/api/v1` (#160): bare-array lists + `Link` pagination, `html_url`/`user.login`/`node_id` payloads, `{message,documentation_url,errors[]}` errors, `X-RateLimit-*`/`ETag` headers, meta routes (`/`, `/rate_limit`, `/zen`, `/_compat/stats`), and zipball/tarball redirects. `false`/`0`/`off` restores plain Oxidean DTO wire shapes; the route table itself is unaffected. See [actions/compatibility.md](actions/compatibility.md) `api.github-rest-compat`. |
+| `OXIDEAN_PAGES_DIR` | Optional | `var/pages` | Materialized Pages site trees — `pages.*` builds publish here and `pages_serve` reads from it. Compose binds `./var/pages:/var/pages` and sets `/var/pages`. |
 | `OXIDEAN_MCP_ENABLED` | Optional | `true` | Instance gate for the MCP endpoint (`POST /api/mcp`). Sys-admins can override at runtime under **Admin → MCP endpoint** (`admin.mcp.updateSettings`); clearing the override reverts to this env default. Disabled → `404 mcp.disabled`. See [MCP.md](MCP.md). |
 | `OXIDEAN_RUNNER_REGISTRATION_TOKEN` | Optional | — | Bootstrap registration token for official runners (Compose profile `actions`). **Reusable while set** — never leave on an internet-facing API; prefer `admin.actions.createRegistrationToken` (one-time). Unset after local runner bootstrap. Rotate on compromise (D-ACT-08). **Never commit real tokens.** |
 | `OXIDEAN_RUNNER_NAME` | Optional | `compose-runner` | Display name passed to runner register. |

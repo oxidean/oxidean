@@ -33,7 +33,8 @@ export default defineRailway((ctx) => {
   const db = postgres("postgres");
 
   // Single forge volume covering Compose /var/* paths (D-CLOUD-04).
-  // Subdirs: repos, lfs, packages, release-assets, uploads, ssh.
+  // Subdirs: repos, lfs, packages, release-assets, uploads, template-packs,
+  // vcs-objects, actions-logs, actions-artifacts, actions-cache, pages, ssh.
   const forgeData = volume("forge-data", { sizeMB: 20480 });
 
   // Channel tag seeded per environment — deploy tooling retags it to the
@@ -64,11 +65,19 @@ export default defineRailway((ctx) => {
       // Align Railway healthcheck PORT with the API listen address.
       PORT: "8080",
       API_BIND: "0.0.0.0:8080",
+      // Every AppState filesystem root is declared explicitly — each resolves
+      // to the same /var/* path the code defaults already pick, so the vars
+      // document the layout without changing it (issue #210 store audit).
       OXIDEAN_REPOS_DIR: "/var/repos",
       OXIDEAN_LFS_DIR: "/var/lfs",
       OXIDEAN_PACKAGES_DIR: "/var/packages",
       OXIDEAN_RELEASE_ASSETS_DIR: "/var/release-assets",
+      OXIDEAN_TEMPLATE_PACKS_DIR: "/var/template-packs",
       OXIDEAN_VCS_OBJECTS_DIR: "/var/vcs-objects",
+      OXIDEAN_ACTIONS_LOG_DIR: "/var/actions-logs",
+      OXIDEAN_ACTIONS_ARTIFACTS_DIR: "/var/actions-artifacts",
+      OXIDEAN_ACTIONS_CACHE_DIR: "/var/actions-cache",
+      OXIDEAN_PAGES_DIR: "/var/pages",
       OXIDEAN_SSH_HOST_KEY_DIR: "/var/ssh",
       OXIDEAN_SSH_ENABLED: "true",
       // Default SSH port (clients expect 22). Railway still publishes a random
