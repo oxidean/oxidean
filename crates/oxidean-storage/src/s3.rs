@@ -159,8 +159,10 @@ async fn os_get<S: ObjectStore>(
     path: &StorePath,
     range: Option<Range<u64>>,
 ) -> Result<BlobObject, StorageError> {
-    let mut options = GetOptions::default();
-    options.range = range.map(GetRange::Bounded);
+    let options = GetOptions {
+        range: range.map(GetRange::Bounded),
+        ..Default::default()
+    };
     let result = inner.get_opts(path, options).await?;
     let meta = object_meta_to_blob(&result.meta);
     let stream: ByteStream = result.into_stream().map_err(StorageError::from).boxed();
@@ -206,12 +208,9 @@ impl S3Upload {
             );
         }
         let Some(upload) = self.upload.as_mut() else {
-            return Err(StorageError::Backend(
-                object_store::Error::NotSupported {
-                    source: "multipart upload init returned no handle".into(),
-                }
-                .into(),
-            ));
+            return Err(StorageError::Backend(object_store::Error::NotSupported {
+                source: "multipart upload init returned no handle".into(),
+            }));
         };
         upload.put_part(PutPayload::from(part)).await?;
         Ok(())
@@ -513,7 +512,7 @@ mod tests {
             .await
             .unwrap();
         upload.write_chunk(Bytes::from_static(b"s3")).await.unwrap();
-        let digest = format!("{:x}", Sha256::digest(b"hello s3"));
+        let digest = bytes_to_hex(Sha256::digest(b"hello s3").as_slice());
         let written = Box::new(upload)
             .commit(PutConstraints {
                 expected_size: Some(9),

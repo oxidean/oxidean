@@ -374,7 +374,7 @@ mod tests {
     }
 
     fn sha256_hex(data: &[u8]) -> String {
-        format!("{:x}", Sha256::digest(data))
+        bytes_to_hex(Sha256::digest(data).as_slice())
     }
 
     async fn collect(mut object: BlobObject) -> Vec<u8> {
