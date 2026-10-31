@@ -358,7 +358,7 @@ Tags: `<flavor>-<content-hash>` (content-keyed — hash covers `Cargo.toml`/`Car
 | `make smoke-mysql` | MySQL overlay bring-up + dialect assert | Profile `mysql` |
 | `make smoke-compose-ci` | Fail-closed CI entry (`DIALECT=…`) | Same as `./scripts/ci-compose-smoke.sh` |
 
-Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — see [DEPLOYMENT.md](DEPLOYMENT.md) and [`docs/archive/planning/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md`](archive/planning/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md). Local preview: `make cloud-plan` (requires linked Railway CLI).
+Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — see [DEPLOYMENT.md](DEPLOYMENT.md) and [`agent-os/specs/_archive/gsd/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md`](../agent-os/specs/_archive/gsd/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md). Local preview: `make cloud-plan` (requires linked Railway CLI).
 
 ### Protocol smokes (local + CI)
 

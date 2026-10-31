@@ -2,17 +2,52 @@
 language: en
 reviews:
   path_filters:
-    # AI-DLC workflow artifacts (intents, audit shards, learnings) inflate the
-    # diff far past the 300-file review limit — generated bookkeeping, not
-    # shipped code.
+    # Archived spec material (GSD milestone history, retired AI-DLC intents)
+    # inflates the diff far past the 300-file review limit — read-only
+    # planning records, not shipped code.
+    - "!agent-os/specs/_archive/**"
+    # Retired AI-DLC harness surface deleted by the spec-setup migration.
+    # Filters are narrowed to the retired paths only (aidlc-named files plus
+    # the handful of engine files with generic names) so future non-AI-DLC
+    # additions under `.claude/`/`.cursor/` still get reviewed. Prune this
+    # whole block post-merge — the paths no longer exist.
     - "!aidlc/**"
+    - "!.claude/CLAUDE.md"
+    - "!.claude/settings.json"
+    - "!.claude/settings.local.json.example"
+    - "!.claude/agents/aidlc-*"
+    - "!.claude/aidlc-common/**"
+    - "!.claude/hooks/aidlc-*"
+    - "!.claude/hooks/review-freeze-command.ts"
+    - "!.claude/hooks/runtime-integrity.ts"
+    - "!.claude/knowledge/aidlc-*"
+    - "!.claude/rules/aidlc*"
+    - "!.claude/scopes/aidlc-*"
+    - "!.claude/sensors/aidlc-*"
+    - "!.claude/skills/aidlc*"
+    - "!.claude/skills/clean-user-facing-text"
+    - "!.claude/skills/remove-ai-marks"
+    - "!.claude/skills/security-review"
+    - "!.claude/tools/aidlc-*"
+    - "!.cursor/agents/aidlc-*"
+    - "!.cursor/aidlc-common/**"
+    - "!.cursor/cli.json"
+    - "!.cursor/hooks/aidlc-*"
+    - "!.cursor/hooks/review-freeze-command.ts"
+    - "!.cursor/hooks/runtime-integrity.ts"
+    - "!.cursor/hooks.json"
+    - "!.cursor/knowledge/aidlc-*"
+    - "!.cursor/scopes/aidlc-*"
+    - "!.cursor/sensors/aidlc-*"
+    - "!.cursor/skills/aidlc*"
+    - "!.cursor/tools/aidlc-*"
+    - "!.cursor/rules/aidlc*"
     # Vendored third-party skill content is installed verbatim via `npx skills
     # add` and locked by skills-lock.json — its example snippets are teaching
     # material, not shipped product code, and flagging them produces review
     # noise. Extend the list when more skills are vendored; team-authored
     # skills stay in scope.
     - "!.agents/skills/security-review/**"
-    - "!.claude/skills/security-review"
     - "!.devin/skills/security-review"
   profile: chill
   tools:

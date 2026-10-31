@@ -1,0 +1,17 @@
+# Agent OS Standards Index
+
+root:
+  code-style:
+    description: Rust + TypeScript conventions, generated-source rules, boundaries, and comment policy
+  commits-versioning:
+    description: Enforced SemVer commit grammar, versioning.toml registry, tag and release flow
+  review-practices:
+    description: PR gate, secrets, generated-source sync, audit events, supply-chain and CI image rules
+  rust:
+    description: Crate layering, trait+adapter seams, RPC dispatch shape, and Rust CI gates
+  testing:
+    description: Test-after posture, per-change minimums, coverage floor, tooling and CI gates
+  way-of-working:
+    description: Trunk-based development, PR-only merges, branch naming, worktrees, squash-merge
+  web-ui:
+    description: Octane (.tsrx) authoring rules, TanStack data layer, DOM-race and coverage gates
