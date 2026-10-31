@@ -30,7 +30,7 @@
 #                     failure/pending/success statuses are left alone.
 #
 # Usage:
-#   RAILWAY_API_TOKEN=… GH_TOKEN=… GH_REPO=owner/repo \
+#   RAILWAY_API_TOKEN=*** GH_TOKEN=… GH_REPO=owner/repo \
 #     scripts/railway-image-source-check.sh [--repair] [--repair-statuses] \
 #       [--status-limit N | --status-sha <sha>] [--environment <name>] [--dry-run]
 #
@@ -264,7 +264,7 @@ repair_statuses() {
 }
 
 usage() {
-  sed -n '2,45p' "$0"
+  sed -n '3,51p' "$0"
 }
 
 main() {
