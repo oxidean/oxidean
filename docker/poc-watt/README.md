@@ -31,8 +31,9 @@ of hidden behind composer config we can't verify without docker.
 
 - `Range`/`If-Modified-Since` on static files is a minimal port (single
   `bytes=a-b` range; no `If-Unmodified-Since`/`If-Range`, no multipart).
-- Fastify is only a lifecycle shell (`setNotFoundHandler` + `reply.hijack()`)
-  — all response bytes are produced by the ported raw handlers.
+- Fastify is only a lifecycle shell (catch-all route + `reply.hijack()`)
+  — all response bytes are produced by the ported raw handlers. A passthrough
+  content-type parser keeps proxied request bodies alive on `request.raw`.
 - Request tracing (`TraceLayer`) is not ported; watt's own logger level is
   configurable via `PLT_SERVER_LOGGER_LEVEL`.
 - `/health` on the web worker is internal-only exactly like `web:3000/health`
