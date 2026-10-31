@@ -431,6 +431,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # Verification queries the linked deployment/environment over the
+          # Railway API — a cancelled status only resolves when the deploy
+          # provably had nothing to do.
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
         # Repo-connected Railway serviceInstances post error/"Deployment
         # cancelled" commit statuses when their diff gate cancels a deploy
         # that found no relevant changes (#206). They are not failures —

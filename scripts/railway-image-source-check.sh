@@ -28,6 +28,14 @@
 #                     branch (or a single commit via --status-sha).
 #                     Only ever touches error+cancelled entries — real
 #                     failure/pending/success statuses are left alone.
+#                     Every repair is verified against the Railway API
+#                     before posting: the status's target_url links its
+#                     deployment, and a status resolves only when the
+#                     deployment provably had nothing to do — ephemeral
+#                     (or already-deleted) PR environments, or a commit
+#                     diff touching none of the deployment's snapshot
+#                     watchPatterns. User-cancelled real deploys and
+#                     anything unverifiable stay as-is.
 #
 # Usage:
 #   RAILWAY_API_TOKEN=*** GH_TOKEN=… GH_REPO=owner/repo \
@@ -196,13 +204,178 @@ check_sources() {
   (( failed == 0 && (drifted == 0 || REPAIR == 1) ))
 }
 
+DEPLOYMENT_STATUS_QUERY='
+  query($id: String!) {
+    deployment(id: $id) {
+      status
+      environment { name isEphemeral }
+      meta
+    }
+  }
+'
+
+ENVIRONMENT_QUERY='
+  query($id: String!) {
+    environment(id: $id) { name isEphemeral }
+  }
+'
+
+# Extract a query param from a Railway dashboard URL — the cancelled
+# status's target_url carries its deployment (?id=<uuid>) and environment
+# (&environmentId=<uuid>), the only link from a status back to its deploy.
+url_param() {
+  printf '%s' "$1" | sed -n "s/.*[?&]$2=\([^&#]*\).*/\1/p"
+}
+
+# gitignore-style glob → ERE, repo-root anchored (`**` → .*, `*` → [^/]*,
+# `?` → [^/]). Slash-less patterns match the basename at any depth —
+# over-matching only ever leaves a status alone, the safe direction.
+watch_pattern_match() {
+  local file="$1" pat="$2" re="" i=0 ch
+  pat="${pat#/}"
+  local anywhere=0
+  [[ "$pat" != */* ]] && anywhere=1
+  while (( i < ${#pat} )); do
+    ch="${pat:i:1}"
+    case "$ch" in
+      '*')
+        if [[ "${pat:i:2}" == "**" ]]; then re+='.*'; i=$((i + 2));
+        else re+='[^/]*'; i=$((i + 1)); fi ;;
+      '?') re+='[^/]'; i=$((i + 1)) ;;
+      \\) re+='\\\\'; i=$((i + 1)) ;;
+      .|^|'$'|+|\(|\)|\[|\]|\{|\}|\|) re+="\\${ch}"; i=$((i + 1)) ;;
+      *) re+="$ch"; i=$((i + 1)) ;;
+    esac
+  done
+  if (( anywhere )); then
+    [[ "$file" =~ (^|/)${re}$ ]]
+  else
+    [[ "$file" =~ ^${re}$ ]]
+  fi
+}
+
+# Is the cancelled status's linked deployment provably a no-change cancel?
+# Verified paths (return 0):
+#   - the deployment lived in an ephemeral PR environment — fork-seeded
+#     instances fire initial deploys that the diff gate cancels; those
+#     statuses are artifacts on the main commit (the env's real signal is
+#     its own GitHub Deployment record), or
+#   - the deployment/environment is already deleted — only ephemeral
+#     environments get torn down, so this is the same artifact class, or
+#   - a persistent environment whose commit diff touches none of the
+#     deployment's snapshot watchPatterns — the same check the gate ran.
+# Everything else (missing links, lookup failures, matching patterns,
+# non-terminal deployment states) returns 1: leave the status alone.
+is_noop_cancel() {
+  local sha="$1" dep_id="$2" env_id="$3"
+  local dep dep_status env_name env_eph commit_hash env_raw
+  if ! dep="$(railway_gql "$DEPLOYMENT_STATUS_QUERY" \
+      "$(jq -n --arg id "$dep_id" '{id:$id}')" 2>/dev/null)"; then
+    echo "skip ${dep_id:0:8}…: deployment lookup failed — cannot verify the cancel"
+    return 1
+  fi
+  if [[ "$(echo "$dep" | jq -r '.data.deployment // "null"')" == "null" ]]; then
+    # Deployment gone → only an environment teardown removes deployments,
+    # and only ephemeral PR environments get torn down. Verify via the env
+    # when its id survives in the status URL.
+    if [[ -n "$env_id" ]] \
+      && env_raw="$(railway_gql "$ENVIRONMENT_QUERY" \
+        "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null)"; then
+      # Persistent env still standing → unverifiable. A null environment
+      # (deleted) or isEphemeral resolve as the ephemeral-artifact class —
+      # jq's // also replaces false, so test null-ness explicitly.
+      if [[ "$(echo "$env_raw" | jq -r 'if .data.environment == null then "gone" elif .data.environment.isEphemeral == true then "true" else "false" end')" == "false" ]]; then
+        echo "skip ${dep_id:0:8}…: deployment gone but environment still exists — cannot verify"
+        return 1
+      fi
+    elif [[ -n "$env_id" ]]; then
+      echo "skip ${dep_id:0:8}…: deployment gone, environment lookup failed — cannot verify"
+      return 1
+    fi
+    echo "verified ${dep_id:0:8}…: deployment deleted with its ephemeral environment"
+    return 0
+  fi
+  commit_hash="$(echo "$dep" | jq -r '.data.deployment.meta.commitHash // ""')"
+  if [[ "$commit_hash" != "$sha" ]]; then
+    echo "skip ${dep_id:0:8}…: deployment commit ${commit_hash:0:7} != status sha ${sha:0:7}"
+    return 1
+  fi
+  dep_status="$(echo "$dep" | jq -r '.data.deployment.status // ""')"
+  case "$dep_status" in
+    REMOVED | REMOVING | SKIPPED) ;;
+    *)
+      echo "skip ${dep_id:0:8}…: deployment is ${dep_status} — not a cancelled no-op"
+      return 1 ;;
+  esac
+  env_name="$(echo "$dep" | jq -r '.data.deployment.environment.name // ""')"
+  env_eph="$(echo "$dep" | jq -r '.data.deployment.environment.isEphemeral // false')"
+  if [[ -z "$env_name" && -n "$env_id" ]] \
+    && env_raw="$(railway_gql "$ENVIRONMENT_QUERY" \
+      "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null)"; then
+    env_name="$(echo "$env_raw" | jq -r '.data.environment.name // ""')"
+    env_eph="$(echo "$env_raw" | jq -r '.data.environment.isEphemeral // false')"
+    if [[ -z "$env_name" ]]; then
+      # Environment deleted — same ephemeral-artifact class.
+      echo "verified ${dep_id:0:8}…: environment deleted (ephemeral PR env)"
+      return 0
+    fi
+  fi
+  if [[ "$env_eph" == "true" ]]; then
+    echo "verified ${dep_id:0:8}…: ephemeral environment '${env_name}' — fork-artifact cancel"
+    return 0
+  fi
+  # Persistent environment: re-run the gate — the cancel was a no-change
+  # skip only when the commit's diff touched none of the deployment's
+  # snapshot watchPatterns.
+  local patterns p f hit=""
+  patterns="$(echo "$dep" | jq -r '.data.deployment.meta.serviceManifest.build.watchPatterns[]? // empty')"
+  if [[ -z "$patterns" ]]; then
+    echo "skip ${dep_id:0:8}… (${env_name:-unknown env}): no watchPatterns in the deployment snapshot — cancel was not the diff gate"
+    return 1
+  fi
+  while IFS= read -r p; do
+    if [[ "$p" == '!'* ]]; then
+      echo "skip ${dep_id:0:8}… (${env_name:-unknown env}): negated watchPatterns are unsupported — cannot verify"
+      return 1
+    fi
+  done <<< "$patterns"
+  local files
+  if ! files="$(gh api "repos/${REPO}/commits/${sha}" --jq '.files[]?.filename' 2>/dev/null)"; then
+    echo "skip ${dep_id:0:8}… (${env_name:-unknown env}): could not list commit files — cannot verify"
+    return 1
+  fi
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    while IFS= read -r p; do
+      [[ -z "$p" ]] && continue
+      if watch_pattern_match "$f" "$p"; then
+        hit="${f} ~ ${p}"
+        break 2
+      fi
+    done <<< "$patterns"
+  done <<< "$files"
+  if [[ -n "$hit" ]]; then
+    echo "skip ${dep_id:0:8}… (${env_name:-unknown env}): commit touched watched path (${hit}) — not a no-change cancel"
+    return 1
+  fi
+  echo "verified ${dep_id:0:8}… (${env_name:-unknown env}): diff touched none of the deployment's watchPatterns"
+  return 0
+}
+
 # Surface 2: cancelled deployment statuses. The combined status endpoint
 # returns newest first, so the first entry seen per context is the live
-# one — only error entries whose description reads as a cancellation get
-# a success posted over them.
+# one — only error entries whose description reads as a cancellation and
+# whose linked Railway deployment verifies as a no-change cancel get a
+# success posted over them.
 repair_statuses() {
   command -v gh >/dev/null 2>&1 || { echo "warn: gh not on PATH — status repair skipped"; return 0; }
   [[ -n "$REPO" ]] || { echo "warn: GH_REPO unset — status repair skipped"; return 0; }
+  # Verification needs the Railway API — without a credential every status
+  # is unverifiable, and unverifiable cancels stay untouched.
+  if [[ -z "${RAILWAY_API_TOKEN:-}" && -z "${RAILWAY_TOKEN:-}" && ! -f "${HOME}/.railway/config.json" ]]; then
+    echo "no Railway credential — cannot verify cancelled statuses, repair skipped"
+    return 0
+  fi
 
   local -a shas=()
   if [[ -n "$STATUS_SHA" ]]; then
@@ -222,7 +395,7 @@ repair_statuses() {
     fi
   fi
 
-  local repaired=0 sha entries ctx st desc url
+  local repaired=0 sha entries ctx st desc url dep_id
   local -A seen=()
   for sha in "${shas[@]}"; do
     local raw
@@ -241,6 +414,14 @@ repair_statuses() {
       seen[$ctx]=1
       [[ "$st" == "error" ]] || continue
       case "$desc" in *[Cc]ancel*) ;; *) continue ;; esac
+      # Never trust the description alone — the linked deployment must
+      # verify as a no-change cancel before anything resolves.
+      dep_id="$(url_param "$url" id)"
+      if [[ -z "$dep_id" ]]; then
+        echo "skip ${sha:0:7} '${ctx}': no deployment link — cannot verify the cancel"
+        continue
+      fi
+      is_noop_cancel "$sha" "$dep_id" "$(url_param "$url" environmentId)" || continue
       if [[ "$DRY_RUN" == "1" ]]; then
         echo "  dry-run: ${sha:0:7} would post success over '${ctx}' (was: ${desc})"
         repaired=$((repaired + 1))
@@ -264,7 +445,7 @@ repair_statuses() {
 }
 
 usage() {
-  sed -n '3,51p' "$0"
+  sed -n '3,60p' "$0"
 }
 
 main() {
