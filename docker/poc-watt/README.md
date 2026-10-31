@@ -22,7 +22,7 @@ of hidden behind composer config we can't verify without docker.
 | Route→shell dispatch incl. asset-overlap rule | ported | `services/web/src/shells.js` + `shells-table.js` (table extracted verbatim from `shells.rs`) |
 | Per-request HTML injection (theme CH + Accept-CH, `<title>`, SSH metas, `http://localhost` rewrite, session/setup/signup stamps) | ported | `services/web/src/inject.js` |
 | Anonymous→login gate (10s cached session probe) + setup stamp | ported | `services/web/src/session.js`, `setup.js`, gate in `server.js` |
-| API reverse proxy (hop-by-hop filter, X-Forwarded-* edge vs behind-proxy, segment-aware prefixes, WS upgrade, SSE pass-through) | ported | `shared/proxy.js` (fetch for regular traffic — required for `*.plt.local` mesh DNS — `node:http` for the upgrade splice) |
+| API reverse proxy (hop-by-hop filter, X-Forwarded-* edge vs behind-proxy, segment-aware prefixes, WS upgrade, SSE pass-through) | ported | `shared/proxy.js` (`undici.request` for regular traffic — the mesh dispatcher resolves `*.plt.local` and, unlike `fetch`, relays encoded bytes raw — `node:http` for the upgrade splice) |
 | Compression with same exclusions (SSE, archives, images, >64B, no re-encode) | ported | `shared/compress.js` (predicate) — applied by the web worker; gateway passes bytes through (Traefik never compressed either) |
 | Header-gated `/health` + `/.well-known/{webmcp,mcp}` | ported | `services/web/server.js` + `src/wellknown.js` |
 | Dot-segment/path-traversal rejection | ported | `shared/apipaths.js` (`hasDotSegments`), enforced in both workers |
