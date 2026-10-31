@@ -375,6 +375,7 @@ jobs:
       contents: read
       deployments: write
       packages: write # the post-deploy channel retag pushes :staging to GHCR
+      statuses: write # resolve cancelled Railway deployment statuses on the sha (#206)
     steps:
       - uses: actions/checkout@v7
         with:
@@ -425,6 +426,17 @@ jobs:
               --description "deploy sha-${SHA} failed"
             exit 1
           fi
+      - name: resolve cancelled deployment statuses on this commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Repo-connected Railway serviceInstances post error/"Deployment
+        # cancelled" commit statuses when their diff gate cancels a deploy
+        # that found no relevant changes (#206). They are not failures —
+        # resolve them as success on the sha this run deploys. The hourly
+        # pr-env-sweep covers cancellations that land later.
+        run: scripts/railway-image-source-check.sh --status-sha "${{ needs.meta.outputs.sha }}"
 
   # Bind the PR's ephemeral Railway environment (forked from preview) to the
   # PR image tag once it exists. Image-sourced services have no repo
