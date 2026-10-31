@@ -4,7 +4,7 @@
 //!
 //! `OXIDEAN_STATUS_PAGE_THEME` picks the variant per process: `default`
 //! (unset) is the plain branded page, `meme` swaps the headline block for
-//! the status's https://http.cat image. Variants share a single shell —
+//! the status's <https://http.cat> image. Variants share a single shell —
 //! only the hero block differs, so copy/markup changes land once.
 //!
 //! HTML is produced only for clients that explicitly accept it
@@ -32,7 +32,7 @@ pub enum Theme {
     /// Plain branded page: status code, headline, blurb.
     #[default]
     Default,
-    /// https://http.cat image for the status code.
+    /// <https://http.cat> image for the status code.
     Meme,
 }
 
