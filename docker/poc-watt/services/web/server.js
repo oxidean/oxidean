@@ -76,9 +76,16 @@ export async function create() {
   const behindProxy = ['1', 'true', 'yes'].includes(
     (process.env.OXIDEAN_WEB_BEHIND_PROXY ?? '').toLowerCase(),
   )
+  // Rust parses OXIDEAN_SSH_PORT as u16 — an invalid value drops the
+  // advertise meta entirely instead of stamping a bad port.
+  const sshPortRaw = env('OXIDEAN_SSH_PORT', null)
+  const sshPortNum = sshPortRaw == null ? null : Number(sshPortRaw)
   const meta = {
     sshHost: env('OXIDEAN_SSH_HOST', null),
-    sshPort: env('OXIDEAN_SSH_PORT', null) == null ? null : Number(env('OXIDEAN_SSH_PORT')),
+    sshPort:
+      Number.isInteger(sshPortNum) && sshPortNum >= 0 && sshPortNum <= 65535
+        ? sshPortNum
+        : null,
     publicOrigin: env('OXIDEAN_PUBLIC_ORIGIN', null)?.replace(/\/+$/, '') ?? null,
     behindProxy,
   }
