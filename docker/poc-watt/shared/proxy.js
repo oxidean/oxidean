@@ -1,10 +1,14 @@
 // Port of crates/oxidean-web/src/proxy.rs — reverse proxy to OXIDEAN_API_ORIGIN.
 //
 // Two transports:
-//   - forward()        — undici fetch. Handles every regular request; streams
-//                        request and response bodies; required for internal
-//                        watt mesh targets (*.plt.local resolves only through
-//                        the runtime's undici dispatcher, not node:http).
+//   - forward()        — undici.request. Handles every regular request;
+//                        streams request and response bodies; required for
+//                        internal watt mesh targets (*.plt.local resolves only
+//                        through the runtime's undici dispatcher, not node:http).
+//                        `request` (not `fetch`) so response bytes pass raw —
+//                        fetch transparently decodes content-encoding while its
+//                        headers still claim the encoding, and the gateway must
+//                        relay compressed bodies untouched like Traefik does.
 //   - forwardUpgrade() — node:http. Raw TCP splice for websocket handshakes
 //                        (e.g. /api/rpc/ws); fetch can't drive an upgrade.
 //
@@ -18,12 +22,25 @@
 //     verbatim; X-Forwarded-Host is filled from Host only when the edge left
 //     it unset
 import http from 'node:http'
-import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import zlib from 'node:zlib'
+import { request as undiciRequest } from 'undici'
 import { compressible, acceptsGzip } from './compress.js'
 
-// Hop-by-hop headers never cross a proxy hop.
-const HOP_BY_HOP = new Set(['host', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade'])
+// Hop-by-hop headers never cross a proxy hop — the fixed set plus whatever
+// the request's `Connection` header nominates (RFC 9110 §7.6.1).
+const HOP_BY_HOP = new Set([
+  'host',
+  'connection',
+  'transfer-encoding',
+  'keep-alive',
+  'upgrade',
+  'te',
+  'trailer',
+  'proxy-connection',
+  'proxy-authorization',
+  'proxy-authenticate',
+])
 // Client-settable headers describing the request to the next hop.
 const FORWARDED_HEADERS = new Set([
   'forwarded',
@@ -43,9 +60,23 @@ const RESP_HOP_BY_HOP = new Set(['connection', 'transfer-encoding', 'keep-alive'
 // connection/upgrade so the websocket handshake crosses verbatim.
 export function upstreamHeaders(req, { behindProxy, peerIp, isUpgrade = false }) {
   const out = {}
+  // Fields `Connection` names are hop-by-hop too — `Connection: keep-alive,
+  // X-Foo` must not forward X-Foo. Skipped for genuine upgrades, whose
+  // connection/upgrade pair is itself the handshake and re-admitted below.
+  const conn = req.headers.connection
+  const nominated =
+    isUpgrade || conn == null
+      ? null
+      : new Set(
+          String(conn)
+            .split(',')
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean),
+        )
   for (const [name, value] of Object.entries(req.headers)) {
     const n = name.toLowerCase()
     if (HOP_BY_HOP.has(n) && !(isUpgrade && (n === 'connection' || n === 'upgrade'))) continue
+    if (nominated?.has(n)) continue
     if (!behindProxy && FORWARDED_HEADERS.has(n)) continue
     out[n] = value
   }
@@ -86,12 +117,10 @@ export async function forward(req, res, target, opts = {}) {
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
   let upstream
   try {
-    upstream = await fetch(url, {
+    upstream = await undiciRequest(url, {
       method: req.method,
       headers,
-      body: hasBody ? Readable.toWeb(req) : null,
-      ...(hasBody ? { duplex: 'half' } : {}),
-      redirect: 'manual',
+      body: hasBody ? req : undefined,
     })
   } catch (e) {
     console.warn(`proxy ${url} failed: ${e?.message} cause=${e?.cause?.message ?? e?.cause?.code ?? e?.cause ?? 'none'}`)
@@ -99,12 +128,12 @@ export async function forward(req, res, target, opts = {}) {
   }
 
   const respHeaders = {}
-  for (const [name, value] of upstream.headers.entries()) {
-    if (RESP_HOP_BY_HOP.has(name)) continue
+  for (const [name, value] of Object.entries(upstream.headers)) {
+    const n = name.toLowerCase()
+    if (RESP_HOP_BY_HOP.has(n)) continue
     // Preserve multi-value headers (Set-Cookie on login sets several) —
-    // writeHead accepts string[] and emits one header line per element.
-    const prev = respHeaders[name]
-    respHeaders[name] = prev === undefined ? value : [].concat(prev, value)
+    // undici already yields string[]; writeHead emits one line per element.
+    respHeaders[n] = value
   }
 
   // Web-tier compression: upstream answered with a sized, compressible body
@@ -114,33 +143,30 @@ export async function forward(req, res, target, opts = {}) {
   if (
     compress &&
     acceptsGzip(req.headers['accept-encoding']) &&
-    compressible({ statusCode: upstream.status, headers: respHeaders })
+    compressible({ statusCode: upstream.statusCode, headers: respHeaders })
   ) {
     try {
-      const buf = Buffer.from(await upstream.arrayBuffer())
-      const gz = zlib.gzipSync(buf)
+      const chunks = []
+      for await (const chunk of upstream.body) chunks.push(chunk)
+      const gz = zlib.gzipSync(Buffer.concat(chunks))
       delete respHeaders['content-length']
       delete respHeaders.etag
       respHeaders['content-encoding'] = 'gzip'
       respHeaders['content-length'] = String(gz.length)
       respHeaders.vary = respHeaders.vary ? `${respHeaders.vary}, Accept-Encoding` : 'Accept-Encoding'
-      res.writeHead(upstream.status, respHeaders)
+      res.writeHead(upstream.statusCode, respHeaders)
       return res.end(gz)
     } catch {
+      upstream.body?.destroy?.()
       return badGateway(res)
     }
   }
 
-  res.writeHead(upstream.status, respHeaders)
-  if (upstream.body == null) return res.end()
-  try {
-    for await (const chunk of Readable.fromWeb(upstream.body)) {
-      if (!res.write(chunk)) await new Promise(r => res.once('drain', r))
-    }
-    res.end()
-  } catch {
-    res.destroy()
-  }
+  res.writeHead(upstream.statusCode, respHeaders)
+  // pipeline: backpressure + destroys the upstream stream when the client
+  // disconnects mid-response (SSE, package blobs, git fetches) instead of
+  // leaking the connection waiting for a drain that never comes.
+  pipeline(upstream.body, res).catch(() => res.destroy())
 }
 
 // Websocket upgrade splice: forward the handshake upstream via node:http

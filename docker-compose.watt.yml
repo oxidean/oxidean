@@ -37,7 +37,9 @@ services:
       # reaches the web worker — same trust shape as Traefik + web.
       OXIDEAN_WEB_BEHIND_PROXY: "1"
     ports:
-      - "80:80"
+      # Local-bench lane only: loopback so the env-seeded admin (local-only
+      # default credentials below) is not reachable off the host.
+      - "127.0.0.1:80:80"
     depends_on:
       api:
         condition: service_healthy

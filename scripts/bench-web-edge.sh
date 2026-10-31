@@ -121,12 +121,17 @@ stats_begin() {
   STATS_FILE="$WORK/stats-$1.jsonl"
   : > "$STATS_FILE"
   (
+    round=0
     while :; do
       ids=$("${COMPOSE[@]}" ps -q 2>/dev/null | tr '\n' ' ')
       if [[ -n "${ids// /}" ]]; then
-        docker stats --no-stream --format '{{json .}}' $ids \
-          >> "$STATS_FILE" 2>/dev/null || true
+        # r tags the sampling round so per-container readings from one
+        # `docker stats` call can be summed into an interval total below.
+        docker stats --no-stream \
+          --format "{\"r\":$round,\"n\":\"{{.Name}}\",\"m\":\"{{.MemUsage}}\",\"c\":\"{{.CPUPerc}}\"}" \
+          $ids >> "$STATS_FILE" 2>/dev/null || true
       fi
+      round=$((round + 1))
       sleep 2
     done
   ) &
@@ -138,6 +143,9 @@ stats_end() {
 }
 
 # $1 = lane (baseline|watt) → edge container name filter (traefik+web vs watt)
+# Aggregates the lane's edge containers per sampling round first (the watt
+# lane is one container, the baseline two) so the metrics compare like for
+# like: peak total RSS and mean total CPU% across the edge tier.
 edge_stats_json() {
   local lane="$1" names
   if [[ "$lane" == "watt" ]]; then
@@ -150,11 +158,12 @@ edge_stats_json() {
               elif test("MiB") then (sub("MiB.*";"")|tonumber)*1048576
               elif test("KiB") then (sub("KiB.*";"")|tonumber)*1024
               else (sub("B.*";"")|tonumber) end);
-    [inputs | fromjson? | select(.Name | test($names))] as $s
+    [inputs | fromjson? | select(.n | test($names))] as $s
     | if ($s|length) == 0 then {containers:0} else
-      { containers: ($s | map(.Name) | unique | length),
-        edge_rss_bytes_max: ($s | map(.MemUsage | split(" / ")[0] | mib) | max),
-        edge_cpu_pct_avg:   ($s | map(.CPUPerc | rtrimstr("%") | tonumber) | add / length) }
+      ($s | group_by(.r)) as $rounds
+      | { containers: ($s | map(.n) | unique | length),
+          edge_rss_bytes_max: ($rounds | map(map(.m | split(" / ")[0] | mib) | add) | max),
+          edge_cpu_pct_avg:   ($rounds | map(map(.c | rtrimstr("%") | tonumber? // 0) | add) | add / length) }
       end' < "$STATS_FILE"
 }
 
