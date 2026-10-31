@@ -67,9 +67,27 @@ pub fn theme() -> Theme {
 
 /// Does the requester want a rendered document? Browsers send `text/html`
 /// in Accept; API/CLI clients (`*/*`, `application/json`) keep terse
-/// machine bodies.
+/// machine bodies. A `text/html` range with `q=0` explicitly refuses HTML,
+/// so media-range parameters are honored rather than substring-matched.
 pub fn accepts_html(accept: Option<&str>) -> bool {
-    accept.is_some_and(|v| v.to_ascii_lowercase().contains("text/html"))
+    accept.is_some_and(|value| {
+        value.split(',').any(|range| {
+            let mut parts = range.split(';');
+            let media_type = parts.next().unwrap_or_default();
+            if !media_type.trim().eq_ignore_ascii_case("text/html") {
+                return false;
+            }
+            for parameter in parts {
+                let Some((name, value)) = parameter.trim().split_once('=') else {
+                    continue;
+                };
+                if name.trim().eq_ignore_ascii_case("q") {
+                    return value.trim().parse::<f32>().is_ok_and(|q| q > 0.0);
+                }
+            }
+            true
+        })
+    })
 }
 
 /// Resolved color scheme for stamping: `Some(true)` dark, `Some(false)`
@@ -490,6 +508,10 @@ mod tests {
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         )));
         assert!(accepts_html(Some("Text/Html")));
+        assert!(accepts_html(Some("application/json, text/html;q=0.5")));
+        assert!(!accepts_html(Some("text/html;q=0,application/json")));
+        assert!(!accepts_html(Some("text/html;q=0.0")));
+        assert!(!accepts_html(Some("text/html;q=bogus")));
         assert!(!accepts_html(Some("application/json")));
         assert!(!accepts_html(Some("*/*")));
         assert!(!accepts_html(None));
