@@ -26,8 +26,12 @@ Before implementing, debugging, deploying, or writing substantial prose, **load 
 | Railway / cloud deploy / flags | [use-railway](../../.agents/skills/use-railway/SKILL.md) |
 | User-facing prose finalize | [clean-user-facing-text](../../.agents/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
 | AI watermark / provenance strip | [remove-ai-marks](../../.agents/skills/remove-ai-marks/SKILL.md) |
+| Spec / planning for significant work | [agent-os-shape-spec](../../.agents/skills/agent-os-shape-spec/SKILL.md), [agent-os-plan-product](../../.agents/skills/agent-os-plan-product/SKILL.md) |
+| Idea → PRD → milestones | [bm-prd-creator](../../.agents/skills/bm-prd-creator/SKILL.md) |
+| Standards index/inject/discover | [agent-os-index-standards](../../.agents/skills/agent-os-index-standards/SKILL.md), [agent-os-inject-standards](../../.agents/skills/agent-os-inject-standards/SKILL.md), [agent-os-discover-standards](../../.agents/skills/agent-os-discover-standards/SKILL.md) |
+| Security review | [security-review](../../.agents/skills/security-review/SKILL.md) |
 
-AI-DLC workflow skills (`aidlc-*`, the `/aidlc` orchestrator) live under `.cursor/skills/` and `.claude/skills/` — use them when the user invokes an AI-DLC workflow.
+Agent OS skills read and write `agent-os/` (product docs, standards, specs); archives live under `agent-os/specs/_archive/` — read-only provenance, never edited.
 
 ## Do not
 

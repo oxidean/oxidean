@@ -5,7 +5,7 @@
 .claude
 .agents
 .railway
-aidlc
+agent-os
 node_modules
 **/node_modules
 target
