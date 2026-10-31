@@ -23,7 +23,14 @@
 #                            no rebuild for a version-only diff.
 #   ox-cli workflow_run    → an ox-v* tag landed → repin staging api's
 #                            OXIDEAN_CLI_DIST_URL + re-pull so the container
-#                            entrypoint fetches the new release feed.
+#                            entrypoint fetches the new release feed. The
+#                            branches: filter matches the triggering run's
+#                            head_branch (the tag name on tag pushes), so
+#                            only ox-v* completions fire — every other
+#                            completion used to spawn a no-op run on main
+#                            that pending-cancelled its still-queued
+#                            predecessor in the shared concurrency group,
+#                            leaving red "cancelled" runs on the commit.
 #   workflow_dispatch      → same as a main push.
 #
 # Image namespaces (public GHCR packages — Railway pulls unauthenticated):
@@ -45,6 +52,11 @@ on:
   workflow_run:
     workflows: ["ox CLI"]
     types: [completed]
+    # Only ox-v* tag runs carry release assets worth repinning — gate on the
+    # triggering run's head_branch (the tag name for tag pushes) so PR legs,
+    # path-filtered main pushes, and cancelled ox-cli runs never create an
+    # Images run at all (issue #206).
+    branches: ["ox-v*"]
   # The backstop for leaked per-PR surfaces moved to pr-env-sweep.yml
   # (hourly schedule + workflow_dispatch) — merged-PR closed runs are
   # cancelled before jobs start, so cleanup-pr below is a fast path only.
