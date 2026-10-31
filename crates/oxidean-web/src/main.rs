@@ -1,9 +1,9 @@
 //! oxidean-web — the production web tier: serves the statically-built Octane
 //! SPA shells and assets, applies per-request middleware (theme class, route
 //! `<title>`, SSH advertise metas, anonymous→login gate, header-gated /health,
-//! well-known discovery docs), and reverse-proxies API prefixes when
-//! OXIDEAN_API_ORIGIN is set (dev parity — Compose Traefik splits them
-//! upstream instead).
+//! well-known discovery docs, themed status pages shared with the API), and
+//! reverse-proxies API prefixes when OXIDEAN_API_ORIGIN is set (dev parity —
+//! Compose Traefik splits them upstream instead).
 
 mod inject;
 mod proxy;
@@ -19,9 +19,11 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::middleware::from_fn;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use oxidean_status_pages as status_pages;
 use tower::ServiceExt;
 use tower_http::compression::predicate;
 use tower_http::compression::{CompressionLayer, Predicate};
@@ -113,6 +115,14 @@ async fn main() {
         .route(wellknown::WEBMCP_PATH, get(wellknown::webmcp))
         .route(wellknown::MCP_PATH, get(wellknown::mcp))
         .fallback(spa)
+        // Themed status pages (#207): for HTML acceptors, bare/plain-text
+        // error bodies (proxy 502s, unprobed /health 404s, anything terse
+        // that slips through) become the branded document the API renders
+        // too — the displaced text rides along as the page's detail line.
+        // Structured bodies (JSON, media, existing HTML) pass through
+        // untouched. Runs inside compression so the swap sees real content
+        // types and bodies.
+        .layer(from_fn(status_pages::theme_errors))
         // Compress only worth-it bodies: >64 bytes and not SSE (streamed
         // JSON-RPC over /api/mcp must not be buffered), not an archive/image
         // payload, and not already-encoded upstream. Upgrade responses (101)
@@ -206,7 +216,7 @@ async fn spa(
     // the API prefix to an arbitrary API path, `/static/../../etc/passwd`
     // escapes dist/. Reject outright.
     if has_dot_segments(path) {
-        return not_found(&st.dist, &headers, &st.meta).await;
+        return not_found(&headers);
     }
 
     // API-owned prefixes (dev parity / single-origin deploys without Traefik)
@@ -238,7 +248,7 @@ async fn spa(
                 if let Some(resp) = try_static(&st.dist, path, req).await {
                     return resp;
                 }
-                return not_found(&st.dist, &headers, &st.meta).await;
+                return not_found(&headers);
             }
             // …except `/{owner}/{repo}` where repo is a legal *dotted* name
             // (`my.app`, `three.js`, `.github`/`​.oxidean` org profile repos):
@@ -251,7 +261,7 @@ async fn spa(
             if segs.len() == 2 && !st.dist.join(segs[0]).exists() {
                 return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
             }
-            return not_found(&st.dist, &headers, &st.meta).await;
+            return not_found(&headers);
         }
         return serve_shell(&st, m, &headers, req.method().clone(), path, query).await;
     }
@@ -260,7 +270,7 @@ async fn spa(
     if let Some(resp) = try_static(&st.dist, path, req).await {
         return resp;
     }
-    not_found(&st.dist, &headers, &st.meta).await
+    not_found(&headers)
 }
 
 /// Would `try_static` serve `dist{path}`? Same guards, without consuming the
@@ -287,11 +297,10 @@ async fn serve_shell(
     // always a stray form/action or a confused crawler — 405 it rather
     // than serve 200 HTML that pretends the mutation worked.
     if method != Method::GET && method != Method::HEAD {
-        return (
-            StatusCode::METHOD_NOT_ALLOWED,
-            [(header::ALLOW, "GET, HEAD")],
-        )
-            .into_response();
+        let mut resp = status_page(StatusCode::METHOD_NOT_ALLOWED, headers);
+        resp.headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
+        return resp;
     }
     // Resolve the session signal once for both the protected gate and the
     // `data-oxidean-session` stamp. Validated upstream when a validator is
@@ -358,7 +367,7 @@ async fn serve_shell(
         }
         Err(e) => {
             tracing::warn!("shell {} unreadable: {e}", m.file);
-            not_found(&st.dist, headers, &st.meta).await
+            not_found(headers)
         }
     }
 }
@@ -432,41 +441,37 @@ async fn try_static(
     Some(resp.map(Body::new))
 }
 
-/// 404 responses inject theme + advertise metas too (dark-theme users
-/// shouldn't get a light flash on a missing page). The session stamp mirrors
-/// cookie *presence* only — never probed upstream on this path (asset misses
-/// are too frequent to pay a probe per 404) — so a signed-in user keeps the
-/// correct skeleton on a bad URL while nothing authoritative is claimed.
-async fn not_found(
-    dist: &std::path::Path,
-    headers: &HeaderMap,
-    meta: &inject::AdvertiseMeta,
-) -> Response {
-    if let Ok(html) = tokio::fs::read_to_string(dist.join("404.html")).await {
-        let signal = if inject::signed_in(cookie_header(headers)) {
-            session::SessionSignal::Unknown
-        } else {
-            session::SessionSignal::Absent
-        };
-        let out = inject::inject(&html, headers, None, meta, signal, None);
-        return (
-            StatusCode::NOT_FOUND,
-            [
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::CACHE_CONTROL, "no-store"),
-                (ACCEPT_CH, "Sec-CH-Prefers-Color-Scheme"),
-                (header::VARY, "Cookie, Sec-CH-Prefers-Color-Scheme"),
-            ],
-            out,
-        )
-            .into_response();
-    }
+/// Branded status page — one shared template with the API tier
+/// (`oxidean-status-pages`, themed by `OXIDEAN_STATUS_PAGE_THEME`). The
+/// color scheme resolves from the same cookie/CH chain as shell injection
+/// so a dark user doesn't get a light flash on a miss; unresolved signals
+/// fall through to the OS media query (no boot script runs here). The page
+/// is static markup — no session stamp — but `Vary` covers the theme inputs.
+fn status_page(status: StatusCode, headers: &HeaderMap) -> Response {
+    let dark = status_pages::color_scheme(
+        cookie_header(headers),
+        headers
+            .get("sec-ch-prefers-color-scheme")
+            .and_then(|v| v.to_str().ok()),
+    );
+    let out = status_pages::render(status_pages::theme(), status, dark);
     (
-        StatusCode::NOT_FOUND,
-        [(header::CACHE_CONTROL, "no-store")],
-        "Not Found",
+        status,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (ACCEPT_CH, "Sec-CH-Prefers-Color-Scheme"),
+            (header::VARY, "Cookie, Sec-CH-Prefers-Color-Scheme"),
+        ],
+        out,
     )
         .into_response()
+}
+
+/// The 404 page is embedded, not a dist file — a broken or empty dist
+/// still gets the branded document.
+fn not_found(headers: &HeaderMap) -> Response {
+    status_page(StatusCode::NOT_FOUND, headers)
 }
 
 /// `returnTo=` needs the path URL-encoded (`/` stays — readable and matches
@@ -647,7 +652,6 @@ mod tests {
                 ("_/_/index.html", "<html>repo shell</html>"),
                 ("brand/logo.png", "PNG"),
                 ("_astro/chunk.js", "console.log(1)"),
-                ("404.html", "<html>nope</html>"),
             ],
         )
         .await;
@@ -925,5 +929,35 @@ mod tests {
         let mut echo = [0u8; 12];
         sock.read_exact(&mut echo).await.unwrap();
         assert_eq!(&echo, b"ping-payload", "bytes must tunnel after upgrade");
+    }
+
+    /// Misses serve the shared branded status page — embedded, so a dist
+    /// without 404.html still answers a real document; the cookie theme
+    /// stamps the color scheme like shell injection does.
+    #[tokio::test]
+    async fn misses_serve_the_branded_status_page() {
+        let dist = dist_with("status-page", &[("index.html", "<html>app</html>")]).await;
+        let st = shared(dist);
+
+        let resp = get(&st, "/no/such/route", None).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("Page not found"), "{body}");
+        assert!(body.contains("Oxidean"), "{body}");
+
+        // Dark-cookie users get the dark class, not a light flash.
+        let resp = get(&st, "/no/such/route", Some("oxidean-theme=dark")).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("class=\"dark\""));
     }
 }

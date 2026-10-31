@@ -3733,6 +3733,7 @@ dependencies = [
  "oxidean-db",
  "oxidean-git",
  "oxidean-runner",
+ "oxidean-status-pages",
  "oxidean-vcs",
  "prost",
  "prost-types",
@@ -4267,6 +4268,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidean-status-pages"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "http",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "oxidean-vcs"
 version = "0.2.1"
 dependencies = [
@@ -4295,6 +4307,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "oxidean-core",
+ "oxidean-status-pages",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
