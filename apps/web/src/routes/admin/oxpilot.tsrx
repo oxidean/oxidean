@@ -208,7 +208,7 @@ export function AdminOxpilotContent() @{
 
   const initialSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
   const [pending, setPending] = useState(false);
-  const [draftReady, setDraftReady] = useState(() => !!initialSettings);
+  const [draftReady, setDraftReady, getDraftReady] = useState(() => !!initialSettings);
 
   const form = useForm({
     defaultValues: formDefaultsFromSettings(initialSettings),
@@ -269,7 +269,9 @@ export function AdminOxpilotContent() @{
   // Seed the draft once — later refetches must not clobber unsaved
   // edits; save/clear handlers re-apply from the server response.
   useEffect(() => {
-    if (!draftReady && settingsQ.isSuccess && settingsQ.data) {
+    // Read the live flag: Octane may run a stale-closure effect after user
+    // edits land, and the captured `draftReady` would still read false.
+    if (!getDraftReady() && settingsQ.isSuccess && settingsQ.data) {
       applySettings(settingsQ.data);
     }
   }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt, draftReady]);
@@ -345,8 +347,12 @@ export function AdminOxpilotContent() @{
   const providers: OxpilotProviderDescriptor[] = providersQ.data ?? [];
   const loadError =
     !!loaderError || me.isError || (settingsQ.isError && settingsErrorCode !== "admin.forbidden");
+  // Hold the form until the draft is seeded no matter which path supplies
+  // it — a late-arriving ready loader must not lift the gate between
+  // `isSuccess` and the seed effect, or the Switch paints unchecked first
+  // and a click in that window toggles the field ON instead of OFF.
   const waitingForDraft =
-    !readyFromLoader && isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
+    isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
   const anyOverridden =
     settings != null &&
     (settings.enabled_overridden ||

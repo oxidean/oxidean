@@ -135,6 +135,16 @@ async function waitForTestId(testId: string, ms = 10_000): Promise<Element> {
   throw new Error(`[data-testid="${testId}"] never appeared. ${debugBody()}`);
 }
 
+async function waitFor(check: () => boolean, what: string, ms = 2_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      throw new Error(`${what}. ${debugBody()}`);
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe("AdminOxpilotPage browser DOM races", () => {
   it("Switch toggle, provider Select, and save do not throw insertBefore", async () => {
     const tracker = trackDomErrors();
@@ -149,21 +159,40 @@ describe("AdminOxpilotPage browser DOM races", () => {
       await act(async () => {
         (toggle as HTMLElement).click();
       });
-      await new Promise((r) => setTimeout(r, 100));
+      // Condition wait, not a fixed sleep: the click must flip aria-checked
+      // to false — if a late hydration effect reverts the write this fails
+      // at the switch, not deep in the save assertion. The diagnostics
+      // distinguish a detached-node click (isConnected=false / live node
+      // differs) from the field never being written at all.
+      await waitFor(
+        () =>
+          document
+            .querySelector('[data-testid="admin-oxpilot-enabled"]')
+            ?.getAttribute("aria-checked") === "false",
+        `switch aria-checked never flipped to false (captured.isConnected=${toggle.isConnected}, captured.aria=${toggle.getAttribute("aria-checked")}, count=${document.querySelectorAll('[data-testid="admin-oxpilot-enabled"]').length})`,
+      );
 
       // Base UI Select — the portal open/close is the race-prone path.
       await pickSelectOptionByTestId(
         "admin-oxpilot-provider",
         "admin-oxpilot-provider-option-openai",
       );
-      await new Promise((r) => setTimeout(r, 100));
+      // Wait for the pick to render on the trigger — proof the field write
+      // flushed through form state, not just the option click.
+      await waitFor(() => {
+        const text =
+          document.querySelector('[data-testid="admin-oxpilot-provider"]')?.textContent ?? "";
+        return (
+          text.includes("OpenAI") && !text.includes("compatible") && !text.includes("Environment")
+        );
+      }, "provider select never reflected the openai pick");
 
       const form = document.querySelector("form");
       expect(form).toBeTruthy();
       await act(async () => {
         form!.requestSubmit();
       });
-      await new Promise((r) => setTimeout(r, 300));
+      await waitFor(() => settingsSetMock.mock.calls.length > 0, "settingsSet was never called");
       expect(settingsSetMock).toHaveBeenCalledWith(
         expect.objectContaining({ enabled: false, provider_id: "openai" }),
       );
