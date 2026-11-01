@@ -2,5 +2,4 @@
 .git/
 .gitignore
 *.bak
-*.tgz
 tmp/

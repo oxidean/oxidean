@@ -7,7 +7,7 @@ The SSH host-key PVC is mounted at /var/ssh in every mode — generated host
 keys and the web-flow signing pair keep their trust chain across data-volume
 replacement.
 */ -}}
-{{- if include "oxidean.dataVolumeMounted" . }}
+{{- if and (include "oxidean.dataVolumeMounted" .) (not .Values.storage.data.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -16,14 +16,14 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.storage.data.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.storage.data.storageClass | nindent 2 }}
   resources:
     requests:
       storage: {{ .Values.storage.data.size | quote }}
 ---
 {{- end }}
-{{- if and (eq .Values.storage.backend "s3") (not .Values.storage.s3.retainDataVolume) }}
+{{- if and (eq .Values.storage.backend "s3") (not .Values.storage.s3.retainDataVolume) (not .Values.storage.s3.repos.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -32,14 +32,14 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.storage.s3.repos.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.storage.s3.repos.storageClass | nindent 2 }}
   resources:
     requests:
       storage: {{ .Values.storage.s3.repos.size | quote }}
 ---
 {{- end }}
-{{- if .Values.ssh.enabled }}
+{{- if and .Values.ssh.enabled (not .Values.ssh.hostKeys.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -48,7 +48,7 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.ssh.hostKeys.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.ssh.hostKeys.storageClass | nindent 2 }}
   resources:
     requests:

@@ -54,3 +54,4 @@ dist-ssr
 # Machine-local harness files
 .claude/settings.local.json
 .devin/config.local.json
+deploy/helm/oxidean/charts/

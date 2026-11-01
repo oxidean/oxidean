@@ -11,6 +11,9 @@
 {{- if not (or .Values.postgres.enabled .Values.database.url .Values.database.existingSecret) -}}
 {{- fail "no database: enable postgres, set database.url, or database.existingSecret" -}}
 {{- end -}}
+{{- if and .Values.objectstore.enabled .Values.seaweedfs.enabled -}}
+{{- fail "objectstore.enabled (RustFS) and seaweedfs.enabled are mutually exclusive bundled stores — pick one" -}}
+{{- end -}}
 {{- $full := include "oxidean.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -200,14 +203,14 @@ spec:
             - name: OXIDEAN_S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "oxidean.secretName" . | quote }}
-                  key: OXIDEAN_S3_ACCESS_KEY_ID
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3AccessKeyIdKey" . | quote }}
                   optional: true
             - name: OXIDEAN_S3_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "oxidean.secretName" . | quote }}
-                  key: OXIDEAN_S3_SECRET_ACCESS_KEY
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3SecretAccessKeyKey" . | quote }}
                   optional: true
             - name: OXIDEAN_S3_SESSION_TOKEN
               valueFrom:

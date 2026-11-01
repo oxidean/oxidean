@@ -115,7 +115,13 @@ storage:
   data:
     size: 10Gi
     storageClass: ""
-    # accessModes: ["ReadWriteOnce"] — RWO is deliberate (single api replica).
+    # Bring-your-own volume: existingClaim mounts an operator-provisioned
+    # PVC instead of a chart-created one — the k8s-native shared-storage
+    # path (EFS, GCP Filestore, Azure Files, CephFS via Rook, Longhorn,
+    # NFS provisioner). accessModes passes through verbatim; RWX works
+    # where the driver supports it (api stays single-replica until OPS-03).
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
   s3:
     # Cross-references crates/oxidean-storage/src/config.rs — env names,
     # validation, and fail-closed behavior are authoritative there.
@@ -144,6 +150,8 @@ storage:
     repos:
       size: 10Gi
       storageClass: ""
+      existingClaim: ""
+      accessModes: ["ReadWriteOnce"]
 
 # --- Git over SSH ---------------------------------------------------------------
 # Raw TCP — Ingress cannot carry SSH. A dedicated LoadBalancer Service is the
@@ -167,6 +175,8 @@ ssh:
     # persistent so client trust and commit signatures survive restarts.
     size: 256Mi
     storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
 
 # --- Bundled postgres -----------------------------------------------------------
 # Evaluation-grade default: `helm install` alone yields a working forge.
@@ -239,6 +249,57 @@ objectstore:
       memory: 256Mi
     limits:
       memory: 1Gi
+
+# --- Bundled k8s-native object store (SeaweedFS, Apache-2.0) -----------------
+# Production-capable alternative to the eval-grade RustFS objectstore — a
+# multi-component master + volume + filer + s3-gateway topology from the
+# official seaweedfs/seaweedfs subchart (4.51.x). With storage.backend=s3,
+# seaweedfs.enabled=true and no explicit storage.s3.endpoint, the api's
+# OXIDEAN_S3_* envs default to its s3 gateway (<release>-seaweedfs-s3:8333).
+# Mutually exclusive with objectstore.enabled.
+# Credentials: by default the subchart generates an admin pair into
+# <release>-seaweedfs-s3-secret and the api reads it. Operator-managed:
+# point s3.credentials.admin.existingSecret at any Secret and set
+# accessKeyKey/secretKeyKey to its key names — e.g. this chart's own Secret
+# (<release>-oxidean, OXIDEAN_S3_* keys — minted/generated as usual) or
+# secrets.existingSecret. storage.s3.accessKeyId/secretAccessKey stay the
+# api-side explicit pair; mirror them into s3.credentials.admin.accessKey/
+# secretKey when the bundled store should use that exact pair.
+# Our pass-through pins PVC persistence — upstream defaults to hostPath
+# (fine for their bare-metal target, wrong here). Production sizing —
+# replicas, replication placement, external filer metadata store — is a
+# documented exercise: docs/SELFHOST-KUBERNETES.md.
+seaweedfs:
+  enabled: false
+  master:
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 1Gi
+      storageClass: ""
+  volume:
+    replicas: 1
+    dataDirs:
+      - name: data1
+        type: persistentVolumeClaim
+        size: 10Gi
+        storageClass: ""
+        maxVolumes: 0
+  filer:
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 1Gi
+      storageClass: ""
+  s3:
+    enabled: true
+    port: 8333
+    enableAuth: true
+    credentials:
+      admin:
+        existingSecret: ""
+        accessKeyKey: OXIDEAN_S3_ACCESS_KEY_ID
+        secretKeyKey: OXIDEAN_S3_SECRET_ACCESS_KEY
 
 # --- HTTP ingress ---------------------------------------------------------------
 # Ingress → web:3000; the web tier reverse-proxies every API-owned path

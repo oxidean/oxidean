@@ -127,6 +127,28 @@ store's root keys. Eval-grade like bundled postgres — production:
 `storage.s3.*` value overrides its bundled default field-by-field, so you
 can also keep the bundled store while pointing the api elsewhere.
 
+**Bundled store (`seaweedfs`)** — `seaweedfs.enabled=true` deploys
+[SeaweedFS](https://seaweedfs.com) via its upstream subchart: master /
+volume / filer StatefulSets on `persistentVolumeClaim` storage (never the
+upstream `hostPath` default) plus an S3 gateway on
+`<release>-seaweedfs-s3:8333`. This is the production-shaped bundled
+option — real quorum + scalable volumes vs RustFS's single-node eval
+profile. With `storage.backend=s3` and no explicit `storage.s3.endpoint`,
+the api's `OXIDEAN_S3_*` envs default to `http://<release>-seaweedfs-s3:8333`
+and the same hook Job creates the bucket. Zero-config: the subchart mints
+the admin pair once into `<release>-seaweedfs-s3-secret`
+(`admin_access_key_id` / `admin_secret_access_key`) and the api keyrefs
+those keys directly, so installs and upgrades never read credentials out
+of the cluster. `objectstore.enabled` and `seaweedfs.enabled` are mutually
+exclusive — templating fails closed if both are set; external
+`storage.s3.endpoint` still overrides either bundled provider.
+
+**Your own claims / shared storage** — every chart-managed PVC accepts
+`existingClaim` (`storage.data`, `storage.s3.repos`, `ssh.hostKeys`,
+`objectstore`, `database`) and a configurable `accessModes` list —
+`["ReadWriteMany"]` + an EFS/CephFS claim is the shared-storage story for
+web replicas and failover.
+
 > **Honesty note (OPS-02 in-flight):** the `BlobStore` abstraction exists
 > but API consumer migration is still landing — today `s3` mode mounts the
 > slim PVCs and exports `OXIDEAN_S3_*`, while non-Git stores still write to

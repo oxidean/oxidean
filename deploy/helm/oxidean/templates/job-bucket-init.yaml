@@ -1,9 +1,10 @@
-{{- if and .Values.objectstore.enabled (eq .Values.storage.backend "s3") -}}
+{{- if and (eq (include "oxidean.s3Bundled" .) "true") (eq .Values.storage.backend "s3") -}}
 {{- /*
 Bucket init — post-install/post-upgrade hook so the store pod exists first.
 Waits for the S3 API, then creates the effective bucket once
-(head-bucket → skip when present). Credentials are the shared OXIDEAN_S3_*
-Secret keys — the same pair the api and the store read.
+(head-bucket → skip when present). Credentials resolve the same way the
+api's do — chart/generated OXIDEAN_S3_* keys, or the subchart's generated
+admin pair on the zero-config SeaweedFS path.
 */ -}}
 apiVersion: batch/v1
 kind: Job
@@ -56,12 +57,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
-                  key: OXIDEAN_S3_ACCESS_KEY_ID
+                  key: {{ include "oxidean.s3AccessKeyIdKey" . | quote }}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
-                  key: OXIDEAN_S3_SECRET_ACCESS_KEY
+                  key: {{ include "oxidean.s3SecretAccessKeyKey" . | quote }}
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.objectstore.region | quote }}
             - name: AWS_EC2_METADATA_DISABLED

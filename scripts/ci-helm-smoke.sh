@@ -27,6 +27,9 @@ for bin in helm kubectl kind; do
   fi
 done
 
+echo "==> helm dependency build (vendored subcharts)"
+helm dependency build "$CHART"
+
 echo "==> helm lint"
 helm lint "$CHART"
 
@@ -119,6 +122,48 @@ if helm template "$RELEASE" "$CHART" -n "$NS" \
   echo "FAIL: backend=s3 without bucket/objectstore must abort templating" >&2
   exit 1
 fi
+
+echo "==> helm template — seaweedfs bundled provider renders and wires s3"
+SWFS="$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set storage.backend=s3 \
+  --set seaweedfs.enabled=true)"
+for expected in "name: ${RELEASE}-seaweedfs-s3" "name: ${RELEASE}-seaweedfs-s3-secret"; do
+  if ! grep -q "$expected" <<<"$SWFS"; then
+    echo "FAIL: seaweedfs render missing $expected" >&2
+    exit 1
+  fi
+done
+grep -q 'value: "http://ox-seaweedfs-s3:8333"' <<<"$SWFS" \
+  || { echo "FAIL: seaweedfs endpoint must default to the s3 gateway service" >&2; exit 1; }
+grep -q 'key: "admin_access_key_id"' <<<"$SWFS" \
+  || { echo "FAIL: zero-config seaweedfs must keyref the subchart admin pair" >&2; exit 1; }
+if grep -q 'name: ox-oxidean-objectstore$' <<<"$SWFS"; then
+  echo "FAIL: seaweedfs mode must not render the RustFS deployment" >&2
+  exit 1
+fi
+
+echo "==> helm template — bundled stores are mutually exclusive"
+if helm template "$RELEASE" "$CHART" -n "$NS" \
+    --set objectstore.enabled=true \
+    --set seaweedfs.enabled=true >/dev/null 2>&1; then
+  echo "FAIL: objectstore.enabled + seaweedfs.enabled must abort templating" >&2
+  exit 1
+fi
+
+echo "==> helm template — existingClaim mounts and suppresses the PVC"
+CLAIM="$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set storage.data.existingClaim=shared-efs)"
+if grep -q 'name: ox-oxidean-data' <<<"$CLAIM"; then
+  echo "FAIL: existingClaim must suppress the chart-managed data PVC" >&2
+  exit 1
+fi
+grep -q 'claimName: shared-efs' <<<"$CLAIM" \
+  || { echo "FAIL: existingClaim must be mounted by the api deployment" >&2; exit 1; }
+
+echo "==> helm template — accessModes passes RWX through"
+grep -q 'ReadWriteMany' <<<"$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set 'storage.data.accessModes[0]=ReadWriteMany')" \
+  || { echo "FAIL: accessModes must render ReadWriteMany" >&2; exit 1; }
 
 if [ "${HELM_SMOKE_SKIP_CLUSTER:-0}" = "1" ]; then
   echo "==> cluster smoke skipped (HELM_SMOKE_SKIP_KIND_LOAD/CLUSTER)"
@@ -249,6 +294,55 @@ kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
 kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
   | grep -q "^OXIDEAN_STORAGE_BACKEND=s3$" \
   || { echo "FAIL: api missing OXIDEAN_STORAGE_BACKEND=s3" >&2; exit 1; }
+
+echo "==> preload seaweedfs image into kind"
+docker pull chrislusf/seaweedfs:4.51 >/dev/null
+kind load docker-image --name "${KIND_CLUSTER:-kind}" chrislusf/seaweedfs:4.51
+
+echo "==> upgrade to bundled SeaweedFS (swap providers)"
+helm upgrade "$RELEASE" "$CHART" -n "$NS" \
+  --reuse-values \
+  --set objectstore.enabled=false \
+  --set seaweedfs.enabled=true
+
+echo "==> waiting for seaweedfs rollouts"
+kubectl -n "$NS" rollout status "statefulset/${RELEASE}-seaweedfs-master" --timeout=300s
+kubectl -n "$NS" rollout status "statefulset/${RELEASE}-seaweedfs-volume" --timeout=300s
+kubectl -n "$NS" rollout status "statefulset/${RELEASE}-seaweedfs-filer" --timeout=300s
+kubectl -n "$NS" rollout status "deploy/${RELEASE}-seaweedfs-s3" --timeout=300s
+
+echo "==> seaweedfs bucket exists via the s3 gateway"
+# Zero-config path: the subchart mints the admin pair into
+# <release>-seaweedfs-s3-secret; the api and init Job keyref the same pair.
+SW_AK="$(kubectl -n "$NS" get secret "${RELEASE}-seaweedfs-s3-secret" \
+  -o jsonpath='{.data.admin_access_key_id}' | base64 -d)"
+SW_SK="$(kubectl -n "$NS" get secret "${RELEASE}-seaweedfs-s3-secret" \
+  -o jsonpath='{.data.admin_secret_access_key}' | base64 -d)"
+SW_OVR="$(printf '%s' \
+  '{"spec":{"containers":[{"name":"ox-s3-check","image":"amazon/aws-cli:2.39.3",' \
+  '"imagePullPolicy":"Never","command":["/bin/sh","-ec",' \
+  '"aws --endpoint-url http://'"${RELEASE}"'-seaweedfs-s3:8333 s3 ls"],' \
+  '"env":[{"name":"AWS_ACCESS_KEY_ID","value":"'"$SW_AK"'"},' \
+  '{"name":"AWS_SECRET_ACCESS_KEY","value":"'"$SW_SK"'"},' \
+  '{"name":"AWS_EC2_METADATA_DISABLED","value":"true"}]}]}}')"
+kubectl -n "$NS" delete pod ox-s3-check --ignore-not-found >/dev/null
+kubectl -n "$NS" run ox-s3-check --restart=Never \
+  --image amazon/aws-cli:2.39.3 --overrides="$SW_OVR" >/dev/null
+for _ in $(seq 1 60); do
+  PHASE="$(kubectl -n "$NS" get pod ox-s3-check -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  { [ "$PHASE" = "Succeeded" ] || [ "$PHASE" = "Failed" ]; } && break
+  sleep 2
+done
+kubectl -n "$NS" logs ox-s3-check || true
+{ [ "$PHASE" = "Succeeded" ] \
+  && kubectl -n "$NS" logs ox-s3-check | grep -q "oxidean"; } \
+  || { echo "FAIL: seaweedfs bucket not listable via the s3 gateway" >&2; exit 1; }
+kubectl -n "$NS" delete pod ox-s3-check >/dev/null
+
+echo "==> api carries the seaweedfs s3 endpoint"
+kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
+  | grep -q "^OXIDEAN_S3_ENDPOINT=http://${RELEASE}-seaweedfs-s3:8333$" \
+  || { echo "FAIL: api missing seaweedfs OXIDEAN_S3_ENDPOINT" >&2; exit 1; }
 
 trap - ERR
 echo "==> ci-helm-smoke OK"

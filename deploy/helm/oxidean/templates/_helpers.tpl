@@ -129,15 +129,33 @@ the chart Secret carries the shared credentials both pods read.
 {{- printf "http://%s:9000" (include "oxidean.objectstoreServiceName" .) -}}
 {{- end -}}
 
-{{/* True when the bundled store is the effective s3 endpoint (no explicit override). */}}
+{{/* True when a bundled store is the effective s3 endpoint (no explicit override). */}}
 {{- define "oxidean.s3Bundled" -}}
-{{- if and .Values.objectstore.enabled (empty .Values.storage.s3.endpoint) -}}true{{- end -}}
+{{- if and (or .Values.objectstore.enabled .Values.seaweedfs.enabled) (empty .Values.storage.s3.endpoint) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+SeaweedFS fullname — replicates the upstream chart's fullname rule so the
+api can derive service/secret names (<fullname>-s3, <fullname>-s3-secret).
+*/}}
+{{- define "oxidean.seaweedfsFullname" -}}
+{{- if contains "seaweedfs" .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-seaweedfs" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oxidean.seaweedfsS3Endpoint" -}}
+{{- printf "http://%s-s3:8333" (include "oxidean.seaweedfsFullname" .) -}}
 {{- end -}}
 
 {{/* Effective endpoint — explicit storage.s3.endpoint wins over the bundled service. */}}
 {{- define "oxidean.s3Endpoint" -}}
 {{- if .Values.storage.s3.endpoint -}}
 {{- .Values.storage.s3.endpoint -}}
+{{- else if .Values.seaweedfs.enabled -}}
+{{- include "oxidean.seaweedfsS3Endpoint" . -}}
 {{- else -}}
 {{- include "oxidean.objectstoreEndpoint" . -}}
 {{- end -}}
@@ -149,7 +167,7 @@ objectstore.bucket only applies when the store is enabled, so a bare
 storage.backend=s3 still fails closed without a bucket.
 */}}
 {{- define "oxidean.s3Bucket" -}}
-{{- if .Values.objectstore.enabled -}}
+{{- if or .Values.objectstore.enabled .Values.seaweedfs.enabled -}}
 {{- default .Values.objectstore.bucket .Values.storage.s3.bucket -}}
 {{- else -}}
 {{- .Values.storage.s3.bucket -}}
@@ -158,11 +176,37 @@ storage.backend=s3 still fails closed without a bucket.
 
 {{/*
 Shared s3 credentials live in the chart Secret (or secrets.existingSecret)
-under the OXIDEAN_S3_* keys — the api reads them directly and the bundled
-store maps them to RUSTFS_* envs, so one pair authenticates both sides.
+under the OXIDEAN_S3_* keys — the api reads them directly and a bundled
+store either maps them to RUSTFS_* envs or points its s3.credentials.admin
+existingSecret at the same keys, so one pair authenticates both sides.
+
+Exception: the zero-config SeaweedFS path. When seaweedfs is the effective
+endpoint and no explicit pair or subchart-admin secret is configured, the
+subchart generates an admin pair into <fullname>-s3-secret and the api
+reads that instead (admin_access_key_id / admin_secret_access_key keys).
 */}}
+{{- define "oxidean.s3SeaweedfsGenerated" -}}
+{{- if and .Values.seaweedfs.enabled
+      (empty .Values.storage.s3.endpoint)
+      (empty .Values.storage.s3.accessKeyId)
+      (empty .Values.seaweedfs.s3.credentials.admin.existingSecret)
+      (empty .Values.seaweedfs.s3.credentials.admin.accessKey) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "oxidean.s3CredentialsSecretName" -}}
+{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}
+{{- printf "%s-s3-secret" (include "oxidean.seaweedfsFullname" .) -}}
+{{- else -}}
 {{- include "oxidean.secretName" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oxidean.s3AccessKeyIdKey" -}}
+{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_access_key_id{{- else -}}OXIDEAN_S3_ACCESS_KEY_ID{{- end -}}
+{{- end -}}
+
+{{- define "oxidean.s3SecretAccessKeyKey" -}}
+{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_secret_access_key{{- else -}}OXIDEAN_S3_SECRET_ACCESS_KEY{{- end -}}
 {{- end -}}
 
 {{- define "oxidean.webServiceName" -}}
@@ -178,18 +222,20 @@ store maps them to RUSTFS_* envs, so one pair authenticates both sides.
 {{- end -}}
 
 {{/*
-PVC names.
+PVC names — an existingClaim substitutes for the chart-created PVC of the
+same role (shared/CSI storage: EFS, Filestore, Azure Files, CephFS,
+Longhorn, NFS provisioner). Deployments only ever see the resolved name.
 */}}
 {{- define "oxidean.dataPvcName" -}}
-{{- printf "%s-data" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-data" (include "oxidean.fullname" .)) .Values.storage.data.existingClaim -}}
 {{- end -}}
 
 {{- define "oxidean.reposPvcName" -}}
-{{- printf "%s-repos" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-repos" (include "oxidean.fullname" .)) .Values.storage.s3.repos.existingClaim -}}
 {{- end -}}
 
 {{- define "oxidean.sshPvcName" -}}
-{{- printf "%s-ssh-keys" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-ssh-keys" (include "oxidean.fullname" .)) .Values.ssh.hostKeys.existingClaim -}}
 {{- end -}}
 
 {{- define "oxidean.postgresPvcName" -}}

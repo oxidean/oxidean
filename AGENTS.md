@@ -67,12 +67,12 @@ contract — never fork the contract per surface:
 |---------|------|----------------|
 | Single-docker self-host | `deploy/selfhost/docker-compose.yml` | postgres always; `tls`/`actions`/`s3` profiles |
 | Dev stack | `docker-compose.yml` | same profiles (`s3` included) |
-| Kubernetes | `deploy/helm/oxidean/` | `postgres.enabled`, `objectstore.enabled`, `runner.enabled` |
+| Kubernetes | `deploy/helm/oxidean/` | `postgres.enabled`, `objectstore.enabled` (RustFS) / `seaweedfs.enabled`, `runner.enabled` |
 
 Object storage: `OXIDEAN_STORAGE_BACKEND=fs|s3` + the `OXIDEAN_S3_*` set —
 authoritative parsing/validation in `crates/oxidean-storage/src/config.rs`.
 Both surfaces bundle an eval-grade RustFS store (compose `s3` profile ↔
-helm `objectstore.enabled`); external endpoints override the same envs.
+helm `objectstore.enabled`); `seaweedfs.enabled` is the production-shaped alternative (mutually exclusive). External endpoints override the same envs.
 Specs: `agent-os/specs/2026-11-01-1425-storage-blob-backend/` (trait) and
 `agent-os/specs/2026-11-01-1934-selfhost-object-store/` (bundled topology).
 

@@ -8,6 +8,14 @@ type: application
 version: "0.1.0"
 appVersion: "0.4.1"
 kubeVersion: ">=1.25.0-0"
+# Vendored at build/package time (`helm dependency build`); charts/*.tgz is
+# gitignored, Chart.lock is committed. SeaweedFS is the k8s-native bundled
+# object store (spec 2026-11-01-2013-k8s-native-storage, OPS-08).
+dependencies:
+  - name: seaweedfs
+    version: "4.51.0"
+    repository: "https://seaweedfs.github.io/seaweedfs/helm"
+    condition: seaweedfs.enabled
 keywords:
   - git
   - forge
