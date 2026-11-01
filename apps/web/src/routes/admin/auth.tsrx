@@ -330,6 +330,9 @@ export function AdminAuthContent() @{
     // otherwise resolve after this write and clobber the saved
     // settings cache on a later remount.
     void queryClient.cancelQueries({ queryKey: adminAuthQueryOptions().queryKey });
+    // Same for an in-flight settings refetch: a stale-remount response
+    // resolving after this write would overwrite the saved settings.
+    void queryClient.cancelQueries({ queryKey: adminAuthSettingsQueryOptions().queryKey });
     setAdminAuthSettingsCache(queryClient, next);
     queryClient.setQueryData<AdminAuthLoaderData>(adminAuthQueryOptions().queryKey, (old) =>
       old?.kind === "ready" ? { ...old, settings: next } : old,
