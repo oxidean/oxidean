@@ -12,6 +12,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "oxidean.dataPvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -28,6 +33,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "oxidean.reposPvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -44,6 +54,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "oxidean.sshPvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -60,6 +75,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "oxidean.objectstorePvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: objectstore

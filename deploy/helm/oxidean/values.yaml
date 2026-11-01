@@ -346,6 +346,11 @@ runner:
     existingClaim: ""
     accessModes: ["ReadWriteOnce"]
   resources: {}
+  # Runner-specific scheduling — privileged dind should land on dedicated
+  # nodes in multi-tenant clusters. Falls back to the global keys below.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 # --- Scheduling / hardening -------------------------------------------------------
 podAnnotations: {}

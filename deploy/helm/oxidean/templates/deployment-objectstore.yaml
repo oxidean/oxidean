@@ -27,6 +27,7 @@ spec:
         {{- include "oxidean.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: objectstore
     spec:
+      {{- include "oxidean.podScheduling" . | nindent 6 }}
       containers:
         - name: objectstore
           image: "{{ .Values.objectstore.image.repository }}:{{ .Values.objectstore.image.tag }}"

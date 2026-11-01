@@ -180,33 +180,50 @@ under the OXIDEAN_S3_* keys — the api reads them directly and a bundled
 store either maps them to RUSTFS_* envs or points its s3.credentials.admin
 existingSecret at the same keys, so one pair authenticates both sides.
 
-Exception: the zero-config SeaweedFS path. When seaweedfs is the effective
-endpoint and no explicit pair or subchart-admin secret is configured, the
-subchart generates an admin pair into <fullname>-s3-secret and the api
-reads that instead (admin_access_key_id / admin_secret_access_key keys).
+SeaweedFS exceptions (only when seaweedfs is the effective endpoint — i.e.
+enabled with no explicit storage.s3.endpoint — and no api-side explicit
+storage.s3.accessKeyId pair):
+  - s3.credentials.admin.existingSecret set → api/init read that Secret
+    under its accessKeyKey/secretKeyKey key names (s3SeaweedfsAdmin).
+  - otherwise → the subchart writes the admin pair (generated or the
+    explicit credentials.admin.accessKey/secretKey values) into
+    <fullname>-s3-secret and the api reads admin_access_key_id /
+    admin_secret_access_key from it (s3SeaweedfsGenerated).
 */}}
 {{- define "oxidean.s3SeaweedfsGenerated" -}}
 {{- if and .Values.seaweedfs.enabled
       (empty .Values.storage.s3.endpoint)
       (empty .Values.storage.s3.accessKeyId)
-      (empty .Values.seaweedfs.s3.credentials.admin.existingSecret)
-      (empty .Values.seaweedfs.s3.credentials.admin.accessKey) -}}true{{- end -}}
+      (empty .Values.seaweedfs.s3.credentials.admin.existingSecret) -}}true{{- end -}}
+{{- end -}}
+
+{{- define "oxidean.s3SeaweedfsAdmin" -}}
+{{- if and .Values.seaweedfs.enabled
+      (empty .Values.storage.s3.endpoint)
+      (empty .Values.storage.s3.accessKeyId)
+      .Values.seaweedfs.s3.credentials.admin.existingSecret -}}true{{- end -}}
 {{- end -}}
 
 {{- define "oxidean.s3CredentialsSecretName" -}}
 {{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}
 {{- printf "%s-s3-secret" (include "oxidean.seaweedfsFullname" .) -}}
+{{- else if eq (include "oxidean.s3SeaweedfsAdmin" .) "true" -}}
+{{- .Values.seaweedfs.s3.credentials.admin.existingSecret -}}
 {{- else -}}
 {{- include "oxidean.secretName" . -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "oxidean.s3AccessKeyIdKey" -}}
-{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_access_key_id{{- else -}}OXIDEAN_S3_ACCESS_KEY_ID{{- end -}}
+{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_access_key_id
+{{- else if eq (include "oxidean.s3SeaweedfsAdmin" .) "true" -}}{{- .Values.seaweedfs.s3.credentials.admin.accessKeyKey -}}
+{{- else -}}OXIDEAN_S3_ACCESS_KEY_ID{{- end -}}
 {{- end -}}
 
 {{- define "oxidean.s3SecretAccessKeyKey" -}}
-{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_secret_access_key{{- else -}}OXIDEAN_S3_SECRET_ACCESS_KEY{{- end -}}
+{{- if eq (include "oxidean.s3SeaweedfsGenerated" .) "true" -}}admin_secret_access_key
+{{- else if eq (include "oxidean.s3SeaweedfsAdmin" .) "true" -}}{{- .Values.seaweedfs.s3.credentials.admin.secretKeyKey -}}
+{{- else -}}OXIDEAN_S3_SECRET_ACCESS_KEY{{- end -}}
 {{- end -}}
 
 {{- define "oxidean.webServiceName" -}}
@@ -240,6 +257,30 @@ Longhorn, NFS provisioner). Deployments only ever see the resolved name.
 
 {{- define "oxidean.postgresPvcName" -}}
 {{- default (printf "%s-postgres" (include "oxidean.fullname" .)) .Values.postgres.persistence.existingClaim -}}
+{{- end -}}
+
+{{/*
+Pod scheduling block shared by every workload pod spec — imagePullSecrets
+plus nodeSelector/affinity/tolerations so operators can pin pods (runner
+isolation, dedicated storage nodes, private-registry pulls).
+*/}}
+{{- define "oxidean.podScheduling" -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 {{- end -}}
 
 {{- define "oxidean.runnerPvcName" -}}

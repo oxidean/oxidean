@@ -14,6 +14,9 @@
 {{- if and .Values.objectstore.enabled .Values.seaweedfs.enabled -}}
 {{- fail "objectstore.enabled (RustFS) and seaweedfs.enabled are mutually exclusive bundled stores — pick one" -}}
 {{- end -}}
+{{- if ne (int .Values.api.replicaCount) 1 -}}
+{{- fail "api.replicaCount must be 1 — CliGitBackend is single-writer on a RWO volume (HA repo sharding is a follow-up, not a values knob)" -}}
+{{- end -}}
 {{- $full := include "oxidean.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -68,6 +71,10 @@ spec:
                 rm -f /var/ssh/web-flow /var/ssh/web-flow.pub
                 ssh-keygen -t ed25519 -N '' -f /var/ssh/web-flow -C oxidean-web-flow
               fi
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ssh-keys
               mountPath: /var/ssh
@@ -86,9 +93,28 @@ spec:
               protocol: TCP
             {{- end }}
           env:
-            {{- if .Values.secrets.existingSecret }}
+            # DATABASE_URL resolution order (mirrors values.yaml):
+            #   database.existingSecret → database.url → postgres.enabled →
+            #   the app Secret's DATABASE_URL (chart-managed or existingSecret).
+            {{- if .Values.database.existingSecret }}
             - name: DATABASE_URL
-              {{- include "oxidean.databaseSecretKeyRef" . | nindent 14 }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.urlKey | quote }}
+            {{- else if .Values.database.url }}
+            {{- if .Values.secrets.existingSecret }}
+            # No chart Secret exists in this mode — emit the literal value
+            # (explicit env still wins over the envFrom'd existingSecret).
+            - name: DATABASE_URL
+              value: {{ .Values.database.url | quote }}
+            {{- else }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: DATABASE_URL
+            {{- end }}
             {{- else if .Values.postgres.enabled }}
             # Bundled: literal value so $(POSTGRES_*) expands from the
             # secretKeyRef entries defined just above — ordering matters.
@@ -102,6 +128,8 @@ spec:
             - name: DATABASE_URL
               value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
             {{- else }}
+            # Postgres disabled and no explicit source — the app Secret
+            # (chart-managed or existing) must carry DATABASE_URL.
             - name: DATABASE_URL
               {{- include "oxidean.databaseSecretKeyRef" . | nindent 14 }}
             {{- end }}
@@ -191,15 +219,20 @@ spec:
             - name: OXIDEAN_S3_REGION
               value: {{ default .Values.objectstore.region .Values.storage.s3.region | quote }}
             {{- end }}
-            {{- if ne .Values.storage.s3.pathStyle "" }}
+            {{- if ne (toString .Values.storage.s3.pathStyle) "" }}
             - name: OXIDEAN_S3_PATH_STYLE
-              value: {{ .Values.storage.s3.pathStyle | quote }}
+              value: {{ .Values.storage.s3.pathStyle | toString | quote }}
             {{- end }}
             {{- if or .Values.storage.s3.insecureHttp (eq (include "oxidean.s3Bundled" .) "true") }}
             - name: OXIDEAN_S3_INSECURE_HTTP
               value: "1"
             {{- end }}
-            {{- if not .Values.secrets.existingSecret }}
+            # Credentials resolve via helpers — chart Secret, the SeaweedFS
+            # generated/admin Secret, or secrets.existingSecret's OXIDEAN_S3_*
+            # keys (envFrom supplies the same values; explicit refs make the
+            # dependency visible and keep the bundled-store paths working when
+            # the app Secret is operator-managed). optional:true preserves the
+            # ambient AWS credentials chain (IRSA / web-identity / IMDS).
             - name: OXIDEAN_S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -215,10 +248,9 @@ spec:
             - name: OXIDEAN_S3_SESSION_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "oxidean.secretName" . | quote }}
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
                   key: OXIDEAN_S3_SESSION_TOKEN
                   optional: true
-            {{- end }}
             {{- end }}
             {{- if not .Values.secrets.existingSecret }}
             - name: OXIDEAN_ACTIONS_SECRETS_KEY

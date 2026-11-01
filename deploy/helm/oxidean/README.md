@@ -28,9 +28,9 @@ annotated defaults.
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `api.image.repository` / `.tag` | `ghcr.io/oxidean/oxidean-api` / appVersion | api image; released charts pin the tag the release was cut against |
-| `web.image.*`, `web.replicas` | `ghcr.io/oxidean/oxidean-web`, `1` | stateless web tier — scale replicas freely |
+| `web.image.*`, `web.replicaCount` | `ghcr.io/oxidean/oxidean-web`, `1` | stateless web tier — scale replicas freely |
 | `postgres.enabled` | `true` | bundled `postgres:18-alpine` — evaluation-grade |
-| `database.existingSecret` / `.urlKey` | `""` / `url` | external `DATABASE_URL` holder when postgres is disabled |
+| `database.existingSecret` / `.urlKey` | `""` / `DATABASE_URL` | external `DATABASE_URL` holder when postgres is disabled |
 | `ingress.enabled` / `.host` / `.tls` | `true` / `""` / `[]` | single-hostname HTTP edge → `web:3000` |
 | `ssh.enabled` / `.service.type` / `.port` | `true` / `LoadBalancer` / `22` | raw-TCP git-over-SSH → api container port 2222 |
 | `storage.backend` | `fs` | `fs` = one `/var` PVC; `s3` = slim repos+ssh PVCs + `OXIDEAN_S3_*` |
@@ -39,7 +39,7 @@ annotated defaults.
 | `storage.s3.retainDataVolume` | `true` | keep a `/var` PVC in s3 mode while OPS-02 consumer migration lands |
 | `secrets.existingSecret` | `""` | operator-managed app secrets (`envFrom`) — no chart Secret rendered |
 | `runner.enabled` | `false` | Actions runner + privileged DinD sidecar — see security note |
-| `api.env.*` flags | — | `OXIDEAN_AUTO_MIGRATE`, `OXIDEAN_ALLOW_SIGNUP`, `OXIDEAN_ACTIONS_ENABLED`, `OXIDEAN_SSH_ENABLED`, `RUST_LOG`, … mirror the Compose contract |
+| `api.env.*` | — | extra non-secret `OXIDEAN_*` env (`RUST_LOG`, mail, SSO ids, …). Values override chart-rendered env names but **not** the matching resources — e.g. `api.env.OXIDEAN_SSH_ENABLED=false` leaves the SSH Service/PVC up; use `ssh.enabled`, `allowSignup`, etc. for structural switches |
 
 See `values.yaml` for the complete annotated surface — every value carries
 a comment.

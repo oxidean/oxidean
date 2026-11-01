@@ -30,6 +30,19 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- $sched := dict "nodeSelector" .Values.runner.nodeSelector "affinity" .Values.runner.affinity "tolerations" .Values.runner.tolerations }}
+      {{- with or $sched.nodeSelector .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with or $sched.affinity .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with or $sched.tolerations .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: runner
           image: {{ include "oxidean.runnerImage" . }}
@@ -82,10 +95,12 @@ spec:
           imagePullPolicy: {{ .Values.runner.dind.image.pullPolicy }}
           securityContext:
             privileged: true
-          env:
-            # Empty certdir disables TLS — localhost-only listener.
-            - name: DOCKER_TLS_CERTDIR
-              value: ""
+          # Bypass dockerd-entrypoint.sh: with DOCKER_TLS_CERTDIR empty it
+          # appends --host=tcp://0.0.0.0:2375, exposing an unauthenticated
+          # Docker API on the pod IP. Invoke dockerd directly with a
+          # loopback-only listener — reachable only inside the pod netns.
+          command: ["dockerd"]
+          args: ["--host=tcp://127.0.0.1:2375", "--host=unix:///var/run/docker.sock"]
           volumeMounts:
             - name: docker-lib
               mountPath: /var/lib/docker
@@ -104,6 +119,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "oxidean.runnerPvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: runner
