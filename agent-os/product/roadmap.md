@@ -131,10 +131,11 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 ## Admin and operations
 
 - [ ] **OPS-01** Metrics endpoint (Prometheus) and observability docs.
-- [ ] **OPS-02** S3-compatible object storage for LFS, packages, and uploads; filesystem is the only backend today.
+- [~] **OPS-02** S3-compatible object storage for non-git stores. `crates/oxidean-storage` `BlobStore` with `fs`/`s3` backends and per-store key prefixes shipped ([#214](https://github.com/oxidean/oxidean/pull/214)); consumer migration behind the trait is the tracked follow-up. Spec: [`agent-os/specs/2026-11-01-1425-storage-blob-backend/`](../specs/2026-11-01-1425-storage-blob-backend/).
 - [ ] **OPS-03** HA / horizontal scaling guidance: shared git storage, DB, object store, runner fleet.
 - [ ] **OPS-04** UI internationalization framework; the product is English-only.
 - [ ] **OPS-05** Admin console depth beyond DEBT-10: repo listing/search, runner detail, system info, broadcast notices.
+- [ ] **OPS-06** Kubernetes deployment: Helm chart installing postgres + api + web with `fs`/`s3` storage modes, SSH LoadBalancer service, and optional runner — unblocked by OPS-02. Spec: [`agent-os/specs/2026-11-01-1628-helm-k8s-deploy/`](../specs/2026-11-01-1628-helm-k8s-deploy/).
 
 ## Exploratory / later
 
