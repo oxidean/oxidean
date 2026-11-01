@@ -12,6 +12,7 @@ Before implementing, debugging, deploying, or writing substantial prose, **load 
 1. Scan skill names/descriptions in `.agents/skills/*/SKILL.md`.
 2. Read the skill file immediately when it matches the task.
 3. Prefer project skills over generic habits or external defaults.
+4. For chat-based Agent OS work, use `agent-os-async-flow` instead of the generic planning mappings.
 
 ## Common mappings
 
