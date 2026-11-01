@@ -326,6 +326,10 @@ export function AdminAuthContent() @{
   // its staleTime seeds the form from loaderData, and a stale loader
   // snapshot would silently restore the pre-save values.
   function writeSettingsCaches(next: AuthSettingsPublic) {
+    // Cancel an in-flight loader first: its pre-save snapshot would
+    // otherwise resolve after this write and clobber the saved
+    // settings cache on a later remount.
+    void queryClient.cancelQueries({ queryKey: adminAuthQueryOptions().queryKey });
     setAdminAuthSettingsCache(queryClient, next);
     queryClient.setQueryData<AdminAuthLoaderData>(adminAuthQueryOptions().queryKey, (old) =>
       old?.kind === "ready" ? { ...old, settings: next } : old,

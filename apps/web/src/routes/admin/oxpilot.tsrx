@@ -281,6 +281,10 @@ export function AdminOxpilotContent() @{
   // its staleTime seeds the form from loaderData, and a stale loader
   // snapshot would silently restore the pre-save values.
   function writeSettingsCaches(next: OxpilotSettingsResponse) {
+    // Cancel an in-flight loader first: its pre-save snapshot would
+    // otherwise resolve after this write and clobber the saved
+    // settings cache on a later remount.
+    void queryClient.cancelQueries({ queryKey: adminOxpilotQueryOptions().queryKey });
     queryClient.setQueryData(settingsQueryKey, next);
     queryClient.setQueryData<AdminOxpilotLoaderData>(adminOxpilotQueryOptions().queryKey, (old) =>
       old?.kind === "ready" ? { ...old, settings: next } : old,
