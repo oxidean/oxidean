@@ -40,7 +40,7 @@ PROJECT="${OXIDEAN_BENCH_PROJECT:-oxidean-bench}"
 # Host header or every baseline request 404s. Watt's gateway is host-agnostic.
 ORIGIN="http://localhost"
 ADMIN_EMAIL="${OXIDEAN_ADMIN_EMAIL:-bench-admin@oxidean.local}"
-ADMIN_PASSWORD="***"
+ADMIN_PASSWORD="${OXIDEAN_ADMIN_PASSWORD:-password1}"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.watt.yml -p "$PROJECT")
 WORK="$(mktemp -d)"
 
@@ -107,7 +107,7 @@ rpc() {
 seed_lane() {
   echo "==> login + seed bench repo" >&2
   rm -f "$JAR"
-  rpc auth.login "{\"identifier\":\"$ADMIN_EMAIL\",\"password\": \"***\",\"remember_me\":false}" >/dev/null
+  rpc auth.login "{\"identifier\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"remember_me\":false}" >/dev/null
   local me owner pat token seed_dir repo
   me="$(rpc auth.me '{}')"
   owner="$(echo "$me" | jq -r '.username')"
