@@ -900,6 +900,9 @@ jobs:
       - name: helm lint + render + kind smoke
         env:
           CI: "true"
+          # helm/kind-action names its cluster "chart-testing" by default —
+          # the script's local default is "kind" (a plain `kind create`).
+          KIND_CLUSTER: chart-testing
         run: ./scripts/ci-helm-smoke.sh
       - name: upload helm smoke logs on failure
         if: failure()

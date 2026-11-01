@@ -20,12 +20,12 @@ RELEASE="ox"
 API_TAG="${HELM_SMOKE_API_TAG:-ci}"
 WEB_TAG="${HELM_SMOKE_WEB_TAG:-ci}"
 
-for bin in helm kubectl kind; do
-  if ! command -v "$bin" >/dev/null 2>&1; then
-    echo "FAIL: '$bin' not on PATH" >&2
-    exit 1
-  fi
-done
+# helm is needed for lint+render; kubectl/kind only matter for the cluster
+# leg (checked below, after the HELM_SMOKE_SKIP_CLUSTER early exit).
+if ! command -v helm >/dev/null 2>&1; then
+  echo "FAIL: 'helm' not on PATH" >&2
+  exit 1
+fi
 
 echo "==> helm dependency build (vendored subcharts)"
 # charts/ is gitignored — on a clean checkout the resolver needs the URL
@@ -176,7 +176,10 @@ CLAIM="$(helm template "$RELEASE" "$CHART" -n "$NS" \
   --set objectstore.persistence.existingClaim=obj-shared \
   --set runner.persistence.existingClaim=runner-shared)"
 PVC_NAMES="$(grep -A3 'kind: PersistentVolumeClaim' <<<"$CLAIM" | grep 'name:')"
-for rendered in 'ox-oxidean-postgres' 'ox-oxidean-objectstore' 'ox-oxidean-runner'; do
+# Neither the default names nor the configured claim names may render as
+# PVC objects — a guard slip would render pg-shared/obj-shared/runner-shared.
+for rendered in 'ox-oxidean-postgres' 'ox-oxidean-objectstore' 'ox-oxidean-runner' \
+  'pg-shared' 'obj-shared' 'runner-shared'; do
   if grep -q "$rendered" <<<"$PVC_NAMES"; then
     echo "FAIL: $rendered PVC must be suppressed by existingClaim" >&2
     exit 1
@@ -192,6 +195,13 @@ if [ "${HELM_SMOKE_SKIP_CLUSTER:-0}" = "1" ]; then
   echo "==> ci-helm-smoke OK (lint+render only)"
   exit 0
 fi
+
+for bin in kubectl kind; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "FAIL: '$bin' not on PATH (needed for the cluster smoke leg)" >&2
+    exit 1
+  fi
+done
 
 echo "==> kind cluster smoke"
 kind get clusters | grep -qx "${KIND_CLUSTER:-kind}" || { echo "FAIL: kind cluster ${KIND_CLUSTER:-kind} not found" >&2; exit 1; }
