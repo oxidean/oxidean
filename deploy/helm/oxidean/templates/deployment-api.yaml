@@ -103,18 +103,18 @@ spec:
                   name: {{ .Values.database.existingSecret | quote }}
                   key: {{ .Values.database.urlKey | quote }}
             {{- else if .Values.database.url }}
-            {{- if .Values.secrets.existingSecret }}
-            # No chart Secret exists in this mode — emit the literal value
-            # (explicit env still wins over the envFrom'd existingSecret).
-            - name: DATABASE_URL
-              value: {{ .Values.database.url | quote }}
-            {{- else }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "oxidean.secretName" . | quote }}
+                  {{- if .Values.secrets.existingSecret }}
+                  # No chart Secret in this mode — the dedicated
+                  # <release>-database Secret carries it instead of a
+                  # literal env value readable in the Deployment spec.
+                  name: {{ include "oxidean.fullname" . }}-database
+                  {{- else }}
+                  name: {{ include "oxidean.secretName" . }}
+                  {{- end }}
                   key: DATABASE_URL
-            {{- end }}
             {{- else if .Values.postgres.enabled }}
             # Bundled: literal value so $(POSTGRES_*) expands from the
             # secretKeyRef entries defined just above — ordering matters.
