@@ -286,7 +286,7 @@ export function AdminAuthContent() @{
           return;
         }
         applySettings(res.data);
-        setAdminAuthSettingsCache(queryClient, res.data);
+        writeSettingsCaches(res.data);
         toastSuccess("Auth settings saved.");
         setPending(false);
       } catch {
@@ -312,6 +312,16 @@ export function AdminAuthContent() @{
     form.setFieldValue("require_two_factor_external", next.require_two_factor_external === true);
     setFlags(flagsFromSettings(next));
     setDraftReady(true);
+  }
+
+  // Settings writes must also update the loader query — a remount inside
+  // its staleTime seeds the form from loaderData, and a stale loader
+  // snapshot would silently restore the pre-save values.
+  function writeSettingsCaches(next: AuthSettingsPublic) {
+    setAdminAuthSettingsCache(queryClient, next);
+    queryClient.setQueryData<AdminAuthLoaderData>(adminAuthQueryOptions().queryKey, (old) =>
+      old?.kind === "ready" ? { ...old, settings: next } : old,
+    );
   }
 
   useEffect(() => {

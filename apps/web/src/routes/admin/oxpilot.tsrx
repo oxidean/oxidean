@@ -244,7 +244,7 @@ export function AdminOxpilotContent() @{
           return;
         }
         applySettings(res.data);
-        queryClient.setQueryData(settingsQueryKey, res.data);
+        writeSettingsCaches(res.data);
         toastSuccess("OxPilot settings saved.");
         setPending(false);
       } catch {
@@ -264,6 +264,16 @@ export function AdminOxpilotContent() @{
     form.setFieldValue("user_budget", v.user_budget);
     form.setFieldValue("instance_budget", v.instance_budget);
     setDraftReady(true);
+  }
+
+  // Settings writes must also update the loader query — a remount inside
+  // its staleTime seeds the form from loaderData, and a stale loader
+  // snapshot would silently restore the pre-save values.
+  function writeSettingsCaches(next: OxpilotSettingsResponse) {
+    queryClient.setQueryData(settingsQueryKey, next);
+    queryClient.setQueryData<AdminOxpilotLoaderData>(adminOxpilotQueryOptions().queryKey, (old) =>
+      old?.kind === "ready" ? { ...old, settings: next } : old,
+    );
   }
 
   // Seed the draft once — later refetches must not clobber unsaved
@@ -286,7 +296,7 @@ export function AdminOxpilotContent() @{
         return;
       }
       applySettings(res.data);
-      queryClient.setQueryData(settingsQueryKey, res.data);
+      writeSettingsCaches(res.data);
       toastSuccess("Reverted to the OXIDEAN_OXPILOT_* environment defaults.");
       setPending(false);
     } catch {
@@ -305,7 +315,7 @@ export function AdminOxpilotContent() @{
         return;
       }
       applySettings(res.data);
-      queryClient.setQueryData(settingsQueryKey, res.data);
+      writeSettingsCaches(res.data);
       toastSuccess("API key cleared.");
       setPending(false);
     } catch {
