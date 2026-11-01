@@ -114,7 +114,9 @@ export function validateWorkspace(
     }
   }
   for (const e of config.entries) {
-    if (e.manifest_path && !workspaceManifests.has(e.manifest_path)) {
+    // kind=helm carriers live outside both workspaces (deploy/helm/**) — the
+    // bidirectional-membership rule applies to crate/bun manifests only.
+    if (e.manifest_path && e.kind !== "helm" && !workspaceManifests.has(e.manifest_path)) {
       push(lineFor(e.id), `component "${e.id}" manifest_path "${e.manifest_path}" is not a workspace member (BR1.2)`);
     }
   }

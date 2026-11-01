@@ -183,6 +183,55 @@ describe("parseRegistry — baseline (BR1.6)", () => {
   });
 });
 
+const HELM = `\n[[component]]\nid = "chart"\nkind = "helm"\nmanifest_path = "deploy/helm/x/Chart.yaml"\ntag_prefix = "chart-v"\nchangelog_path = "deploy/helm/x/CHANGELOG.md"\nglobs = ["deploy/helm/x/**"]\nscopes = ["helm"]\ndepends_on = ["a", "b"]\napp_component = "a"\nimage_components = { b = "b" }\n`;
+
+describe("parseRegistry — kind=helm linkages", () => {
+  test("valid helm entry parses typed fields", () => {
+    const r = parseRegistry(VALID + HELM);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const chart = r.config.entries.find((e) => e.id === "chart")!;
+    expect(chart.kind).toBe("helm");
+    expect(chart.app_component).toBe("a");
+    expect(chart.image_components).toEqual({ b: "b" });
+  });
+
+  test("helm without app_component → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('app_component = "a"\n', ""));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("requires app_component"))).toBe(true);
+  });
+
+  test("app_component not in depends_on → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('depends_on = ["a", "b"]', 'depends_on = ["b"]'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('app_component "a" must appear in depends_on'))).toBe(true);
+  });
+
+  test("image_components referencing unknown id → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('image_components = { b = "b" }', 'image_components = { b = "ghost" }'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('unknown component "ghost"'))).toBe(true);
+  });
+
+  test("image_components not in depends_on → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('depends_on = ["a", "b"]', 'depends_on = ["a"]'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('image_components.b = "b" must appear in depends_on'))).toBe(true);
+  });
+
+  test("crate carrying app_component → violation", () => {
+    const r = parseRegistry(VALID.replace('depends_on = []\n', 'depends_on = []\napp_component = "b"\n'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("must not carry app_component"))).toBe(true);
+  });
+});
+
 describe("loadRegistry — file states", () => {
   test("missing file → registry not found violation", () => {
     const r = loadRegistry("/nonexistent-dir-12345");
