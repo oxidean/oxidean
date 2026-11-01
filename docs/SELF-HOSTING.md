@@ -17,6 +17,9 @@ cp .env.example .env
 
 Related docs: [CONFIGURATION.md](CONFIGURATION.md) (every env var),
 [DEPLOYMENT.md](DEPLOYMENT.md) (all deployment targets incl. Oxidean Cloud),
+[SELFHOST-KUBERNETES.md](SELFHOST-KUBERNETES.md) (the Helm chart),
+[SELFHOST-MIGRATE-TO-K8S.md](SELFHOST-MIGRATE-TO-K8S.md) (moving this
+Compose install to Kubernetes),
 [database.md](database.md) (dialects).
 
 ## Architecture

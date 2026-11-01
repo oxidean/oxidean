@@ -45,9 +45,12 @@ Confirmed 2026-11-01:
 
 3. **Two storage modes via `storage.backend`:** `fs` mounts one RWO PVC
    at `/var` (parity with compose's `oxidean_data` and Railway's
-   `forge-data`); `s3` mounts PVCs only for `/var/repos` and `/var/ssh`
-   and emits `OXIDEAN_STORAGE_BACKEND` + `OXIDEAN_S3_*` envs from a
-   Secret. Self-host zero-infra default stays `fs`.
+   `forge-data`); `s3` emits `OXIDEAN_STORAGE_BACKEND` + `OXIDEAN_S3_*`
+   envs from a Secret. Self-host zero-infra default stays `fs`.
+   *(Implemented with `storage.s3.retainDataVolume: true` as the default —
+   the slim `/var/repos` + `/var/ssh` layout only applies once the api's
+   store-by-store BlobStore consumer migration lands; until then s3 mode
+   still mounts the full `/var` PVC so fs-resident stores keep working.)*
 
 4. **SSH host keys get a small PVC, not a Secret.** Mounted Secrets are
    read-only; the app writes host keys on first boot. A mounted Secret
@@ -80,11 +83,14 @@ Confirmed 2026-11-01:
    replica means no migration race; a pre-install/upgrade hook Job is a
    later option, not v1.
 
-10. **Postgres: `postgres.enabled=true` by default** (Bitnami postgresql
-    OCI subchart) so `helm install` gives the same single-command eval
-    as compose; production operators set `postgres.enabled=false` and
-    supply an external `DATABASE_URL` via `database.*`. Docs mark the
-    bundled database as evaluation-grade.
+10. **Postgres: `postgres.enabled=true` by default** so `helm install`
+    gives the same single-command eval as compose; production operators
+    set `postgres.enabled=false` and supply an external `DATABASE_URL`
+    via `database.*`. Docs mark the bundled database as evaluation-grade.
+    *(Implemented as native chart templates — `postgres:18-alpine` +
+    Deployment + PVC, matching the compose image — rather than a Bitnami
+    OCI subchart; the dependency turned out unnecessary and pulled an
+    external fetch into a vendored-dep build.)*
 
 11. **Runner (`actions` profile in compose) is `runner.enabled=false`
     by default** — it needs a privileged dind sidecar or host docker

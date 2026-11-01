@@ -14,6 +14,8 @@ oci://ghcr.io/oxidean/charts/oxidean
 ```
 
 Related docs: [SELF-HOSTING.md](SELF-HOSTING.md) (Compose bundle),
+[SELFHOST-MIGRATE-TO-K8S.md](SELFHOST-MIGRATE-TO-K8S.md) (moving an
+existing Compose install here — DB, repos, SSH keys, secrets),
 [CONFIGURATION.md](CONFIGURATION.md) (every env var),
 [DEPLOYMENT.md](DEPLOYMENT.md) (all deployment targets),
 [database.md](database.md) (dialects),
@@ -68,7 +70,8 @@ set `ssh.service.type: ClusterIP`, and keep `ssh.host` == `ingress.host`.
 helm install ox oci://ghcr.io/oxidean/charts/oxidean \
   --namespace oxidean --create-namespace \
   --set ingress.enabled=false \
-  --set ssh.service.type=ClusterIP
+  --set ssh.service.type=ClusterIP \
+  --set publicOrigin=http://localhost:3000
 
 kubectl -n oxidean rollout status deploy/ox-oxidean-api --timeout=10m
 kubectl -n oxidean port-forward svc/ox-oxidean-web 3000:3000
@@ -133,8 +136,12 @@ can also keep the bundled store while pointing the api elsewhere.
 volume / filer StatefulSets on `persistentVolumeClaim` storage (never the
 upstream `hostPath` default) plus an S3 gateway on
 `<release>-seaweedfs-s3:8333`. This is the production-shaped bundled
-option — real quorum + scalable volumes vs RustFS's single-node eval
-profile. With `storage.backend=s3` and no explicit `storage.s3.endpoint`,
+option — a real distributed-store topology (master / volume / filer
+StatefulSets) vs RustFS's single-node eval profile. The default sizing is
+one replica per component with replication off, so it is still not HA out
+of the box — quorum and volume replication need explicit replica and
+placement values (see the subchart's `master.replicas`, `volume.replicas`,
+and replication settings). With `storage.backend=s3` and no explicit `storage.s3.endpoint`,
 the api's `OXIDEAN_S3_*` envs default to `http://<release>-seaweedfs-s3:8333`
 and the same hook Job creates the bucket. Zero-config: the subchart mints
 the admin pair once into `<release>-seaweedfs-s3-secret`
@@ -145,10 +152,18 @@ exclusive — templating fails closed if both are set; external
 `storage.s3.endpoint` still overrides either bundled provider.
 
 **Your own claims / shared storage** — every chart-managed PVC accepts
-`existingClaim` (`storage.data`, `storage.s3.repos`, `ssh.hostKeys`,
-`objectstore`, `database`) and a configurable `accessModes` list —
-`["ReadWriteMany"]` + an EFS/CephFS claim is the shared-storage story for
-web replicas and failover.
+`existingClaim` and a configurable `accessModes` list: `storage.data`,
+`storage.s3.repos`, `ssh.hostKeys`, `postgres.persistence`,
+`objectstore.persistence`, and `runner.persistence`. Point a key at an
+existing claim and the chart skips its own PVC and mounts yours — an
+EFS/CephFS/Longhorn `ReadWriteMany` claim is the shared-storage story.
+Two caveats: `ReadWriteMany` does **not** make the api multi-replica (it
+stays pinned to 1 — shared storage shortens failover reattach, it does
+not give active/active), and chart PVCs carry
+`helm.sh/resource-policy: keep`, so switching a key to `existingClaim`
+keeps the previously managed claim instead of deleting it — migrate the
+data yourself, then delete the old claim explicitly. The bundled
+SeaweedFS subchart's own PVCs follow its values, not these keys.
 
 > **Honesty note (OPS-02 in-flight):** the `BlobStore` abstraction exists
 > but API consumer migration is still landing — today `s3` mode mounts the
@@ -173,13 +188,15 @@ For anything real, run Postgres outside the chart:
 postgres:
   enabled: false
 database:
-  existingSecret: my-db-secret   # supplies DATABASE_URL
-  urlKey: url                    # key inside that Secret (default: url)
+  existingSecret: my-db-secret   # supplies the connection URL
+  urlKey: url                    # key inside that Secret (default: DATABASE_URL)
 ```
 
 or leave `database.existingSecret` empty and put `DATABASE_URL` in
-`secrets.existingSecret` (it is `envFrom`-merged, so any key works).
-`secrets.dbUrlKey` lets you rename the expected key (default `DATABASE_URL`).
+`secrets.existingSecret` (it is `envFrom`-merged — with postgres disabled
+the api also reads `DATABASE_URL` from that Secret explicitly). The only
+custom key-name support is `database.urlKey` for `database.existingSecret`
+— there is no rename knob for the `secrets.existingSecret` key.
 
 ## Secrets
 
@@ -187,7 +204,9 @@ On first install the chart generates and persists:
 
 - `OXIDEAN_ACTIONS_SECRETS_KEY` — Actions secrets encryption
 - `OXIDEAN_SESSION_SECRET` — session signing
-- `ADMIN_PASSWORD` — bootstrap admin password (`secrets.adminPasswordKey`)
+- `OXIDEAN_ADMIN_PASSWORD` — bootstrap admin password, only when
+  `admin.email` or `secrets.adminPassword` is set (the default `/setup`
+  wizard flow mints no password key)
 - `POSTGRES_PASSWORD` — only when `postgres.enabled`
 
 Generation is `lookup`-guarded: `helm upgrade` reuses whatever is already
@@ -213,12 +232,19 @@ runner:
 ```
 
 Ships `ghcr.io/oxidean/oxidean-runner` plus a `docker:28-dind` sidecar so
-`docker://` jobs run. **Security note:** the dind container runs
-`privileged: true` — it can reach the host. That's the documented tradeoff
-for containerized CI on shared nodes; isolate runner pods to dedicated
-nodes (`runner.nodeSelector`/`tolerations`) in multi-tenant clusters.
-Rootless dind / Firecracker isolation is out of scope for this chart
-(roadmap follow-up).
+`docker://` jobs run. The chart bypasses the stock dind entrypoint and
+invokes `dockerd` with a loopback-only listener
+(`tcp://127.0.0.1:2375` + the container-local socket), so the daemon API
+never leaves the pod's network namespace — the runner container reaches
+it via the shared `DOCKER_HOST`, nothing else can.
+
+**Security note:** the dind container still runs `privileged: true` — it
+can reach the host kernel. That's the documented tradeoff for
+containerized CI on shared nodes; pin runner pods to dedicated nodes with
+`runner.nodeSelector` / `runner.affinity` / `runner.tolerations` (they fall
+back to the global scheduling keys) in multi-tenant clusters. Rootless
+dind / Firecracker isolation is out of scope for this chart (roadmap
+follow-up).
 
 ## Health and upgrades
 

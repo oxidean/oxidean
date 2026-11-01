@@ -75,6 +75,7 @@ Both surfaces bundle an eval-grade RustFS store (compose `s3` profile ↔
 helm `objectstore.enabled`); `seaweedfs.enabled` is the production-shaped alternative (mutually exclusive). External endpoints override the same envs.
 Specs: `agent-os/specs/2026-11-01-1425-storage-blob-backend/` (trait) and
 `agent-os/specs/2026-11-01-1934-selfhost-object-store/` (bundled topology).
+Compose→k8s data migration: `docs/SELFHOST-MIGRATE-TO-K8S.md`.
 
 ## Commands agents should know
 

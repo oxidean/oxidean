@@ -68,7 +68,10 @@ Ship a bundled, eval-grade S3-compatible object store on **both** deploy surface
 
 - `helm install` with `--set storage.backend=s3 --set objectstore.enabled=true`
   yields a working object-storage topology with zero external dependencies.
-- `docker compose --profile s3 up -d` does the same on a single host.
+- `docker compose --profile s3 up -d` does the same on a single host —
+  with `OXIDEAN_STORAGE_BACKEND=s3` and both `OXIDEAN_S3_ACCESS_KEY_ID` /
+  `OXIDEAN_S3_SECRET_ACCESS_KEY` set in `.env` first (backend defaults to
+  `fs` and the init container fails closed on an empty pair).
 - Production guidance is unchanged: bundled is for evaluation and small installs;
   real deployments point `storage.s3.*` / `OXIDEAN_S3_*` at external object
   storage (managed S3, R2, on-prem SeaweedFS cluster, …) — the chart docs say so.
