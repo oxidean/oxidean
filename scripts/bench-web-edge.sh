@@ -149,9 +149,9 @@ stats_end() {
 edge_stats_json() {
   local lane="$1" names
   if [[ "$lane" == "watt" ]]; then
-    names="watt"
+    names='[-_]watt[-_][0-9]+$'
   else
-    names="traefik|web"
+    names='[-_](traefik|web)[-_][0-9]+$'
   fi
   jq -Rn --arg names "$names" '
     def mib: (if test("GiB") then (sub("GiB.*";"")|tonumber)*1073741824

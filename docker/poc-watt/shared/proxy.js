@@ -53,26 +53,40 @@ const FORWARDED_HEADERS = new Set([
   'cf-connecting-ip',
   'true-client-ip',
 ])
-// Response headers stripped on the way back.
-const RESP_HOP_BY_HOP = new Set(['connection', 'transfer-encoding', 'keep-alive'])
+// Response headers stripped on the way back — the fixed hop-by-hop set.
+const RESP_HOP_BY_HOP = new Set([
+  'connection',
+  'transfer-encoding',
+  'keep-alive',
+  'upgrade',
+  'te',
+  'trailer',
+  'proxy-connection',
+  'proxy-authorization',
+  'proxy-authenticate',
+])
+
+// Fields `Connection` names are hop-by-hop too (RFC 9110 §7.6.1) — applies to
+// request AND response headers crossing this hop.
+function connNominated(value) {
+  if (value == null) return null
+  const s = new Set(
+    String(value)
+      .split(',')
+      .map(t => t.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  return s.size ? s : null
+}
 
 // Build the outbound header set per the rules above. `isUpgrade` re-admits
 // connection/upgrade so the websocket handshake crosses verbatim.
 export function upstreamHeaders(req, { behindProxy, peerIp, isUpgrade = false }) {
   const out = {}
-  // Fields `Connection` names are hop-by-hop too — `Connection: keep-alive,
-  // X-Foo` must not forward X-Foo. Skipped for genuine upgrades, whose
-  // connection/upgrade pair is itself the handshake and re-admitted below.
-  const conn = req.headers.connection
-  const nominated =
-    isUpgrade || conn == null
-      ? null
-      : new Set(
-          String(conn)
-            .split(',')
-            .map(s => s.trim().toLowerCase())
-            .filter(Boolean),
-        )
+  // `Connection: keep-alive, X-Foo` must not forward X-Foo. Skipped for
+  // genuine upgrades, whose connection/upgrade pair is itself the handshake
+  // and re-admitted below.
+  const nominated = isUpgrade ? null : connNominated(req.headers.connection)
   for (const [name, value] of Object.entries(req.headers)) {
     const n = name.toLowerCase()
     if (HOP_BY_HOP.has(n) && !(isUpgrade && (n === 'connection' || n === 'upgrade'))) continue
@@ -127,39 +141,33 @@ export async function forward(req, res, target, opts = {}) {
     return badGateway(res)
   }
 
+  const respNominated = connNominated(upstream.headers.connection)
   const respHeaders = {}
   for (const [name, value] of Object.entries(upstream.headers)) {
     const n = name.toLowerCase()
-    if (RESP_HOP_BY_HOP.has(n)) continue
+    if (RESP_HOP_BY_HOP.has(n) || respNominated?.has(n)) continue
     // Preserve multi-value headers (Set-Cookie on login sets several) —
     // undici already yields string[]; writeHead emits one line per element.
     respHeaders[n] = value
   }
 
   // Web-tier compression: upstream answered with a sized, compressible body
-  // and no content-encoding, and the client accepts gzip. Buffered like the
-  // Rust layer effectively is for shell/JSON bodies; oversized streams keep
-  // Content-Length absent upstream and never reach here.
+  // and no content-encoding, and the client accepts gzip. Streamed through
+  // zlib like tower_http's adapter — bounded memory, no event-loop-blocking
+  // gzipSync; Content-Length/ETag drop because the encoded size is only known
+  // when the stream ends (chunked transfer like the Rust layer emits).
   if (
     compress &&
     acceptsGzip(req.headers['accept-encoding']) &&
     compressible({ statusCode: upstream.statusCode, headers: respHeaders })
   ) {
-    try {
-      const chunks = []
-      for await (const chunk of upstream.body) chunks.push(chunk)
-      const gz = zlib.gzipSync(Buffer.concat(chunks))
-      delete respHeaders['content-length']
-      delete respHeaders.etag
-      respHeaders['content-encoding'] = 'gzip'
-      respHeaders['content-length'] = String(gz.length)
-      respHeaders.vary = respHeaders.vary ? `${respHeaders.vary}, Accept-Encoding` : 'Accept-Encoding'
-      res.writeHead(upstream.statusCode, respHeaders)
-      return res.end(gz)
-    } catch {
-      upstream.body?.destroy?.()
-      return badGateway(res)
-    }
+    delete respHeaders['content-length']
+    delete respHeaders.etag
+    respHeaders['content-encoding'] = 'gzip'
+    respHeaders.vary = respHeaders.vary ? `${respHeaders.vary}, Accept-Encoding` : 'Accept-Encoding'
+    res.writeHead(upstream.statusCode, respHeaders)
+    pipeline(upstream.body, zlib.createGzip(), res).catch(() => res.destroy())
+    return
   }
 
   res.writeHead(upstream.statusCode, respHeaders)
@@ -207,11 +215,12 @@ export function forwardUpgrade(req, socket, head, target, opts = {}) {
   // Upstream refused the upgrade with a normal response (auth, 404, …) —
   // relay it as an HTTP response on the raw socket.
   upstream.on('response', upRes => {
+    const upNominated = connNominated(upRes.headers.connection)
     const lines = [`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage ?? ''}`]
     let hasLength = false
     for (let i = 0; i < upRes.rawHeaders.length; i += 2) {
       const n = upRes.rawHeaders[i].toLowerCase()
-      if (RESP_HOP_BY_HOP.has(n)) continue
+      if (RESP_HOP_BY_HOP.has(n) || upNominated?.has(n)) continue
       if (n === 'content-length') hasLength = true
       lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`)
     }

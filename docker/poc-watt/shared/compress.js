@@ -16,6 +16,8 @@ const EXCLUDED_TYPES = [
 
 export function compressible({ statusCode, headers }) {
   if (statusCode < 200 || statusCode >= 300) return false
+  // 206 Partial Content: re-encoding breaks the advertised Content-Range.
+  if (statusCode === 206 || headers['content-range'] != null) return false
   const len = Number(headers['content-length'] ?? 0)
   if (!Number.isFinite(len) || len <= 64) return false
   if (headers['content-encoding'] != null) return false
