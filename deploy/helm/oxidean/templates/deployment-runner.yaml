@@ -98,6 +98,7 @@ spec:
         - name: docker-lib
           emptyDir: {}
         {{- end }}
+{{- if not .Values.runner.persistence.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -107,9 +108,10 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: runner
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.runner.persistence.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.runner.persistence.storageClass | nindent 2 }}
   resources:
     requests:
       storage: {{ .Values.runner.persistence.size | quote }}
+{{- end }}
 {{- end }}

@@ -122,7 +122,7 @@ the chart Secret carries the shared credentials both pods read.
 {{- end -}}
 
 {{- define "oxidean.objectstorePvcName" -}}
-{{- printf "%s-objectstore" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-objectstore" (include "oxidean.fullname" .)) .Values.objectstore.persistence.existingClaim -}}
 {{- end -}}
 
 {{- define "oxidean.objectstoreEndpoint" -}}
@@ -239,11 +239,11 @@ Longhorn, NFS provisioner). Deployments only ever see the resolved name.
 {{- end -}}
 
 {{- define "oxidean.postgresPvcName" -}}
-{{- printf "%s-postgres" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-postgres" (include "oxidean.fullname" .)) .Values.postgres.persistence.existingClaim -}}
 {{- end -}}
 
 {{- define "oxidean.runnerPvcName" -}}
-{{- printf "%s-runner" (include "oxidean.fullname" .) -}}
+{{- default (printf "%s-runner" (include "oxidean.fullname" .)) .Values.runner.persistence.existingClaim -}}
 {{- end -}}
 
 {{/*

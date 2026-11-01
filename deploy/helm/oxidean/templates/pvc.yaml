@@ -55,7 +55,7 @@ spec:
       storage: {{ .Values.ssh.hostKeys.size | quote }}
 ---
 {{- end }}
-{{- if .Values.objectstore.enabled }}
+{{- if and .Values.objectstore.enabled (not .Values.objectstore.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -64,7 +64,7 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: objectstore
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.objectstore.persistence.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.objectstore.persistence.storageClass | nindent 2 }}
   resources:
     requests:

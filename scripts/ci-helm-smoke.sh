@@ -28,6 +28,9 @@ for bin in helm kubectl kind; do
 done
 
 echo "==> helm dependency build (vendored subcharts)"
+# charts/ is gitignored — on a clean checkout the resolver needs the URL
+# registered locally before it can fetch the pinned Chart.lock entry.
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm >/dev/null
 helm dependency build "$CHART"
 
 echo "==> helm lint"
@@ -164,6 +167,25 @@ echo "==> helm template — accessModes passes RWX through"
 grep -q 'ReadWriteMany' <<<"$(helm template "$RELEASE" "$CHART" -n "$NS" \
   --set 'storage.data.accessModes[0]=ReadWriteMany')" \
   || { echo "FAIL: accessModes must render ReadWriteMany" >&2; exit 1; }
+
+echo "==> helm template — bundled-component existingClaims suppress PVCs"
+CLAIM="$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set storage.backend=s3 --set objectstore.enabled=true \
+  --set runner.enabled=true \
+  --set postgres.persistence.existingClaim=pg-shared \
+  --set objectstore.persistence.existingClaim=obj-shared \
+  --set runner.persistence.existingClaim=runner-shared)"
+PVC_NAMES="$(grep -A3 'kind: PersistentVolumeClaim' <<<"$CLAIM" | grep 'name:')"
+for rendered in 'ox-oxidean-postgres' 'ox-oxidean-objectstore' 'ox-oxidean-runner'; do
+  if grep -q "$rendered" <<<"$PVC_NAMES"; then
+    echo "FAIL: $rendered PVC must be suppressed by existingClaim" >&2
+    exit 1
+  fi
+done
+for mounted in 'claimName: pg-shared' 'claimName: obj-shared' 'claimName: runner-shared'; do
+  grep -q "$mounted" <<<"$CLAIM" \
+    || { echo "FAIL: $mounted must be mounted by its workload" >&2; exit 1; }
+done
 
 if [ "${HELM_SMOKE_SKIP_CLUSTER:-0}" = "1" ]; then
   echo "==> cluster smoke skipped (HELM_SMOKE_SKIP_KIND_LOAD/CLUSTER)"

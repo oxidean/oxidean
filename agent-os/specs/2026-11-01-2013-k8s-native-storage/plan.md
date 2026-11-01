@@ -17,6 +17,11 @@ This folder + OPS-08 in `agent-os/product/roadmap.md`.
 - `templates/_helpers.tpl`: `dataPvcName`/`reposPvcName`/`sshPvcName`
   resolve to `existingClaim` when set (mount side needs no other change —
   deployments already reference the name helpers).
+- Extended past the original scope for parity with the k8s docs' claim:
+  `postgres.persistence`, `objectstore.persistence`, and
+  `runner.persistence` carry the same `{existingClaim,accessModes}` pair;
+  their name helpers substitute the claim and the PVC manifests (postgres
+  and runner render inline in their Deployments) gate on it.
 
 ## Task 3: SeaweedFS bundled provider
 

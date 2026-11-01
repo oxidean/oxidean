@@ -69,6 +69,7 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "oxidean.postgresPvcName" . }}
+{{- if not .Values.postgres.persistence.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -78,9 +79,10 @@ metadata:
     {{- include "oxidean.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes: {{ .Values.postgres.persistence.accessModes | toJson }}
   {{- include "oxidean.storageClass" .Values.postgres.persistence.storageClass | nindent 2 }}
   resources:
     requests:
       storage: {{ .Values.postgres.persistence.size | quote }}
+{{- end }}
 {{- end }}

@@ -50,9 +50,10 @@ Raw TCP can't ride an HTTP ingress, so SSH gets its own `LoadBalancer`
 service. On clouds that issue one address per LoadBalancer this is a
 second IP/DNS name — advertise it via `ssh.host` + `ssh.port` (the chart
 falls back to `ingress.host` + `22`). On a single-IP cluster (or bare
-metal) map port 22 through your ingress controller's TCP services instead
-(e.g. ingress-nginx `tcp-services` ConfigMap), set `ssh.service.type:
-ClusterIP`, and keep `ssh.host` == `ingress.host`.
+metal) either give `LoadBalancer` a provider (MetalLB, kube-vip, or the
+distribution's built-in LB) or map port 22 through your ingress
+controller's TCP services (e.g. ingress-nginx `tcp-services` ConfigMap),
+set `ssh.service.type: ClusterIP`, and keep `ssh.host` == `ingress.host`.
 
 ## Prerequisites
 

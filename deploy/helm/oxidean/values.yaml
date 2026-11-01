@@ -196,6 +196,8 @@ postgres:
   persistence:
     size: 5Gi
     storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       cpu: 100m
@@ -236,6 +238,8 @@ objectstore:
   persistence:
     size: 10Gi
     storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
   # Bucket-creation Job (post-install/post-upgrade hook) — head-bucket, then
   # mb when absent.
   init:
@@ -339,6 +343,8 @@ runner:
   persistence:
     size: 2Gi # runner /data (registration state + work dirs)
     storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
   resources: {}
 
 # --- Scheduling / hardening -------------------------------------------------------
