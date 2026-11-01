@@ -57,6 +57,7 @@ oxidean-core = { path = "../oxidean-core" }
 oxidean-db = { path = "../oxidean-db" }
 oxidean-git = { path = "../oxidean-git" }
 oxidean-actions-expr = { path = "../oxidean-actions-expr" }
+oxidean-status-pages = { path = "../oxidean-status-pages" }
 oxidean-vcs = { path = "../oxidean-vcs", features = ["server"] }
 tokio = { workspace = true }
 serde = { workspace = true }

@@ -239,6 +239,14 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
         .nest("/v2", crate::packages::oci::router())
         .nest("/npm", crate::packages::npm::router())
         .nest("/generic", crate::packages::generic::router())
+        // Branded status pages (shared crate with the web tier): unmatched
+        // paths → themed 404, method mismatches → themed 405 — but only for
+        // `Accept: text/html`; API/CLI clients keep the JSON error envelope.
+        .fallback(fallback_not_found)
+        .method_not_allowed_fallback(fallback_method_not_allowed)
+        // Bare/plain-text route errors (avatars, cli assets, raw files) get
+        // the same themed page for browsers — structured bodies untouched.
+        .layer(from_fn(oxidean_status_pages::theme_errors))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         // Outermost: stamp ConnectInfo into an internal header so every
@@ -303,6 +311,67 @@ async fn setup_check(State(state): State<AppState>) -> impl IntoResponse {
             (no_store, StatusCode::INTERNAL_SERVER_ERROR).into_response()
         }
     }
+}
+
+/// Router fallback — no route matched the path. Browsers (`Accept:
+/// text/html`) get the shared branded page; anything else gets the RPC
+/// error envelope a mistyped API path deserves.
+async fn fallback_not_found(headers: HeaderMap) -> Response {
+    status_response(
+        StatusCode::NOT_FOUND,
+        "route.not_found",
+        "route not found",
+        &headers,
+    )
+}
+
+/// Method mismatch on a matched path (axum re-stamps `Allow` on top of our
+/// response) — same negotiation as the 404 fallback.
+async fn fallback_method_not_allowed(headers: HeaderMap) -> Response {
+    status_response(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "route.method_not_allowed",
+        "method not allowed",
+        &headers,
+    )
+}
+
+/// Content-negotiated status response: shared themed page for document
+/// requests, JSON error envelope otherwise.
+fn status_response(
+    status: StatusCode,
+    code: &'static str,
+    message: &'static str,
+    headers: &HeaderMap,
+) -> Response {
+    let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
+    if oxidean_status_pages::accepts_html(accept) {
+        // Same cookie/CH chain the web tier resolves — `/api/*` rides the
+        // browser origin, so the theme cookies are already on the request.
+        let dark = oxidean_status_pages::color_scheme(
+            headers.get(header::COOKIE).and_then(|v| v.to_str().ok()),
+            headers
+                .get("sec-ch-prefers-color-scheme")
+                .and_then(|v| v.to_str().ok()),
+        );
+        return (
+            status,
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            oxidean_status_pages::render(oxidean_status_pages::theme(), status, dark),
+        )
+            .into_response();
+    }
+    (
+        status,
+        Json(serde_json::json!({
+            "ok": false,
+            "error": { "code": code, "message": message }
+        })),
+    )
+        .into_response()
 }
 
 /// Peer IP when the server was started with
@@ -421,5 +490,35 @@ async fn handle_socket(
         if sender.send(Message::Text(payload.into())).await.is_err() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn fallback_negotiates_branded_page_or_json() {
+        let mut html = HeaderMap::new();
+        html.insert(header::ACCEPT, HeaderValue::from_static("text/html"));
+        let resp = fallback_not_found(html).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Page not found"));
+
+        let resp = fallback_not_found(HeaderMap::new()).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["error"]["code"], "route.not_found");
     }
 }
