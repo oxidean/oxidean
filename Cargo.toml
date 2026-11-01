@@ -36,6 +36,7 @@ members = [
   "crates/oxidean-db",
   "crates/oxidean-git",
   "crates/oxidean-runner",
+  "crates/oxidean-status-pages",
   "crates/oxidean-vcs",
   "crates/oxidean-web",
 ]

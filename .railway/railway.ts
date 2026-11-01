@@ -124,6 +124,9 @@ export default defineRailway((ctx) => {
       OXIDEAN_OIDC_ISSUER: preserve(),
       OXIDEAN_OIDC_CLIENT_ID: preserve(),
       OXIDEAN_OIDC_CLIENT_SECRET: preserve(),
+      // Branded status page theme (default|meme) — cosmetic opt-in; keep the
+      // same dashboard value on the web service so both tiers match.
+      OXIDEAN_STATUS_PAGE_THEME: preserve(),
     },
     // Git-over-SSH TCP publish (D-CLOUD-08).
     tcp: [22],
@@ -146,6 +149,8 @@ export default defineRailway((ctx) => {
       // CloneBox SSH advertise (SSR’d into the page; match api listen/advertise).
       OXIDEAN_SSH_HOST: "${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_SSH_PORT: "22",
+      // Branded status page theme — keep in sync with the api service's value.
+      OXIDEAN_STATUS_PAGE_THEME: preserve(),
     },
   });
 

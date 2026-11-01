@@ -115,6 +115,8 @@ services:
       # Fallback: hostname of OXIDEAN_PUBLIC_ORIGIN (Compose default localhost).
       OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
       OXIDEAN_SSH_HOST_KEY_DIR: ${OXIDEAN_SSH_HOST_KEY_DIR:-/var/ssh}
+      # Status page theme shared with the web tier (default|meme).
+      OXIDEAN_STATUS_PAGE_THEME: ${OXIDEAN_STATUS_PAGE_THEME:-}
     ports:
       # Host TCP publish for SSH (D-SSH-07) — do not add Traefik TCP/HTTP routers for SSH.
       - "2222:2222"
@@ -227,6 +229,8 @@ services:
       # Advertised Git SSH endpoint — injected as <meta> by the web middleware.
       OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
+      # Status page theme shared with the api tier (default|meme).
+      OXIDEAN_STATUS_PAGE_THEME: ${OXIDEAN_STATUS_PAGE_THEME:-}
     depends_on:
       api:
         condition: service_healthy
