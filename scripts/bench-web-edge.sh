@@ -175,7 +175,7 @@ edge_stats_json() {
 oha_run() {
   local label="$1" url="$2" out
   shift 2
-  out="$(oha --no-tui -j -z "$DUR" -c "$CONN" "$@" "$url" \
+  out="$(oha --no-tui --output-format json -z "$DUR" -c "$CONN" "$@" "$url" \
         2>>"$WORK/oha-$label.log" || true)"
   if [[ -z "$out" ]] || ! echo "$out" | jq -e . >/dev/null 2>&1; then
     echo "warn: oha $label produced no JSON (see $WORK/oha-$label.log)" >&2
@@ -248,7 +248,15 @@ bench_lane() {
   fi
 
   echo "==> lane $lane: compose build ($services)" >&2
-  "${COMPOSE[@]}" build $services >&2
+  local bsvc bimg
+  for bsvc in $services; do
+    bimg="$("${COMPOSE[@]}" config --format json 2>/dev/null | jq -r ".services.\"$bsvc\".image // empty")"
+    if [[ -z "$bimg" ]] || ! docker image inspect "$bimg" >/dev/null 2>&1; then
+      "${COMPOSE[@]}" build "$bsvc" >&2
+    else
+      echo "    $bsvc: image $bimg present, skipping build" >&2
+    fi
+  done
 
   echo "==> lane $lane: compose up ($services)" >&2
   local t0 healthy_ms
