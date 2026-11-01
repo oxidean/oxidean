@@ -680,12 +680,12 @@ mod tests {
         let creds = S3Credentials::Static {
             access_key_id: "AKIDEXAMPLE".into(),
             secret_access_key: "supersecret".into(),
-            session_token: Some("token".into()),
+            session_token: Some("rawsessiontoken".into()),
         };
         let dbg = format!("{creds:?}");
         assert!(!dbg.contains("AKIDEXAMPLE"));
         assert!(!dbg.contains("supersecret"));
-        assert!(!dbg.contains("token"));
+        assert!(!dbg.contains("rawsessiontoken"));
         assert!(dbg.contains("<redacted>"));
     }
 

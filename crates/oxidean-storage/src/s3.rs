@@ -515,18 +515,18 @@ mod tests {
         let digest = bytes_to_hex(Sha256::digest(b"hello s3").as_slice());
         let written = Box::new(upload)
             .commit(PutConstraints {
-                expected_size: Some(9),
+                expected_size: Some(8),
                 expected_sha256: Some(digest),
                 content_type: None,
             })
             .await
             .unwrap();
-        assert_eq!(written, 9);
+        assert_eq!(written, 8);
         let object = os_get(mem.as_ref(), &path, None).await.unwrap();
         assert_eq!(collect(object).await, b"hello s3".to_vec());
         assert!(os_exists(mem.as_ref(), &path).await.unwrap());
         let meta = os_head(mem.as_ref(), &path).await.unwrap();
-        assert_eq!(meta.size, 9);
+        assert_eq!(meta.size, 8);
     }
 
     #[tokio::test]
