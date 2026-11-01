@@ -161,14 +161,25 @@ export function AdminOxpilotContent() @{
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
       window.location.assign("/login?returnTo=/admin/oxpilot");
-      return;
-    }
-    if (loaderData?.kind === "ready") {
-      setAuthMeCache(queryClient, loaderData.me);
-      queryClient.setQueryData(settingsQueryKey, loaderData.settings);
-      queryClient.setQueryData(providersQueryKey, loaderData.providers);
     }
   }, [loaderData, queryClient]);
+
+  // Sync each downstream cache only when its own loader field changes —
+  // `writeSettingsCaches` bumps the loader query, and re-writing
+  // `me`/`providers` off that snapshot would clobber caches that
+  // recovered independently (e.g. providersQ after a loader-time 503).
+  const loaderMe = loaderData?.kind === "ready" ? loaderData.me : null;
+  const loaderSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
+  const loaderProviders = loaderData?.kind === "ready" ? loaderData.providers : null;
+  useEffect(() => {
+    if (loaderMe) setAuthMeCache(queryClient, loaderMe);
+  }, [loaderMe, queryClient]);
+  useEffect(() => {
+    if (loaderSettings) queryClient.setQueryData(settingsQueryKey, loaderSettings);
+  }, [loaderSettings, queryClient]);
+  useEffect(() => {
+    if (loaderProviders) queryClient.setQueryData(providersQueryKey, loaderProviders);
+  }, [loaderProviders, queryClient]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
@@ -208,7 +219,7 @@ export function AdminOxpilotContent() @{
 
   const initialSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
   const [pending, setPending] = useState(false);
-  const [draftReady, setDraftReady] = useState(() => !!initialSettings);
+  const [draftReady, setDraftReady, getDraftReady] = useState(() => !!initialSettings);
 
   const form = useForm({
     defaultValues: formDefaultsFromSettings(initialSettings),
@@ -244,7 +255,7 @@ export function AdminOxpilotContent() @{
           return;
         }
         applySettings(res.data);
-        queryClient.setQueryData(settingsQueryKey, res.data);
+        writeSettingsCaches(res.data);
         toastSuccess("OxPilot settings saved.");
         setPending(false);
       } catch {
@@ -266,10 +277,29 @@ export function AdminOxpilotContent() @{
     setDraftReady(true);
   }
 
+  // Settings writes must also update the loader query — a remount inside
+  // its staleTime seeds the form from loaderData, and a stale loader
+  // snapshot would silently restore the pre-save values.
+  function writeSettingsCaches(next: OxpilotSettingsResponse) {
+    // Cancel an in-flight loader first: its pre-save snapshot would
+    // otherwise resolve after this write and clobber the saved
+    // settings cache on a later remount.
+    void queryClient.cancelQueries({ queryKey: adminOxpilotQueryOptions().queryKey });
+    // Same for an in-flight settings refetch: a stale-remount response
+    // resolving after this write would overwrite the saved settings.
+    void queryClient.cancelQueries({ queryKey: settingsQueryKey });
+    queryClient.setQueryData(settingsQueryKey, next);
+    queryClient.setQueryData<AdminOxpilotLoaderData>(adminOxpilotQueryOptions().queryKey, (old) =>
+      old?.kind === "ready" ? { ...old, settings: next } : old,
+    );
+  }
+
   // Seed the draft once — later refetches must not clobber unsaved
   // edits; save/clear handlers re-apply from the server response.
   useEffect(() => {
-    if (!draftReady && settingsQ.isSuccess && settingsQ.data) {
+    // Read the live flag: Octane may run a stale-closure effect after user
+    // edits land, and the captured `draftReady` would still read false.
+    if (!getDraftReady() && settingsQ.isSuccess && settingsQ.data) {
       applySettings(settingsQ.data);
     }
   }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt, draftReady]);
@@ -284,7 +314,7 @@ export function AdminOxpilotContent() @{
         return;
       }
       applySettings(res.data);
-      queryClient.setQueryData(settingsQueryKey, res.data);
+      writeSettingsCaches(res.data);
       toastSuccess("Reverted to the OXIDEAN_OXPILOT_* environment defaults.");
       setPending(false);
     } catch {
@@ -303,7 +333,7 @@ export function AdminOxpilotContent() @{
         return;
       }
       applySettings(res.data);
-      queryClient.setQueryData(settingsQueryKey, res.data);
+      writeSettingsCaches(res.data);
       toastSuccess("API key cleared.");
       setPending(false);
     } catch {
@@ -345,8 +375,12 @@ export function AdminOxpilotContent() @{
   const providers: OxpilotProviderDescriptor[] = providersQ.data ?? [];
   const loadError =
     !!loaderError || me.isError || (settingsQ.isError && settingsErrorCode !== "admin.forbidden");
+  // Hold the form until the draft is seeded no matter which path supplies
+  // it — a late-arriving ready loader must not lift the gate between
+  // `isSuccess` and the seed effect, or the Switch paints unchecked first
+  // and a click in that window toggles the field ON instead of OFF.
   const waitingForDraft =
-    !readyFromLoader && isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
+    isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
   const anyOverridden =
     settings != null &&
     (settings.enabled_overridden ||
