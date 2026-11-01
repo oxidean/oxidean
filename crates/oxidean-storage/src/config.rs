@@ -31,7 +31,7 @@ use std::sync::Arc;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 
 use crate::error::StorageError;
-use crate::fs::{absolutize, FsBlobStore};
+use crate::fs::{resolve_isolation_root, FsBlobStore};
 use crate::key::validate_store_name;
 use crate::key::BlobKey;
 use crate::s3::S3BlobStore;
@@ -155,15 +155,11 @@ impl StorageConfig {
                 }
             }
             None => {
-                // Canonicalize so aliased roots (existing symlinks, dot
-                // components) compare as the same identity; a root that
-                // doesn't exist yet still gets lexical `.`/`..`
-                // normalization via absolutize + components.
+                // Resolve each root to a canonical identity so aliased or
+                // `..`-bearing roots compare equal — see resolve_isolation_root.
                 let mut seen: HashMap<PathBuf, &str> = HashMap::new();
                 for (store, root) in stores {
-                    let root = std::fs::canonicalize(root).unwrap_or_else(|_| {
-                        absolutize(root).components().collect()
-                    });
+                    let root = resolve_isolation_root(root);
                     if let Some((other_root, other)) =
                         seen.iter().find(|(other_root, _)| {
                             root.starts_with(other_root.as_path())
@@ -687,6 +683,25 @@ mod tests {
                 ("packages", Path::new("/var/same")),
             ])
             .is_err());
+
+        // Missing root containing `..` still folds to its real identity —
+        // `dir/missing/../lfs/child` overlaps `dir/lfs`.
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("missing");
+        let lfs = dir.path().join("lfs");
+        let child = base.join("..").join("lfs").join("child");
+        assert!(storage_fs
+            .check_store_isolation([
+                ("lfs", lfs.as_path()),
+                ("uploads", child.as_path()),
+            ])
+            .is_err());
+        assert!(storage_fs
+            .check_store_isolation([
+                ("lfs", lfs.as_path()),
+                ("packages", base.join("..").join("packages").as_path()),
+            ])
+            .is_ok());
     }
 
     #[test]

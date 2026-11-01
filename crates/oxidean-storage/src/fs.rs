@@ -4,7 +4,7 @@
 //! same-filesystem `tmp/` staging so renames stay atomic.
 
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -111,6 +111,33 @@ pub(crate) fn absolutize(path: &Path) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("/"))
             .join(path)
     }
+}
+
+/// Root identity for overlap checks: canonicalize the longest existing
+/// prefix (resolving symlinks there), then fold the non-existing tail's
+/// `.`/`..` components lexically. A plain `canonicalize`-or-nothing fallback
+/// would keep `..` in missing roots (`Path::components` does not normalize
+/// them), letting `/var/missing/../lfs` slip past `/var/lfs`.
+pub(crate) fn resolve_isolation_root(root: &Path) -> PathBuf {
+    let abs = absolutize(root);
+    let components: Vec<Component> = abs.components().collect();
+    for split in (0..=components.len()).rev() {
+        let prefix: PathBuf = components[..split].iter().collect();
+        if let Ok(base) = std::fs::canonicalize(&prefix) {
+            let mut resolved = base;
+            for component in &components[split..] {
+                match component {
+                    Component::ParentDir => {
+                        resolved.pop();
+                    }
+                    Component::Normal(name) => resolved.push(name),
+                    _ => {}
+                }
+            }
+            return resolved;
+        }
+    }
+    absolutize(root)
 }
 
 /// tmp staging holds pre-commit bytes — lock it down like the vcs
