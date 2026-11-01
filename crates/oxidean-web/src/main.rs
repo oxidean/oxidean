@@ -453,7 +453,13 @@ fn status_page(status: StatusCode, headers: &HeaderMap) -> Response {
     // status. `theme_errors` can't undo an already-rendered document.
     let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
     if !status_pages::accepts_html(accept) {
-        return status.into_response();
+        // Bare statuses can be heuristically cached — `Vary: Accept` keeps a
+        // cached non-HTML 404 from being served to a later HTML request.
+        let mut response = status.into_response();
+        response
+            .headers_mut()
+            .insert(header::VARY, HeaderValue::from_static("Accept"));
+        return response;
     }
     let dark = status_pages::color_scheme(
         cookie_header(headers),
