@@ -5,6 +5,9 @@
 #   docker compose up -d                     # http://localhost:8080
 #   docker compose --profile tls up -d       # https://$DOMAIN (auto-HTTPS)
 #   docker compose --profile actions up -d   # + Actions runner
+#   docker compose --profile s3 up -d        # + bundled object store (set
+#                                            #  OXIDEAN_STORAGE_BACKEND=s3 +
+#                                            #  OXIDEAN_S3_ACCESS_KEY_ID/…SECRET)
 #
 # The web tier is the single origin: it serves the UI and proxies every
 # API-owned path (RPC, Smart HTTP git, LFS, package registries, badges,
@@ -71,6 +74,23 @@ services:
       OXIDEAN_ACTIONS_ARTIFACTS_DIR: /var/actions-artifacts
       OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
       OXIDEAN_PAGES_DIR: /var/pages
+      # Object storage (spec agent-os/specs/2026-11-01-1934-selfhost-object-store):
+      # fs = POSIX under /var (default); s3 = BlobStore-backed stores write to
+      # S3-compatible object storage as the api's consumer rollout lands.
+      # Defaults target the bundled `--profile s3` objectstore; override every
+      # OXIDEAN_S3_* for an external endpoint (managed S3, R2, on-prem).
+      # `-` (not `:-`) on ENDPOINT/REGION/flags so an explicitly-empty value
+      # passes through as "unset" — e.g. OXIDEAN_S3_ENDPOINT= selects AWS.
+      OXIDEAN_STORAGE_BACKEND: ${OXIDEAN_STORAGE_BACKEND:-fs}
+      OXIDEAN_S3_BUCKET: ${OXIDEAN_S3_BUCKET:-oxidean}
+      OXIDEAN_S3_ENDPOINT: ${OXIDEAN_S3_ENDPOINT-http://objectstore:9000}
+      OXIDEAN_S3_REGION: ${OXIDEAN_S3_REGION-us-east-1}
+      OXIDEAN_S3_PATH_STYLE: ${OXIDEAN_S3_PATH_STYLE-}
+      OXIDEAN_S3_INSECURE_HTTP: ${OXIDEAN_S3_INSECURE_HTTP-1}
+      OXIDEAN_S3_PREFIX: ${OXIDEAN_S3_PREFIX-}
+      OXIDEAN_S3_ACCESS_KEY_ID: ${OXIDEAN_S3_ACCESS_KEY_ID-}
+      OXIDEAN_S3_SECRET_ACCESS_KEY: ${OXIDEAN_S3_SECRET_ACCESS_KEY-}
+      OXIDEAN_S3_SESSION_TOKEN: ${OXIDEAN_S3_SESSION_TOKEN-}
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
       OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
       # Oxpilot agentic chat (/oxpilot) — enabled by default; configure a
@@ -192,7 +212,11 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env for the tls profile}
+      # DOMAIN required only when the tls profile runs — compose evaluates
+      # interpolations for every service unconditionally, so :? here would
+      # break plain `up -d` for non-tls installs. Empty instead → Caddy
+      # fails fast on {$DOMAIN} only when the profile is actually enabled.
+      DOMAIN: ${DOMAIN:-}
     ports:
       - "80:80"
       - "443:443"
@@ -231,6 +255,73 @@ services:
     networks:
       - oxidean
 
+  # Bundled object store — `docker compose --profile s3 up -d` with
+  # OXIDEAN_STORAGE_BACKEND=s3 set on api. RustFS (Apache-2.0, S3-compatible
+  # MinIO successor): single node + one volume — eval-grade like the bundled
+  # postgres; production should point OXIDEAN_S3_* at external object storage.
+  # One credential pair (OXIDEAN_S3_ACCESS_KEY_ID / …_SECRET_ACCESS_KEY) is
+  # the store's root keys AND what the api signs with.
+  objectstore:
+    profiles: ["s3"]
+    image: rustfs/rustfs:${RUSTFS_VERSION:-1.0.4}
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${OXIDEAN_S3_ACCESS_KEY_ID:-}
+      RUSTFS_SECRET_KEY: ${OXIDEAN_S3_SECRET_ACCESS_KEY:-}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_REGION: ${OXIDEAN_S3_REGION-us-east-1}
+      RUSTFS_CONSOLE_ENABLE: ${RUSTFS_CONSOLE_ENABLE:-false}
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      # No outbound version check — the store must not phone home.
+      RUSTFS_CHECK_UPDATE: "false"
+    volumes:
+      - objectstore_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || wget -qO- http://127.0.0.1:9000/minio/health/live >/dev/null",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - oxidean
+
+  # One-shot bucket creation — exits once the api's bucket exists.
+  objectstore-init:
+    profiles: ["s3"]
+    image: amazon/aws-cli:2.39.3
+    restart: "no"
+    depends_on:
+      objectstore:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${OXIDEAN_S3_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${OXIDEAN_S3_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${OXIDEAN_S3_REGION-us-east-1}
+      AWS_EC2_METADATA_DISABLED: "true"
+      S3_ENDPOINT: http://objectstore:9000
+      S3_BUCKET: ${OXIDEAN_S3_BUCKET:-oxidean}
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        if [ -z "$$AWS_ACCESS_KEY_ID" ] || [ -z "$$AWS_SECRET_ACCESS_KEY" ]; then
+          echo "ERROR: set OXIDEAN_S3_ACCESS_KEY_ID and OXIDEAN_S3_SECRET_ACCESS_KEY in .env for the s3 profile" >&2
+          exit 1
+        fi
+        for i in $$(seq 1 60); do
+          aws --endpoint-url "$$S3_ENDPOINT" s3 ls >/dev/null 2>&1 && break
+          sleep 5
+        done
+        aws --endpoint-url "$$S3_ENDPOINT" s3api head-bucket --bucket "$$S3_BUCKET" 2>/dev/null \
+          || aws --endpoint-url "$$S3_ENDPOINT" s3 mb "s3://$$S3_BUCKET"
+    networks:
+      - oxidean
+
 networks:
   oxidean:
 
@@ -240,3 +331,4 @@ volumes:
   caddy_data:
   caddy_config:
   runner_data:
+  objectstore_data:
