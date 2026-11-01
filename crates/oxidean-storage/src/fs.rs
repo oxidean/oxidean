@@ -118,6 +118,12 @@ pub(crate) fn absolutize(path: &Path) -> PathBuf {
 /// `.`/`..` components lexically. A plain `canonicalize`-or-nothing fallback
 /// would keep `..` in missing roots (`Path::components` does not normalize
 /// them), letting `/var/missing/../lfs` slip past `/var/lfs`.
+///
+/// Each appended tail component is re-canonicalized when it exists, so a
+/// symlink created under a "missing" directory is still followed before the
+/// next `..` folds — otherwise `dir/missing/../alias/child` (with `alias`
+/// linking into another store's root) would compare non-overlapping while
+/// the OS resolves it inside the other store at create time.
 pub(crate) fn resolve_isolation_root(root: &Path) -> PathBuf {
     let abs = absolutize(root);
     let components: Vec<Component> = abs.components().collect();
@@ -130,7 +136,12 @@ pub(crate) fn resolve_isolation_root(root: &Path) -> PathBuf {
                     Component::ParentDir => {
                         resolved.pop();
                     }
-                    Component::Normal(name) => resolved.push(name),
+                    Component::Normal(name) => {
+                        resolved.push(name);
+                        if let Ok(target) = std::fs::canonicalize(&resolved) {
+                            resolved = target;
+                        }
+                    }
                     _ => {}
                 }
             }

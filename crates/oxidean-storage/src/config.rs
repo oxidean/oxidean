@@ -699,6 +699,31 @@ mod tests {
             .is_ok());
     }
 
+    // A symlink inside an otherwise-missing tail is still followed: the
+    // kernel resolves `dir/missing/../alias/child` by hopping through
+    // `alias` before folding `..`, so it lands inside `dir/lfs`.
+    #[cfg(unix)]
+    #[test]
+    fn fs_isolation_follows_symlinks_in_missing_tail() {
+        let storage_fs = StorageConfig {
+            backend: BackendKind::Fs,
+            s3: None,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let lfs = dir.path().join("lfs");
+        std::fs::create_dir_all(&lfs).unwrap();
+        std::os::unix::fs::symlink(&lfs, dir.path().join("alias")).unwrap();
+        let sneaky = dir
+            .path()
+            .join("missing")
+            .join("..")
+            .join("alias")
+            .join("child");
+        assert!(storage_fs
+            .check_store_isolation([("lfs", lfs.as_path()), ("uploads", sneaky.as_path())])
+            .is_err());
+    }
+
     #[test]
     fn credentials_debug_redacts_secrets() {
         let creds = S3Credentials::Static {
