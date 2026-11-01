@@ -155,15 +155,29 @@ impl StorageConfig {
                 }
             }
             None => {
+                // Canonicalize so aliased roots (existing symlinks, dot
+                // components) compare as the same identity; a root that
+                // doesn't exist yet still gets lexical `.`/`..`
+                // normalization via absolutize + components.
                 let mut seen: HashMap<PathBuf, &str> = HashMap::new();
                 for (store, root) in stores {
-                    let root = absolutize(root);
-                    if let Some(other) = seen.insert(root.clone(), store) {
+                    let root = std::fs::canonicalize(root).unwrap_or_else(|_| {
+                        absolutize(root).components().collect()
+                    });
+                    if let Some((other_root, other)) =
+                        seen.iter().find(|(other_root, _)| {
+                            root.starts_with(other_root.as_path())
+                                || other_root.as_path().starts_with(&root)
+                        })
+                    {
                         return Err(StorageError::Config(format!(
-                            "stores `{other}` and `{store}` resolve to the same root {}",
+                            "stores `{other}` and `{store}` use overlapping \
+                             roots `{}` and `{}`",
+                            other_root.display(),
                             root.display()
                         )));
                     }
+                    seen.insert(root, store);
                 }
             }
         }

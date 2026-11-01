@@ -88,7 +88,7 @@ pub(crate) fn validate_blob_key(raw: &str) -> Result<(), StorageError> {
     // `tmp/…` would collide with the staging dir, `.oxidean-…` with the
     // ownership markers (`delete` on the marker key would strip ownership
     // and fail the next open).
-    let first = raw.split('/').next().unwrap();
+    let first = raw.split_once('/').map_or(raw, |(first, _)| first);
     if first == TMP_DIR || first.starts_with(INTERNAL_PREFIX) {
         return Err(StorageError::InvalidKey(format!(
             "first segment {first:?} is reserved for store internals"
