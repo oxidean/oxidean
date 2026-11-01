@@ -1,0 +1,51 @@
+Oxidean forge installed as release "{{ .Release.Name }}" (chart {{ .Chart.Version }}, app {{ .Chart.AppVersion }}).
+
+{{- if .Values.ingress.enabled }}
+Web UI:  {{ if .Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .Values.ingress.host | default "<ingress-host>" }}/
+         (publicOrigin is {{ .Values.publicOrigin }} — keep it in sync with the URL above)
+{{- else }}
+Web UI:  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "oxidean.webServiceName" . }} 3000:3000
+         → http://localhost:3000
+{{- end }}
+{{- if .Values.ssh.enabled }}
+
+Git SSH: svc/{{ include "oxidean.sshServiceName" . }} (type {{ .Values.ssh.service.type }}, port {{ .Values.ssh.service.port }} → {{ .Values.ssh.containerPort }})
+         Advertised endpoint: {{ include "oxidean.sshHost" . }}:{{ .Values.ssh.port }}
+         Get the assigned address: kubectl -n {{ .Release.Namespace }} get svc {{ include "oxidean.sshServiceName" . }}
+{{- end }}
+{{- if .Values.postgres.enabled }}
+
+Bundled postgres is evaluation-grade ({{ include "oxidean.postgresServiceName" . }}:5432 on its own PVC —
+not a backup story). Production: postgres.enabled=false + database.url or
+database.existingSecret → docs/SELFHOST-KUBERNETES.md.
+{{- end }}
+{{- if .Values.admin.email }}
+
+Admin:   seeded user for {{ .Values.admin.email }} — the generated password is
+         in Secret {{ include "oxidean.secretName" . }} (key OXIDEAN_ADMIN_PASSWORD)
+         unless you set secrets.adminPassword. First sign-in forces a change.
+{{- else }}
+
+Admin:   browse to /setup — the wizard creates the first sys-admin.
+{{- end }}
+{{- if .Values.secrets.existingSecret }}
+
+Secrets: envFrom {{ .Values.secrets.existingSecret }} — it must carry
+         OXIDEAN_ACTIONS_SECRETS_KEY{{ if .Values.postgres.enabled }}, POSTGRES_PASSWORD{{ end }}{{ if not .Values.database.existingSecret }}{{ if not .Values.postgres.enabled }}, DATABASE_URL{{ end }}{{ end }}
+         plus any optional keys (OXIDEAN_SESSION_SECRET, OXIDEAN_SECRETS_KEY,
+         OXIDEAN_WEB_FLOW_PRIVATE_KEY, OXIDEAN_S3_*, …).
+{{- end }}
+{{- if eq .Values.storage.backend "s3" }}
+
+Storage: s3 mode — OXIDEAN_S3_* envs are live for stores the api has migrated;
+{{- if .Values.storage.s3.retainDataVolume }}
+         the /var data PVC stays mounted until the remaining stores move over
+         (set storage.s3.retainDataVolume=false for the slim repos+ssh topology).
+{{- else }}
+         slim topology: /var/repos + /var/ssh PVCs only.
+{{- end }}
+{{- end }}
+{{- if .Values.runner.enabled }}
+
+Runner:  privileged dind sidecar enabled — restrict to trusted workflows.
+{{- end }}

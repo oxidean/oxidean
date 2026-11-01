@@ -1,0 +1,56 @@
+{{- /*
+Volume plan — see values.yaml `storage` and the fs/s3 note in _helpers.tpl.
+  fs                        → data PVC at /var
+  s3 + retainDataVolume     → same /var PVC (inert envs until consumers land)
+  s3 + !retainDataVolume    → /var/repos PVC only (target topology)
+The SSH host-key PVC is mounted at /var/ssh in every mode — generated host
+keys and the web-flow signing pair keep their trust chain across data-volume
+replacement.
+*/ -}}
+{{- if include "oxidean.dataVolumeMounted" . }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxidean.dataPvcName" . }}
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "oxidean.storageClass" .Values.storage.data.storageClass | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.data.size | quote }}
+---
+{{- end }}
+{{- if and (eq .Values.storage.backend "s3") (not .Values.storage.s3.retainDataVolume) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxidean.reposPvcName" . }}
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "oxidean.storageClass" .Values.storage.s3.repos.storageClass | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.s3.repos.size | quote }}
+---
+{{- end }}
+{{- if .Values.ssh.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxidean.sshPvcName" . }}
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "oxidean.storageClass" .Values.ssh.hostKeys.storageClass | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.ssh.hostKeys.size | quote }}
+{{- end }}
