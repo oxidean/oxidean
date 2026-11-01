@@ -169,6 +169,7 @@ export function applyHelmExtras(
   rootDir: string,
   entry: RegistryEntry,
   byId: Map<string, RegistryEntry>,
+  bumped: ReadonlyMap<string, string> = new Map(),
 ): (ManifestEdit | { error: string })[] {
   const out: (ManifestEdit | { error: string })[] = [];
   if (!entry.manifest_path) return out;
@@ -215,20 +216,33 @@ export function applyHelmExtras(
     if (values !== null) {
       let changed = false;
       for (const [svc, comp] of Object.entries(images)) {
-        // A shared image published by several components (web ↔ oxidean-web)
-        // tracks the newest carrier version, so either release refreshes the
-        // chart pin.
         const cids = Array.isArray(comp) ? comp : [comp];
+        const prevTag = values.match(new RegExp(`^${svc}:[\\s\\S]*?^    tag:[ \\t]*"?([^"\\s]*)"?`, "m"))?.[1];
+        // A shared image published by several components (web ↔ oxidean-web)
+        // must pin the tag this release actually produced — the bumped
+        // carrier's new version — not the numerically greatest series
+        // version, which can name an image built from older code. With no
+        // carrier in this plan, the existing pin still names a published
+        // tag; only fill it when empty.
+        const released = cids.filter((c) => bumped.has(c));
         let v: string | null = null;
-        for (const cid of cids) {
-          const cv = resolve(cid);
-          if (cv !== null && (v === null || compareSemver(cv, v) > 0)) v = cv;
+        if (released.length > 0) {
+          for (const cid of released) {
+            const cv = bumped.get(cid)!;
+            if (v === null || compareSemver(cv, v) > 0) v = cv;
+          }
+        } else if (!prevTag) {
+          for (const cid of cids) {
+            const cv = resolve(cid);
+            if (cv !== null && (v === null || compareSemver(cv, v) > 0)) v = cv;
+          }
+        } else {
+          continue;
         }
         if (!v) {
           out.push({ error: `${entry.id}: cannot resolve image_components.${svc} = "${JSON.stringify(comp)}" carrier` });
           continue;
         }
-        const prevTag = values.match(new RegExp(`^${svc}:[\\s\\S]*?^    tag:[ \\t]*"?([^"\\s]*)"?`, "m"))?.[1];
         const next = writeValuesImageTag(values, svc, v);
         if (next === null) {
           out.push({ error: `${entry.id}: no ${svc}.image.tag field in ${valuesRel}` });
@@ -318,10 +332,11 @@ export function bumpCommand(root: string, args: string[]): number {
   }
   // Helm stamps run after every carrier write so appVersion/image tags read
   // the freshly bumped versions, not the pre-bump ones.
+  const bumped = new Map(plan.entries.map((e) => [e.component, e.toVersion]));
   for (const e of plan.entries) {
     const reg = byId.get(e.component);
     if (!reg || reg.kind !== "helm") continue;
-    for (const x of applyHelmExtras(root, reg, byId)) {
+    for (const x of applyHelmExtras(root, reg, byId, bumped)) {
       if ("error" in x) errors.push(x.error);
       else edits.push(x);
     }

@@ -97,4 +97,44 @@ describe("applyHelmExtras", () => {
     const out = applyHelmExtras(root, helmEntry(), byId);
     expect(out.some((x) => "error" in x && x.error.includes("app_component"))).toBe(true);
   });
+
+  test("shared image pins the released carrier's version, not the max", () => {
+    const root = fixture();
+    // web image shared by carriers a (0.9.0) and b (0.4.1): bumping b must
+    // pin 0.4.1 — the tag the release just produced — not max(0.9.0).
+    mkdirSync(join(root, "crates/b"), { recursive: true });
+    writeFileSync(join(root, "crates/b/Cargo.toml"), '[package]\nname = "b"\nversion = "0.4.1"\n');
+    writeFileSync(
+      join(root, "crates/a/Cargo.toml"),
+      '[package]\nname = "a"\nversion = "0.9.0"\n',
+    );
+    const entry = helmEntry({ image_components: { web: ["a", "b"] } });
+    const byId = new Map([
+      ["a", crateEntry()],
+      ["b", { ...crateEntry(), id: "b", manifest_path: "crates/b/Cargo.toml" }],
+      ["chart", entry],
+    ]);
+    const out = applyHelmExtras(root, entry, byId, new Map([["b", "0.4.1"]]));
+    expect(out.filter((x) => "error" in x)).toEqual([]);
+    const values = readFileSync(join(root, "deploy/helm/x/values.yaml"), "utf-8");
+    const m = values.match(/^web:[\s\S]*?^    tag: "([^"]*)"/m);
+    expect(m?.[1]).toBe("0.4.1");
+  });
+
+  test("no carrier in the plan keeps the existing pin", () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, "deploy/helm/x/values.yaml"),
+      "web:\n  image:\n    repository: ghcr.io/x/web\n    tag: \"0.4.0\"\n",
+    );
+    const entry = helmEntry({ image_components: { web: ["a"] } });
+    const byId = new Map([["a", crateEntry()], ["chart", entry]]);
+    // Chart-only bump: carrier "a" did not release — the pin stays at the
+    // last produced tag instead of drifting.
+    const out = applyHelmExtras(root, entry, byId, new Map([["chart", "0.2.0"]]));
+    expect(out.filter((x) => "error" in x)).toEqual([]);
+    expect(out.filter((x) => !("error" in x) && x.field === "chart.image_tag")).toEqual([]);
+    const values = readFileSync(join(root, "deploy/helm/x/values.yaml"), "utf-8");
+    expect(values).toContain('tag: "0.4.0"');
+  });
 });
