@@ -84,6 +84,12 @@ services:
       OXIDEAN_VCS_OBJECTS_DIR: /var/vcs-objects
       # Actions job logs (D-ACT-13) — distinct from repos / LFS / packages / release-assets.
       OXIDEAN_ACTIONS_LOG_DIR: /var/actions-logs
+      # Actions artifact payloads (upload/download-artifact) — distinct store.
+      OXIDEAN_ACTIONS_ARTIFACTS_DIR: /var/actions-artifacts
+      # actions/cache payloads — distinct from artifacts and logs.
+      OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
+      # Pages materialized site trees — `pages.*` builds publish here.
+      OXIDEAN_PAGES_DIR: /var/pages
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
       # Instance MCP endpoint gate (AGT-03) — admin UI override wins at runtime.
       OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
@@ -137,6 +143,12 @@ services:
       - ./var/vcs-objects:/var/vcs-objects
       # Actions job logs (D-ACT-13) — {run_id}/{job_id}.log
       - ./var/actions-logs:/var/actions-logs
+      # Actions artifact payloads — {run_id}/{artifact_id}.tgz
+      - ./var/actions-artifacts:/var/actions-artifacts
+      # actions/cache payloads — {repo_id}/{cache_id}.tgz
+      - ./var/actions-cache:/var/actions-cache
+      # Pages materialized sites — /pages/{owner}/{repo}/ serve reads here
+      - ./var/pages:/var/pages
       # Persist SSH host keys across restarts (TOFU; D-SSH-07 / RESEARCH pitfall 5)
       - ssh_host_keys:/var/ssh
     depends_on:

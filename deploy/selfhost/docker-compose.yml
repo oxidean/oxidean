@@ -70,6 +70,7 @@ services:
       OXIDEAN_ACTIONS_LOG_DIR: /var/actions-logs
       OXIDEAN_ACTIONS_ARTIFACTS_DIR: /var/actions-artifacts
       OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
+      OXIDEAN_PAGES_DIR: /var/pages
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
       OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
       # Oxpilot agentic chat (/oxpilot) — enabled by default; configure a
