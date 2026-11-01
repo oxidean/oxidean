@@ -98,6 +98,8 @@ services:
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
       OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
       OXIDEAN_SSH_HOST_KEY_DIR: /var/ssh
+      # Status page theme shared with the web tier (default|meme).
+      OXIDEAN_STATUS_PAGE_THEME: ${OXIDEAN_STATUS_PAGE_THEME:-}
       # Web-flow commit signing (template/stack/license seed commits).
       # Required when OXIDEAN_ENV=production: provision via env (base64 PEM)
       # or drop web-flow/web-flow.pub into the volume under /var/ssh.
@@ -155,6 +157,8 @@ services:
       # Advertised Git SSH endpoint — injected as <meta> for CloneBox URLs.
       OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
       OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
+      # Status page theme shared with the api tier (default|meme).
+      OXIDEAN_STATUS_PAGE_THEME: ${OXIDEAN_STATUS_PAGE_THEME:-}
     ports:
       # Loopback-only by default: reach the app through caddy (tls profile)
       # for real installs. For a LAN/HTTP-only install, set

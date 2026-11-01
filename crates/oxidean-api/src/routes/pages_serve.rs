@@ -92,8 +92,19 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
     }
 }
 
+/// No site file and no custom `404.html` in the published tree → the
+/// shared branded page (GitHub Pages answers its own styled 404 the same
+/// way — user `404.html` still wins when present).
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, "Not Found").into_response()
+    (
+        StatusCode::NOT_FOUND,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        oxidean_status_pages::page(StatusCode::NOT_FOUND),
+    )
+        .into_response()
 }
 
 /// `rel` → a path inside `root`, or `None` on `..`/absolute escapes.

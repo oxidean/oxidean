@@ -426,10 +426,11 @@ async fn pages_legacy_build_serves_with_security_headers() {
     assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
 
     // Prefix-sibling decoy file must not exist on the site — and the site
-    // root under `/docs` has no 404.html, so the miss is a bare 404.
+    // root under `/docs` has no 404.html, so the miss is the branded page.
     let (status, _, body) = get_page(&t.app, "/pages/pg3/site/decoy.html", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body, b"Not Found");
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("Page not found"), "{body}");
 
     // Custom 404 body on miss — covered below under the `/` source, whose
     // tree carries the repo's own 404.html.
