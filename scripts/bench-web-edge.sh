@@ -40,7 +40,7 @@ PROJECT="${OXIDEAN_BENCH_PROJECT:-oxidean-bench}"
 # Host header or every baseline request 404s. Watt's gateway is host-agnostic.
 ORIGIN="http://localhost"
 ADMIN_EMAIL="${OXIDEAN_ADMIN_EMAIL:-bench-admin@oxidean.local}"
-ADMIN_PASSWORD="${OXIDEAN_ADMIN_PASSWORD:-password1}"
+ADMIN_PASSWORD="***"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.watt.yml -p "$PROJECT")
 WORK="$(mktemp -d)"
 
@@ -54,6 +54,24 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "error: required command not found: $1" >&2; exit 1; }
 }
 need_cmd docker; need_cmd git; need_cmd curl; need_cmd jq; need_cmd oha
+
+# oha's JSON flag moved across versions — 1.8 has `--json`, newer releases
+# have `--output-format json`. Detect support once so an incompatible oha
+# fails with an actionable error instead of recording null metrics.
+OHA_FLAGS=()
+if oha --help 2>&1 | grep -q -- '--output-format'; then
+  OHA_FLAGS=(--output-format json)
+elif oha --help 2>&1 | grep -q -- '--json'; then
+  OHA_FLAGS=(--json)
+else
+  echo "error: installed oha lacks JSON output support (need oha >= 1.8)" >&2
+  exit 1
+fi
+# --no-tui only exists on newer releases; older ones already skip the TUI
+# when stdout is not a terminal.
+if oha --help 2>&1 | grep -q -- '--no-tui'; then
+  OHA_FLAGS+=(--no-tui)
+fi
 
 now_ms() { date +%s%3N; }
 
@@ -89,7 +107,7 @@ rpc() {
 seed_lane() {
   echo "==> login + seed bench repo" >&2
   rm -f "$JAR"
-  rpc auth.login "{\"identifier\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"remember_me\":false}" >/dev/null
+  rpc auth.login "{\"identifier\":\"$ADMIN_EMAIL\",\"password\": \"***\",\"remember_me\":false}" >/dev/null
   local me owner pat token seed_dir repo
   me="$(rpc auth.me '{}')"
   owner="$(echo "$me" | jq -r '.username')"
@@ -175,7 +193,7 @@ edge_stats_json() {
 oha_run() {
   local label="$1" url="$2" out
   shift 2
-  out="$(oha --no-tui --output-format json -z "$DUR" -c "$CONN" "$@" "$url" \
+  out="$(oha "${OHA_FLAGS[@]}" -z "$DUR" -c "$CONN" "$@" "$url" \
         2>>"$WORK/oha-$label.log" || true)"
   if [[ -z "$out" ]] || ! echo "$out" | jq -e . >/dev/null 2>&1; then
     echo "warn: oha $label produced no JSON (see $WORK/oha-$label.log)" >&2
@@ -247,14 +265,17 @@ bench_lane() {
     edge_services="traefik web"
   fi
 
+  # Services with a `build:` section are always rebuilt — their images use
+  # stable `:ci` tags, so presence proves nothing about which checkout the
+  # layers came from. Compose's layer cache makes a no-change rebuild cheap;
+  # skipping on presence alone could benchmark stale code while the results
+  # record the current HEAD. Image-only services are pulled by `up`.
   echo "==> lane $lane: compose build ($services)" >&2
-  local bsvc bimg
+  local cfg bsvc
+  cfg="$("${COMPOSE[@]}" config --format json)"
   for bsvc in $services; do
-    bimg="$("${COMPOSE[@]}" config --format json 2>/dev/null | jq -r ".services.\"$bsvc\".image // empty")"
-    if [[ -z "$bimg" ]] || ! docker image inspect "$bimg" >/dev/null 2>&1; then
+    if echo "$cfg" | jq -e ".services.\"$bsvc\".build" >/dev/null 2>&1; then
       "${COMPOSE[@]}" build "$bsvc" >&2
-    else
-      echo "    $bsvc: image $bimg present, skipping build" >&2
     fi
   done
 
