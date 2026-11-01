@@ -5,15 +5,14 @@ References: [`references.md`](references.md).
 
 ## Status
 
-Proposed. Open questions in `shape.md` are the decisions to settle during
-implementation PR review; the defaults below reflect the recommendations.
+Proposed. All shaping decisions settled 2026-11-01 — ready to implement.
 
 ## Task 1 — Save spec documentation
 
 This folder: `shape.md`, `plan.md`, `standards.md`, `references.md`.
 Lands with the spec PR itself.
 
-## Task 2 — Chart skeleton (fs backend, external DB)
+## Task 2 — Chart skeleton (fs backend, bundled postgres)
 
 `deploy/helm/oxidean/`:
 
@@ -22,8 +21,9 @@ Lands with the spec PR itself.
 - `values.yaml` — image refs (`ghcr.io/oxidean/oxidean-{api,web}`, tag
   default `.Chart.AppVersion`), `storage.backend: fs`, single `data` PVC
   values (size/storageClass), `ingress` block, `ssh.service` block,
-  `database.external` (host/url) + `existingSecret`, `env`/`extraEnv`
-  passthrough, `resources`, `podSecurityContext`/`securityContext`
+  `postgres.enabled: true` + `database.external`/`existingSecret`
+  override, `env`/`extraEnv` passthrough, `resources`,
+  `podSecurityContext`/`securityContext`
 - `templates/_helpers.tpl` (names, labels, env renderer)
 - `templates/deployment-api.yaml` — replicas 1, `strategy: Recreate`,
   `/var` PVC mount, `/health:8080` probes, full `OXIDEAN_*` env surface
@@ -54,9 +54,11 @@ option). Docs note: ingress-nginx `tcp-services` alternative.
 
 ## Task 5 — Postgres dependency
 
-- `postgres.enabled` → Bitnami postgresql OCI subchart for eval installs;
-  renders `DATABASE_URL` into the api Secret
-- External default: `database.existingSecret` carrying `DATABASE_URL`
+- `postgres.enabled=true` default → Bitnami postgresql OCI subchart for
+  eval installs; renders `DATABASE_URL` into the api Secret
+- `postgres.enabled=false` + `database.existingSecret` carrying
+  `DATABASE_URL` is the production path; docs mark the bundled database
+  as evaluation-grade
 
 ## Task 6 — Optional runner
 
@@ -74,8 +76,9 @@ New `helm` job in `ci.yml`: `helm lint`, `helm template` render check
 
 ## Task 8 — Release integration
 
-- `versioning.toml` component for the chart (new `kind` — open question:
-  tooling support vs release-workflow-only versioning)
+- `versioning.toml` component for the chart plus real `kind = "helm"`
+  support in the versioning tooling (same shape as `contract`/`bun`) so
+  `Chart.yaml` `version`/`appVersion` are stamped by the release train
 - Release workflow: `helm package` → `helm push` to
   `oci://ghcr.io/oxidean/charts/oxidean`, version = release version
 

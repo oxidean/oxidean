@@ -20,8 +20,9 @@ Target topology (inherited from the storage spec):
   sharding/Gitaly-style split is a separate decision. Until then `api`
   cannot scale past one replica.
 - `web` — stateless, scales freely.
-- `postgres` — external `DATABASE_URL` by default; optional in-chart
-  dependency for zero-config installs.
+- `postgres` — in-chart dependency by default so `helm install` matches
+  compose's zero-config install; production operators point
+  `database.*` at an external `DATABASE_URL` instead.
 - Every non-git byte goes to object storage when `storage.backend=s3`
   (`crates/oxidean-storage`, PR #214): LFS, release assets, packages,
   template packs, VCS objects, actions logs/artifacts/cache, pages,
@@ -31,8 +32,7 @@ Target topology (inherited from the storage spec):
 
 ## Decisions
 
-Recommended defaults, flagged where the call could reasonably go the
-other way:
+Confirmed 2026-11-01:
 
 1. **Chart at `deploy/helm/oxidean/`**, published as an OCI artifact to
    `oci://ghcr.io/oxidean/charts/oxidean` on the existing release train —
@@ -80,21 +80,22 @@ other way:
    replica means no migration race; a pre-install/upgrade hook Job is a
    later option, not v1.
 
-10. **Postgres: external `DATABASE_URL` default; `postgres.enabled` adds
-    an in-chart dependency** (Bitnami postgresql OCI subchart) so
-    `helm install` works out of the box for evaluation.
+10. **Postgres: `postgres.enabled=true` by default** (Bitnami postgresql
+    OCI subchart) so `helm install` gives the same single-command eval
+    as compose; production operators set `postgres.enabled=false` and
+    supply an external `DATABASE_URL` via `database.*`. Docs mark the
+    bundled database as evaluation-grade.
 
 11. **Runner (`actions` profile in compose) is `runner.enabled=false`
     by default** — it needs a privileged dind sidecar or host docker
     socket, a real security tradeoff. Ship the template but gate it;
     hardening is follow-up.
 
-12. **Chart registered in `versioning.toml`** — needs a new component
-    `kind` (`crate`/`bun`/`contract` exist today; propose `helm`).
-    `Chart.yaml` `version` and `appVersion` follow the release version.
-    If tooling support for a new kind is too heavy for v1, fall back to
-    versioning the chart only inside the release workflow — flagged as
-    an open question.
+12. **Chart registered in `versioning.toml` with real `kind = "helm"`
+    tooling support** — the release tooling stamps `Chart.yaml`
+    `version`/`appVersion` in lockstep with the release train instead
+    of drifting on a workflow side-channel. Adding a kind is the same
+    shape as the existing `contract`/`bun` kinds.
 
 13. **CI gets a `helm` job** — `helm lint`, `helm template` golden
     render, and a kind-cluster install smoke alongside `selfhost-example`
@@ -112,17 +113,6 @@ other way:
   for a single writer.
 - **Secret for SSH host keys** — impossible: read-only mounts.
 - **Caddy inside the chart** — rejected: duplicates the ingress layer.
-
-## Open questions
-
-- Should `postgres.enabled` default on (single-command eval) or off
-  (production posture)? Leaning on, matching compose's inclusive default.
-- Runner in chart v1, or a documented `runner` follow-up? dind's
-  privileged surface argues for shipping gated-but-present.
-- Gateway API (`HTTPRoute`/`TCPRoute`) support now or Ingress-only v1?
-  Ingress covers every managed cluster today.
-- Does `versioning.toml` get `kind = "helm"` tooling support, or does
-  the chart version only in the release workflow for now?
 
 ## Context
 
