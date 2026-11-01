@@ -397,7 +397,9 @@ jobs:
           set -euo pipefail
           echo "${GH_TOKEN}" | helm registry login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
-          # Vendored subcharts (seaweedfs) must resolve before packaging.
+          # Vendored subcharts (seaweedfs) must resolve before packaging —
+          # charts/ is gitignored, so register the URL repo for the resolver.
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
           helm dependency build deploy/helm/oxidean
           helm package deploy/helm/oxidean
           helm push "oxidean-${{ needs.meta.outputs.chart_version }}.tgz" \
