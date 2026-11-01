@@ -135,7 +135,7 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 - [ ] **OPS-03** HA / horizontal scaling guidance: shared git storage, DB, object store, runner fleet.
 - [ ] **OPS-04** UI internationalization framework; the product is English-only.
 - [ ] **OPS-05** Admin console depth beyond DEBT-10: repo listing/search, runner detail, system info, broadcast notices.
-- [ ] **OPS-06** Kubernetes deployment: Helm chart installing postgres + api + web with `fs`/`s3` storage modes, SSH LoadBalancer service, and optional runner — unblocked by OPS-02. Spec: [`agent-os/specs/2026-11-01-1628-helm-k8s-deploy/`](../specs/2026-11-01-1628-helm-k8s-deploy/).
+- [x] **OPS-06** Kubernetes deployment: Helm chart [`deploy/helm/oxidean/`](../../deploy/helm/oxidean/) published as `oci://ghcr.io/oxidean/charts/oxidean` — single-replica api on RWO volumes, scalable web behind one Ingress hostname, bundled eval-grade Postgres + external `DATABASE_URL` path, `fs`/`s3` storage modes (s3 slim-PVCs until OPS-02 consumers land), SSH `LoadBalancer`, `lookup`-guarded generated secrets, opt-in privileged-DinD runner, `helm` CI lane (`helm lint`/render matrix/kind smoke) + `publish-chart` OCI lane on `oxidean-chart-v*` tags. Spec: [`agent-os/specs/2026-11-01-1628-helm-k8s-deploy/`](../specs/2026-11-01-1628-helm-k8s-deploy/).
 
 ## Exploratory / later
 

@@ -2,6 +2,8 @@
 
 Oxidean is configured primarily through environment variables. Canonical templates live in [`.env.example`](../.env.example) (Compose / local API) and [`docs/dev-auth.env.example`](dev-auth.env.example) (local auth/email stubs). Copy templates into untracked files such as `.env` or `.env.dev-auth` — never commit secrets.
 
+Deployment surfaces: [SELF-HOSTING.md](SELF-HOSTING.md) (Compose bundle) maps each var onto `deploy/selfhost/docker-compose.yml`; [SELFHOST-KUBERNETES.md](SELFHOST-KUBERNETES.md) maps the same contract onto the Helm chart in [`deploy/helm/oxidean/`](../deploy/helm/oxidean/).
+
 Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 
 ## Environment variables

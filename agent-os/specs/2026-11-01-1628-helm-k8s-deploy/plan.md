@@ -5,7 +5,24 @@ References: [`references.md`](references.md).
 
 ## Status
 
-Proposed. All shaping decisions settled 2026-11-01 — ready to implement.
+Implemented. All shaping decisions settled 2026-11-01; implementation
+landed on the spec branch. Recorded deviations from this plan:
+
+- **Bundled Postgres is native chart templates, not a Bitnami OCI
+  subchart.** A `postgres:18-alpine` `Deployment`+`Service`+PVC in-repo
+  keeps parity with the Compose bundle's exact image, removes an external
+  dependency fetch from CI/offline installs, and exposes the identical
+  operator surface (`postgres.enabled`, `postgres.size`,
+  `database.existingSecret`/`urlKey`).
+- **`storage.backend: s3` ships slim PVCs + env wiring, plus
+  `storage.s3.retainDataVolume: true` by default.** `oxidean-storage`
+  exists but its `BlobStore` is not yet consumed by the api, so s3 mode
+  keeps a `/var` PVC unless the operator opts out — documented honestly in
+  `docs/SELFHOST-KUBERNETES.md` and `values.yaml`.
+- **The bundled `DATABASE_URL` lives in the api Deployment env block, not
+  the Secret.** Kubernetes expands `$(VAR)` only in literal `value:`
+  fields, never in Secret data — `POSTGRES_*` are `secretKeyRef` entries
+  and `DATABASE_URL` expands them in-pod.
 
 ## Task 1 — Save spec documentation
 
