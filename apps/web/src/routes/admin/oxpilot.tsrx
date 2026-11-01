@@ -161,14 +161,25 @@ export function AdminOxpilotContent() @{
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
       window.location.assign("/login?returnTo=/admin/oxpilot");
-      return;
-    }
-    if (loaderData?.kind === "ready") {
-      setAuthMeCache(queryClient, loaderData.me);
-      queryClient.setQueryData(settingsQueryKey, loaderData.settings);
-      queryClient.setQueryData(providersQueryKey, loaderData.providers);
     }
   }, [loaderData, queryClient]);
+
+  // Sync each downstream cache only when its own loader field changes —
+  // `writeSettingsCaches` bumps the loader query, and re-writing
+  // `me`/`providers` off that snapshot would clobber caches that
+  // recovered independently (e.g. providersQ after a loader-time 503).
+  const loaderMe = loaderData?.kind === "ready" ? loaderData.me : null;
+  const loaderSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
+  const loaderProviders = loaderData?.kind === "ready" ? loaderData.providers : null;
+  useEffect(() => {
+    if (loaderMe) setAuthMeCache(queryClient, loaderMe);
+  }, [loaderMe, queryClient]);
+  useEffect(() => {
+    if (loaderSettings) queryClient.setQueryData(settingsQueryKey, loaderSettings);
+  }, [loaderSettings, queryClient]);
+  useEffect(() => {
+    if (loaderProviders) queryClient.setQueryData(providersQueryKey, loaderProviders);
+  }, [loaderProviders, queryClient]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),

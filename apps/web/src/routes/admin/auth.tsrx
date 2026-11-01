@@ -222,13 +222,21 @@ export function AdminAuthContent() @{
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
       window.location.assign("/login?returnTo=/admin/auth");
-      return;
-    }
-    if (loaderData?.kind === "ready") {
-      setAuthMeCache(queryClient, loaderData.me);
-      setAdminAuthSettingsCache(queryClient, loaderData.settings);
     }
   }, [loaderData, queryClient]);
+
+  // Sync each downstream cache only when its own loader field changes —
+  // `writeSettingsCaches` bumps the loader query, and re-writing `me`
+  // off that snapshot would clobber a session cache that refreshed
+  // independently.
+  const loaderMe = loaderData?.kind === "ready" ? loaderData.me : null;
+  const loaderSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
+  useEffect(() => {
+    if (loaderMe) setAuthMeCache(queryClient, loaderMe);
+  }, [loaderMe, queryClient]);
+  useEffect(() => {
+    if (loaderSettings) setAdminAuthSettingsCache(queryClient, loaderSettings);
+  }, [loaderSettings, queryClient]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
