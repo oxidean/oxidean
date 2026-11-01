@@ -158,6 +158,19 @@ headers itself; the port may then face clients directly.
 **Disable git-over-SSH** — `OXIDEAN_SSH_ENABLED=false` (optionally remove
 the `ports:` entry under `api`).
 
+**Object storage (s3)** — `docker compose --profile s3 up -d` adds a bundled
+RustFS service (S3-compatible, Apache-2.0) plus a one-shot bucket-init job.
+Set in `.env`: `OXIDEAN_STORAGE_BACKEND=s3` and the credential pair
+`OXIDEAN_S3_ACCESS_KEY_ID` / `OXIDEAN_S3_SECRET_ACCESS_KEY` (one pair is the
+store's root keys *and* what the api signs with). Compose env defaults
+already point api at `http://objectstore:9000` bucket `oxidean` — override
+the `OXIDEAN_S3_*` set for an external endpoint (`OXIDEAN_S3_ENDPOINT=`
+explicitly empty selects AWS). Eval-grade like bundled postgres: single
+node, one volume, no replication — production should run external object
+storage. Non-Git stores migrate to it as the api's BlobStore rollout lands
+(see [CONFIGURATION.md](CONFIGURATION.md#object-storage-backend)); Git repos
+and SSH keys stay on POSIX either way.
+
 **Air-gapped / custom image registry** — retag the three
 `ghcr.io/oxidean/oxidean-*` images into your registry and edit the `image:`
 lines; the drift check's allowlist only applies to the shipped file.

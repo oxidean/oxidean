@@ -109,6 +109,24 @@ Point `storage.s3.bucket` (+ `prefix`, `endpoint`, `region`, `pathStyle`,
 volumes remain: `/var/repos` (Git) and `/var/ssh` (keys); everything else is
 intended to resolve through `crates/oxidean-storage`'s `s3` backend.
 
+**Bundled store (`objectstore`)** — `objectstore.enabled=true` deploys a
+single-node RustFS (S3-compatible, Apache-2.0) on its own PVC
+(`<release>-oxidean-objectstore`) behind a ClusterIP Service. With
+`storage.backend=s3` and no explicit `storage.s3.endpoint`, the api's
+`OXIDEAN_S3_*` envs default to `http://<release>-oxidean-objectstore:9000`
+(path-style addressing, `OXIDEAN_S3_INSECURE_HTTP=1` for the in-cluster
+http endpoint) and `storage.s3.bucket` falls back to `objectstore.bucket`
+(default `oxidean`). A `post-install,post-upgrade` hook Job creates the
+bucket. Credentials are one shared pair in the chart Secret (or your
+`secrets.existingSecret`'s `OXIDEAN_S3_ACCESS_KEY_ID` /
+`OXIDEAN_S3_SECRET_ACCESS_KEY` keys): the store reads them as `RUSTFS_*`
+root keys and the api signs with them. Explicit `storage.s3.accessKeyId` /
+`secretAccessKey` override the generated pair — and then double as the
+store's root keys. Eval-grade like bundled postgres — production:
+`objectstore.enabled=false` + external `storage.s3.*`. Every explicit
+`storage.s3.*` value overrides its bundled default field-by-field, so you
+can also keep the bundled store while pointing the api elsewhere.
+
 > **Honesty note (OPS-02 in-flight):** the `BlobStore` abstraction exists
 > but API consumer migration is still landing — today `s3` mode mounts the
 > slim PVCs and exports `OXIDEAN_S3_*`, while non-Git stores still write to
