@@ -160,12 +160,10 @@ impl StorageConfig {
                 let mut seen: HashMap<PathBuf, &str> = HashMap::new();
                 for (store, root) in stores {
                     let root = resolve_isolation_root(root);
-                    if let Some((other_root, other)) =
-                        seen.iter().find(|(other_root, _)| {
-                            root.starts_with(other_root.as_path())
-                                || other_root.as_path().starts_with(&root)
-                        })
-                    {
+                    if let Some((other_root, other)) = seen.iter().find(|(other_root, _)| {
+                        root.starts_with(other_root.as_path())
+                            || other_root.as_path().starts_with(&root)
+                    }) {
                         return Err(StorageError::Config(format!(
                             "stores `{other}` and `{store}` use overlapping \
                              roots `{}` and `{}`",
@@ -691,10 +689,7 @@ mod tests {
         let lfs = dir.path().join("lfs");
         let child = base.join("..").join("lfs").join("child");
         assert!(storage_fs
-            .check_store_isolation([
-                ("lfs", lfs.as_path()),
-                ("uploads", child.as_path()),
-            ])
+            .check_store_isolation([("lfs", lfs.as_path()), ("uploads", child.as_path()),])
             .is_err());
         assert!(storage_fs
             .check_store_isolation([
