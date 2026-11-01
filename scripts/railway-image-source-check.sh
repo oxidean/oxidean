@@ -230,9 +230,10 @@ url_param() {
   printf '%s' "$1" | sed -n "s/.*[?&]$2=\([^&#]*\).*/\1/p"
 }
 
-# gitignore-style glob → ERE, repo-root anchored (`**` → .*, `*` → [^/]*,
-# `?` → [^/]). Slash-less patterns match the basename at any depth —
-# over-matching only ever leaves a status alone, the safe direction.
+# gitignore-style glob → ERE, repo-root anchored (`**/` → zero or more
+# directories, `**` → .*, `*` → [^/]*, `?` → [^/]). Slash-less patterns
+# match the basename at any depth — over-matching only ever leaves a
+# status alone, the safe direction.
 watch_pattern_match() {
   local file="$1" pat="$2" re="" i=0 ch
   pat="${pat#/}"
@@ -242,7 +243,9 @@ watch_pattern_match() {
     ch="${pat:i:1}"
     case "$ch" in
       '*')
-        if [[ "${pat:i:2}" == "**" ]]; then re+='.*'; i=$((i + 2));
+        if [[ "${pat:i:2}" == "**" ]]; then
+          if [[ "${pat:i+2:1}" == "/" ]]; then re+='(.*/)?'; i=$((i + 3));
+          else re+='.*'; i=$((i + 2)); fi
         else re+='[^/]*'; i=$((i + 1)); fi ;;
       '?') re+='[^/]'; i=$((i + 1)) ;;
       \\) re+='\\\\'; i=$((i + 1)) ;;
