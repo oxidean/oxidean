@@ -100,6 +100,8 @@ The `Main` branch ruleset requires every `ci.yml` job plus `images.yml`'s `meta`
 
 Structured work runs through **Agent OS** skills under `.agents/skills/` (`agent-os-plan-product`, `agent-os-shape-spec`, `agent-os-discover-standards`, `agent-os-index-standards`, `agent-os-inject-standards`) plus `bm-prd-creator` for idea→PRD→milestones. Product docs live under `agent-os/product/`, team standards under `agent-os/standards/`, and specs under `agent-os/specs/` — one canonical home each; `.claude/skills`, `.devin/skills`, and root `CLAUDE.md` are symlinks, never second copies. The shipped v1.0 GSD-era milestone history and the retired AI-DLC intent records are archived read-only at [`agent-os/specs/_archive/`](agent-os/specs/_archive/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `agent-os/specs/_archive/gsd/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.
 
+Chat-driven agents (Telegram/messaging surfaces, ACP hosts — no plan mode or interactive question forms) follow [`.agents/skills/agent-os-async-flow/SKILL.md`](.agents/skills/agent-os-async-flow/SKILL.md): it adapts the upstream skills' plan-mode/AskUserQuestion requirements for async conversations — autonomous spec drafts, open questions in plain text, review via draft PR.
+
 ## Scratch files (`tmp/`)
 
 Use repo-root [`tmp/`](tmp/README.md) for agent and local scratch (screenshots, dumps, one-off scripts, debug logs). The directory is gitignored except `tmp/README.md`. **Never** drop temporary files in the repository root or inside `apps/` / `crates/` / `packages/` source trees.
