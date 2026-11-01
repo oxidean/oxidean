@@ -2,8 +2,8 @@
 {{- if not (or (eq .Values.storage.backend "fs") (eq .Values.storage.backend "s3")) -}}
 {{- fail (printf "storage.backend must be fs or s3, got %q" .Values.storage.backend) -}}
 {{- end -}}
-{{- if and (eq .Values.storage.backend "s3") (not .Values.storage.s3.bucket) -}}
-{{- fail "storage.backend=s3 requires storage.s3.bucket (OXIDEAN_S3_BUCKET)" -}}
+{{- if and (eq .Values.storage.backend "s3") (empty (include "oxidean.s3Bucket" .)) -}}
+{{- fail "storage.backend=s3 requires storage.s3.bucket or objectstore.enabled (OXIDEAN_S3_BUCKET)" -}}
 {{- end -}}
 {{- if and (eq .Values.storage.backend "s3") (ne (empty .Values.storage.s3.accessKeyId) (empty .Values.storage.s3.secretAccessKey)) -}}
 {{- fail "storage.s3.accessKeyId and storage.s3.secretAccessKey must be set together (or neither for the ambient AWS chain)" -}}
@@ -175,24 +175,24 @@ spec:
             - name: OXIDEAN_STORAGE_BACKEND
               value: s3
             - name: OXIDEAN_S3_BUCKET
-              value: {{ .Values.storage.s3.bucket | quote }}
+              value: {{ include "oxidean.s3Bucket" . | quote }}
             {{- with .Values.storage.s3.prefix }}
             - name: OXIDEAN_S3_PREFIX
               value: {{ . | quote }}
             {{- end }}
-            {{- with .Values.storage.s3.endpoint }}
+            {{- if or .Values.storage.s3.endpoint (eq (include "oxidean.s3Bundled" .) "true") }}
             - name: OXIDEAN_S3_ENDPOINT
-              value: {{ . | quote }}
+              value: {{ include "oxidean.s3Endpoint" . | quote }}
             {{- end }}
-            {{- with .Values.storage.s3.region }}
+            {{- if or .Values.storage.s3.region (eq (include "oxidean.s3Bundled" .) "true") }}
             - name: OXIDEAN_S3_REGION
-              value: {{ . | quote }}
+              value: {{ default .Values.objectstore.region .Values.storage.s3.region | quote }}
             {{- end }}
             {{- if ne .Values.storage.s3.pathStyle "" }}
             - name: OXIDEAN_S3_PATH_STYLE
               value: {{ .Values.storage.s3.pathStyle | quote }}
             {{- end }}
-            {{- if .Values.storage.s3.insecureHttp }}
+            {{- if or .Values.storage.s3.insecureHttp (eq (include "oxidean.s3Bundled" .) "true") }}
             - name: OXIDEAN_S3_INSECURE_HTTP
               value: "1"
             {{- end }}

@@ -1,0 +1,95 @@
+{{- if .Values.objectstore.enabled -}}
+{{- /*
+Evaluation-grade bundled object store — the chart-side analogue of the
+compose `s3` profile's objectstore service (same RustFS image). Deployment
+(not StatefulSet): single replica, Recreate keeps the PVC single-attached.
+Credentials: RUSTFS_* envs map onto the shared OXIDEAN_S3_* Secret keys —
+the api and the store authenticate with the same pair.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxidean.fullname" . }}-objectstore
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oxidean.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: objectstore
+  template:
+    metadata:
+      labels:
+        {{- include "oxidean.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: objectstore
+    spec:
+      containers:
+        - name: objectstore
+          image: "{{ .Values.objectstore.image.repository }}:{{ .Values.objectstore.image.tag }}"
+          imagePullPolicy: {{ .Values.objectstore.image.pullPolicy }}
+          args: ["/data"]
+          ports:
+            - name: s3
+              containerPort: 9000
+              protocol: TCP
+            {{- if .Values.objectstore.console.enabled }}
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: OXIDEAN_S3_ACCESS_KEY_ID
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: OXIDEAN_S3_SECRET_ACCESS_KEY
+            - name: RUSTFS_VOLUMES
+              value: /data
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_REGION
+              value: {{ .Values.objectstore.region | quote }}
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: {{ .Values.objectstore.console.enabled | quote }}
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: ":9001"
+            # No outbound version check — the pod must not phone home.
+            - name: RUSTFS_CHECK_UPDATE
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            periodSeconds: 20
+          {{- with .Values.objectstore.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxidean.objectstorePvcName" . }}
+{{- end }}

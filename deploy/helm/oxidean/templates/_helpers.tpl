@@ -112,6 +112,59 @@ Service names.
 {{- printf "%s-api" (include "oxidean.fullname" .) -}}
 {{- end -}}
 
+{{/*
+Bundled object store (RustFS). When objectstore.enabled and no explicit
+storage.s3.endpoint is set, the bundled service is the effective endpoint and
+the chart Secret carries the shared credentials both pods read.
+*/}}
+{{- define "oxidean.objectstoreServiceName" -}}
+{{- printf "%s-objectstore" (include "oxidean.fullname" .) -}}
+{{- end -}}
+
+{{- define "oxidean.objectstorePvcName" -}}
+{{- printf "%s-objectstore" (include "oxidean.fullname" .) -}}
+{{- end -}}
+
+{{- define "oxidean.objectstoreEndpoint" -}}
+{{- printf "http://%s:9000" (include "oxidean.objectstoreServiceName" .) -}}
+{{- end -}}
+
+{{/* True when the bundled store is the effective s3 endpoint (no explicit override). */}}
+{{- define "oxidean.s3Bundled" -}}
+{{- if and .Values.objectstore.enabled (empty .Values.storage.s3.endpoint) -}}true{{- end -}}
+{{- end -}}
+
+{{/* Effective endpoint — explicit storage.s3.endpoint wins over the bundled service. */}}
+{{- define "oxidean.s3Endpoint" -}}
+{{- if .Values.storage.s3.endpoint -}}
+{{- .Values.storage.s3.endpoint -}}
+{{- else -}}
+{{- include "oxidean.objectstoreEndpoint" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Effective bucket — explicit storage.s3.bucket wins over the bundled default.
+objectstore.bucket only applies when the store is enabled, so a bare
+storage.backend=s3 still fails closed without a bucket.
+*/}}
+{{- define "oxidean.s3Bucket" -}}
+{{- if .Values.objectstore.enabled -}}
+{{- default .Values.objectstore.bucket .Values.storage.s3.bucket -}}
+{{- else -}}
+{{- .Values.storage.s3.bucket -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Shared s3 credentials live in the chart Secret (or secrets.existingSecret)
+under the OXIDEAN_S3_* keys — the api reads them directly and the bundled
+store maps them to RUSTFS_* envs, so one pair authenticates both sides.
+*/}}
+{{- define "oxidean.s3CredentialsSecretName" -}}
+{{- include "oxidean.secretName" . -}}
+{{- end -}}
+
 {{- define "oxidean.webServiceName" -}}
 {{- printf "%s-web" (include "oxidean.fullname" .) -}}
 {{- end -}}

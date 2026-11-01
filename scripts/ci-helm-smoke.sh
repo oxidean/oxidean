@@ -83,6 +83,43 @@ if helm template "$RELEASE" "$CHART" -n "$NS" \
   exit 1
 fi
 
+echo "==> helm template — bundled objectstore renders and wires s3"
+BUNDLED="$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set storage.backend=s3 \
+  --set objectstore.enabled=true)"
+for expected in "name: ${RELEASE}-oxidean-objectstore" "name: ${RELEASE}-oxidean-objectstore-init"; do
+  if ! grep -q "$expected" <<<"$BUNDLED"; then
+    echo "FAIL: bundled render missing $expected" >&2
+    exit 1
+  fi
+done
+grep -q 'value: "http://ox-oxidean-objectstore:9000"' <<<"$BUNDLED" \
+  || { echo "FAIL: bundled endpoint must default to the service DNS" >&2; exit 1; }
+grep -q 'OXIDEAN_S3_INSECURE_HTTP' <<<"$BUNDLED" \
+  || { echo "FAIL: bundled http endpoint must emit OXIDEAN_S3_INSECURE_HTTP" >&2; exit 1; }
+grep -q 'helm.sh/hook": post-install,post-upgrade' <<<"$BUNDLED" \
+  || { echo "FAIL: bucket init must be a post-install/upgrade hook Job" >&2; exit 1; }
+
+echo "==> helm template — explicit s3.endpoint overrides the bundled store"
+OVERRIDE="$(helm template "$RELEASE" "$CHART" -n "$NS" \
+  --set storage.backend=s3 \
+  --set objectstore.enabled=true \
+  --set storage.s3.endpoint=https://s3.example.com \
+  --set storage.s3.bucket=ext-bucket)"
+grep -q 'value: "https://s3.example.com"' <<<"$OVERRIDE" \
+  || { echo "FAIL: explicit endpoint must win over the bundled default" >&2; exit 1; }
+if grep -q 'OXIDEAN_S3_INSECURE_HTTP' <<<"$OVERRIDE"; then
+  echo "FAIL: https endpoint must not emit OXIDEAN_S3_INSECURE_HTTP" >&2
+  exit 1
+fi
+
+echo "==> helm template — bare s3 without bucket or store fails closed"
+if helm template "$RELEASE" "$CHART" -n "$NS" \
+    --set storage.backend=s3 >/dev/null 2>&1; then
+  echo "FAIL: backend=s3 without bucket/objectstore must abort templating" >&2
+  exit 1
+fi
+
 if [ "${HELM_SMOKE_SKIP_CLUSTER:-0}" = "1" ]; then
   echo "==> cluster smoke skipped (HELM_SMOKE_SKIP_KIND_LOAD/CLUSTER)"
   echo "==> ci-helm-smoke OK (lint+render only)"
@@ -158,6 +195,60 @@ probe "oxidean-web" 3000 "/health" "Oxidean-Health-Probe: 1" || { echo "FAIL: we
 echo "==> postgres readiness"
 kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-postgres" -- \
   pg_isready -U oxidean >/dev/null || { echo "FAIL: postgres pg_isready" >&2; exit 1; }
+
+echo "==> preload objectstore + init images into kind"
+docker pull rustfs/rustfs:1.0.4 >/dev/null
+docker pull amazon/aws-cli:2.39.3 >/dev/null
+kind load docker-image --name "${KIND_CLUSTER:-kind}" rustfs/rustfs:1.0.4 amazon/aws-cli:2.39.3
+
+echo "==> upgrade to storage.backend=s3 + bundled objectstore"
+helm upgrade "$RELEASE" "$CHART" -n "$NS" \
+  --reuse-values \
+  --set storage.backend=s3 \
+  --set objectstore.enabled=true
+
+echo "==> waiting for objectstore + api rollouts"
+kubectl -n "$NS" rollout status "deploy/${RELEASE}-oxidean-objectstore" --timeout=300s
+kubectl -n "$NS" rollout status "deploy/${RELEASE}-oxidean-api" --timeout=600s
+
+echo "==> bundled bucket exists in the store"
+# The init Job is a helm hook with hook-succeeded cleanup — it is gone by the
+# time helm returns, so assert the invariant it produces instead: the bucket
+# is listable with the chart-minted credentials against the bundled service.
+OS_AK="$(kubectl -n "$NS" get secret "${RELEASE}-oxidean-secrets" \
+  -o jsonpath='{.data.OXIDEAN_S3_ACCESS_KEY_ID}' | base64 -d)"
+OS_SK="$(kubectl -n "$NS" get secret "${RELEASE}-oxidean-secrets" \
+  -o jsonpath='{.data.OXIDEAN_S3_SECRET_ACCESS_KEY}' | base64 -d)"
+OS_OVR="$(printf '%s' \
+  '{"spec":{"containers":[{"name":"ox-s3-check","image":"amazon/aws-cli:2.39.3",' \
+  '"imagePullPolicy":"Never","command":["/bin/sh","-ec",' \
+  '"aws --endpoint-url http://'"${RELEASE}"'-oxidean-objectstore:9000 s3 ls"],' \
+  '"env":[{"name":"AWS_ACCESS_KEY_ID","value":"'"$OS_AK"'"},' \
+  '{"name":"AWS_SECRET_ACCESS_KEY","value":"'"$OS_SK"'"},' \
+  '{"name":"AWS_EC2_METADATA_DISABLED","value":"true"}]}]}}')"
+# No --rm/-i attach — a fast-exiting pod's output can be lost before the
+# attach stream opens; poll the phase and read logs instead.
+kubectl -n "$NS" delete pod ox-s3-check --ignore-not-found >/dev/null
+kubectl -n "$NS" run ox-s3-check --restart=Never \
+  --image amazon/aws-cli:2.39.3 --overrides="$OS_OVR" >/dev/null
+for _ in $(seq 1 60); do
+  PHASE="$(kubectl -n "$NS" get pod ox-s3-check -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  { [ "$PHASE" = "Succeeded" ] || [ "$PHASE" = "Failed" ]; } && break
+  sleep 2
+done
+kubectl -n "$NS" logs ox-s3-check || true
+{ [ "$PHASE" = "Succeeded" ] \
+  && kubectl -n "$NS" logs ox-s3-check | grep -q "oxidean"; } \
+  || { echo "FAIL: bundled bucket not listable" >&2; exit 1; }
+kubectl -n "$NS" delete pod ox-s3-check >/dev/null
+
+echo "==> api carries the bundled s3 env contract"
+kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
+  | grep -q "^OXIDEAN_S3_ENDPOINT=http://ox-oxidean-objectstore:9000$" \
+  || { echo "FAIL: api missing bundled OXIDEAN_S3_ENDPOINT" >&2; exit 1; }
+kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
+  | grep -q "^OXIDEAN_STORAGE_BACKEND=s3$" \
+  || { echo "FAIL: api missing OXIDEAN_STORAGE_BACKEND=s3" >&2; exit 1; }
 
 trap - ERR
 echo "==> ci-helm-smoke OK"

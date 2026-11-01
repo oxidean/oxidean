@@ -119,14 +119,20 @@ storage:
   s3:
     # Cross-references crates/oxidean-storage/src/config.rs — env names,
     # validation, and fail-closed behavior are authoritative there.
+    # When objectstore.enabled and endpoint is empty, the bundled store is the
+    # endpoint — bucket defaults to objectstore.bucket, credentials to a pair
+    # generated once into the chart Secret (shared with the store's RUSTFS_*
+    # root keys).
     bucket: ""
     prefix: "" # global key prefix before {store}/
-    endpoint: "" # custom S3-compatible endpoint URL
+    endpoint: "" # custom S3-compatible endpoint URL — empty uses the bundled store
     region: "" # provider default when empty; "auto" for R2-style
-    pathStyle: "" # "" | "1" | "0" — force path-style addressing
-    insecureHttp: false # opt-in for http:// endpoints (OXIDEAN_S3_INSECURE_HTTP)
+    pathStyle: "" # "" | "1" | "0" — force path-style addressing (custom endpoints default to path-style)
+    insecureHttp: false # opt-in for http:// endpoints — always emitted for the bundled store
     # Static credentials — both-or-neither; neither → ambient AWS chain
     # (AWS_* env, web-identity/IRSA, ECS, IMDS) which needs no chart secrets.
+    # With objectstore.enabled + no explicit pair, the chart generates one
+    # into the Secret and it doubles as the store's root credentials.
     accessKeyId: ""
     secretAccessKey: ""
     sessionToken: ""
@@ -192,9 +198,47 @@ postgres:
 #   2. database.url (rendered into the chart Secret)
 #   3. postgres.enabled → URL rendered to the bundled service
 database:
-  url: "" # postgres://user:pass@host:5432/db · mysql://… · sqlite:/var/oxidean.db
+  url: "" # postgres://user:***@host:5432/db · mysql://… · sqlite:/var/oxidean.db
   existingSecret: ""
   urlKey: DATABASE_URL
+
+# --- Bundled object store ---------------------------------------------------
+# Evaluation-grade S3-compatible store (RustFS, Apache-2.0) — the chart-side
+# analogue of the compose `s3` profile. With `storage.backend=s3` +
+# `objectstore.enabled=true` and no explicit `storage.s3.endpoint`, the api's
+# OXIDEAN_S3_* envs default to this service and a post-install Job creates
+# the bucket. Credentials: one shared pair — generated once into the chart
+# Secret unless storage.s3.accessKeyId/secretAccessKey are set (which then
+# double as the store's root keys) or secrets.existingSecret carries
+# OXIDEAN_S3_ACCESS_KEY_ID / OXIDEAN_S3_SECRET_ACCESS_KEY.
+# Production: objectstore.enabled=false + external storage.s3.* — bundled
+# data lives on its PVC and is NOT a backup story (same posture as postgres).
+objectstore:
+  enabled: false
+  image:
+    repository: rustfs/rustfs
+    tag: "1.0.4"
+    pullPolicy: IfNotPresent
+  bucket: oxidean # created by the init Job on install/upgrade
+  region: us-east-1
+  console:
+    enabled: false # RustFS admin console on :9001 — debugging aid only
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  # Bucket-creation Job (post-install/post-upgrade hook) — head-bucket, then
+  # mb when absent.
+  init:
+    image:
+      repository: amazon/aws-cli
+      tag: "2.39.3"
+      pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
 
 # --- HTTP ingress ---------------------------------------------------------------
 # Ingress → web:3000; the web tier reverse-proxies every API-owned path

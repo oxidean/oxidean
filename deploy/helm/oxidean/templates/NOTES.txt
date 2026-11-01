@@ -19,6 +19,12 @@ Bundled postgres is evaluation-grade ({{ include "oxidean.postgresServiceName" .
 not a backup story). Production: postgres.enabled=false + database.url or
 database.existingSecret → docs/SELFHOST-KUBERNETES.md.
 {{- end }}
+{{- if .Values.objectstore.enabled }}
+
+Bundled object store (RustFS) is evaluation-grade ({{ include "oxidean.objectstoreServiceName" . }}:9000 on
+its own PVC — not a backup story). Production: objectstore.enabled=false +
+external storage.s3.* → docs/SELFHOST-KUBERNETES.md.
+{{- end }}
 {{- if .Values.admin.email }}
 
 Admin:   seeded user for {{ .Values.admin.email }} — the generated password is
@@ -33,7 +39,9 @@ Admin:   browse to /setup — the wizard creates the first sys-admin.
 Secrets: envFrom {{ .Values.secrets.existingSecret }} — it must carry
          OXIDEAN_ACTIONS_SECRETS_KEY{{ if .Values.postgres.enabled }}, POSTGRES_PASSWORD{{ end }}{{ if not .Values.database.existingSecret }}{{ if not .Values.postgres.enabled }}, DATABASE_URL{{ end }}{{ end }}
          plus any optional keys (OXIDEAN_SESSION_SECRET, OXIDEAN_SECRETS_KEY,
-         OXIDEAN_WEB_FLOW_PRIVATE_KEY, OXIDEAN_S3_*, …).
+         OXIDEAN_WEB_FLOW_PRIVATE_KEY, OXIDEAN_S3_*, …).{{ if .Values.objectstore.enabled }}
+         objectstore.enabled → OXIDEAN_S3_ACCESS_KEY_ID +
+         OXIDEAN_S3_SECRET_ACCESS_KEY are required (store + api + init Job).{{ end }}
 {{- end }}
 {{- if eq .Values.storage.backend "s3" }}
 
