@@ -867,6 +867,48 @@ jobs:
             /tmp/oxidean-smoke*.json
           if-no-files-found: ignore
 
+  # Helm chart lane (OPS-06): helm lint → render matrix (default fs, s3 slim,
+  # existingSecret, runner, fail-closed half-credentials) → kind install smoke
+  # against the same-run oxidean images (mirrors compose-smoke's artifact
+  # flow). Fail-closed via scripts/ci-helm-smoke.sh.
+  helm:
+    name: helm
+    needs: [docker-ci-images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: free disk for image load
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+          df -h /
+      - name: download compose images
+        uses: actions/download-artifact@v8
+        with:
+          name: oxidean-ci-images
+          path: /tmp/oxidean-ci-images
+      - name: load compose images
+        run: ./scripts/ci-load-compose-images.sh /tmp/oxidean-ci-images/oxidean-ci-images.tgz
+      - name: setup helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.22.1
+      - name: create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+      - name: helm lint + render + kind smoke
+        env:
+          CI: "true"
+        run: ./scripts/ci-helm-smoke.sh
+      - name: upload helm smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: helm-smoke-logs
+          path: /tmp/helm-smoke*
+          if-no-files-found: ignore
+
   # One leg for all three dialects: services: can't key on matrix (Postgres +
   # MySQL booted per leg anyway), and the probe now runs from the shared
   # nextest archive — no per-dialect compile, one runner boot.
