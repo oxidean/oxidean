@@ -53,6 +53,13 @@ export function signedIn(cookie) {
 // port: `http://localhost:8080` in docs/example text must survive untouched.
 const BUILD_ORIGIN_PLACEHOLDER = 'http://localhost'
 
+// Request-derived host must be a hostname or IP literal with an optional
+// port. Anything else (quotes, angle brackets, whitespace, a smuggled
+// scheme) is attacker text that would land unescaped in rewritten HTML —
+// drop the origin rather than write it in. Stricter than the Rust, which
+// trusts the header value hyper already parsed.
+const HOST_RE = /^(?:\[[0-9a-fA-F:.]+\]|[A-Za-z0-9._-]+)(?::[0-9]{1,5})?$/
+
 // Public origin for this request: configured OXIDEAN_PUBLIC_ORIGIN wins;
 // otherwise derive from the request — X-Forwarded-Host/Proto only behind a
 // declared edge (behindProxy), raw Host always.
@@ -64,7 +71,9 @@ function requestOrigin(headers, behindProxy) {
     return t || null
   }
   const host = (behindProxy ? hdr('x-forwarded-host') : null) ?? hdr('host')
-  if (!host) return null
+  if (!host || !HOST_RE.test(host)) return null
+  const port = host.match(/:(\d+)$/)
+  if (port && Number(port[1]) > 65535) return null
   const protoHdr = behindProxy ? hdr('x-forwarded-proto') : null
   const proto = protoHdr === 'https' || protoHdr === 'http' ? protoHdr : 'http'
   return `${proto}://${host}`
