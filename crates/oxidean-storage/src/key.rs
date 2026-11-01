@@ -9,8 +9,16 @@ use crate::error::StorageError;
 
 const MAX_KEY_LEN: usize = 1024;
 
+/// fs staging lives under `{root}/tmp/`; reserve the first-segment name so a
+/// committed key can never alias in-flight `*.tmp` uploads.
+pub(crate) const TMP_DIR: &str = "tmp";
+/// Store internals at the root use the `.oxidean-` namespace
+/// (`.oxidean-{store}-marker` today) — reserve it on both backends.
+const INTERNAL_PREFIX: &str = ".oxidean-";
+
 /// A validated store-relative object key: `/`-separated segments of
-/// `[A-Za-z0-9._~-]`, never absolute, never a `.`/`..` component.
+/// `[A-Za-z0-9._~-]`, never absolute, never a `.`/`..` component, and never
+/// a reserved first segment (`tmp`, `.oxidean-*`).
 ///
 /// Covers every existing layout — LFS `{aa}/{bb}/{oid}`, template
 /// `sha256/{aa}/{bb}/{digest}.zip`, artifacts `{run_id}/{id}.tgz`,
@@ -76,6 +84,16 @@ pub(crate) fn validate_blob_key(raw: &str) -> Result<(), StorageError> {
             )));
         }
     }
+    // First segment reaches `{root}/` (fs) / `{prefix}/` (s3) directly —
+    // `tmp/…` would collide with the staging dir, `.oxidean-…` with the
+    // ownership markers (`delete` on the marker key would strip ownership
+    // and fail the next open).
+    let first = raw.split('/').next().unwrap();
+    if first == TMP_DIR || first.starts_with(INTERNAL_PREFIX) {
+        return Err(StorageError::InvalidKey(format!(
+            "first segment {first:?} is reserved for store internals"
+        )));
+    }
     Ok(())
 }
 
@@ -134,6 +152,21 @@ mod tests {
         }
         let too_long = "a".repeat(1025);
         assert!(BlobKey::new(&too_long).is_err());
+    }
+
+    #[test]
+    fn keys_reject_reserved_first_segments() {
+        for bad in [
+            "tmp",
+            "tmp/upload-1",
+            ".oxidean-lfs-marker",
+            ".oxidean-vcs-objects-marker",
+            ".oxidean-anything",
+        ] {
+            assert!(BlobKey::new(bad).is_err(), "{bad:?}");
+        }
+        // Non-first `tmp` segments stay legal — only the root level collides.
+        assert!(BlobKey::new("run-1/tmp/trace.log").is_ok());
     }
 
     #[test]

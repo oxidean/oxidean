@@ -23,8 +23,9 @@ use crate::store::{
 };
 
 /// In-flight upload staging under `{root}/tmp/` — same filesystem as the
-/// final path so the commit rename is atomic.
-const TMP_DIR: &str = "tmp";
+/// final path so the commit rename is atomic. Shared with `key.rs`, which
+/// reserves the name from `BlobKey`s.
+use crate::key::TMP_DIR;
 /// `lost+found` is exempted from the foreign-content scan — a fresh
 /// dedicated volume ships one (`ObjectStore` SD3.9-R9).
 const LOST_FOUND: &str = "lost+found";

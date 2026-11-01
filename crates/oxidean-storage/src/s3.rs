@@ -270,7 +270,10 @@ impl StagedUpload for S3Upload {
                         return Err(e.into());
                     }
                 }
-                upload.complete().await?;
+                if let Err(e) = upload.complete().await {
+                    let _ = upload.abort().await;
+                    return Err(e.into());
+                }
                 Ok(self.written)
             }
             None => {
