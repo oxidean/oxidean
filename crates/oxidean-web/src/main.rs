@@ -448,6 +448,13 @@ async fn try_static(
 /// fall through to the OS media query (no boot script runs here). The page
 /// is static markup — no session stamp — but `Vary` covers the theme inputs.
 fn status_page(status: StatusCode, headers: &HeaderMap) -> Response {
+    // Same contract as the API tier: branded HTML only for an explicit
+    // positive text/html range — git/RPC/registry clients get the bare
+    // status. `theme_errors` can't undo an already-rendered document.
+    let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
+    if !status_pages::accepts_html(accept) {
+        return status.into_response();
+    }
     let dark = status_pages::color_scheme(
         cookie_header(headers),
         headers
@@ -585,9 +592,25 @@ mod tests {
     }
 
     async fn get(st: &Arc<Shared>, path: &str, cookie: Option<&str>) -> Response {
+        get_accept(st, path, cookie, None).await
+    }
+
+    async fn get_html(st: &Arc<Shared>, path: &str, cookie: Option<&str>) -> Response {
+        get_accept(st, path, cookie, Some("text/html")).await
+    }
+
+    async fn get_accept(
+        st: &Arc<Shared>,
+        path: &str,
+        cookie: Option<&str>,
+        accept: Option<&str>,
+    ) -> Response {
         let mut b = axum::extract::Request::builder().uri(path);
         if let Some(c) = cookie {
             b = b.header(header::COOKIE, c);
+        }
+        if let Some(a) = accept {
+            b = b.header(header::ACCEPT, a);
         }
         let req = b.body(Body::empty()).unwrap();
         let headers = req.headers().clone();
@@ -939,7 +962,7 @@ mod tests {
         let dist = dist_with("status-page", &[("index.html", "<html>app</html>")]).await;
         let st = shared(dist);
 
-        let resp = get(&st, "/no/such/route", None).await;
+        let resp = get_html(&st, "/no/such/route", None).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             resp.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -952,8 +975,18 @@ mod tests {
         assert!(body.contains("Page not found"), "{body}");
         assert!(body.contains("Oxidean"), "{body}");
 
+        // Non-document clients get the bare status, not the page.
+        let resp = get(&st, "/no/such/route", None).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_ne!(
+            resp.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("text/html; charset=utf-8")
+        );
+
         // Dark-cookie users get the dark class, not a light flash.
-        let resp = get(&st, "/no/such/route", Some("oxidean-theme=dark")).await;
+        let resp = get_html(&st, "/no/such/route", Some("oxidean-theme=dark")).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
             .await
