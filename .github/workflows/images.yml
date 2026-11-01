@@ -23,7 +23,14 @@
 #                            no rebuild for a version-only diff.
 #   ox-cli workflow_run    → an ox-v* tag landed → repin staging api's
 #                            OXIDEAN_CLI_DIST_URL + re-pull so the container
-#                            entrypoint fetches the new release feed.
+#                            entrypoint fetches the new release feed. The
+#                            branches: filter matches the triggering run's
+#                            head_branch (the tag name on tag pushes), so
+#                            only ox-v* completions fire — every other
+#                            completion used to spawn a no-op run on main
+#                            that pending-cancelled its still-queued
+#                            predecessor in the shared concurrency group,
+#                            leaving red "cancelled" runs on the commit.
 #   workflow_dispatch      → same as a main push.
 #
 # Image namespaces (public GHCR packages — Railway pulls unauthenticated):
@@ -45,13 +52,22 @@ on:
   workflow_run:
     workflows: ["ox CLI"]
     types: [completed]
+    # Only ox-v* tag runs carry release assets worth repinning — gate on the
+    # triggering run's head_branch (the tag name for tag pushes) so PR legs,
+    # path-filtered main pushes, and cancelled ox-cli runs never create an
+    # Images run at all (issue #206).
+    branches: ["ox-v*"]
   # The backstop for leaked per-PR surfaces moved to pr-env-sweep.yml
   # (hourly schedule + workflow_dispatch) — merged-PR closed runs are
   # cancelled before jobs start, so cleanup-pr below is a fast path only.
   workflow_dispatch:
 
 concurrency:
-  group: images-${{ github.ref }}
+  # workflow_run legs get a group per triggering run: GitHub keeps at most
+  # one pending run per group and cancels older queued ones regardless of
+  # cancel-in-progress, so a repin queued behind a main-push build would be
+  # dropped — and still read as a failed deployment on the commit (#206).
+  group: images-${{ github.event_name == 'workflow_run' && format('wr-{0}', github.event.workflow_run.id) || github.ref }}
   cancel-in-progress: false # never cancel mid-publish or mid-deploy
 
 permissions:
@@ -66,6 +82,12 @@ jobs:
   # which publish mechanism (build | retag | release-layer).
   meta:
     name: meta
+    # A workflow_run leg only has work when the triggering ox-v* run
+    # succeeded — a failed/cancelled tag lane resolves all-skipped here
+    # instead of spending a meta pass on a run that can publish nothing.
+    if: |
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.m.outputs.services }}
@@ -353,6 +375,7 @@ jobs:
       contents: read
       deployments: write
       packages: write # the post-deploy channel retag pushes :staging to GHCR
+      statuses: write # resolve cancelled Railway deployment statuses on the sha (#206)
     steps:
       - uses: actions/checkout@v7
         with:
@@ -403,6 +426,23 @@ jobs:
               --description "deploy sha-${SHA} failed"
             exit 1
           fi
+      - name: resolve cancelled deployment statuses on this commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Verification queries the linked deployment/environment over the
+          # Railway API — a cancelled status only resolves when the deploy
+          # provably had nothing to do.
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+        # Repo-connected Railway serviceInstances post error/"Deployment
+        # cancelled" commit statuses when their diff gate cancels a deploy
+        # that found no relevant changes (#206). They are not failures —
+        # resolve them as success on the sha this run deploys. The hourly
+        # pr-env-sweep covers cancellations that land later.
+        run: scripts/railway-image-source-check.sh --status-sha "${{ needs.meta.outputs.sha }}" --no-source-check
 
   # Bind the PR's ephemeral Railway environment (forked from preview) to the
   # PR image tag once it exists. Image-sourced services have no repo

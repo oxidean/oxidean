@@ -40,6 +40,7 @@ permissions:
   pull-requests: read
   packages: write # GHCR pr-<n> version deletes
   deployments: write # inactivate stale deployments when env delete is denied
+  statuses: write # resolve cancelled Railway deployment statuses as pass (#206)
 
 jobs:
   sweep:
@@ -94,3 +95,16 @@ jobs:
           GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token || secrets.RELEASE_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: scripts/pr-env-sweep.sh
+      - name: heal service-source drift + cancelled deploy statuses
+        if: always()
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Repo-connected serviceInstances post error/"Deployment cancelled"
+        # commit statuses when Railway's diff gate cancels a deploy that had
+        # nothing to do — PR envs inherit them from their fork source (#206).
+        # Repin any drifted instance to the env's channel image and resolve
+        # the leftover cancelled statuses as success.
+        run: scripts/railway-image-source-check.sh --repair --repair-statuses
