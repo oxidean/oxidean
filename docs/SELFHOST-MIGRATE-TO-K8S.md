@@ -43,10 +43,15 @@ No new pushes, issues, or logins from this point on.
 ## Step 2 — Dump Postgres
 
 ```bash
-docker compose exec postgres \
-  pg_dump -U "$POSTGRES_USER" --format=custom --no-owner "$POSTGRES_DB" \
+docker compose exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" --format=custom --no-owner "$POSTGRES_DB"' \
   > oxidean-db.dump
 ```
+
+`-T` disables the TTY `docker compose exec` allocates by default (it
+corrupts a binary dump), and the `sh -c` wrapper expands
+`POSTGRES_USER`/`POSTGRES_DB` **inside** the container where the Compose
+file defines them — the host shell does not have them.
 
 If the Compose stack ran MySQL or SQLite instead, migrate the engine first
 (export/import) or keep the same engine as an external `database.url` —
@@ -63,11 +68,21 @@ and whatever storage mode you want. Two PVC strategies — pick one:
   required when you want a specific StorageClass, an already-provisioned
   EFS/CephFS filesystem, or the data seeded by an out-of-band job.
 
-Install the chart first so its claims exist:
+Create the namespace and the database Secret first — the install
+references it:
+
+```bash
+kubectl create namespace oxidean
+kubectl -n oxidean create secret generic ox-db \
+  --from-literal=DATABASE_URL="postgres://oxidean:<target-password>@<db-host>:5432/oxidean"
+```
+
+The key name is the chart default (`database.urlKey=DATABASE_URL`), so no
+extra `--set` is needed. Then install the chart so its claims exist:
 
 ```bash
 helm install ox oci://ghcr.io/oxidean/charts/oxidean \
-  --namespace oxidean --create-namespace \
+  --namespace oxidean \
   --set publicOrigin=https://git.example.com \
   --set postgres.enabled=false \
   --set database.existingSecret=ox-db \
@@ -75,23 +90,29 @@ helm install ox oci://ghcr.io/oxidean/charts/oxidean \
 kubectl -n oxidean scale deploy/ox-oxidean-api --replicas=0   # keep it off for the copy
 ```
 
-(`ox-db` supplies `DATABASE_URL` at key `url` — see Step 4. `ox-secrets`
-is Step 6.)
+(`ox-secrets` is created in Step 6 — before the api scales up in Step 8.
+Only the api reads it, so the order is safe.)
 
 ## Step 4 — Load the database
 
-Get the dump into a postgres client that can reach the target:
+Run a throwaway postgres client pod, copy the dump in, then restore —
+`kubectl cp` needs a pod that is already Running, so a one-shot
+`--rm` command cannot work:
 
 ```bash
-kubectl -n oxidean run pg-restore --restart=Never --rm -i \
-  --image=postgres:18-alpine --env="PGPASSWORD=$TARGET_PG_PASSWORD" -- \
-  sh -c 'pg_restore -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" --clean --if-exists --no-owner /dump/oxidean-db.dump'
+kubectl -n oxidean run pg-restore --restart=Never \
+  --image=postgres:18-alpine --command -- sleep 3600
+kubectl -n oxidean wait --for=condition=Ready pod/pg-restore --timeout=60s
+kubectl -n oxidean cp oxidean-db.dump pg-restore:/tmp/oxidean-db.dump
+kubectl -n oxidean exec pg-restore -- env PGPASSWORD="<target-password>" \
+  pg_restore -h <db-host> -U <db-user> -d <db-name> \
+  --clean --if-exists --no-owner /tmp/oxidean-db.dump
+kubectl -n oxidean delete pod pg-restore
 ```
 
-Mount the dump via `kubectl cp` into a helper pod, a `hostPath`, or an
-object-storage fetch — whatever the cluster allows. For the bundled
-postgres path, the same restore runs against
-`ox-oxidean-postgres:5432` with the chart's generated `POSTGRES_PASSWORD`.
+For the bundled-postgres path the same restore runs against
+`ox-oxidean-postgres:5432` with the chart's generated `POSTGRES_PASSWORD`
+(`kubectl -n oxidean get secret ox-oxidean-secrets -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d`).
 
 ## Step 5 — Copy the data volume
 
@@ -101,8 +122,14 @@ and expand it into the target PVC through a temporary pod.
 
 On the compose host:
 
+Resolve the volume the api actually mounts — the Compose project name
+prefix varies, so never guess `oxidean_selfhost_oxidean_data`:
+
 ```bash
-docker run --rm -v oxidean_selfhost_oxidean_data:/var:ro -v "$PWD":/out \
+API_CID="$(docker compose ps -q api)"
+DATA_VOL="$(docker inspect "$API_CID" \
+  --format '{{ range .Mounts }}{{ if eq .Destination "/var" }}{{ .Name }}{{ end }}{{ end }}')"
+docker run --rm -v "$DATA_VOL":/var:ro -v "$PWD":/out \
   alpine tar czf /out/oxidean-var.tgz -C /var .
 ```
 
@@ -179,10 +206,16 @@ Then:
 
 ## Rollback
 
-Stop the chart's api (`kubectl scale deploy/ox-oxidean-api --replicas=0`),
-repoint DNS back to the compose host, `docker compose start api web`.
-Anything written to the cluster while it served traffic needs a re-run of
-Steps 2–5 before switching again — treat that window as read-only.
+**Only safe before the cluster serves writes.** While Kubernetes has not
+accepted a single push or login, stopping its api and pointing DNS back
+at the compose host restores service exactly as it was.
+
+Once the cluster has taken writes, switching back without a reverse
+transfer silently discards them — Steps 2–5 only copy *from* compose
+*to* Kubernetes. To roll back after cluster writes, run the same
+procedure in reverse first: dump the target database, restore it into
+the compose postgres, and copy the PVC contents back onto the compose
+volumes — then cut DNS over.
 
 ## Notes and edge cases
 

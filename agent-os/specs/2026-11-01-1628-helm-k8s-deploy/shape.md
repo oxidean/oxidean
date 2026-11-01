@@ -47,6 +47,9 @@ Confirmed 2026-11-01:
    at `/var` (parity with compose's `oxidean_data` and Railway's
    `forge-data`); `s3` emits `OXIDEAN_STORAGE_BACKEND` + `OXIDEAN_S3_*`
    envs from a Secret. Self-host zero-infra default stays `fs`.
+   *(Credentials are Secret-backed only when a static pair is configured;
+   with none, the pod keeps the ambient AWS chain — IRSA, web identity,
+   IMDS — so EKS/GKE deployments need no chart Secret at all.)*
    *(Implemented with `storage.s3.retainDataVolume: true` as the default —
    the slim `/var/repos` + `/var/ssh` layout only applies once the api's
    store-by-store BlobStore consumer migration lands; until then s3 mode
