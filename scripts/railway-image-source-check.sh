@@ -36,11 +36,14 @@
 #                     diff touching none of the deployment's snapshot
 #                     watchPatterns. User-cancelled real deploys and
 #                     anything unverifiable stay as-is.
+#   --no-source-check skip the check_sources surface (status-repair-only
+#                     invocations, e.g. deploy-staging's --status-sha)
 #
 # Usage:
 #   RAILWAY_API_TOKEN=*** GH_TOKEN=… GH_REPO=owner/repo \
 #     scripts/railway-image-source-check.sh [--repair] [--repair-statuses] \
-#       [--status-limit N | --status-sha <sha>] [--environment <name>] [--dry-run]
+#       [--status-limit N | --status-sha <sha>] [--environment <name>] \
+#       [--no-source-check] [--dry-run]
 #
 # Credentials:
 #   RAILWAY_API_TOKEN  account/workspace token (environment enumeration
@@ -73,7 +76,7 @@ CONTEXT_PREFIX="${OXIDEAN_STATUS_CONTEXT_PREFIX:-Oxidean - }"
 STATUS_LIMIT="${OXIDEAN_STATUS_LIMIT:-30}"
 DEFAULT_BRANCH="${OXIDEAN_DEFAULT_BRANCH:-main}"
 
-REPAIR=0 REPAIR_STATUSES=0 DRY_RUN=0
+REPAIR=0 REPAIR_STATUSES=0 DRY_RUN=0 SOURCE_CHECK=1
 STATUS_SHA="" ENV_FILTER=""
 
 service_pairs() {
@@ -276,20 +279,22 @@ is_noop_cancel() {
   fi
   if [[ "$(echo "$dep" | jq -r '.data.deployment // "null"')" == "null" ]]; then
     # Deployment gone → only an environment teardown removes deployments,
-    # and only ephemeral PR environments get torn down. Verify via the env
-    # when its id survives in the status URL.
-    if [[ -n "$env_id" ]] \
-      && env_raw="$(railway_gql "$ENVIRONMENT_QUERY" \
+    # and only ephemeral PR environments get torn down — but that needs
+    # the environment link to confirm. No env id → unverifiable.
+    if [[ -z "$env_id" ]]; then
+      echo "skip ${dep_id:0:8}…: deployment gone, no environment link — cannot verify"
+      return 1
+    fi
+    if ! env_raw="$(railway_gql "$ENVIRONMENT_QUERY" \
         "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null)"; then
-      # Persistent env still standing → unverifiable. A null environment
-      # (deleted) or isEphemeral resolve as the ephemeral-artifact class —
-      # jq's // also replaces false, so test null-ness explicitly.
-      if [[ "$(echo "$env_raw" | jq -r 'if .data.environment == null then "gone" elif .data.environment.isEphemeral == true then "true" else "false" end')" == "false" ]]; then
-        echo "skip ${dep_id:0:8}…: deployment gone but environment still exists — cannot verify"
-        return 1
-      fi
-    elif [[ -n "$env_id" ]]; then
       echo "skip ${dep_id:0:8}…: deployment gone, environment lookup failed — cannot verify"
+      return 1
+    fi
+    # Persistent env still standing → unverifiable. A null environment
+    # (deleted) or isEphemeral resolve as the ephemeral-artifact class —
+    # jq's // also replaces false, so test null-ness explicitly.
+    if [[ "$(echo "$env_raw" | jq -r 'if .data.environment == null then "gone" elif .data.environment.isEphemeral == true then "true" else "false" end')" == "false" ]]; then
+      echo "skip ${dep_id:0:8}…: deployment gone but environment still exists — cannot verify"
       return 1
     fi
     echo "verified ${dep_id:0:8}…: deployment deleted with its ephemeral environment"
@@ -340,7 +345,7 @@ is_noop_cancel() {
     fi
   done <<< "$patterns"
   local files
-  if ! files="$(gh api "repos/${REPO}/commits/${sha}" --jq '.files[]?.filename' 2>/dev/null)"; then
+  if ! files="$(gh api --paginate "repos/${REPO}/commits/${sha}" --jq '.files[]?.filename' 2>/dev/null)"; then
     echo "skip ${dep_id:0:8}… (${env_name:-unknown env}): could not list commit files — cannot verify"
     return 1
   fi
@@ -376,6 +381,9 @@ repair_statuses() {
     echo "no Railway credential — cannot verify cancelled statuses, repair skipped"
     return 0
   fi
+  # Deployment/environment lookups must reach every environment — prefer
+  # the account token; an env-scoped project token 401s outside its env.
+  [[ -n "${RAILWAY_API_TOKEN:-}" ]] && unset RAILWAY_TOKEN
 
   local -a shas=()
   if [[ -n "$STATUS_SHA" ]]; then
@@ -445,7 +453,7 @@ repair_statuses() {
 }
 
 usage() {
-  sed -n '3,60p' "$0"
+  sed -n '3,62p' "$0"
 }
 
 main() {
@@ -457,6 +465,7 @@ main() {
       --status-limit) STATUS_LIMIT="$2"; shift ;;
       --status-sha) STATUS_SHA="$2"; REPAIR_STATUSES=1; shift ;;
       --environment|--env) ENV_FILTER="$2"; shift ;;
+      --no-source-check) SOURCE_CHECK=0 ;;
       --dry-run) DRY_RUN=1 ;;
       -h | --help)
         usage
@@ -468,7 +477,9 @@ main() {
   done
 
   local rc=0
-  check_sources || rc=1
+  if [[ "$SOURCE_CHECK" == "1" ]]; then
+    check_sources || rc=1
+  fi
   if [[ "$REPAIR_STATUSES" == "1" ]]; then
     repair_statuses || rc=1
   fi
