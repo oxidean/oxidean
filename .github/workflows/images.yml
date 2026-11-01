@@ -170,6 +170,13 @@ jobs:
                     # Chart tags carry no container image — publish-chart
                     # packages + pushes the OCI artifact from the tagged tree.
                     semver="${tagname#oxidean-chart-v}"
+                    # Tag names are attacker-controllable and this value lands
+                    # in a downstream run: script — fail closed on anything
+                    # that is not a strict semver (optionally -beta.N etc.).
+                    if [[ ! "$semver" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                      echo "rejecting malformed chart tag: ${tagname}" >&2
+                      exit 1
+                    fi
                     echo "chart=true" >> "$GITHUB_OUTPUT"
                     echo "chart_version=${semver}" >> "$GITHUB_OUTPUT"
                     echo "mode=build" >> "$GITHUB_OUTPUT"
@@ -393,6 +400,9 @@ jobs:
       - name: package + push chart
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Validated semver in meta — keep it in env so the tag value never
+          # interpolates into the script text (injection-safe).
+          CHART_VERSION: ${{ needs.meta.outputs.chart_version }}
         run: |
           set -euo pipefail
           echo "${GH_TOKEN}" | helm registry login ghcr.io \
@@ -401,8 +411,11 @@ jobs:
           # charts/ is gitignored, so register the URL repo for the resolver.
           helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
           helm dependency build deploy/helm/oxidean
-          helm package deploy/helm/oxidean
-          helm push "oxidean-${{ needs.meta.outputs.chart_version }}.tgz" \
+          # --version stamps the archive from the tag itself, so beta tags
+          # (whose trees carry the pre-beta Chart.yaml) still produce the
+          # correctly named oxidean-<tag-version>.tgz.
+          helm package deploy/helm/oxidean --version "${CHART_VERSION}"
+          helm push "oxidean-${CHART_VERSION}.tgz" \
             "oci://ghcr.io/${{ github.repository_owner }}/charts"
 
   # Deploy the freshly published sha tag set to staging (main pushes + manual

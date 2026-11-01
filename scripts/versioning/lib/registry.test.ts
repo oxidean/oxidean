@@ -224,6 +224,28 @@ describe("parseRegistry — kind=helm linkages", () => {
     expect(r.violations.some((v) => v.message.includes('image_components.b = "b" must appear in depends_on'))).toBe(true);
   });
 
+  test("image_components array value parses (shared-image multi-source)", () => {
+    const r = parseRegistry(VALID + HELM.replace('image_components = { b = "b" }', 'image_components = { b = ["a", "b"] }'));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const chart = r.config.entries.find((e) => e.id === "chart")!;
+    expect(chart.image_components).toEqual({ b: ["a", "b"] });
+  });
+
+  test("image_components array with unknown id → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('image_components = { b = "b" }', 'image_components = { b = ["a", "ghost"] }'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('unknown component "ghost"'))).toBe(true);
+  });
+
+  test("image_components empty array → violation", () => {
+    const r = parseRegistry(VALID + HELM.replace('image_components = { b = "b" }', 'image_components = { b = [] }'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('must be a component id or non-empty id list'))).toBe(true);
+  });
+
   test("crate carrying app_component → violation", () => {
     const r = parseRegistry(VALID.replace('depends_on = []\n', 'depends_on = []\napp_component = "b"\n'));
     expect(r.ok).toBe(false);

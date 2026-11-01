@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import type { RegistryEntry } from "../lib/registry.ts";
 import type { BumpPlan } from "../lib/plan.ts";
 import { carrierVersion } from "../lib/plan.ts";
+import { compareSemver } from "../lib/semver.ts";
 import { buildPlan, printPlanTable } from "./plan.ts";
 
 export const usage =
@@ -214,9 +215,17 @@ export function applyHelmExtras(
     if (values !== null) {
       let changed = false;
       for (const [svc, comp] of Object.entries(images)) {
-        const v = resolve(comp);
+        // A shared image published by several components (web ↔ oxidean-web)
+        // tracks the newest carrier version, so either release refreshes the
+        // chart pin.
+        const cids = Array.isArray(comp) ? comp : [comp];
+        let v: string | null = null;
+        for (const cid of cids) {
+          const cv = resolve(cid);
+          if (cv !== null && (v === null || compareSemver(cv, v) > 0)) v = cv;
+        }
         if (!v) {
-          out.push({ error: `${entry.id}: cannot resolve image_components.${svc} = "${comp}" carrier` });
+          out.push({ error: `${entry.id}: cannot resolve image_components.${svc} = "${JSON.stringify(comp)}" carrier` });
           continue;
         }
         const prevTag = values.match(new RegExp(`^${svc}:[\\s\\S]*?^    tag:[ \\t]*"?([^"\\s]*)"?`, "m"))?.[1];

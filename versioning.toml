@@ -456,4 +456,6 @@ globs = ["deploy/helm/oxidean/**"]
 scopes = ["helm", "k8s", "kubernetes"]
 depends_on = ["oxidean-api", "web", "oxidean-web", "oxidean-runner"]
 app_component = "oxidean-api"
-image_components = { api = "oxidean-api", web = "web", runner = "oxidean-runner" }
+# web + oxidean-web publish the same image — the chart pins the newest of
+# the two series so either release refreshes it.
+image_components = { api = "oxidean-api", web = ["web", "oxidean-web"], runner = "oxidean-runner" }

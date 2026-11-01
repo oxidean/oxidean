@@ -27,8 +27,9 @@ export interface RegistryEntry {
   depends_on: string[];
   /** kind=helm only: the component whose version stamps Chart.yaml appVersion. */
   app_component?: string;
-  /** kind=helm only: values.yaml `<svc>.image.tag` → component id map. */
-  image_components?: Record<string, string>;
+  /** kind=helm only: values.yaml `<svc>.image.tag` → component id (or ids —
+   * a shared image published by several components takes the newest version). */
+  image_components?: Record<string, string | string[]>;
 }
 
 export interface RegistryConfig {
@@ -257,14 +258,15 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
           push(entryLine(idx, i), `${at} ("${id}"): kind=helm requires app_component (the component stamped into Chart.yaml appVersion)`);
         }
         if (hasImageComponents && !isRecord(c.image_components)) {
-          push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components must be a table of <svc> = <component id>`);
+          push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components must be a table of <svc> = <component id | [ids]>`);
         } else if (isRecord(c.image_components)) {
           for (const [svc, comp] of Object.entries(c.image_components)) {
             if (!ID_RE.test(svc)) {
               push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components key "${svc}" is not a lowercase path segment`);
             }
-            if (typeof comp !== "string" || !ID_RE.test(comp)) {
-              push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components.${svc} must be a component id`);
+            const comps = Array.isArray(comp) ? comp : [comp];
+            if (comps.length === 0 || comps.some((x) => typeof x !== "string" || !ID_RE.test(x))) {
+              push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components.${svc} must be a component id or non-empty id list`);
             }
           }
         }
@@ -303,7 +305,7 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
         depends_on: isStringArray(c.depends_on) ? c.depends_on : [],
         app_component: hasAppComponent ? (c.app_component as string) : undefined,
         image_components: isRecord(c.image_components)
-          ? (c.image_components as Record<string, string>)
+          ? (c.image_components as Record<string, string | string[]>)
           : undefined,
       });
     });
@@ -368,10 +370,12 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
         push(entryLine(idx, i, "app_component"), `"${e.id}": app_component "${e.app_component}" must appear in depends_on so its releases refresh the stamp (BR1.4)`);
       }
       for (const [svc, comp] of Object.entries(e.image_components ?? {})) {
-        if (!byId.has(comp)) {
-          push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} references unknown component "${comp}" (BR1.4)`);
-        } else if (!e.depends_on.includes(comp)) {
-          push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} = "${comp}" must appear in depends_on (BR1.4)`);
+        for (const cid of Array.isArray(comp) ? comp : [comp]) {
+          if (!byId.has(cid)) {
+            push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} references unknown component "${cid}" (BR1.4)`);
+          } else if (!e.depends_on.includes(cid)) {
+            push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} = "${cid}" must appear in depends_on (BR1.4)`);
+          }
         }
       }
     }
