@@ -11,7 +11,9 @@
 #                            image — oxidean-api-v*→api, web-v*/oxidean-web-v*
 #                            →web (frontend app + Rust serving crate share the
 #                            image), oxidean-runner-v*→runner (builds once as
-#                            a fallback when the sha tag is missing)
+#                            a fallback when the sha tag is missing),
+#                            oxidean-chart-v*→publish-chart packages +
+#                            oci-pushes deploy/helm/oxidean (no image legs)
 #   pull_request (same repo) → build+push :pr-<n> + :pr-<n>-sha-<sha>, then
 #                            bind the PR's ephemeral Railway environment to
 #                            the pr image tag. Fork PRs skip (GITHUB_TOKEN is
@@ -45,7 +47,7 @@ name: Images
 on:
   push:
     branches: [main]
-    tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*"]
+    tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*", "oxidean-chart-v*.*.*"]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, closed]
@@ -97,6 +99,8 @@ jobs:
       api_version: ${{ steps.m.outputs.api_version }}
       pr: ${{ steps.m.outputs.pr }}
       tags_json: ${{ steps.m.outputs.tags_json }}
+      chart: ${{ steps.m.outputs.chart }}
+      chart_version: ${{ steps.m.outputs.chart_version }}
     steps:
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
@@ -162,22 +166,32 @@ jobs:
                   # frontend app — both version into the same web image.
                   oxidean-web-v*) svc=web; semver="${tagname#oxidean-web-v}" ;;
                   oxidean-runner-v*) svc=runner; semver="${tagname#oxidean-runner-v}" ;;
+                  oxidean-chart-v*)
+                    # Chart tags carry no container image — publish-chart
+                    # packages + pushes the OCI artifact from the tagged tree.
+                    semver="${tagname#oxidean-chart-v}"
+                    echo "chart=true" >> "$GITHUB_OUTPUT"
+                    echo "chart_version=${semver}" >> "$GITHUB_OUTPUT"
+                    echo "mode=build" >> "$GITHUB_OUTPUT"
+                    ;;
                   *) echo "unmapped tag prefix: ${tagname}" >&2; exit 1 ;;
                 esac
-                tags="${NS}/oxidean-${svc}:${semver}"
-                if [[ "$semver" != *-* ]]; then
-                  tags="${tags},${NS}/oxidean-${svc}:latest"
-                fi
-                set_tags "$svc" "$tags"
-                services="[\"${svc}\"]"
-                # Retag the existing sha image when there is one; fall back to
-                # a real build when the tag points at a commit images.yml
-                # never built (e.g. a hand-cut tag on an old commit).
-                if scripts/ghcr-images.sh check "sha-${sha}" --services "$svc" >/dev/null 2>&1; then
-                  echo "mode=retag" >> "$GITHUB_OUTPUT"
-                else
-                  echo "sha-${sha} missing on GHCR — building ${svc} instead of retagging"
-                  echo "mode=build" >> "$GITHUB_OUTPUT"
+                if [ "${tagname#oxidean-chart-v}" = "$tagname" ]; then
+                  tags="${NS}/oxidean-${svc}:${semver}"
+                  if [[ "$semver" != *-* ]]; then
+                    tags="${tags},${NS}/oxidean-${svc}:latest"
+                  fi
+                  set_tags "$svc" "$tags"
+                  services="[\"${svc}\"]"
+                  # Retag the existing sha image when there is one; fall back to
+                  # a real build when the tag points at a commit images.yml
+                  # never built (e.g. a hand-cut tag on an old commit).
+                  if scripts/ghcr-images.sh check "sha-${sha}" --services "$svc" >/dev/null 2>&1; then
+                    echo "mode=retag" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "sha-${sha} missing on GHCR — building ${svc} instead of retagging"
+                    echo "mode=build" >> "$GITHUB_OUTPUT"
+                  fi
                 fi
               else
                 # main push (or dispatch): full sha set (+ :main on main).
@@ -190,7 +204,7 @@ jobs:
                 if [[ "$subject" == chore\(release\)* ]] \
                   && git rev-parse --verify "${sha}^" >/dev/null 2>&1 \
                   && [[ -z "$(git diff --name-only "${sha}^" "$sha" | grep -vE \
-                    '^(versioning\.toml|Cargo\.toml|Cargo\.lock|bun\.lock|crates/[^/]+/Cargo\.toml|crates/oxidean-core/src/lib\.rs|CHANGELOG\.md|crates/[^/]+/CHANGELOG\.md|packages/[^/]+/CHANGELOG\.md|apps/[^/]+/CHANGELOG\.md|docs/[^/]*CHANGELOG[^/]*\.md|packages/api-client/|packages/[^/]+/package\.json|apps/[^/]+/package\.json|docs/openapi\.yaml)$' \
+                    '^(versioning\.toml|Cargo\.toml|Cargo\.lock|bun\.lock|crates/[^/]+/Cargo\.toml|crates/oxidean-core/src/lib\.rs|CHANGELOG\.md|crates/[^/]+/CHANGELOG\.md|packages/[^/]+/CHANGELOG\.md|apps/[^/]+/CHANGELOG\.md|docs/[^/]*CHANGELOG[^/]*\.md|packages/api-client/|packages/[^/]+/package\.json|apps/[^/]+/package\.json|docs/openapi\.yaml|deploy/helm/[^/]+/Chart\.yaml|deploy/helm/[^/]+/values\.yaml|deploy/helm/[^/]+/CHANGELOG\.md)$' \
                     || true)" ]]; then
                   parent="$(git rev-parse "${sha}^")"
                   if scripts/ghcr-images.sh check "sha-${parent}" >/dev/null 2>&1; then
@@ -359,6 +373,33 @@ jobs:
           for t in "${tags[@]}"; do args+=(-t "$t"); done
           docker buildx imagetools create "${args[@]}" \
             "${IMAGE_NS}/oxidean-${{ matrix.svc }}:sha-${{ needs.meta.outputs.sha }}"
+
+  # OCI chart publish (OPS-06): oxidean-chart-v* tags already carry the
+  # stamped Chart.yaml/values.yaml, so the package is taken verbatim from the
+  # tagged tree and pushed to oci://ghcr.io/<owner>/charts/oxidean.
+  publish-chart:
+    name: publish chart
+    needs: meta
+    if: needs.meta.outputs.chart == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+      - name: setup helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.22.1
+      - name: package + push chart
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | helm registry login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+          helm package deploy/helm/oxidean
+          helm push "oxidean-${{ needs.meta.outputs.chart_version }}.tgz" \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
 
   # Deploy the freshly published sha tag set to staging (main pushes + manual
   # dispatch). Staging tracks main-tip; production promotes via
