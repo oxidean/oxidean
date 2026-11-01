@@ -1,5 +1,6 @@
 //! `oxidean-storage` — the [`BlobStore`] abstraction every non-git
-//! persistent store migrates behind (issue #210, ADR-0001).
+//! persistent store migrates behind (issue #210, spec
+//! `agent-os/specs/2026-11-01-1425-storage-blob-backend`).
 //!
 //! Two backends, one trait:
 //!
@@ -14,7 +15,7 @@
 //!   set. Uploads stage through multipart; `complete` is the visibility
 //!   point.
 //!
-//! Cross-cutting invariants baked in here (ADR-0001 §security):
+//! Cross-cutting invariants baked in here (spec §security invariants):
 //!
 //! - keys are [`BlobKey`]s — validated identifiers only, never raw client
 //!   input;

@@ -1,15 +1,16 @@
-# 0001: Cloud-agnostic storage strategy for a Git-forge application
+# S3-Compatible Blob Storage Backend — Shaping Notes
 
-- Status: accepted
-- Date: 2026-11-02
-- Issue: [#210](https://github.com/oxidean/oxidean/issues/210)
+> Recorded 2026-11-01 alongside the foundation PR (#214). Work was shaped
+> on issue [#210](https://github.com/oxidean/oxidean/issues/210); this spec
+> is the durable decision record it produced.
 
-## Context
+## Scope
 
-Oxidean is one codebase for Oxidean Cloud and self-hosted installs, and
-today every byte of forge state lives on the local filesystem. `AppState`
-carries roughly a dozen filesystem roots (`crates/oxidean-api-core/src/app.rs`),
-each bind-mounted per deployment topology:
+One codebase for Oxidean Cloud and self-hosted installs, and today every
+byte of forge state lives on the local filesystem — `AppState` carries
+roughly a dozen filesystem roots
+(`crates/oxidean-api-core/src/app.rs`), each bind-mounted per deployment
+topology:
 
 | Store | Env var | Content model | Needs POSIX? |
 |-------|---------|---------------|--------------|
@@ -32,7 +33,7 @@ replica safely (RWO volume semantics for every store), a Helm chart would
 need a large RWO volume per install, and cloud installs pay volume prices
 for cold blob data that object storage serves natively and cheaper.
 
-Constraints that shape the decision:
+Constraints that shaped the decision:
 
 - `git` (the CLI, via `CliGitBackend`) does loose-object writes, ref
   transaction locks, `gc`, and `receive-pack` on local paths. There is no
@@ -43,7 +44,7 @@ Constraints that shape the decision:
 - Object storage is the one API every target platform already provides:
   AWS S3, MinIO, Garage, SeaweedFS, Ceph RGW, Cloudflare R2.
 
-## Decision
+## Decisions
 
 Adopt the **decoupled hybrid** — the same architecture GitLab runs
 (Gitaly for git, object storage for everything else):
@@ -51,8 +52,8 @@ Adopt the **decoupled hybrid** — the same architecture GitLab runs
 1. **Raw git repositories stay on a POSIX single-node volume.**
    `OXIDEAN_REPOS_DIR` remains a real filesystem (Compose bind mount /
    RWO PVC). Repo HA via sharding or a Gitaly-style service split is a
-   *separate* ADR; `api` stays single-replica until then, while `web`
-   scales freely.
+   *separate* decision; `api` stays single-replica until then, while
+   `web` scales freely.
 
 2. **Every other persistent store moves behind a `BlobStore`
    abstraction** (`crates/oxidean-storage`) with two backends:
@@ -108,38 +109,31 @@ Adopt the **decoupled hybrid** — the same architecture GitLab runs
 
 ## Alternatives considered
 
-### A. All-in on object storage (including git)
-
-Mount FUSE/s3fs or a git-object gateway in front of `repos_dir`.
-Rejected: git's loose-object + lock-file + `receive-pack` semantics do
-not survive an eventually-consistent, non-POSIX store; correctness and
-data safety come first. This is the path that leads to building Gitaly
-prematurely.
-
-### B. Stay filesystem-only, add shared storage for HA later
-
-NFS/EFS for everything. Rejected: it does not decouple the app from one
-vendor, pays performance taxes on small-file workloads, and does not
-give presigned-URL offload — the single biggest bandwidth win for LFS
-and release assets.
-
-### C. Bucket-per-store topology
-
-A bucket each for LFS, packages, release assets, etc. Rejected as the
-default: more operator surface (N buckets × policies × lifecycle rules)
-for no isolation gain — the app already enforces per-store ACLs.
-Prefix-level isolation with the marker gate carries the same
-cross-store invariant (`D-PKG-07`, `D-ACT-13`) into object storage.
-Operators can still give stores distinct `(bucket, prefix)` pairs later
-if they need it — the collision check then becomes load-bearing.
-
-### D. Full `aws-sdk-s3` / cloud-SDK clients
-
-Rejected: the AWS SDK pulls a large service graph for what is a
-seven-method store, and it still needs shims for MinIO/Garage quirks.
-`object_store` gives `AmazonS3` + `LocalFileSystem` impls, presigning,
-endpoint + path-style support, and multipart upload behind one trait
-with a much smaller dep tree.
+- **A. All-in on object storage (including git).** Mount FUSE/s3fs or a
+  git-object gateway in front of `repos_dir`. Rejected: git's
+  loose-object + lock-file + `receive-pack` semantics do not survive an
+  eventually-consistent, non-POSIX store; correctness and data safety
+  come first. This is the path that leads to building Gitaly
+  prematurely.
+- **B. Stay filesystem-only, add shared storage for HA later.**
+  NFS/EFS for everything. Rejected: it does not decouple the app from
+  one vendor, pays performance taxes on small-file workloads, and does
+  not give presigned-URL offload — the single biggest bandwidth win for
+  LFS and release assets.
+- **C. Bucket-per-store topology.** A bucket each for LFS, packages,
+  release assets, etc. Rejected as the default: more operator surface
+  (N buckets × policies × lifecycle rules) for no isolation gain — the
+  app already enforces per-store ACLs. Prefix-level isolation with the
+  marker gate carries the same cross-store invariant (`D-PKG-07`,
+  `D-ACT-13`) into object storage. Operators can still give stores
+  distinct `(bucket, prefix)` pairs later if they need it — the
+  collision check then becomes load-bearing.
+- **D. Full `aws-sdk-s3` / cloud-SDK clients.** Rejected: the AWS SDK
+  pulls a large service graph for what is a seven-method store, and it
+  still needs shims for MinIO/Garage quirks. `object_store` gives
+  `AmazonS3` + `LocalFileSystem` impls, presigning, endpoint +
+  path-style support, and multipart upload behind one trait with a much
+  smaller dep tree.
 
 ## Consequences
 
@@ -161,4 +155,14 @@ with a much smaller dep tree.
 - Follow-up phases (consumer migration store-by-store, multipart
   mapping for Actions artifacts, a MinIO self-host overlay, and
   migration tooling) are tracked on issue #210 and ship independently;
-  this ADR is the contract they implement.
+  this spec is the contract they implement.
+
+## Context
+
+- **Origin:** issue [#210](https://github.com/oxidean/oxidean/issues/210)
+  — store table, configuration surface, and trait shape defined there.
+- **Product alignment:** platform-parity track on
+  `agent-os/product/roadmap.md` — cloud-native storage unblocks
+  multi-replica API and Helm.
+- **Precedent:** VCS object store's marker-verified root
+  (`ObjectStoreConfig`) — the marker gate reuses that invariant.

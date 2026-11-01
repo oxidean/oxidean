@@ -132,7 +132,8 @@ pub trait StagedUpload: Send {
 /// Presigning is a capability, not a guarantee: `fs` answers
 /// [`StorageError::PresignUnsupported`]. Callers mint URLs only *after*
 /// the store's own ACL check — presign changes who serves the bytes,
-/// never who decides (ADR-0001).
+/// never who decides (spec
+/// `agent-os/specs/2026-11-01-1425-storage-blob-backend`).
 #[async_trait]
 pub trait BlobStore: Send + Sync + 'static {
     /// Backend identifier for diagnostics (`"fs"` / `"s3"`).
