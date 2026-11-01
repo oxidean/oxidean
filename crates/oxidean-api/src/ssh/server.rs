@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use oxidean_db::Database;
-use russh::server::{Auth, ChannelOpenHandle, Handler, Msg, Server as RusshServer, Session};
+use russh::server::{
+    Auth, ChannelOpenHandle, Handler, Msg, Server as RusshServer, Session, VerifiedPublicKey,
+};
 use russh::{Channel, ChannelId, MethodKind, MethodSet};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -78,8 +80,9 @@ impl Handler for SshHandler {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &ssh_key::PublicKey,
+        key: VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
+        let public_key = key.public_key;
         let ip = self
             .peer
             .map(|p| p.ip().to_string())
