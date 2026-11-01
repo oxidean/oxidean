@@ -46,6 +46,11 @@ of hidden behind composer config we can't verify without docker.
 - Open-proxy hardening: only path+query is taken from the request line —
   an absolute-form request target (`GET http://host/x`) can't redirect the
   proxy to a different upstream (matches the Rust `format!("{origin}{path}")`).
+- Themed status pages (`oxidean-status-pages`, landed on main after this
+  PoC) are not ported — a missing `dist/404.html` degrades to a bare
+  text/plain 404 instead of the branded page, and `405`/bare proxy errors
+  are not themed either. Benchmark classes are unaffected (error paths are
+  not in the harness).
 - Request-derived origin host (raw `Host`, or `X-Forwarded-Host` behind the
   declared edge) is validated as hostname/IP-literal + optional port in
   `inject.js`; a malformed value drops the origin instead of writing
