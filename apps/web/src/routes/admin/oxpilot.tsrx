@@ -285,6 +285,9 @@ export function AdminOxpilotContent() @{
     // otherwise resolve after this write and clobber the saved
     // settings cache on a later remount.
     void queryClient.cancelQueries({ queryKey: adminOxpilotQueryOptions().queryKey });
+    // Same for an in-flight settings refetch: a stale-remount response
+    // resolving after this write would overwrite the saved settings.
+    void queryClient.cancelQueries({ queryKey: settingsQueryKey });
     queryClient.setQueryData(settingsQueryKey, next);
     queryClient.setQueryData<AdminOxpilotLoaderData>(adminOxpilotQueryOptions().queryKey, (old) =>
       old?.kind === "ready" ? { ...old, settings: next } : old,
