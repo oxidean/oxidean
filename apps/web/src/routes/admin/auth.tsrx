@@ -222,13 +222,21 @@ export function AdminAuthContent() @{
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
       window.location.assign("/login?returnTo=/admin/auth");
-      return;
-    }
-    if (loaderData?.kind === "ready") {
-      setAuthMeCache(queryClient, loaderData.me);
-      setAdminAuthSettingsCache(queryClient, loaderData.settings);
     }
   }, [loaderData, queryClient]);
+
+  // Sync each downstream cache only when its own loader field changes —
+  // `writeSettingsCaches` bumps the loader query, and re-writing `me`
+  // off that snapshot would clobber a session cache that refreshed
+  // independently.
+  const loaderMe = loaderData?.kind === "ready" ? loaderData.me : null;
+  const loaderSettings = loaderData?.kind === "ready" ? loaderData.settings : null;
+  useEffect(() => {
+    if (loaderMe) setAuthMeCache(queryClient, loaderMe);
+  }, [loaderMe, queryClient]);
+  useEffect(() => {
+    if (loaderSettings) setAdminAuthSettingsCache(queryClient, loaderSettings);
+  }, [loaderSettings, queryClient]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
@@ -259,7 +267,7 @@ export function AdminAuthContent() @{
         },
   );
   const [pending, setPending] = useState(false);
-  const [draftReady, setDraftReady] = useState(() => !!initialSettings);
+  const [draftReady, setDraftReady, getDraftReady] = useState(() => !!initialSettings);
 
   const form = useForm({
     defaultValues: formDefaultsFromSettings(initialSettings),
@@ -286,7 +294,7 @@ export function AdminAuthContent() @{
           return;
         }
         applySettings(res.data);
-        setAdminAuthSettingsCache(queryClient, res.data);
+        writeSettingsCaches(res.data);
         toastSuccess("Auth settings saved.");
         setPending(false);
       } catch {
@@ -314,6 +322,23 @@ export function AdminAuthContent() @{
     setDraftReady(true);
   }
 
+  // Settings writes must also update the loader query — a remount inside
+  // its staleTime seeds the form from loaderData, and a stale loader
+  // snapshot would silently restore the pre-save values.
+  function writeSettingsCaches(next: AuthSettingsPublic) {
+    // Cancel an in-flight loader first: its pre-save snapshot would
+    // otherwise resolve after this write and clobber the saved
+    // settings cache on a later remount.
+    void queryClient.cancelQueries({ queryKey: adminAuthQueryOptions().queryKey });
+    // Same for an in-flight settings refetch: a stale-remount response
+    // resolving after this write would overwrite the saved settings.
+    void queryClient.cancelQueries({ queryKey: adminAuthSettingsQueryOptions().queryKey });
+    setAdminAuthSettingsCache(queryClient, next);
+    queryClient.setQueryData<AdminAuthLoaderData>(adminAuthQueryOptions().queryKey, (old) =>
+      old?.kind === "ready" ? { ...old, settings: next } : old,
+    );
+  }
+
   useEffect(() => {
     if (loaderData) return;
     if (me.isPending) return;
@@ -323,11 +348,15 @@ export function AdminAuthContent() @{
     }
   }, [loaderData, me.isPending, me.isError, me.data]);
 
+  // Seed the draft once — later refetches must not clobber unsaved
+  // edits; save/clear handlers re-apply from the server response.
   useEffect(() => {
-    if (settingsQ.isSuccess && settingsQ.data) {
+    // Read the live flag: Octane may run a stale-closure effect after user
+    // edits land, and the captured `draftReady` would still read false.
+    if (!getDraftReady() && settingsQ.isSuccess && settingsQ.data) {
       applySettings(settingsQ.data);
     }
-  }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt]);
+  }, [settingsQ.isSuccess, settingsQ.dataUpdatedAt, draftReady]);
 
   const settingsErrorCode =
     settingsQ.isError && settingsQ.error && typeof settingsQ.error === "object"
@@ -352,8 +381,12 @@ export function AdminAuthContent() @{
   const settings = settingsQ.data ?? (readyFromLoader ? loaderData.settings : undefined);
   const loadError =
     !!loaderError || me.isError || (settingsQ.isError && settingsErrorCode !== "admin.forbidden");
+  // Hold the form until the draft is seeded no matter which path supplies
+  // it — a late-arriving ready loader must not lift the gate between
+  // `isSuccess` and the seed effect, or the Switch paints unchecked first
+  // and a click in that window toggles the field ON instead of OFF.
   const waitingForDraft =
-    !readyFromLoader && isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
+    isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
 
   @if (!sessionKnown || waitingForDraft) {
     <></>;
@@ -663,10 +696,10 @@ function PatPolicySection() @{
   const [allowNever, setAllowNever] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded, getLoaded] = useState(false);
 
   useEffect(() => {
-    if (loaded || !policy) return;
+    if (getLoaded() || !policy) return;
     setDefaultTtl(String(policy.default_ttl_days));
     setMaxTtl(String(policy.max_ttl_days));
     setAllowNever(policy.allow_never_expire === true);
