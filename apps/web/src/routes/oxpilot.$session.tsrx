@@ -82,6 +82,13 @@ function toCallCard(call: {
   };
 }
 
+/** String frame field or "" — the catch-all variant's index signature
+ * makes narrowed field access `unknown`, and parsed frames can genuinely
+ * carry non-strings. */
+function frameStr(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
 /** `"${code}: ${message}"` — the query-layer/stream error envelope. */
 function codeOf(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -493,15 +500,15 @@ function OxpilotChatSurface(props: {
           const call = toCallCard({
             call_id: String(frame.call_id),
             call_index: typeof frame.call_index === "number" ? frame.call_index : undefined,
-            tool: String(frame.tool ?? ""),
-            status: String(frame.status ?? ""),
+            tool: frameStr(frame.tool),
+            status: frameStr(frame.status),
             args_summary: frame.args_summary as string | null | undefined,
             output_summary: frame.output_summary as string | null | undefined,
           });
           setToolCalls((prev) => new Map(prev).set(call.call_id, call));
         } else if (frame.type === "card") {
-          const kind = String(frame.card_kind ?? "");
-          const refId = String(frame.ref_id ?? "");
+          const kind = frameStr(frame.card_kind);
+          const refId = frameStr(frame.ref_id);
           if (kind === "queued") {
             // The queued row set is `queueList`-resolved — the card frame
             // is only the trigger to refresh it.
@@ -530,7 +537,7 @@ function OxpilotChatSurface(props: {
           });
           invalidateOxpilotQueries(qc);
           if (!busyRef.current) {
-            const result = String(frame.result ?? "");
+            const result = frameStr(frame.result);
             if (result === "aborted") props.onTurnNotice("aborted");
             else if (result !== "done") props.onTurnNotice("error");
             props.onReseed();
