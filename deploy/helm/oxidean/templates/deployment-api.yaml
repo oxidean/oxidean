@@ -148,7 +148,7 @@ spec:
                   name: {{ include "oxidean.secretName" . | quote }}
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: postgres://$(POSTGRES_USER):***@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
             {{- else }}
             # Postgres disabled and no explicit source — the app Secret
             # (chart-managed or existing) must carry DATABASE_URL.
