@@ -29,6 +29,7 @@ This skill adapts the flow. Follow it whenever the user drives Agent OS work (pl
 
 1. **Gather context autonomously** — read the code surfaces the request touches, `agent-os/product/` (mission, roadmap, tech-stack, decisions), prior records in `agent-os/specs/` (newest first; `_archive/` is read-only provenance, never edit), and `agent-os/standards/index.yml` for binding standards. Search the issue tracker for related issues and PRs.
 2. **Draft the spec folder** at `agent-os/specs/<YYYY-MM-DD-HHMM>-<slug>/` using the real clock (`date '+%Y-%m-%d-%H%M'`), never session metadata. Write `shape.md` (context, recommended decisions with rationale, alternatives considered, open questions), `plan.md` (phased tasks, each with verify criteria), `references.md` (code and doc surfaces), `standards.md` (binding standards inlined — see `agent-os-shape-spec` for the format).
+   Use a lowercase, hyphenated feature slug with at most 40 characters. If visuals exist, add them under `visuals/`.
 3. **Open a draft PR** — branch `spec/<slug>`, commit `docs(spec): <subject>`, draft PR titled `spec: <title>`; body summarizes the spec and lists the open questions.
 4. **Ask the open questions in chat** (format above) and keep them mirrored in the PR body. Fold answers into `shape.md`/`plan.md`, push, keep the PR body in sync.
 5. **Related updates ride the same PR** — roadmap line items, standards edits, `standards/index.yml` regeneration via `agent-os-index-standards`.
