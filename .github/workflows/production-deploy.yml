@@ -329,7 +329,10 @@ jobs:
             # Self-heal the producing pipeline, throttled to every ~5min: a
             # concluded-bad run gets a --failed rerun (max 2); a missing run
             # (>3-tag push suppression) gets a one-shot tag-ref dispatch.
-            if (( i % 10 == 1 )); then
+            # Skip recovery on the first iteration: the tag-push run may not be
+            # listed yet, and dispatching a duplicate would cancel the healthy
+            # build via ox-cli.yml's same-ref concurrency group.
+            if (( i > 1 && i % 10 == 1 )); then
               # Lookup failure must not masquerade as "no run": ox-cli.yml's
               # concurrency group cancels in-progress runs for the same ref,
               # so dispatching on a transient API error would kill a healthy
@@ -339,8 +342,11 @@ jobs:
                 --jq '.workflow_runs[0].id // empty' 2>/dev/null)"; then
                 if [[ -z "$run_id" && "$dispatched" == "false" ]]; then
                   echo "no ox CLI run exists for ${OX_TAG} (tag-push suppression) — dispatching on the tag ref"
-                  gh workflow run ox-cli.yml --ref "$OX_TAG" || true
-                  dispatched=true
+                  if gh workflow run ox-cli.yml --ref "$OX_TAG"; then
+                    dispatched=true
+                  else
+                    echo "::warning::dispatch of ox-cli.yml on ${OX_TAG} failed — will retry next cycle"
+                  fi
                 elif [[ -n "$run_id" && "$healed" -lt 2 ]]; then
                   concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
                     --jq '.conclusion // empty' 2>/dev/null || true)"
