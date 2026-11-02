@@ -443,3 +443,19 @@ changelog_path = "docs/WIRE-CHANGELOG.md"
 globs = []
 scopes = ["wire", "rpc"]
 depends_on = []
+
+# --- Helm chart -------------------------------------------------------------
+
+[[component]]
+id = "oxidean-chart"
+kind = "helm"
+manifest_path = "deploy/helm/oxidean/Chart.yaml"
+tag_prefix = "oxidean-chart-v"
+changelog_path = "deploy/helm/oxidean/CHANGELOG.md"
+globs = ["deploy/helm/oxidean/**"]
+scopes = ["helm", "k8s", "kubernetes"]
+depends_on = ["oxidean-api", "web", "oxidean-web", "oxidean-runner"]
+app_component = "oxidean-api"
+# web + oxidean-web publish the same image — the chart pins the newest of
+# the two series so either release refreshes it.
+image_components = { api = "oxidean-api", web = ["web", "oxidean-web"], runner = "oxidean-runner" }

@@ -1,0 +1,25 @@
+{{- if .Values.objectstore.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxidean.objectstoreServiceName" . }}
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oxidean.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+      protocol: TCP
+    {{- if .Values.objectstore.console.enabled }}
+    - name: console
+      port: 9001
+      targetPort: console
+      protocol: TCP
+    {{- end }}
+{{- end }}

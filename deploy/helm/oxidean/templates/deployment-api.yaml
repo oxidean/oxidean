@@ -1,0 +1,375 @@
+{{- /* Validations — fail fast at template time, not in the cluster. */ -}}
+{{- if not (or (eq .Values.storage.backend "fs") (eq .Values.storage.backend "s3")) -}}
+{{- fail (printf "storage.backend must be fs or s3, got %q" .Values.storage.backend) -}}
+{{- end -}}
+{{- if and (eq .Values.storage.backend "s3") (empty (include "oxidean.s3Bucket" .)) -}}
+{{- fail "storage.backend=s3 requires storage.s3.bucket or objectstore.enabled (OXIDEAN_S3_BUCKET)" -}}
+{{- end -}}
+{{- if and (eq .Values.storage.backend "s3") (ne (empty .Values.storage.s3.accessKeyId) (empty .Values.storage.s3.secretAccessKey)) -}}
+{{- fail "storage.s3.accessKeyId and storage.s3.secretAccessKey must be set together (or neither for the ambient AWS chain)" -}}
+{{- end -}}
+{{- if not (or .Values.postgres.enabled .Values.database.url .Values.database.existingSecret) -}}
+{{- fail "no database: enable postgres, set database.url, or database.existingSecret" -}}
+{{- end -}}
+{{- if and .Values.objectstore.enabled .Values.seaweedfs.enabled -}}
+{{- fail "objectstore.enabled (RustFS) and seaweedfs.enabled are mutually exclusive bundled stores — pick one" -}}
+{{- end -}}
+{{- if ne (int .Values.api.replicaCount) 1 -}}
+{{- fail "api.replicaCount must be 1 — CliGitBackend is single-writer on a RWO volume (HA repo sharding is a follow-up, not a values knob)" -}}
+{{- end -}}
+{{- $full := include "oxidean.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-api
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  # Recreate guarantees single-writer semantics: raw git repos live on a RWO
+  # volume and CliGitBackend needs loose objects, ref transaction locks and
+  # receive-pack on local paths. Never bump replicas past 1 until repo
+  # sharding lands (see the spec's follow-ups).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oxidean.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "oxidean.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      {{- /* Rotation key for the checksum below: data from the carrier Secret,
+      read server-side. Keying the digest on Secret data keeps the annotation
+      from being an offline verifier for the password embedded in the URL —
+      a Deployment reader cannot replay candidate passwords without Secret
+      read. Empty on first install / when the deployer cannot read Secrets,
+      in which case the checksum is simply omitted. */ -}}
+      {{- $dbKey := dict }}
+      {{- if .Values.database.url }}
+      {{- if .Values.secrets.existingSecret }}
+      {{- $dbKey = get (default dict (lookup "v1" "Secret" .Release.Namespace .Values.secrets.existingSecret)) "data" | default dict }}
+      {{- else }}
+      {{- $dbKey = get (default dict (lookup "v1" "Secret" .Release.Namespace (include "oxidean.secretName" .))) "data" | default dict }}
+      {{- end }}
+      {{- end }}
+      {{- if or .Values.podAnnotations (and .Values.database.url $dbKey) }}
+      annotations:
+        {{- if and .Values.database.url $dbKey }}
+        # Rolls the api when the effective URL changes — secretKeyRef reads
+        # resolve only at container start, so a Secret update alone would
+        # leave the running pod on the old database.
+        checksum/database-url: {{ print (toJson $dbKey) .Values.database.url | sha256sum | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and .Values.webFlowKey.initProvision (not .Values.secrets.webFlowPrivateKey) .Values.ssh.enabled }}
+      initContainers:
+        - name: provision-web-flow
+          image: {{ include "oxidean.apiImage" . }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          # The app provisions web-flow commit-signing keys from files under
+          # OXIDEAN_SSH_HOST_KEY_DIR (fails closed on production without them).
+          # Idempotent: skip when the pair already exists.
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if [ ! -s /var/ssh/web-flow ] || [ ! -s /var/ssh/web-flow.pub ]; then
+                rm -f /var/ssh/web-flow /var/ssh/web-flow.pub
+                ssh-keygen -t ed25519 -N '' -f /var/ssh/web-flow -C oxidean-web-flow
+              fi
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: ssh-keys
+              mountPath: /var/ssh
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "oxidean.apiImage" . }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.ssh.enabled }}
+            - name: ssh
+              containerPort: {{ .Values.ssh.containerPort }}
+              protocol: TCP
+            {{- end }}
+          env:
+            # DATABASE_URL resolution order (mirrors values.yaml):
+            #   database.existingSecret → database.url → postgres.enabled →
+            #   the app Secret's DATABASE_URL (chart-managed or existingSecret).
+            {{- if .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.urlKey | quote }}
+            {{- else if .Values.database.url }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secrets.existingSecret }}
+                  # No chart Secret in this mode — the dedicated
+                  # <release>-database Secret carries it instead of a
+                  # literal env value readable in the Deployment spec.
+                  name: {{ include "oxidean.fullname" . }}-database
+                  {{- else }}
+                  name: {{ include "oxidean.secretName" . }}
+                  {{- end }}
+                  key: DATABASE_URL
+            {{- else if .Values.postgres.enabled }}
+            # Bundled: literal value so $(POSTGRES_*) expands from the
+            # secretKeyRef entries defined just above — ordering matters.
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgres://$(POSTGRES_USER):***@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
+            {{- else }}
+            # Postgres disabled and no explicit source — the app Secret
+            # (chart-managed or existing) must carry DATABASE_URL.
+            - name: DATABASE_URL
+              {{- include "oxidean.databaseSecretKeyRef" . | nindent 14 }}
+            {{- end }}
+            - name: OXIDEAN_ENV
+              value: {{ .Values.env | quote }}
+            - name: OXIDEAN_PUBLIC_ORIGIN
+              value: {{ .Values.publicOrigin | quote }}
+            - name: OXIDEAN_CORS_ORIGINS
+              value: {{ .Values.corsOrigins | default .Values.publicOrigin | quote }}
+            - name: API_BIND
+              value: "0.0.0.0:8080"
+            - name: RUST_LOG
+              value: {{ .Values.api.env.RUST_LOG | default "info" | quote }}
+            - name: OXIDEAN_PROTECTION_HELPER
+              value: /usr/local/bin/oxidean-protection-hook
+            # Forge state roots — /var/* contract identical to compose.
+            - name: OXIDEAN_REPOS_DIR
+              value: /var/repos
+            - name: OXIDEAN_LFS_DIR
+              value: /var/lfs
+            - name: OXIDEAN_RELEASE_ASSETS_DIR
+              value: /var/release-assets
+            - name: OXIDEAN_PACKAGES_DIR
+              value: /var/packages
+            - name: OXIDEAN_TEMPLATE_PACKS_DIR
+              value: /var/template-packs
+            - name: OXIDEAN_VCS_OBJECTS_DIR
+              value: /var/vcs-objects
+            - name: OXIDEAN_ACTIONS_LOG_DIR
+              value: /var/actions-logs
+            - name: OXIDEAN_ACTIONS_ARTIFACTS_DIR
+              value: /var/actions-artifacts
+            - name: OXIDEAN_ACTIONS_CACHE_DIR
+              value: /var/actions-cache
+            - name: OXIDEAN_PAGES_DIR
+              value: /var/pages
+            - name: OXIDEAN_ACTIONS_ENABLED
+              value: "true"
+            - name: OXIDEAN_MCP_ENABLED
+              value: "true"
+            - name: OXIDEAN_OXPILOT_ENABLED
+              value: "1"
+            - name: OXIDEAN_ALLOW_SIGNUP
+              value: {{ .Values.allowSignup | quote }}
+            - name: OXIDEAN_AUTO_MIGRATE
+              value: "true"
+            {{- if .Values.statusPageTheme }}
+            - name: OXIDEAN_STATUS_PAGE_THEME
+              value: {{ .Values.statusPageTheme | quote }}
+            {{- end }}
+            {{- if .Values.ssh.enabled }}
+            - name: OXIDEAN_SSH_ENABLED
+              value: "true"
+            - name: OXIDEAN_SSH_PORT
+              value: {{ .Values.ssh.containerPort | quote }}
+            - name: OXIDEAN_SSH_HOST
+              value: {{ include "oxidean.sshHost" . | quote }}
+            - name: OXIDEAN_SSH_HOST_KEY_DIR
+              value: /var/ssh
+            {{- else }}
+            - name: OXIDEAN_SSH_ENABLED
+              value: "false"
+            {{- end }}
+            {{- if .Values.admin.email }}
+            - name: OXIDEAN_ADMIN_EMAIL
+              value: {{ .Values.admin.email | quote }}
+            - name: OXIDEAN_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_ADMIN_PASSWORD
+            {{- end }}
+            {{- if eq .Values.storage.backend "s3" }}
+            - name: OXIDEAN_STORAGE_BACKEND
+              value: s3
+            - name: OXIDEAN_S3_BUCKET
+              value: {{ include "oxidean.s3Bucket" . | quote }}
+            {{- with .Values.storage.s3.prefix }}
+            - name: OXIDEAN_S3_PREFIX
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if or .Values.storage.s3.endpoint (eq (include "oxidean.s3Bundled" .) "true") }}
+            - name: OXIDEAN_S3_ENDPOINT
+              value: {{ include "oxidean.s3Endpoint" . | quote }}
+            {{- end }}
+            {{- if or .Values.storage.s3.region (eq (include "oxidean.s3Bundled" .) "true") }}
+            - name: OXIDEAN_S3_REGION
+              value: {{ default .Values.objectstore.region .Values.storage.s3.region | quote }}
+            {{- end }}
+            {{- if ne (toString .Values.storage.s3.pathStyle) "" }}
+            - name: OXIDEAN_S3_PATH_STYLE
+              value: {{ .Values.storage.s3.pathStyle | toString | quote }}
+            {{- end }}
+            {{- if or .Values.storage.s3.insecureHttp (eq (include "oxidean.s3Bundled" .) "true") }}
+            - name: OXIDEAN_S3_INSECURE_HTTP
+              value: "1"
+            {{- end }}
+            # Credentials resolve via helpers — chart Secret, the SeaweedFS
+            # generated/admin Secret, or secrets.existingSecret's OXIDEAN_S3_*
+            # keys (envFrom supplies the same values; explicit refs make the
+            # dependency visible and keep the bundled-store paths working when
+            # the app Secret is operator-managed). optional:true preserves the
+            # ambient AWS credentials chain (IRSA / web-identity / IMDS).
+            - name: OXIDEAN_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3AccessKeyIdKey" . | quote }}
+                  optional: true
+            - name: OXIDEAN_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3SecretAccessKeyKey" . | quote }}
+                  optional: true
+            - name: OXIDEAN_S3_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: OXIDEAN_S3_SESSION_TOKEN
+                  optional: true
+            {{- end }}
+            {{- if not .Values.secrets.existingSecret }}
+            - name: OXIDEAN_ACTIONS_SECRETS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_ACTIONS_SECRETS_KEY
+            - name: OXIDEAN_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_SESSION_SECRET
+                  optional: true
+            - name: OXIDEAN_SECRETS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_SECRETS_KEY
+                  optional: true
+            - name: OXIDEAN_WEB_FLOW_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_WEB_FLOW_PRIVATE_KEY
+                  optional: true
+            {{- end }}
+            {{- range $k, $v := .Values.api.env }}
+            {{- if ne $k "RUST_LOG" }}
+            - name: {{ $k }}
+              value: {{ $v | toString | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if .Values.secrets.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.existingSecret | quote }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: {{ .Values.api.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.api.probes.startup.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.api.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.api.probes.liveness.periodSeconds }}
+          {{- with .Values.api.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if include "oxidean.dataVolumeMounted" . }}
+            - name: data
+              mountPath: /var
+            {{- else }}
+            - name: repos
+              mountPath: /var/repos
+            {{- end }}
+            {{- if .Values.ssh.enabled }}
+            - name: ssh-keys
+              mountPath: /var/ssh
+            {{- end }}
+      volumes:
+        {{- if include "oxidean.dataVolumeMounted" . }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxidean.dataPvcName" . }}
+        {{- else }}
+        - name: repos
+          persistentVolumeClaim:
+            claimName: {{ include "oxidean.reposPvcName" . }}
+        {{- end }}
+        {{- if .Values.ssh.enabled }}
+        - name: ssh-keys
+          persistentVolumeClaim:
+            claimName: {{ include "oxidean.sshPvcName" . }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -22,6 +22,16 @@ bump flow.
 | `crate` | `oxidean-core`, `oxidean-api`, `ox` | `Cargo.toml` `version = "…"` (literal, never `workspace = true`) |
 | `bun` | `web`, `api-client` | `package.json` `"version"` |
 | `contract` | `wire` (the RPC wire contract) | `crates/oxidean-core/src/lib.rs` `WIRE_VERSION` |
+| `helm` | `oxidean-chart` | `deploy/helm/oxidean/Chart.yaml` `version:` |
+
+`kind = "helm"` carriers live outside both workspaces, so workspace
+completeness skips them. They take two extra registry keys: `app_component`
+names the component whose current version is stamped into `Chart.yaml`
+`appVersion:` after every bump (for `oxidean-chart`: `oxidean-api`), and
+`image_components` maps `values.yaml` `<svc>.image.tag` pins to component ids
+(the chart api/web/runner entries), so a released chart always installs the
+exact image set it was cut against. Both must appear in `depends_on` so their releases
+propagate a chart patch bump and refresh the stamps.
 
 Tags are `<tag_prefix><semver>` — e.g. `oxidean-api-v0.2.0`, `ox-v0.1.1`,
 `wire-v0.1.0`. Tag prefixes are registered per component in
@@ -168,6 +178,10 @@ existing components:
 - **`ox-v*` tags never touch images**: the api fetches its CLI feed at
   container boot from the runtime `OXIDEAN_CLI_DIST_URL` var (deploy tooling
   repins it per environment) — `sha-*` tags stay immutable across ox releases.
+- **`oxidean-chart-v*` tags run no image lane at all**: `publish-chart`
+  packages `deploy/helm/oxidean` from the tagged tree (version, appVersion,
+  and image pins were stamped by `bump`) and pushes it to
+  `oci://ghcr.io/<owner>/charts/oxidean`.
 
 Tag pushes must use the **`RELEASE_TOKEN`** secret (a maintainer PAT) —
 the default `GITHUB_TOKEN` does not re-trigger workflows, so tag pushes

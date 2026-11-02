@@ -1,0 +1,26 @@
+apiVersion: v2
+name: oxidean
+description: Self-hostable code forge — git, issues, pull requests, orgs, LFS, releases, packages, actions.
+type: application
+# version is the chart semver (carrier for the `oxidean-chart` versioning
+# component); appVersion tracks the `oxidean-api` server version. Both are
+# stamped by the release train — see docs/VERSIONING.md (kind = "helm").
+version: "0.1.0"
+appVersion: "0.4.1"
+kubeVersion: ">=1.25.0-0"
+# Vendored at build/package time (`helm dependency build`); charts/*.tgz is
+# gitignored, Chart.lock is committed. SeaweedFS is the k8s-native bundled
+# object store (spec 2026-11-01-2013-k8s-native-storage, OPS-08).
+dependencies:
+  - name: seaweedfs
+    version: "4.51.0"
+    repository: "https://seaweedfs.github.io/seaweedfs/helm"
+    condition: seaweedfs.enabled
+keywords:
+  - git
+  - forge
+  - code-hosting
+icon: https://raw.githubusercontent.com/oxidean/oxidean/main/brand/oxidean-mark.png
+home: https://oxidean.dev
+sources:
+  - https://github.com/oxidean/oxidean
