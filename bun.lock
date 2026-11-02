@@ -24,6 +24,7 @@
         "@octanejs/zustand": "^0.1.68",
         "@oxidean/api-client": "workspace:*",
         "@simplewebauthn/browser": "^14.0.0",
+        "@tanstack/ai": "^1.0.1",
         "@tanstack/ai-client": "^1.0.1",
         "@tanstack/ai-octane": "^1.0.0",
         "astro": "^7.4.4",

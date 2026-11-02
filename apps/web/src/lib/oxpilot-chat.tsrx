@@ -10,7 +10,14 @@
  */
 import { useMemo, useRef } from "octane";
 import { useChat } from "@tanstack/ai-octane";
-import type { ChatFetcher, ChatFetcherInput, UIMessage } from "@tanstack/ai-client";
+import { EventType } from "@tanstack/ai";
+import type { StreamChunk } from "@tanstack/ai";
+import type {
+  ChatFetcher,
+  ChatFetcherInput,
+  ChatFetcherOptions,
+  UIMessage,
+} from "@tanstack/ai-client";
 import { parseSseBuffer } from "@/lib/oxpilot-stream";
 
 function textOf(m: UIMessage): string {
@@ -37,7 +44,8 @@ export function toUiMessage(m: { id: string; role: string; content: string }): U
 async function* oxpilotFetcher(
   sessionId: string,
   input: ChatFetcherInput,
-): AsyncGenerator<Record<string, unknown>> {
+  options: ChatFetcherOptions,
+): AsyncGenerator<StreamChunk> {
   const lastUser = [...input.messages].reverse().find((m) => m.role === "user");
   const content = lastUser ? textOf(lastUser).trim() : "";
   const clientMsgId =
@@ -46,7 +54,8 @@ async function* oxpilotFetcher(
   const res = await fetch(`/api/oxpilot/sessions/${encodeURIComponent(sessionId)}/chat`, {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...options.headers },
+    signal: options.signal,
     body: JSON.stringify({ content, client_msg_id: clientMsgId }),
   });
   if (!res.ok || !res.body) {
@@ -60,7 +69,7 @@ async function* oxpilotFetcher(
     throw new Error(detail);
   }
 
-  yield { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId };
+  yield { type: EventType.RUN_STARTED, threadId: input.threadId, runId: input.runId };
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -88,18 +97,18 @@ async function* oxpilotFetcher(
           seen.add(key);
           if (!opened) {
             opened = true;
-            yield { type: "TEXT_MESSAGE_START", messageId, role: "assistant" };
+            yield { type: EventType.TEXT_MESSAGE_START, messageId, role: "assistant" };
           }
-          yield { type: "TEXT_MESSAGE_CONTENT", messageId, delta: String(frame.delta) };
+          yield { type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta: String(frame.delta) };
         } else if (frame.type === "terminal") {
           sawTerminal = true;
           messageId = String(frame.message_id);
-          if (opened) yield { type: "TEXT_MESSAGE_END", messageId };
+          if (opened) yield { type: EventType.TEXT_MESSAGE_END, messageId };
           if (frame.result === "done") {
-            yield { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId };
+            yield { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId };
           } else {
             const code = typeof frame.code === "string" ? frame.code : "error";
-            yield { type: "RUN_ERROR", message: code, code };
+            yield { type: EventType.RUN_ERROR, message: code, code };
           }
           return;
         } else if (frame.type === "snapshot") {
@@ -119,7 +128,7 @@ async function* oxpilotFetcher(
     // The deliberate resend/idempotent path returns ONE snapshot frame and
     // closes — no append ever opened a run message; finish cleanly.
     if (sawSnapshot && !opened) {
-      yield { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId };
+      yield { type: EventType.RUN_FINISHED, threadId: input.threadId, runId: input.runId };
       return;
     }
     // Any other terminal-less EOF is a truncated stream: surface it as a
@@ -149,16 +158,15 @@ export function useOxpilotChat(
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
   const fetcher = useMemo(
-    () =>
-      ((input: ChatFetcherInput) =>
-        (async function* () {
-          try {
-            yield* oxpilotFetcher(sessionId, input);
-          } catch (e) {
-            hooksRef.current?.onFetchError?.(e instanceof Error ? e : new Error(String(e)));
-            throw e;
-          }
-        })()) as unknown as ChatFetcher,
+    (): ChatFetcher => (input: ChatFetcherInput, options: ChatFetcherOptions) =>
+      (async function* (): AsyncGenerator<StreamChunk> {
+        try {
+          yield* oxpilotFetcher(sessionId, input, options);
+        } catch (e) {
+          hooksRef.current?.onFetchError?.(e instanceof Error ? e : new Error(String(e)));
+          throw e;
+        }
+      })(),
     [sessionId],
   );
   return useChat({ threadId: sessionId, fetcher, initialMessages });
