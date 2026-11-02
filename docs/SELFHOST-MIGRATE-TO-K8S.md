@@ -93,6 +93,22 @@ kubectl -n oxidean scale deploy/ox-oxidean-api --replicas=0   # keep it off for 
 (`ox-secrets` is created in Step 6 — before the api scales up in Step 8.
 Only the api reads it, so the order is safe.)
 
+**Bundled-Postgres variant** — if you keep `postgres.enabled=true` instead of
+an external database, the postgres pod reads `POSTGRES_PASSWORD` from
+`ox-secrets` at first boot, so it must exist *before the install* (not in
+Step 6). Create it early, drop the external-database flags, and use that
+same password for the Step 4 restore:
+
+```bash
+kubectl -n oxidean create secret generic ox-secrets \
+  --from-literal=POSTGRES_PASSWORD="<target db password>"   # plus the OXIDEAN_* keys from Step 6
+helm install ox oci://ghcr.io/oxidean/charts/oxidean \
+  --namespace oxidean \
+  --set publicOrigin=https://git.example.com \
+  --set secrets.existingSecret=ox-secrets
+# no postgres.enabled/database.* sets — the bundled path is the default
+```
+
 ## Step 4 — Load the database
 
 Run a throwaway postgres client pod, copy the dump in, then restore —
@@ -126,9 +142,11 @@ Resolve the volume the api actually mounts — the Compose project name
 prefix varies, so never guess `oxidean_selfhost_oxidean_data`:
 
 ```bash
-API_CID="$(docker compose ps -q api)"
+API_CID="$(docker compose ps --all -q api)"   # --all: Step 1 stopped api
+[ -n "$API_CID" ] || { echo "api container not found"; exit 1; }
 DATA_VOL="$(docker inspect "$API_CID" \
   --format '{{ range .Mounts }}{{ if eq .Destination "/var" }}{{ .Name }}{{ end }}{{ end }}')"
+[ -n "$DATA_VOL" ] || { echo "no /var volume mounted on $API_CID"; exit 1; }
 docker run --rm -v "$DATA_VOL":/var:ro -v "$PWD":/out \
   alpine tar czf /out/oxidean-var.tgz -C /var .
 ```
