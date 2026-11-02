@@ -11,6 +11,10 @@
 # - ox-v*.*.* tag pushes create a semver GitHub Release carrying the full
 #   binary matrix (`ox-targets.txt` + `ox-{triple}` + `.sha256` +
 #   SOURCE_COMMIT), installers, and packages for standalone GitHub installs.
+#   The release lands as a DRAFT once the producers finish; `publish` flips
+#   it public only after every install/package verification leg is green —
+#   a verification-runner flake leaves an invisible draft instead of a dead
+#   pipeline (rerun the failed legs and the publish still flips).
 #   That tag release is also the API-image staging feed: Cloud deploys pin
 #   OXIDEAN_CLI_DIST_URL to the tag's download URL (deploy scripts resolve the
 #   ox-v* tag on the deployed commit); stable cuts also ship latest.json in
@@ -429,11 +433,13 @@ jobs:
           name: ox-pkg-${{ matrix.fmt }}-${{ matrix.arch }}
           path: pkg/
 
-  # ── ox-v* tags: publish the full matrix + packages as semver release assets
+  # ── ox-v* tags: stage the full matrix + packages as a DRAFT release ─────
   release:
-    name: publish ox release assets
+    name: stage ox release assets (draft)
     # The tag's own release is the staging feed — no rolling ox-dist release.
-    needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
+    # Producers only: the verification legs gate `publish`, not the draft, so
+    # one verification-runner flake can no longer starve the release.
+    needs: [build, build-freebsd, packages]
     if: startsWith(github.ref, 'refs/tags/ox-v')
     runs-on: ubuntu-latest
     permissions:
@@ -495,16 +501,24 @@ jobs:
             '{schema_version: 1, version: $v, dist_commit: $c, targets: $ts[0]}' \
             > assets/latest.json
           cat assets/latest.json
-      - name: github release
+      - name: github release (draft)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Title is the tag itself — the tag embeds the `ox` name, so a
           # prefix would duplicate it (`ox ox-v0.1.0`).
-          args=(--title "${{ github.ref_name }}")
+          args=(--title "${{ github.ref_name }}" --draft)
           if [[ "${GITHUB_REF_NAME#ox-v}" == *-* ]]; then
             args+=(--prerelease)
+          fi
+          # Idempotent: a tag-ref dispatch recovery (production-deploy's wait
+          # step) can land here with a draft already staged by a partial run —
+          # `gh release create` would hard-fail, so refresh assets instead.
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "release ${{ github.ref_name }} already exists — refreshing assets"
+            gh release upload "${{ github.ref_name }}" assets/* --clobber
+            exit 0
           fi
           git fetch --tags --force origin >/dev/null 2>&1 || true
           notes="$(git tag -l --format='%(contents)' "${{ github.ref_name }}" || true)"
@@ -518,10 +532,27 @@ jobs:
       # OXIDEAN_CLI_DIST_URL and re-pulls the api image so the container
       # entrypoint fetches this tag's feed — no image rebuild needed.
 
+  # ── flip the draft public once every verification leg is green ──────────
+  publish:
+    name: publish ox release (undraft)
+    # Draft-release assets need auth to download — the api image build and
+    # the deploy wait gate fetch them unauthenticated, so nothing consumes
+    # the release until this flip lands.
+    needs: [release, install-linux, install-macos, install-windows]
+    if: startsWith(github.ref, 'refs/tags/ox-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: draft → published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false
+
   # ── prove API image stages this tag's release matrix ────────────────────
   image-matrix:
     name: api image stages ox release matrix
-    needs: [release]
+    needs: [publish]
     # The staging feed only exists on ox-v* tags — untagged builds are
     # host-only (verified by ci.yml's plain api image build).
     if: startsWith(github.ref, 'refs/tags/ox-v')

@@ -54,7 +54,7 @@ concurrency:
 
 permissions:
   contents: read # checkout only — the stable cut pushes the bump commit + tags with the release App token, never GITHUB_TOKEN
-  actions: read
+  actions: write # the ox-assets wait self-heals: rerun --failed legs / dispatch ox-cli.yml on the tag ref
   packages: write # promote moves the :production channel tag on GHCR
   deployments: write # image deploys post GitHub Deployment records (Railway only posts git-triggered ones)
 
@@ -287,27 +287,53 @@ jobs:
           OX_TAG: ${{ steps.baseline.outputs.ox_tag || steps.bump.outputs.ox_tag }}
         run: |
           set -euo pipefail
-          # A stable ox-v* tag was just pushed — its ox-cli.yml matrix must land
-          # the release assets before the api container's boot-time
+          # A stable ox-v* tag was just pushed — its ox-cli.yml matrix must
+          # publish the release before the api container's boot-time
           # OXIDEAN_CLI_DIST_URL fetch runs, or the new replica fails closed.
           # Gate on the artifact, not on runs: a same-sha branch-push run can
           # conclude success without ever publishing (the publish job is
           # refs/tags/ox-v-gated), and >3-tag pushes create no tag events at
-          # all — polling run status can never detect either case.
-          for i in $(seq 1 90); do
-            names="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${OX_TAG}" \
-              --jq '.assets[].name' 2>/dev/null || true)"
-            if [[ -n "$names" ]] \
-              && grep -qx 'ox-targets.txt' <<<"$names" \
-              && grep -qx 'SOURCE_COMMIT' <<<"$names" \
-              && grep -qx 'latest.json' <<<"$names"; then
-              echo "release ${OX_TAG} carries the ox feed — assets are live"
+          # all — polling run status can never detect either case. The release
+          # also lands as a draft first (verification legs gate the publish):
+          # draft assets need auth to download, so only draft=false counts.
+          healed=0          # bounded self-heals of a concluded-bad ox-cli run
+          dispatched=false  # one-shot recovery when no run exists at all
+          for i in $(seq 1 120); do
+            rel_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${OX_TAG}" 2>/dev/null || true)"
+            if [[ -n "$rel_json" ]] \
+              && [[ "$(jq -r '.draft' <<<"$rel_json")" == "false" ]] \
+              && jq -r '.assets[].name' <<<"$rel_json" | grep -qx 'ox-targets.txt' \
+              && jq -r '.assets[].name' <<<"$rel_json" | grep -qx 'SOURCE_COMMIT' \
+              && jq -r '.assets[].name' <<<"$rel_json" | grep -qx 'latest.json'; then
+              echo "release ${OX_TAG} is published and carries the ox feed — assets are live"
               exit 0
             fi
-            echo "waiting for ${OX_TAG} release assets (attempt ${i}/90)"
+            # Self-heal the producing pipeline, throttled to every ~5min: a
+            # concluded-bad run gets a --failed rerun (max 2); a missing run
+            # (>3-tag push suppression) gets a one-shot tag-ref dispatch.
+            if (( i % 10 == 1 )); then
+              run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${OX_TAG}&per_page=20" \
+                --jq '[.workflow_runs[] | select(.name=="ox CLI")] | .[0].id // empty' 2>/dev/null || true)"
+              if [[ -z "$run_id" && "$dispatched" == "false" ]]; then
+                echo "no ox CLI run exists for ${OX_TAG} (tag-push suppression) — dispatching on the tag ref"
+                gh workflow run ox-cli.yml --ref "$OX_TAG" || true
+                dispatched=true
+              elif [[ -n "$run_id" && "$healed" -lt 2 ]]; then
+                concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                  --jq '.conclusion // empty' 2>/dev/null || true)"
+                case "$concl" in
+                  failure|cancelled|timed_out|action_required|startup_failure)
+                    echo "ox CLI run ${run_id} concluded ${concl} — rerunning failed legs (heal $((healed+1))/2)"
+                    gh run rerun "$run_id" --failed || true
+                    healed=$((healed+1))
+                    ;;
+                esac
+              fi
+            fi
+            echo "waiting for ${OX_TAG} release assets (attempt ${i}/120)"
             sleep 30
           done
-          echo "::error::timed out (45m) waiting for ${OX_TAG} release assets — the tag push may have been suppressed (no events when >3 tags push at once). Recover: gh workflow run ox-cli.yml --ref ${OX_TAG}"
+          echo "::error::timed out (60m) waiting for ${OX_TAG} release assets — self-heal attempted ${healed} rerun(s) and dispatched=${dispatched}. Inspect: gh run list --workflow ox-cli.yml --branch ${OX_TAG}"
           exit 1
 
       - name: Wait for GHCR image tags
