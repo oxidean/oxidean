@@ -2,6 +2,8 @@
 
 Oxidean is configured primarily through environment variables. Canonical templates live in [`.env.example`](../.env.example) (Compose / local API) and [`docs/dev-auth.env.example`](dev-auth.env.example) (local auth/email stubs). Copy templates into untracked files such as `.env` or `.env.dev-auth` — never commit secrets.
 
+Deployment surfaces: [SELF-HOSTING.md](SELF-HOSTING.md) (Compose bundle) maps each var onto `deploy/selfhost/docker-compose.yml`; [SELFHOST-KUBERNETES.md](SELFHOST-KUBERNETES.md) maps the same contract onto the Helm chart in [`deploy/helm/oxidean/`](../deploy/helm/oxidean/).
+
 Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 
 ## Environment variables
@@ -178,6 +180,28 @@ Phase 14 adds filesystem-backed **Git LFS** over HTTPS (batch + basic transfer).
 **SSH remotes (D-LFS-05):** Git-over-SSH does **not** carry LFS bytes in Phase 14. When the git remote is SSH, `git-lfs` still transfers objects over **HTTPS** using a credential helper / stored PAT. LFS-over-SSH is deferred.
 
 **Client attributes (D-LFS-17):** Operators/users track patterns with `git lfs track` and commit `.gitattributes` themselves. The server does **not** auto-commit attributes when LFS is enabled.
+
+## Object storage backend
+
+Non-Git stores (LFS objects, release assets, packages, template packs, VCS objects, actions artifacts/cache/logs, pages, uploads) can resolve through `crates/oxidean-storage`'s `BlobStore` trait instead of POSIX paths. `OXIDEAN_STORAGE_BACKEND` selects `fs` (default) or `s3`; the `OXIDEAN_S3_*` surface is only parsed when `s3` is set — under `fs` the values are inert. Parsing is fail-closed: malformed or half-set combinations are fatal at boot rather than silently degrading to filesystem semantics.
+
+> **Rollout status (OPS-02 in-flight):** the trait and both backends ship, but API consumer migration is still landing — stores keep writing to their `OXIDEAN_*_DIR` paths until each one moves behind `BlobStore`. Ship the deployment topology now; the envs go live store-by-store.
+
+| Env | Default | Role |
+| --- | --- | --- |
+| `OXIDEAN_STORAGE_BACKEND` | `fs` | `fs`/`s3` — anything else is fatal |
+| `OXIDEAN_S3_BUCKET` | — | Required when `s3`; 3–63 `[a-z0-9.-]`, no `..`, not IPv4-shaped |
+| `OXIDEAN_S3_PREFIX` | — | Global key prefix before `{store}/` |
+| `OXIDEAN_S3_ENDPOINT` | — | Custom S3-compatible endpoint URL (`http(s)://`, no creds/query/fragment) |
+| `OXIDEAN_S3_REGION` | provider default | Signing region; `auto` accepted (R2-style) |
+| `OXIDEAN_S3_PATH_STYLE` | provider default | `1`/`0` — custom endpoints default to path-style, AWS to virtual-hosted |
+| `OXIDEAN_S3_INSECURE_HTTP` | `0` | Required opt-in for `http://` endpoints |
+| `OXIDEAN_S3_ACCESS_KEY_ID` | — | Static key id — both-or-neither with the secret |
+| `OXIDEAN_S3_SECRET_ACCESS_KEY` | — | Static secret — never logged |
+| `OXIDEAN_S3_SESSION_TOKEN` | — | Optional, static creds only |
+| (neither key set) | — | Ambient AWS chain (`AWS_*` env, web-identity/IRSA, ECS, IMDS) |
+
+**Bundled store:** both deploy surfaces ship an eval-grade S3-compatible store (RustFS, Apache-2.0) — `docker compose --profile s3 up -d` for single-docker, `objectstore.enabled=true` for the Helm chart. The compose env defaults (endpoint `http://objectstore:9000`, bucket `oxidean`, `INSECURE_HTTP=1`) already target it; for an external endpoint override every `OXIDEAN_S3_*` — note `OXIDEAN_S3_ENDPOINT=` explicitly empty selects the AWS endpoint. Bundled durability is its own volume, not a backup story — production should run external object storage. Git repos and SSH host keys always stay on POSIX.
 
 ## Issues
 

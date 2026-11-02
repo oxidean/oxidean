@@ -1,0 +1,33 @@
+{{- if .Values.ssh.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxidean.sshServiceName" . }}
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.ssh.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.ssh.service.type }}
+  {{- if .Values.ssh.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.ssh.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if .Values.ssh.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.ssh.service.loadBalancerIP | quote }}
+  {{- end }}
+  {{- with .Values.ssh.service.externalIPs }}
+  externalIPs:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: ssh
+      port: {{ .Values.ssh.service.port }}
+      targetPort: ssh
+      protocol: TCP
+  selector:
+    {{- include "oxidean.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}

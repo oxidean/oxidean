@@ -7,7 +7,7 @@
 .PHONY: smoke-packages
 .PHONY: smoke-actions
 .PHONY: smoke-protection
-.PHONY: smoke-protocol-ci smoke-compose-ci
+.PHONY: smoke-protocol-ci smoke-compose-ci helm-lint helm-smoke
 .PHONY: cloud-plan cloud-docs cloud-production-autodeploy-check
 .PHONY: up-mysql up-sqlite down-mysql down-sqlite smoke-mysql smoke-sqlite
 .PHONY: up-dev-auth down-dev-auth up-with-dev-auth down-with-dev-auth test-e2e-stack seed-actions-demo test-e2e-actions
@@ -69,6 +69,7 @@ help:
 	@echo "  make smoke-packages  - Traefik /v2|/npm|/generic → API smoke (PKG-01..03)"
 	@echo "  make smoke-protocol-ci - Compose up + smoke-git-* + smoke-packages + smoke-protection (D-QH-04; fail-closed)"
 	@echo "  make smoke-compose-ci - Compose dialect bring-up smoke for CI (D-CI-01; DIALECT=postgres|sqlite|mysql)"
+	@echo "  make helm-lint / helm-smoke - chart lint+render matrix; helm-smoke also needs a live kind cluster + :ci images (OPS-06)"
 	@echo "  make smoke-mysql    - bring-up smoke asserting dialect=mysql"
 	@echo "  make smoke-sqlite   - bring-up smoke asserting dialect=sqlite"
 	@echo "  make cloud-plan     - railway config plan (Oxidean Cloud IaC; no apply)"
@@ -294,6 +295,14 @@ smoke-protocol-ci:
 # Usage: make smoke-compose-ci DIALECT=sqlite
 smoke-compose-ci:
 	@./scripts/ci-compose-smoke.sh "$(or $(DIALECT),postgres)"
+
+# OPS-06: chart lint + render matrix only (no cluster needed).
+helm-lint:
+	@HELM_SMOKE_SKIP_CLUSTER=1 ./scripts/ci-helm-smoke.sh
+
+# OPS-06: full lane — expects a kind cluster + oxidean-{api,web}:ci images.
+helm-smoke:
+	@./scripts/ci-helm-smoke.sh
 
 # D-CLOUD-07: preview Railway IaC diff only — never auto-apply from Make/CI.
 cloud-plan:

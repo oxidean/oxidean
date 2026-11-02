@@ -1,0 +1,137 @@
+{{- if .Values.runner.enabled -}}
+{{- /*
+Actions runner + privileged dind sidecar — the compose `actions` profile's k8s
+form. The sidecar owns the Docker daemon (DOCKER_HOST=tcp://127.0.0.1:2375);
+jobs with `docker://` steps land inside it. Privileged is the documented
+tradeoff — enable only for trusted workflows; hardening is a follow-up.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxidean.fullname" . }}-runner
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oxidean.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
+  template:
+    metadata:
+      labels:
+        {{- include "oxidean.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: runner
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $sched := dict "nodeSelector" .Values.runner.nodeSelector "affinity" .Values.runner.affinity "tolerations" .Values.runner.tolerations }}
+      {{- with or $sched.nodeSelector .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with or $sched.affinity .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with or $sched.tolerations .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: runner
+          image: {{ include "oxidean.runnerImage" . }}
+          imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
+          env:
+            - name: OXIDEAN_PUBLIC_ORIGIN
+              value: http://{{ include "oxidean.apiServiceName" . }}:8080
+            - name: OXIDEAN_RUNNER_NAME
+              value: {{ .Values.runner.name | quote }}
+            - name: OXIDEAN_RUNNER_LABELS
+              value: {{ .Values.runner.labels | quote }}
+            {{- if .Values.runner.dind.enabled }}
+            - name: DOCKER_HOST
+              value: tcp://127.0.0.1:2375
+            {{- end }}
+            {{- if .Values.runner.registrationToken }}
+            - name: OXIDEAN_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_RUNNER_REGISTRATION_TOKEN
+            {{- else if .Values.runner.existingSecret }}
+            - name: OXIDEAN_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runner.existingSecret | quote }}
+                  key: OXIDEAN_RUNNER_REGISTRATION_TOKEN
+            {{- end }}
+            {{- if .Values.runner.gitToken }}
+            - name: OXIDEAN_RUNNER_GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.secretName" . | quote }}
+                  key: OXIDEAN_RUNNER_GIT_TOKEN
+            {{- end }}
+          {{- with .Values.runner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.runner.dind.enabled }}
+            - name: docker-lib
+              mountPath: /var/lib/docker
+            {{- end }}
+        {{- if .Values.runner.dind.enabled }}
+        - name: dind
+          image: "{{ .Values.runner.dind.image.repository }}:{{ .Values.runner.dind.image.tag }}"
+          imagePullPolicy: {{ .Values.runner.dind.image.pullPolicy }}
+          securityContext:
+            privileged: true
+          # Bypass dockerd-entrypoint.sh: with DOCKER_TLS_CERTDIR empty it
+          # appends --host=tcp://0.0.0.0:2375, exposing an unauthenticated
+          # Docker API on the pod IP. Invoke dockerd directly with a
+          # loopback-only listener — reachable only inside the pod netns.
+          command: ["dockerd"]
+          args: ["--host=tcp://127.0.0.1:2375", "--host=unix:///var/run/docker.sock"]
+          volumeMounts:
+            - name: docker-lib
+              mountPath: /var/lib/docker
+        {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxidean.runnerPvcName" . }}
+        {{- if .Values.runner.dind.enabled }}
+        - name: docker-lib
+          emptyDir: {}
+        {{- end }}
+{{- if not .Values.runner.persistence.existingClaim }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxidean.runnerPvcName" . }}
+  annotations:
+    # Helm must never garbage-collect data — keeps the claim
+    # when a later upgrade switches it to existingClaim or the
+    # release is uninstalled; operators delete it explicitly.
+    "helm.sh/resource-policy": keep
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  accessModes: {{ .Values.runner.persistence.accessModes | toJson }}
+  {{- include "oxidean.storageClass" .Values.runner.persistence.storageClass | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.runner.persistence.size | quote }}
+{{- end }}
+{{- end }}

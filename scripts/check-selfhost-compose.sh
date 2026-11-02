@@ -57,7 +57,7 @@ done
 
 # --- 1. compose config parses under every profile combo ----------------------
 # `:?`-guarded secrets get dummy values — config validation only.
-export POSTGRES_PASSWORD=check OXIDEAN_ACTIONS_SECRETS_KEY=check \
+export POSTGRES_PASSWORD=*** OXIDEAN_ACTIONS_SECRETS_KEY=*** \
   DOMAIN=example.invalid OXIDEAN_RUNNER_REGISTRATION_TOKEN=check
 for combo in "" "--profile tls" "--profile actions" "--profile tls --profile actions"; do
   # shellcheck disable=SC2086
@@ -72,9 +72,26 @@ info "compose config parses (base, tls, actions, tls+actions, docker-sock overri
 mapfile -t imgs < <(grep -hoE 'image:[[:space:]]*[^[:space:]]+' "${COMPOSE_FILES[@]}" | awk '{print $2}' | sort -u)
 [ "${#imgs[@]}" -gt 0 ] || fail "no image: refs found in $COMPOSE"
 
+# Compose-style ${VAR:-default}/${VAR-default}/${VAR} expansion for image tags
+# (e.g. rustfs:${RUSTFS_VERSION:-1.0.4}): process env wins, then the template's
+# uncommented .env.example value, then the :- fallback — same resolution the
+# OXIDEAN_VERSION tag check below uses.
+resolve_image_ref() {
+  local s="$1" var val
+  while [[ "$s" =~ \$\{([A-Z][A-Z0-9_]*)(:-|-)?([^}]*)\} ]]; do
+    var="${BASH_REMATCH[1]}"
+    val="${!var:-}"
+    [ -n "$val" ] || val="$(grep -oE "^${var}=[^[:space:]#]+" "$ENVX" | head -1 | cut -d= -f2-)"
+    [ -n "$val" ] || val="${BASH_REMATCH[3]}"
+    s="${s/"${BASH_REMATCH[0]}"/$val}"
+  done
+  printf '%s' "$s"
+}
+
 allowed_oxidean="api web runner"
 oxidean_svcs=""
 for img in "${imgs[@]}"; do
+  img="$(resolve_image_ref "$img")"
   case "$img" in
     ghcr.io/oxidean/oxidean-*:*)
       svc="${img#ghcr.io/oxidean/oxidean-}"

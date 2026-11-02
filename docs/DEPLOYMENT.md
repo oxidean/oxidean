@@ -1,6 +1,6 @@
 # Deployment
 
-Oxidean deploys as Docker images behind Traefik on a single HTTP origin. The supported path in-repo is Docker Compose (default Postgres, optional MySQL/SQLite overlays). Cloud hosting is intended to reuse the same images.
+Oxidean deploys as Docker images behind a single HTTP origin. The supported in-repo self-host paths are Docker Compose (default Postgres, optional MySQL/SQLite overlays) and the Helm chart for Kubernetes. Cloud hosting reuses the same images.
 
 **Operators self-hosting a real instance:** the root `docker-compose.yml` is the *contributor/dev* stack (builds from source, `Host(localhost)` Traefik rules, dev secrets). Use the image-based bundle in [`deploy/selfhost/`](../deploy/selfhost/) instead — guide: [SELF-HOSTING.md](SELF-HOSTING.md).
 
@@ -11,6 +11,7 @@ Related docs: [CONFIGURATION.md](CONFIGURATION.md), [ARCHITECTURE.md](ARCHITECTU
 | Target | Config | Notes |
 |--------|--------|-------|
 | **Self-host Compose (operators)** | [`deploy/selfhost/`](../deploy/selfhost/) | Published GHCR images, no build — `web` is the single origin, optional `tls` (caddy) + `actions` (runner) profiles. Guide: [SELF-HOSTING.md](SELF-HOSTING.md) |
+| **Self-host Kubernetes (operators)** | [`deploy/helm/oxidean/`](../deploy/helm/oxidean/) | OCI chart `oci://ghcr.io/oxidean/charts/oxidean` — `web` Ingress + api `Recreate` on RWO volumes, bundled-eval Postgres, SSH `LoadBalancer`, opt-in runner. Guide: [SELFHOST-KUBERNETES.md](SELFHOST-KUBERNETES.md) |
 | Docker Compose (dev, default) | `docker-compose.yml` | Traefik `:80` + `web` + `api` + Postgres — source builds, `Host(localhost)` |
 | MySQL overlay | `docker-compose.yml` + `docker-compose.mysql.yml` (`--profile mysql`) | Overrides API `DATABASE_URL` / dialect; Postgres service may still start |
 | SQLite overlay | `docker-compose.yml` + `docker-compose.sqlite.yml` | No DB container; file under `${OXIDEAN_SQLITE_HOST_DIR:-./var}` → `/app/var` (Compose v2.24+ for `!reset`) |

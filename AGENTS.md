@@ -58,6 +58,25 @@ Claude Code also loads the same skills from [`.claude/skills/`](.claude/skills/)
 (cloned on demand). Do not vendor `service/` into this repo. Do not invent
 local cleaners if ensure fails. Use `clean-user-facing-text` for offline
 prose-only passes (no service).
+## Deployment surfaces (parity map)
+
+One product, three deployable faces that share the same `OXIDEAN_*` env
+contract — never fork the contract per surface:
+
+| Surface | File | Bundled pieces |
+|---------|------|----------------|
+| Single-docker self-host | `deploy/selfhost/docker-compose.yml` | postgres always; `tls`/`actions`/`s3` profiles |
+| Dev stack | `docker-compose.yml` | same profiles (`s3` included) |
+| Kubernetes | `deploy/helm/oxidean/` | `postgres.enabled`, `objectstore.enabled` (RustFS) / `seaweedfs.enabled`, `runner.enabled` |
+
+Object storage: `OXIDEAN_STORAGE_BACKEND=fs|s3` + the `OXIDEAN_S3_*` set —
+authoritative parsing/validation in `crates/oxidean-storage/src/config.rs`.
+Both surfaces bundle an eval-grade RustFS store (compose `s3` profile ↔
+helm `objectstore.enabled`); `seaweedfs.enabled` is the production-shaped alternative (mutually exclusive). External endpoints override the same envs.
+Specs: `agent-os/specs/2026-11-01-1425-storage-blob-backend/` (trait) and
+`agent-os/specs/2026-11-01-1934-selfhost-object-store/` (bundled topology).
+Compose→k8s data migration: `docs/SELFHOST-MIGRATE-TO-K8S.md`.
+
 ## Commands agents should know
 
 ```bash

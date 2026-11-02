@@ -22,7 +22,7 @@ Oxidean is a self-hostable code forge: git hosting, pull requests, issues, CI ac
 
 ## Cloud vs self-host
 
-**Oxidean Cloud** and **self-hosted Oxidean** share the same images and application. Self-host with Docker Compose today; Cloud is the hosted instance of that same stack. Self-hosters: start with [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) and the ready-to-run bundle in [`deploy/selfhost/`](deploy/selfhost/) — no source build. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**Oxidean Cloud** and **self-hosted Oxidean** share the same images and application. Self-host with Docker Compose or Kubernetes today; Cloud is the hosted instance of that same stack. Self-hosters: start with [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) and the ready-to-run bundle in [`deploy/selfhost/`](deploy/selfhost/) — no source build — or install the Helm chart (`oci://ghcr.io/oxidean/charts/oxidean`, chart source [`deploy/helm/oxidean/`](deploy/helm/oxidean/)) per [docs/SELFHOST-KUBERNETES.md](docs/SELFHOST-KUBERNETES.md). See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Quick start
 

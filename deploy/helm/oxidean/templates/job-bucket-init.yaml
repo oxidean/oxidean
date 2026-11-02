@@ -1,0 +1,71 @@
+{{- if and (eq (include "oxidean.s3Bundled" .) "true") (eq .Values.storage.backend "s3") -}}
+{{- /*
+Bucket init — post-install/post-upgrade hook so the store pod exists first.
+Waits for the S3 API, then creates the effective bucket once
+(head-bucket → skip when present). Credentials resolve the same way the
+api's do — chart/generated OXIDEAN_S3_* keys, or the subchart's generated
+admin pair on the zero-config SeaweedFS path.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "oxidean.fullname" . }}-objectstore-init
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: objectstore
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "oxidean.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: objectstore
+    spec:
+      {{- include "oxidean.podScheduling" . | nindent 6 }}
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: "{{ .Values.objectstore.init.image.repository }}:{{ .Values.objectstore.init.image.tag }}"
+          imagePullPolicy: {{ .Values.objectstore.init.image.pullPolicy }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              echo "waiting for $S3_ENDPOINT"
+              for i in $(seq 1 60); do
+                if aws --endpoint-url "$S3_ENDPOINT" s3 ls >/dev/null 2>&1; then
+                  break
+                fi
+                if [ "$i" -eq 60 ]; then
+                  echo "endpoint $S3_ENDPOINT never became ready" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+              if aws --endpoint-url "$S3_ENDPOINT" s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+                echo "bucket $S3_BUCKET already exists"
+              else
+                aws --endpoint-url "$S3_ENDPOINT" s3 mb "s3://$S3_BUCKET"
+              fi
+          env:
+            - name: S3_ENDPOINT
+              value: {{ include "oxidean.s3Endpoint" . | quote }}
+            - name: S3_BUCKET
+              value: {{ include "oxidean.s3Bucket" . | quote }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3AccessKeyIdKey" . | quote }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxidean.s3CredentialsSecretName" . | quote }}
+                  key: {{ include "oxidean.s3SecretAccessKeyKey" . | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.objectstore.region | quote }}
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+{{- end }}

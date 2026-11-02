@@ -103,6 +103,17 @@ export function readManifestVersion(rootDir: string, relPath: string): CarrierRe
     }
     return { ok: true, version };
   }
+  if (relPath.endsWith("Chart.yaml")) {
+    // Helm chart carrier — the top-level `version:` scalar (NOT `appVersion:`,
+    // which is stamped from app_component at bump time). Read line-wise to
+    // avoid taking a YAML dependency.
+    const m = text.match(/^version:[ \t]*"?([^"\s]+)"?[ \t]*$/m);
+    if (!m) return { ok: false, error: `${relPath}: no top-level "version:" field` };
+    if (!isSemver(m[1])) {
+      return { ok: false, error: `${relPath} version "${m[1]}" is not valid semver` };
+    }
+    return { ok: true, version: m[1] };
+  }
   return { ok: false, error: `unsupported manifest type: ${relPath}` };
 }
 

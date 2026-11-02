@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxidean.fullname" . }}-web
+  labels:
+    {{- include "oxidean.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oxidean.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "oxidean.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "oxidean.webImage" . }}
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+            - name: OXIDEAN_API_ORIGIN
+              value: http://{{ include "oxidean.apiServiceName" . }}:8080
+            - name: OXIDEAN_PUBLIC_ORIGIN
+              value: {{ .Values.publicOrigin | quote }}
+            # The ingress is the sanitizing edge in front; its X-Forwarded-*
+            # chain is trusted (compose's caddy equivalent).
+            - name: OXIDEAN_WEB_BEHIND_PROXY
+              value: "1"
+            - name: OXIDEAN_SSH_HOST
+              value: {{ include "oxidean.sshHost" . | quote }}
+            - name: OXIDEAN_SSH_PORT
+              value: {{ .Values.ssh.port | quote }}
+            {{- if .Values.statusPageTheme }}
+            - name: OXIDEAN_STATUS_PAGE_THEME
+              value: {{ .Values.statusPageTheme | quote }}
+            {{- end }}
+            {{- range $k, $v := .Values.web.env }}
+            - name: {{ $k }}
+              value: {{ $v | toString | quote }}
+            {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              httpHeaders:
+                - name: Oxidean-Health-Probe
+                  value: "1"
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              httpHeaders:
+                - name: Oxidean-Health-Probe
+                  value: "1"
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              httpHeaders:
+                - name: Oxidean-Health-Probe
+                  value: "1"
+            periodSeconds: 20
+          {{- with .Values.web.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

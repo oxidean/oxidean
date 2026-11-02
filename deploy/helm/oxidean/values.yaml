@@ -1,0 +1,366 @@
+# Oxidean Helm chart — self-hosted forge topology:
+# postgres + api + web (+ optional actions runner).
+#
+# The env contract mirrors deploy/selfhost/docker-compose.yml — the same
+# OXIDEAN_* names, no new variables. Env reference: docs/CONFIGURATION.md.
+# Install guide: docs/SELFHOST-KUBERNETES.md.
+
+# --- Images -------------------------------------------------------------------
+# The release train stamps these tags with the image set the chart was
+# released against (kind = "helm" — see docs/VERSIONING.md). `tag: ""` falls
+# back per image: api → .Chart.AppVersion, web/runner → "latest".
+imagePullSecrets: []
+
+api:
+  replicaCount: 1 # single-writer: raw git repos live on a RWO PVC (CliGitBackend)
+  image:
+    repository: ghcr.io/oxidean/oxidean-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Structural envs are rendered by the chart; use `env` for any additional
+  # non-secret OXIDEAN_* knobs (RUST_LOG, OXIDEAN_OXPILOT_*, mail, SSO client
+  # ids, OXIDEAN_EGRESS_ALLOW_PRIVATE, …). Secret values belong in `secrets.env`.
+  env: {}
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # probes: api serves GET /health on :8080 — override only for exotic setups.
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 5
+    readiness:
+      periodSeconds: 10
+    liveness:
+      periodSeconds: 20
+
+web:
+  replicaCount: 1 # stateless — scale freely
+  image:
+    repository: ghcr.io/oxidean/oxidean-web
+    tag: ""
+    pullPolicy: IfNotPresent
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# --- Identity -----------------------------------------------------------------
+# Browser-facing origin: magic links, SSO redirects, HTTPS clone URLs.
+# Set to the ingress URL (https://git.example.com).
+publicOrigin: "http://localhost:8080"
+# `production` = Secure cookies + fail-closed gates (HTTPS expected).
+# Plain-HTTP LAN eval (http://192.168.x.y): use `development` — see
+# docs/SELF-HOSTING.md for the trade-offs.
+env: production
+allowSignup: false
+# Optional empty-instance sys-admin seed (the /setup wizard does the same
+# interactively when unset). `admin.email` set → a generated
+# OXIDEAN_ADMIN_PASSWORD lands in the chart Secret unless `secrets.adminPassword`
+# or an existing secret provides one.
+admin:
+  email: ""
+corsOrigins: "" # default: publicOrigin — the single-origin layout is correct
+statusPageTheme: "" # default|meme — shared by api and web tiers
+
+# --- Secrets ------------------------------------------------------------------
+# Chart-managed Secret with one-time generation (a `lookup` against the live
+# Secret preserves generated values across upgrades — never rotated silently).
+# Every entry also accepts an operator-managed `existingSecret`; in that mode
+# the chart renders no Secret and pods read the whole Secret via envFrom, so
+# it must contain every key the install needs (see secrets.requiredKeys note).
+secrets:
+  existingSecret: ""
+  # AES-256-GCM key for Actions/mirror/webhook secrets and TOTP at rest —
+  # REQUIRED. Empty → generated once (openssl rand -base64 32 equivalent).
+  actionsSecretsKey: ""
+  # Shared fallback key for at-rest secret chains. Empty → generated once.
+  sessionSecret: ""
+  # Dedicated TOTP key (falls back to actionsSecretsKey when unset).
+  secretsKey: ""
+  # Seeded sys-admin password (only meaningful with admin.email). Empty +
+  # admin.email set → generated once.
+  adminPassword: ""
+  # Base64 OpenSSH PEM for web-flow commit signing
+  # (ssh-keygen -t ed25519 -N '' -f web-flow && base64 -w0 web-flow). Empty →
+  # an initContainer generates the pair into the SSH host-key volume, the
+  # same provisioning path the app supports natively. Required when
+  # env=production — see webFlowKey below.
+  webFlowPrivateKey: ""
+  # Extra secret envs rendered into the chart Secret, NAME: value —
+  # OXIDEAN_OXPILOT_API_KEY, OXIDEAN_OXPILOT_SECRETS_KEY,
+  # OXIDEAN_OIDC_CLIENT_SECRET, OXIDEAN_SMTP_URL, OXIDEAN_RESEND_API_KEY,
+  # WORKOS_*, OXIDEAN_OXPILOT_BASE_URL, …
+  env: {}
+# Provision the web-flow signing keypair by initContainer (ssh-keygen into
+# the ssh host-key volume). Only used when secrets.webFlowPrivateKey is unset.
+webFlowKey:
+  initProvision: true
+
+# --- Storage ------------------------------------------------------------------
+storage:
+  # fs: one RWO PVC at /var — every content root (compose parity).
+  # s3: emits OXIDEAN_STORAGE_BACKEND=s3 + OXIDEAN_S3_* envs so stores migrate
+  #     to object storage as the api's consumer rollout lands (spec
+  #     2026-11-01-1425-storage-blob-backend). Until a store migrates it keeps
+  #     writing to its fs path — keep the data PVC attached (retainDataVolume)
+  #     or non-git stores land on ephemeral container disk.
+  backend: fs
+  data:
+    size: 10Gi
+    storageClass: ""
+    # Bring-your-own volume: existingClaim mounts an operator-provisioned
+    # PVC instead of a chart-created one — the k8s-native shared-storage
+    # path (EFS, GCP Filestore, Azure Files, CephFS via Rook, Longhorn,
+    # NFS provisioner). accessModes passes through verbatim; RWX works
+    # where the driver supports it (api stays single-replica until OPS-03).
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
+  s3:
+    # Cross-references crates/oxidean-storage/src/config.rs — env names,
+    # validation, and fail-closed behavior are authoritative there.
+    # When objectstore.enabled and endpoint is empty, the bundled store is the
+    # endpoint — bucket defaults to objectstore.bucket, credentials to a pair
+    # generated once into the chart Secret (shared with the store's RUSTFS_*
+    # root keys).
+    bucket: ""
+    prefix: "" # global key prefix before {store}/
+    endpoint: "" # custom S3-compatible endpoint URL — empty uses the bundled store
+    region: "" # provider default when empty; "auto" for R2-style
+    pathStyle: "" # "" | "1" | "0" — force path-style addressing (custom endpoints default to path-style)
+    insecureHttp: false # opt-in for http:// endpoints — always emitted for the bundled store
+    # Static credentials — both-or-neither; neither → ambient AWS chain
+    # (AWS_* env, web-identity/IRSA, ECS, IMDS) which needs no chart secrets.
+    # With objectstore.enabled + no explicit pair, the chart generates one
+    # into the Secret and it doubles as the store's root credentials.
+    accessKeyId: ""
+    secretAccessKey: ""
+    sessionToken: ""
+    # Keep the single /var data PVC mounted in s3 mode. Default true while
+    # the api's store-by-store migration lands (inert OXIDEAN_S3_* envs then
+    # lose nothing); set false for the target topology — /var/repos +
+    # /var/ssh PVCs only — once all stores are s3-migrated.
+    retainDataVolume: true
+    repos:
+      size: 10Gi
+      storageClass: ""
+      existingClaim: ""
+      accessModes: ["ReadWriteOnce"]
+
+# --- Git over SSH ---------------------------------------------------------------
+# Raw TCP — Ingress cannot carry SSH. A dedicated LoadBalancer Service is the
+# default; on a single-LB cluster map port 22 through your ingress
+# controller's TCP services (ingress-nginx `tcp-services` ConfigMap) and set
+# ssh.service.type=ClusterIP. Advertised host/port feed the UI CloneBox URLs.
+ssh:
+  enabled: true
+  host: "" # advertised host — defaults to ingress.host
+  port: 22 # advertised port users put in git remotes / ~/.ssh/config
+  containerPort: 2222 # the api's OXIDEAN_SSH_PORT
+  service:
+    type: LoadBalancer
+    port: 22 # service port → ssh.containerPort
+    annotations: {}
+    externalTrafficPolicy: "" # "Local" preserves client source IPs
+    loadBalancerIP: ""
+    externalIPs: []
+  hostKeys:
+    # SSH host keys + the web-flow signing pair are generated on first boot —
+    # persistent so client trust and commit signatures survive restarts.
+    size: 256Mi
+    storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
+
+# --- Bundled postgres -----------------------------------------------------------
+# Evaluation-grade default: `helm install` alone yields a working forge.
+# Production: postgres.enabled=false + database.url (or
+# database.existingSecret) pointing at managed Postgres/MySQL. Bundled data
+# lives on the postgres PVC — it is NOT a backup story.
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "18-alpine"
+    pullPolicy: IfNotPresent
+  user: oxidean
+  database: oxidean
+  # Password lives in the chart Secret (generated once) or your existing
+  # secret's POSTGRES_PASSWORD key.
+  persistence:
+    size: 5Gi
+    storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# External database — resolution order:
+#   1. database.existingSecret (key: database.urlKey, default DATABASE_URL)
+#   2. database.url (rendered into the chart Secret)
+#   3. postgres.enabled → URL rendered to the bundled service
+database:
+  url: "" # postgres://user:***@host:5432/db · mysql://… · sqlite:/var/oxidean.db
+  existingSecret: ""
+  urlKey: DATABASE_URL
+
+# --- Bundled object store ---------------------------------------------------
+# Evaluation-grade S3-compatible store (RustFS, Apache-2.0) — the chart-side
+# analogue of the compose `s3` profile. With `storage.backend=s3` +
+# `objectstore.enabled=true` and no explicit `storage.s3.endpoint`, the api's
+# OXIDEAN_S3_* envs default to this service and a post-install Job creates
+# the bucket. Credentials: one shared pair — generated once into the chart
+# Secret unless storage.s3.accessKeyId/secretAccessKey are set (which then
+# double as the store's root keys) or secrets.existingSecret carries
+# OXIDEAN_S3_ACCESS_KEY_ID / OXIDEAN_S3_SECRET_ACCESS_KEY.
+# Production: objectstore.enabled=false + external storage.s3.* — bundled
+# data lives on its PVC and is NOT a backup story (same posture as postgres).
+objectstore:
+  enabled: false
+  image:
+    repository: rustfs/rustfs
+    tag: "1.0.4"
+    pullPolicy: IfNotPresent
+  bucket: oxidean # created by the init Job on install/upgrade
+  region: us-east-1
+  console:
+    enabled: false # RustFS admin console on :9001 — debugging aid only
+  persistence:
+    size: 10Gi
+    storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
+  # Bucket-creation Job (post-install/post-upgrade hook) — head-bucket, then
+  # mb when absent.
+  init:
+    image:
+      repository: amazon/aws-cli
+      tag: "2.39.3"
+      pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# --- Bundled k8s-native object store (SeaweedFS, Apache-2.0) -----------------
+# Production-capable alternative to the eval-grade RustFS objectstore — a
+# multi-component master + volume + filer + s3-gateway topology from the
+# official seaweedfs/seaweedfs subchart (4.51.x). With storage.backend=s3,
+# seaweedfs.enabled=true and no explicit storage.s3.endpoint, the api's
+# OXIDEAN_S3_* envs default to its s3 gateway (<release>-seaweedfs-s3:8333).
+# Mutually exclusive with objectstore.enabled.
+# Credentials: by default the subchart generates an admin pair into
+# <release>-seaweedfs-s3-secret and the api reads it. Operator-managed:
+# point s3.credentials.admin.existingSecret at any Secret and set
+# accessKeyKey/secretKeyKey to its key names — e.g. this chart's own Secret
+# (<release>-oxidean, OXIDEAN_S3_* keys — minted/generated as usual) or
+# secrets.existingSecret. storage.s3.accessKeyId/secretAccessKey stay the
+# api-side explicit pair; mirror them into s3.credentials.admin.accessKey/
+# secretKey when the bundled store should use that exact pair.
+# Our pass-through pins PVC persistence — upstream defaults to hostPath
+# (fine for their bare-metal target, wrong here). Production sizing —
+# replicas, replication placement, external filer metadata store — is a
+# documented exercise: docs/SELFHOST-KUBERNETES.md.
+seaweedfs:
+  enabled: false
+  master:
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 1Gi
+      storageClass: ""
+  volume:
+    replicas: 1
+    dataDirs:
+      - name: data1
+        type: persistentVolumeClaim
+        size: 10Gi
+        storageClass: ""
+        maxVolumes: 0
+  filer:
+    replicas: 1
+    data:
+      type: persistentVolumeClaim
+      size: 1Gi
+      storageClass: ""
+  s3:
+    enabled: true
+    port: 8333
+    enableAuth: true
+    credentials:
+      admin:
+        existingSecret: ""
+        accessKeyKey: OXIDEAN_S3_ACCESS_KEY_ID
+        secretKeyKey: OXIDEAN_S3_SECRET_ACCESS_KEY
+
+# --- HTTP ingress ---------------------------------------------------------------
+# Ingress → web:3000; the web tier reverse-proxies every API-owned path
+# (/api/*, /{o}/{r}.git, badges, /pages, /.well-known/oauth*, WS/SSE), so one
+# hostname suffices. TLS via annotations/cert-manager — no bundled edge.
+ingress:
+  enabled: true
+  className: ""
+  host: "" # empty → catch-all rule
+  annotations: {}
+  tls: [] # [{ secretName: forge-tls, hosts: [git.example.com] }]
+
+# --- Actions runner -------------------------------------------------------------
+# Ships the template but stays opt-in: job execution needs a privileged dind
+# sidecar — real attack surface. Enable only for trusted workflows;
+# rootless/isolated runners are a follow-up (see the helm spec's follow-ups).
+runner:
+  enabled: false
+  image:
+    repository: ghcr.io/oxidean/oxidean-runner
+    tag: ""
+    pullPolicy: IfNotPresent
+  name: selfhost-runner
+  labels: "ubuntu-latest,self-hosted"
+  # Reusable bootstrap token — prefer one-time DB-minted tokens
+  # (admin.actions.createRegistrationToken) on internet-facing installs.
+  registrationToken: ""
+  existingSecret: "" # carries OXIDEAN_RUNNER_REGISTRATION_TOKEN
+  # PAT for cloning private repos on the runner.
+  gitToken: ""
+  dind:
+    enabled: true # privileged docker-in-docker sidecar — the security tradeoff above
+    image:
+      repository: docker
+      tag: "28-dind"
+      pullPolicy: IfNotPresent
+  persistence:
+    size: 2Gi # runner /data (registration state + work dirs)
+    storageClass: ""
+    existingClaim: ""
+    accessModes: ["ReadWriteOnce"]
+  resources: {}
+  # Runner-specific scheduling — privileged dind should land on dedicated
+  # nodes in multi-tenant clusters. Falls back to the global keys below.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# --- Scheduling / hardening -------------------------------------------------------
+podAnnotations: {}
+podSecurityContext: {}
+# fsGroup / runAsUser overrides — the stock images run as root; set only with
+# matching volume fsGroup or /var writes fail.
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+nameOverride: ""
+fullnameOverride: ""

@@ -131,10 +131,13 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 ## Admin and operations
 
 - [ ] **OPS-01** Metrics endpoint (Prometheus) and observability docs.
-- [ ] **OPS-02** S3-compatible object storage for LFS, packages, and uploads; filesystem is the only backend today.
+- [~] **OPS-02** S3-compatible object storage for non-git stores. `crates/oxidean-storage` `BlobStore` with `fs`/`s3` backends and per-store key prefixes shipped ([#214](https://github.com/oxidean/oxidean/pull/214)); consumer migration behind the trait is the tracked follow-up. Spec: [`agent-os/specs/2026-11-01-1425-storage-blob-backend/`](../specs/2026-11-01-1425-storage-blob-backend/).
 - [ ] **OPS-03** HA / horizontal scaling guidance: shared git storage, DB, object store, runner fleet.
 - [ ] **OPS-04** UI internationalization framework; the product is English-only.
 - [ ] **OPS-05** Admin console depth beyond DEBT-10: repo listing/search, runner detail, system info, broadcast notices.
+- [x] **OPS-06** Kubernetes deployment: Helm chart [`deploy/helm/oxidean/`](../../deploy/helm/oxidean/) published as `oci://ghcr.io/oxidean/charts/oxidean` — single-replica api on RWO volumes, scalable web behind one Ingress hostname, bundled eval-grade Postgres + external `DATABASE_URL` path, `fs`/`s3` storage modes (s3 slim-PVCs until OPS-02 consumers land), SSH `LoadBalancer`, `lookup`-guarded generated secrets, opt-in privileged-DinD runner, `helm` CI lane (`helm lint`/render matrix/kind smoke) + `publish-chart` OCI lane on `oxidean-chart-v*` tags. Spec: [`agent-os/specs/2026-11-01-1628-helm-k8s-deploy/`](../specs/2026-11-01-1628-helm-k8s-deploy/).
+- [x] **OPS-07** Bundled self-hostable object store (RustFS) + compose/helm parity: `objectstore.enabled` chart section ↔ `s3` compose profile, shared generated credentials, bucket-init Job, CI kind lane. Spec: [`agent-os/specs/2026-11-01-1934-selfhost-object-store/`](../specs/2026-11-01-1934-selfhost-object-store/).
+- [~] **OPS-08** Kubernetes-native storage alternatives: `existingClaim`/`accessModes`/RWX on product PVCs (EFS/Filestore/Azure Files/CephFS/Longhorn/NFS provisioner) + bundled SeaweedFS provider via subchart (Apache-2.0, master+volume+filer+s3 topology, shared `OXIDEAN_S3_*` credentials). Spec: [`agent-os/specs/2026-11-01-2013-k8s-native-storage/`](../specs/2026-11-01-2013-k8s-native-storage/).
 
 ## Exploratory / later
 

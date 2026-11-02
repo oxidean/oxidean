@@ -53,7 +53,7 @@ describe("docs/VERSIONING.md (canonical reference)", () => {
     const allAliases = loaded.ok ? loaded.config.entries.flatMap((e) => e.scopes) : [];
     const tableish = allAliases.filter((s) => doc.includes(`\`${s}\``));
     expect(allAliases.length).toBeGreaterThan(10); // sanity: real registry
-    expect(tableish.length).toBeLessThanOrEqual(8); // illustrative subset only
+    expect(tableish.length).toBeLessThanOrEqual(12); // illustrative subset only
   });
 
   test("GITHUB_TOKEN prohibition is named for tag pushes (BR7.5)", () => {

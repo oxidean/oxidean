@@ -12,7 +12,7 @@ import { globsMayOverlap } from "./globs.ts";
 
 export const REGISTRY_FILENAME = "versioning.toml";
 
-export const COMPONENT_KINDS = ["crate", "bun", "contract"] as const;
+export const COMPONENT_KINDS = ["crate", "bun", "contract", "helm"] as const;
 export type ComponentKind = (typeof COMPONENT_KINDS)[number];
 
 export interface RegistryEntry {
@@ -25,6 +25,11 @@ export interface RegistryEntry {
   globs: string[];
   scopes: string[];
   depends_on: string[];
+  /** kind=helm only: the component whose version stamps Chart.yaml appVersion. */
+  app_component?: string;
+  /** kind=helm only: values.yaml `<svc>.image.tag` → component id (or ids —
+   * a shared image published by several components takes the newest version). */
+  image_components?: Record<string, string | string[]>;
 }
 
 export interface RegistryConfig {
@@ -114,6 +119,8 @@ const COMPONENT_KEYS = new Set([
   "globs",
   "scopes",
   "depends_on",
+  "app_component",
+  "image_components",
 ]);
 
 function unknownKeys(raw: Raw, allowed: Set<string>): string[] {
@@ -242,6 +249,35 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
       if (hasConstant && typeof c.constant_path === "string" && !CONSTANT_PATH_RE.test(c.constant_path)) {
         push(entryLine(idx, i, "constant_path"), `${at} ("${id}"): constant_path must be "file#NAME", got "${c.constant_path}"`);
       }
+      // kind=helm carriers: Chart.yaml `version:` + `appVersion:` stamped
+      // from `app_component`; values.yaml image tags from `image_components`.
+      const hasAppComponent = typeof c.app_component === "string" && c.app_component !== "";
+      const hasImageComponents = c.image_components !== undefined;
+      if (kind === "helm") {
+        if (!hasAppComponent) {
+          push(entryLine(idx, i), `${at} ("${id}"): kind=helm requires app_component (the component stamped into Chart.yaml appVersion)`);
+        }
+        if (hasImageComponents && !isRecord(c.image_components)) {
+          push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components must be a table of <svc> = <component id | [ids]>`);
+        } else if (isRecord(c.image_components)) {
+          for (const [svc, comp] of Object.entries(c.image_components)) {
+            if (!ID_RE.test(svc)) {
+              push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components key "${svc}" is not a lowercase path segment`);
+            }
+            const comps = Array.isArray(comp) ? comp : [comp];
+            if (comps.length === 0 || comps.some((x) => typeof x !== "string" || !ID_RE.test(x))) {
+              push(entryLine(idx, i, "image_components"), `${at} ("${id}"): image_components.${svc} must be a component id or non-empty id list`);
+            }
+          }
+        }
+      } else {
+        if (c.app_component !== undefined) {
+          push(entryLine(idx, i, "app_component"), `${at} ("${id}"): kind=${kind} must not carry app_component (BR1.3)`);
+        }
+        if (hasImageComponents) {
+          push(entryLine(idx, i, "image_components"), `${at} ("${id}"): kind=${kind} must not carry image_components (BR1.3)`);
+        }
+      }
       if (typeof c.tag_prefix !== "string" || !c.tag_prefix.endsWith("-v")) {
         push(entryLine(idx, i, "tag_prefix"), `${at} ("${id}"): tag_prefix must end in "-v"`);
       }
@@ -267,6 +303,10 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
         globs: isStringArray(c.globs) ? c.globs : [],
         scopes,
         depends_on: isStringArray(c.depends_on) ? c.depends_on : [],
+        app_component: hasAppComponent ? (c.app_component as string) : undefined,
+        image_components: isRecord(c.image_components)
+          ? (c.image_components as Record<string, string | string[]>)
+          : undefined,
       });
     });
   }
@@ -319,6 +359,24 @@ export function parseRegistry(text: string, file = REGISTRY_FILENAME): LoadResul
         push(entryLine(idx, i, "depends_on"), `"${e.id}" cannot depend on itself (BR1.4)`);
       } else if (!byId.has(dep)) {
         push(entryLine(idx, i, "depends_on"), `"${e.id}" depends on unknown component "${dep}" (BR1.4)`);
+      }
+    }
+    // kind=helm linkages: the stamped components must be real and declared in
+    // depends_on so their releases propagate a chart bump (fresh stamps).
+    if (e.kind === "helm") {
+      if (e.app_component && !byId.has(e.app_component)) {
+        push(entryLine(idx, i, "app_component"), `"${e.id}": app_component "${e.app_component}" is not a registered component (BR1.4)`);
+      } else if (e.app_component && !e.depends_on.includes(e.app_component)) {
+        push(entryLine(idx, i, "app_component"), `"${e.id}": app_component "${e.app_component}" must appear in depends_on so its releases refresh the stamp (BR1.4)`);
+      }
+      for (const [svc, comp] of Object.entries(e.image_components ?? {})) {
+        for (const cid of Array.isArray(comp) ? comp : [comp]) {
+          if (!byId.has(cid)) {
+            push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} references unknown component "${cid}" (BR1.4)`);
+          } else if (!e.depends_on.includes(cid)) {
+            push(entryLine(idx, i, "image_components"), `"${e.id}": image_components.${svc} = "${cid}" must appear in depends_on (BR1.4)`);
+          }
+        }
       }
     }
   });
