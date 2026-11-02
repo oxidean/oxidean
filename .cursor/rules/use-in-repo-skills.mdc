@@ -12,6 +12,7 @@ Before implementing, debugging, deploying, or writing substantial prose, **load 
 1. Scan skill names/descriptions in `.agents/skills/*/SKILL.md`.
 2. Read the skill file immediately when it matches the task.
 3. Prefer project skills over generic habits or external defaults.
+4. For chat-based Agent OS feature spec work, use `agent-os-async-flow` instead of the generic shape-spec mapping. Keep the `agent-os-plan-product` mapping for product planning.
 
 ## Common mappings
 
@@ -27,6 +28,7 @@ Before implementing, debugging, deploying, or writing substantial prose, **load 
 | User-facing prose finalize | [clean-user-facing-text](../../.agents/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
 | AI watermark / provenance strip | [remove-ai-marks](../../.agents/skills/remove-ai-marks/SKILL.md) |
 | Spec / planning for significant work | [agent-os-shape-spec](../../.agents/skills/agent-os-shape-spec/SKILL.md), [agent-os-plan-product](../../.agents/skills/agent-os-plan-product/SKILL.md) |
+| Agent OS feature spec work over chat / no interactive question UI | [agent-os-async-flow](../../.agents/skills/agent-os-async-flow/SKILL.md) |
 | Idea → PRD → milestones | [bm-prd-creator](../../.agents/skills/bm-prd-creator/SKILL.md) |
 | Standards index/inject/discover | [agent-os-index-standards](../../.agents/skills/agent-os-index-standards/SKILL.md), [agent-os-inject-standards](../../.agents/skills/agent-os-inject-standards/SKILL.md), [agent-os-discover-standards](../../.agents/skills/agent-os-discover-standards/SKILL.md) |
 | Security review | [security-review](../../.agents/skills/security-review/SKILL.md) |
