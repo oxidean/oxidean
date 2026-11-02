@@ -170,7 +170,7 @@ jobs:
           # runs endpoint + client-side name filter: release SHAs accumulate
           # 50+ runs across component-tag pushes, and per_page=30 truncates
           # before the CI run is reached (ox-v0.4.0 promote failed on this).
-          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=10" \
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&branch=main&per_page=10" \
             --jq '[.workflow_runs[] | {id,status,conclusion,html_url}]')"
           echo "$RUNS_JSON" | jq .
           COUNT="$(echo "$RUNS_JSON" | jq 'length')"
@@ -187,9 +187,11 @@ jobs:
           fi
           echo "CI success confirmed for ${SHA}"
           # Artifact evidence: the deploy pulls ghcr sha-<SHA> tags published
-          # by images.yml on this commit's pushes — require at least one
-          # successful push-event Images run for the SHA.
-          IMG_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/images.yml/runs?head_sha=${SHA}&per_page=30" \
+          # by images.yml on this commit's main pushes — require at least one
+          # successful push-event Images run for the SHA. branch=main is
+          # required: component-tag pushes (api-v*/web-v*/…) are push events
+          # too but publish tags/charts, not the sha-* image set.
+          IMG_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/images.yml/runs?head_sha=${SHA}&branch=main&per_page=30" \
             --jq '[.workflow_runs[] | select(.event=="push") | {id,status,conclusion,html_url}]')"
           echo "$IMG_JSON" | jq .
           IMG_OK="$(echo "$IMG_JSON" | jq '[.[] | select(.status=="completed" and .conclusion=="success")] | length')"
@@ -328,22 +330,30 @@ jobs:
             # concluded-bad run gets a --failed rerun (max 2); a missing run
             # (>3-tag push suppression) gets a one-shot tag-ref dispatch.
             if (( i % 10 == 1 )); then
-              run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ox-cli.yml/runs?branch=${OX_TAG}&per_page=10" \
-                --jq '.workflow_runs[0].id // empty' 2>/dev/null || true)"
-              if [[ -z "$run_id" && "$dispatched" == "false" ]]; then
-                echo "no ox CLI run exists for ${OX_TAG} (tag-push suppression) — dispatching on the tag ref"
-                gh workflow run ox-cli.yml --ref "$OX_TAG" || true
-                dispatched=true
-              elif [[ -n "$run_id" && "$healed" -lt 2 ]]; then
-                concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
-                  --jq '.conclusion // empty' 2>/dev/null || true)"
-                case "$concl" in
-                  failure|cancelled|timed_out|action_required|startup_failure)
-                    echo "ox CLI run ${run_id} concluded ${concl} — rerunning failed legs (heal $((healed+1))/2)"
-                    gh run rerun "$run_id" --failed || true
-                    healed=$((healed+1))
-                    ;;
-                esac
+              # Lookup failure must not masquerade as "no run": ox-cli.yml's
+              # concurrency group cancels in-progress runs for the same ref,
+              # so dispatching on a transient API error would kill a healthy
+              # release build. Only an empty result after a successful lookup
+              # may dispatch.
+              if run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ox-cli.yml/runs?branch=${OX_TAG}&per_page=10" \
+                --jq '.workflow_runs[0].id // empty' 2>/dev/null)"; then
+                if [[ -z "$run_id" && "$dispatched" == "false" ]]; then
+                  echo "no ox CLI run exists for ${OX_TAG} (tag-push suppression) — dispatching on the tag ref"
+                  gh workflow run ox-cli.yml --ref "$OX_TAG" || true
+                  dispatched=true
+                elif [[ -n "$run_id" && "$healed" -lt 2 ]]; then
+                  concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                    --jq '.conclusion // empty' 2>/dev/null || true)"
+                  case "$concl" in
+                    failure|cancelled|timed_out|action_required|startup_failure)
+                      echo "ox CLI run ${run_id} concluded ${concl} — rerunning failed legs (heal $((healed+1))/2)"
+                      gh run rerun "$run_id" --failed || true
+                      healed=$((healed+1))
+                      ;;
+                  esac
+                fi
+              else
+                echo "ox-cli run lookup for ${OX_TAG} failed — skipping self-heal this cycle"
               fi
             fi
             echo "waiting for ${OX_TAG} release assets (attempt ${i}/120)"
