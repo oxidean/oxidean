@@ -2,6 +2,17 @@
 
 All notable changes to this component are documented here.
 
+## [0.4.0] - 2026-11-02
+
+### Features
+
+- feat: add /oxpilot agentic chat, tools, and connector (#203) (42e154a)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+
 ## [0.3.1] - 2026-10-28
 
 ### Fixes

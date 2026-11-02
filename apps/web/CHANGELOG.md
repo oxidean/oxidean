@@ -3,6 +3,21 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.5.0] - 2026-11-02
+
+### Features
+
+- feat: add /oxpilot agentic chat, tools, and connector (#203) (42e154a)
+- feat: proper HTTP status pages with env-selectable themes (#213) (cc10c28)
+
+### Fixes
+
+- fix(web): hold admin settings forms until the draft is seeded (#219) (ea3604b)
+
+### Dependencies
+
+- Bumped for changes in `api-client`
+
 ## [0.4.0] - 2026-10-28
 
 ### Features

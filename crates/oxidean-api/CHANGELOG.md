@@ -3,6 +3,21 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.5.0] - 2026-11-02
+
+### Features
+
+- feat: add /oxpilot agentic chat, tools, and connector (#203) (42e154a)
+- feat: proper HTTP status pages with env-selectable themes (#213) (cc10c28)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-api-oxpilot`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+- Bumped for changes in `oxidean-status-pages`
+
 ## [0.4.1] - 2026-10-29
 
 ### Dependencies
