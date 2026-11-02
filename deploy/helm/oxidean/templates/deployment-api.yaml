@@ -42,13 +42,27 @@ spec:
       labels:
         {{- include "oxidean.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
-      {{- if or .Values.podAnnotations .Values.database.url }}
+      {{- /* Rotation key for the checksum below: data from the carrier Secret,
+      read server-side. Keying the digest on Secret data keeps the annotation
+      from being an offline verifier for the password embedded in the URL —
+      a Deployment reader cannot replay candidate passwords without Secret
+      read. Empty on first install / when the deployer cannot read Secrets,
+      in which case the checksum is simply omitted. */ -}}
+      {{- $dbKey := dict }}
+      {{- if .Values.database.url }}
+      {{- if .Values.secrets.existingSecret }}
+      {{- $dbKey = get (default dict (lookup "v1" "Secret" .Release.Namespace .Values.secrets.existingSecret)) "data" | default dict }}
+      {{- else }}
+      {{- $dbKey = get (default dict (lookup "v1" "Secret" .Release.Namespace (include "oxidean.secretName" .))) "data" | default dict }}
+      {{- end }}
+      {{- end }}
+      {{- if or .Values.podAnnotations (and .Values.database.url $dbKey) }}
       annotations:
-        {{- if .Values.database.url }}
+        {{- if and .Values.database.url $dbKey }}
         # Rolls the api when the effective URL changes — secretKeyRef reads
         # resolve only at container start, so a Secret update alone would
         # leave the running pod on the old database.
-        checksum/database-url: {{ .Values.database.url | sha256sum | quote }}
+        checksum/database-url: {{ print (toJson $dbKey) .Values.database.url | sha256sum | quote }}
         {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -134,7 +148,7 @@ spec:
                   name: {{ include "oxidean.secretName" . | quote }}
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
+              value: postgres://$(POSTGRES_USER):***@{{ include "oxidean.postgresServiceName" . }}:5432/{{ .Values.postgres.database }}
             {{- else }}
             # Postgres disabled and no explicit source — the app Secret
             # (chart-managed or existing) must carry DATABASE_URL.
