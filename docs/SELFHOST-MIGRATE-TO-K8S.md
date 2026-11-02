@@ -127,8 +127,8 @@ kubectl -n oxidean delete pod pg-restore
 ```
 
 For the bundled-postgres path the same restore runs against
-`ox-oxidean-postgres:5432` with the chart's generated `POSTGRES_PASSWORD`
-(`kubectl -n oxidean get secret ox-oxidean-secrets -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d`).
+`ox-oxidean-postgres:5432` with the `POSTGRES_PASSWORD` from `ox-secrets`
+(`kubectl -n oxidean get secret ox-secrets -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d`).
 
 ## Step 5 — Copy the data volume
 
@@ -188,8 +188,13 @@ kubectl -n oxidean create secret generic ox-secrets \
   --from-literal=OXIDEAN_ACTIONS_SECRETS_KEY="$OXIDEAN_ACTIONS_SECRETS_KEY" \
   --from-literal=OXIDEAN_SESSION_SECRET="$OXIDEAN_SESSION_SECRET" \
   --from-literal=OXIDEAN_SECRETS_KEY="$OXIDEAN_SECRETS_KEY" \
-  --from-literal=POSTGRES_PASSWORD="<target db password>"
+  --from-literal=POSTGRES_PASSWORD="<target db password>" \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+(The `apply` form matters on the bundled-Postgres path — `ox-secrets`
+already exists there from the pre-install step, so a plain `create`
+would fail with `AlreadyExists` and never add the `OXIDEAN_*` keys.)
 
 Losing `OXIDEAN_ACTIONS_SECRETS_KEY` / `OXIDEAN_SECRETS_KEY` makes every
 stored Actions secret, TOTP secret, and mirror/webhook credential
