@@ -64,7 +64,7 @@
 - `crates/oxidean-db/src/lib.rs` — `Database` façade delegating to modules;
   holds the `contribution_backfills` claim helpers.
 - `crates/oxidean-db/migrations/` — `0094_user_contribution_indexes` +
-  `0095_contribution_followups` on all three dialects.
+  `0095_user_contribution_tables` on all three dialects.
 - Tables: `repository_activity` (gains the actor index in 0094),
   `pull_requests` (author idx), `issues` (author idx), `pull_reviews`
   (gains `idx_pull_reviews_author_submitted` in 0094 — 0016 already owns

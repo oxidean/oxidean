@@ -32,7 +32,7 @@ Verify: `cargo check -p oxidean-api-user -p oxidean-core` compiles;
     — `idx_pull_reviews_author` is already taken by 0016's `(pull_id,
     author_id)` index; the `_submitted` suffix avoids a collision postgres
     and mysql reject loudly and sqlite would silently skip.
-- `migrations/{postgres,mysql,sqlite}/0095_contribution_followups.sql`:
+- `migrations/{postgres,mysql,sqlite}/0095_user_contribution_tables.sql`:
   - `users ADD COLUMN show_private_contributions` (default on)
   - `authored_commits` — PK `(repository_id, sha)`; `user_id`,
     `authored_day`, `authored_at`; `idx_authored_commits_user_day`

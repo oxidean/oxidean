@@ -80,7 +80,7 @@ matches what GitHub shows):
   `/settings/profile`. Owners who opt out get the same public-only view
   every other viewer gets (`includes_private: false`).
 
-### Schema (two migrations per dialect — 0094 indexes, 0095 follow-ups)
+### Schema (two migrations per dialect — 0094 indexes, 0095 tables)
 
 - `idx_repository_activity_actor_created (actor_id, created_at DESC)` — the
   contribution query is actor-scoped with a range; today there is no actor
@@ -93,7 +93,7 @@ matches what GitHub shows):
   `IF NOT EXISTS` would silently skip.
 - `issues` / `pull_requests` already carry author indexes; `repositories`
   already carries `owner_id`.
-- `0095_contribution_followups` adds `users.show_private_contributions` and
+- `0095_user_contribution_tables` adds `users.show_private_contributions` and
   three tables — `authored_commits`, `user_contribution_days`,
   `contribution_backfills` — detailed under Contribution counting and
   Materialized rollups below.
