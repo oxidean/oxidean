@@ -326,8 +326,14 @@ echo "==> api carries the bundled s3 env contract"
 # pod-template-hash, and give the contract a short settle window.
 api_env() {
   local hash pod
-  hash="$(kubectl -n "$NS" get "deploy/${RELEASE}-oxidean-api" \
-    -o jsonpath='{.spec.template.metadata.labels.pod-template-hash}')"
+  # The deployment's own template never carries pod-template-hash — the
+  # controller stamps it on the ReplicaSets it creates. Read it from the
+  # newest api ReplicaSet; pods with that hash are unambiguous members of
+  # the current rollout even while old-RS pods are still Terminating.
+  hash="$(kubectl -n "$NS" get rs \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.labels.pod-template-hash}{" "}{.metadata.creationTimestamp}{"\n"}{end}' \
+    | awk -v p="${RELEASE}-oxidean-api-" 'index($1,p)==1 && $3>t {t=$3; h=$2} END{print h}')"
+  [ -n "$hash" ] || return 1
   pod="$(kubectl -n "$NS" get pods -l "pod-template-hash=${hash}" \
     --field-selector=status.phase=Running \
     -o jsonpath='{.items[0].metadata.name}')"
