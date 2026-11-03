@@ -2,7 +2,7 @@ import { AppPage } from "@/components/app-page";
 import { useForm } from "@octanejs/tanstack-form";
 import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { EmailListItem, UserPublic } from "@oxidean/api-client";
-import { useEffect, useState } from "octane";
+import { useEffect, useRef, useState } from "octane";
 import { AccountEmailsSection } from "@/components/settings/account-emails-section";
 import { ProfileAvatarField } from "@/components/settings/profile-avatar-field";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -99,6 +99,7 @@ function ProfileContent() @{
   const [avatarRemovePending, setAvatarRemovePending] = useState(false);
   const [pending, setPending] = useState(false);
   const [privatePending, setPrivatePending] = useState(false);
+  const formHydrated = useRef(false);
 
   const profileForm = useForm({
     defaultValues: {
@@ -143,9 +144,16 @@ function ProfileContent() @{
     if (!loaderData) return;
     if (loaderData.kind === "ready") {
       const user = loaderData.user;
-      profileForm.setFieldValue("display_name", user.display_name ?? "");
-      profileForm.setFieldValue("username", user.username ?? "");
-      profileForm.setFieldValue("bio", user.bio ?? "");
+      // Cache identity changes on every write-back (profile save, the
+      // contributions-toggle cache update) and refetch — re-running the
+      // field sets then would clobber unsaved edits. Hydrate once; phase
+      // and avatar still track the freshest data below.
+      if (!formHydrated.current) {
+        formHydrated.current = true;
+        profileForm.setFieldValue("display_name", user.display_name ?? "");
+        profileForm.setFieldValue("username", user.username ?? "");
+        profileForm.setFieldValue("bio", user.bio ?? "");
+      }
       setAvatarUrl(user.avatar_url);
       setPhase({ kind: "ready", user, emails: loaderData.emails });
       return;

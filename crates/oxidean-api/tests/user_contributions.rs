@@ -581,3 +581,38 @@ async fn contributions_past_range_streak_ends_at_to() {
     assert_eq!(data["current_streak"], 0, "{data}");
     assert_eq!(data["longest_streak"], 3, "{data}");
 }
+
+#[tokio::test]
+async fn contributions_soft_deleted_repo_drops_from_rollups() {
+    // A repo soft-deleted after the first read keeps its rollup rows — the
+    // one-shot `user:<id>` rebuild claim never re-runs — so `list_days`
+    // filters them out at read time via the repositories join.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_del.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "del@ex.com", "delu").await;
+    verify_user(&db, &user_id).await;
+    let repo = create_repo(&app, &cookie, "delrepo", "public").await;
+    seed_contributions(&db, &repo, &user_id, "del@ex.com").await;
+
+    // First read builds the rollup rows; the claim then blocks re-rebuilds.
+    let v = wait_commits(&app, Some(&cookie), "delu", 4).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["data"]["by_type"]["issues"], 1, "{v}");
+
+    db.soft_delete_repository(&repo).await.expect("soft delete");
+
+    let v = rpc_json(&app, Some(&cookie), &contribution_call("delu")).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    for kind in ["commits", "issues", "pull_requests", "reviews"] {
+        assert_eq!(data["by_type"][kind], 0, "{kind} — {data}");
+    }
+    assert_eq!(data["total"], 0, "{data}");
+    let s = serde_json::to_string(data).unwrap();
+    assert!(!s.contains("delrepo"), "{s}");
+}

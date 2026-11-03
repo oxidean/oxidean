@@ -162,17 +162,20 @@ pub async fn list_days(
     public_only: bool,
 ) -> Result<Vec<ContributionDayCount>, String> {
     let vis = if public_only {
-        " AND NOT is_private"
+        " AND NOT d.is_private"
     } else {
         ""
     };
     // `SUM` over a BIGINT column returns NUMERIC on Postgres and DECIMAL on
     // MySQL — neither decodes into i64 — so the aggregate is cast back to an
-    // integer per dialect.
+    // integer per dialect. The join excludes rows for repos soft-deleted
+    // after the last rebuild — the one-shot rebuild claim never re-runs.
     let sql = format!(
-        "SELECT day, kind, CAST(SUM(day_count) AS {{int}}) AS c FROM user_contribution_days\n\
-         WHERE user_id = {{p1}} AND day >= {{p2}} AND day < {{p3}}{vis}\n\
-         GROUP BY day, kind"
+        "SELECT d.day, d.kind, CAST(SUM(d.day_count) AS {{int}}) AS c\n\
+         FROM user_contribution_days d\n\
+         JOIN repositories r ON r.id = d.repository_id AND r.deleted_at IS NULL\n\
+         WHERE d.user_id = {{p1}} AND d.day >= {{p2}} AND d.day < {{p3}}{vis}\n\
+         GROUP BY d.day, d.kind"
     );
     match pool {
         DbPool::Postgres(p) => {
