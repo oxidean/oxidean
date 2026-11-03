@@ -16,7 +16,7 @@ Minimums by change type that apply here:
 | UI + Query / session | happy-dom integration test | extend `$owner.user-profile.integration.test.ts` |
 | Auth / RPC contract | Rust integration test and/or stack e2e | `tests/user_contributions.rs` |
 | RPC schema | `make rpc-sync-check` clean | new `user.getContributions` |
-| Dialect-touching DB code | `dialect_*` test | `contributions.rs` query ×3 dialects |
+| Dialect-touching DB code | `dialect_*` test | `contributions.rs` / `authored_commits.rs` / `contribution_days.rs` ×3 dialects |
 
 - Web gates before committing `apps/web`: `make web-lint` +
   `make web-format-check`.

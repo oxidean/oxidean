@@ -24,14 +24,23 @@ suggested build sequence inside the branch.
 Verify: `cargo check -p oxidean-api-user -p oxidean-core` compiles;
 `make rpc-sync-check` clean.
 
-## Task 2 — Migration 0094 (all three dialects)
+## Task 2 — Migrations 0094 + 0095 (all three dialects)
 
 - `migrations/{postgres,mysql,sqlite}/0094_user_contribution_indexes.sql`:
   - `idx_repository_activity_actor_created ON repository_activity(actor_id, created_at DESC)`
-  - `idx_pull_reviews_author ON pull_reviews(author_id, submitted_at DESC)`
-- Match each dialect's index idiom (MySQL lacks `IF NOT EXISTS` on indexes in
-  older files — copy the exact style of the neighboring migration in each
-  dir).
+  - `idx_pull_reviews_author_submitted ON pull_reviews(author_id, submitted_at DESC)`
+    — `idx_pull_reviews_author` is already taken by 0016's `(pull_id,
+    author_id)` index; the `_submitted` suffix avoids a collision postgres
+    and mysql reject loudly and sqlite would silently skip.
+- `migrations/{postgres,mysql,sqlite}/0095_contribution_followups.sql`:
+  - `users ADD COLUMN show_private_contributions` (default on)
+  - `authored_commits` — PK `(repository_id, sha)`; `user_id`,
+    `authored_day`, `authored_at`; `idx_authored_commits_user_day`
+  - `user_contribution_days` — PK `(user_id, repository_id, day, kind)`;
+    `is_private`, `day_count`
+  - `contribution_backfills` — `scope` PK, `done_at`
+- Match each dialect's index/column idiom (copy the exact style of the
+  neighboring migration in each dir).
 
 Verify: `make test` dialect boot (sqlite migration applies); CI dialect
 lanes.
@@ -122,9 +131,49 @@ Verify: `bun run test` for the touched test file; `make web-lint` +
 `make web-format-check` before commit; commit subjects follow
 `feat(profile):` / `feat(api):` grammar, no AI attribution.
 
+## Task 8 — Attribution, rollups, opt-out, streaks (same PR)
+
+Additions to the same change set, not follow-ups — they ship in the same PR.
+
+- `crates/oxidean-db/src/authored_commits.rs` — `record_authored` resolves
+  commit author emails to verified users (`user_emails.verified_at` plus
+  verified primary `users.email`), dedup-inserts on `(repository_id, sha)`,
+  and bumps `user_contribution_days` only for rows that land.
+  `ContributionRepoRow` + `list_actor_contribution_repos` enumerate repos a
+  user plausibly committed to (pushed to, merged a PR into, or had a PR
+  merged into — including PR-review activity).
+- `crates/oxidean-db/src/contribution_days.rs` — `bump` upserts
+  `(user, repo, day, kind)` resolving `is_private` in the same statement;
+  `list_user_contribution_days` serves the handler's aggregates;
+  `rebuild_user_contribution_days` rebuilds one user from source tables;
+  `repositories.update_visibility` retags `is_private` on flips.
+- `contribution_backfills` claims in `lib.rs` — `claim_` / `release_` /
+  `claimed_repo_backfill_scopes` over `user:<id>` and `repo:<id>` scopes.
+- `crates/oxidean-db/src/users.rs` — `show_private_contributions` column
+  mapping; `update_profile` writes it.
+- Write-path wiring: `oxidean-api-core/src/repo/activity.rs` observes pushed
+  and merged commits → `record_authored`; `oxidean-api-pulls/src/merge_ops.rs`
+  and `merge_queue/mod.rs` feed merge results; `oxidean-vcs/src/git_interop.rs`
+  exposes the commit walk for history backfill;
+  `spawn_contribution_backfill` runs it async under the `repo:<id>` claim
+  (`BACKFILL_WALK_CAP = 20_000`).
+- Handler: claims the `user:<id>` scope for a one-time rollup rebuild on
+  first read; spawns ≤4 repo backfills per read for unclaimed repos;
+  `total`/`days`/`by_type`/`current_streak`/`longest_streak` read the
+  rollup while `months` still uses `list_user_contribution_events`.
+- `oxidean-core/src/auth_types.rs` — `show_private_contributions` on
+  `UserPublic` + `UpdateProfileRequest`; `oxidean-api-user/src/profile.rs`
+  `update_profile` writes it. `make rpc-gen` picks up the field.
+- `apps/web/src/routes/settings/profile.tsrx` — "Contributions & activity"
+  section with the "Include private contributions on my profile" checkbox.
+
+Verify: `cargo nextest run -p oxidean-api --test user_contributions` covers
+the opt-out round-trip, authored-commit dedup, streak math, and rollup
+rebuild; `settings/profile.integration.test.ts` covers the toggle.
+
 ## Out of scope (this spec)
 
-- Pinned repos (COL-04), streak metrics, REST endpoint, authored-commit
-  dedupe, materialized rollups, comments as contributions, the GitHub-style
-  "private contributions" opt-out toggle (needs a user-preferences surface
-  that doesn't exist yet), "Contribution settings" dropdown.
+- Pinned repos (COL-04), REST `/api/v1` endpoint, comments as
+  contributions, GitHub's profile-page "Contribution settings" dropdown
+  (its private-contributions toggle ships on `/settings/profile` instead),
+  the full GitHub sidebar layout reshaping.

@@ -38,7 +38,9 @@ One new anonymous-safe read RPC plus a reworked profile page section.
   `{ day, kind, repo_slug, ref_number, title, count }` across the five sources
   above, filtered to `repositories.visibility = 'public'` unless the caller is
   the profile owner (see Visibility). Day extraction: `to_char`/`DATE_FORMAT`/
-  `strftime` per dialect, matching existing date-format code.
+  `strftime` per dialect, matching existing date-format code. This query feeds
+  only the itemized monthly sections — aggregates read the materialized
+  rollup instead (see Materialized rollups and streaks).
 - Rust-side aggregation in the `oxidean-api-user` handler produces:
   - `total`, `from`, `to`, `includes_private`
   - `days[]` — `{ date, count }` for the heatmap
@@ -50,6 +52,8 @@ One new anonymous-safe read RPC plus a reworked profile page section.
   - `years[]` — selectable years for the GitHub-style year list, derived
     server-side: account-creation year (`users.created_at`) through the
     current year, descending.
+  - `current_streak` / `longest_streak` — consecutive-day runs computed
+    server-side from the day map, rendered under the totals.
 - Classified `Open` in `proc_classes` (anonymous-safe: non-self viewers only
   ever receive public-repo data; the private-inclusive branch requires the
   caller's session to be the profile owner). New procedure name goes in
@@ -69,20 +73,30 @@ matches what GitHub shows):
   contributions, with `includes_private: true` so the UI can label it — GitHub
   shows your own full graph by default. Itemized rows for private repos are
   safe here — the viewer is the author.
-- GitHub also has a "private contributions on my profile" opt-out under
-  Contribution settings. There is no user-preferences surface in the schema
-  today, so the opt-out is a documented follow-up, not part of this pass.
+- GitHub's "Include private contributions on my profile" opt-out ships in the
+  same change: `users.show_private_contributions` (default on, matching
+  GitHub's default), exposed on `UserPublic` and writable via
+  `user.update_profile`, with a "Contributions & activity" checkbox on
+  `/settings/profile`. Owners who opt out get the same public-only view
+  every other viewer gets (`includes_private: false`).
 
-### Indexes (one migration per dialect, next free number 0094)
+### Schema (two migrations per dialect — 0094 indexes, 0095 follow-ups)
 
 - `idx_repository_activity_actor_created (actor_id, created_at DESC)` — the
   contribution query is actor-scoped with a range; today there is no actor
   index at all. Also accelerates the existing user Atom feed and the admin
   user-activity view.
-- `idx_pull_reviews_author (author_id, submitted_at DESC)` — new per-author
-  access path.
+- `idx_pull_reviews_author_submitted (author_id, submitted_at DESC)` — new
+  per-author access path. The `_submitted` suffix is required: migration
+  0016 already owns `idx_pull_reviews_author` as a `(pull_id, author_id)`
+  key, which postgres/mysql reject as a duplicate and sqlite's
+  `IF NOT EXISTS` would silently skip.
 - `issues` / `pull_requests` already carry author indexes; `repositories`
   already carries `owner_id`.
+- `0095_contribution_followups` adds `users.show_private_contributions` and
+  three tables — `authored_commits`, `user_contribution_days`,
+  `contribution_backfills` — detailed under Contribution counting and
+  Materialized rollups below.
 
 ### Web UI
 
@@ -121,15 +135,42 @@ current single-column profile structure:
 
 ### Contribution counting rule
 
-- "Commits" = `SUM(commits_count)` over `repository_activity` rows where
-  `push_type` is a real ref push (`push`, `force_push`, `pr_merge`) — not
-  branch create/delete/rename rows, and not ref-free `vcs.*` rows.
-- Known approximation vs GitHub: we count commits in pushed ranges rather
-  than authored commits on the default branch, so rebased/duplicated ranges
-  can overcount and commits pushed by someone else never credit the author.
-  This is the same basis the Atom feed already publishes; acceptable for v1,
-  documented here so nobody "fixes" it accidentally.
+- "Commits" = authored commits that reached the repo's default branch,
+  attributed to the verified account matching the commit's author email —
+  GitHub's rule, not the pushed-range `commits_count` approximation the Atom
+  feed publishes. Rows land in `authored_commits` (PK `(repository_id, sha)`
+  dedupes re-pushes; the same sha in another repo counts separately, matching
+  GitHub's per-repository rule). Author email resolves via verified
+  `user_emails` rows plus verified primary `users.email`.
+- Write paths: `record_ref_updates` (HTTP/SSH pushes), `record_pr_merge` and
+  the merge queue, and web file editing all feed `record_authored`
+  best-effort — unresolvable emails and unparsable author dates are skipped,
+  never fatal.
+- Backfill: history predating the write-path wiring is covered lazily —
+  repos the user plausibly authored in (pushed to, merged a PR into, or had
+  a PR merged into — `list_actor_contribution_repos`) get one bounded
+  default-branch history walk (`BACKFILL_WALK_CAP = 20_000` commits), claimed
+  per repo via `contribution_backfills` `repo:<id>` scopes, spawned from
+  profile reads (≤4 per read). Failures release the claim so a later read
+  retries.
 - PRs / issues / reviews count `created_at`/`submitted_at` events — exact.
+
+### Materialized rollups and streaks
+
+- `user_contribution_days` — one row per `(user_id, repository_id, day,
+  kind)`; `is_private` snapshots repo visibility at write time, and
+  `repositories.update_visibility` retags it so public views stay correct
+  across visibility flips. Bumped inside the façade insert paths — including
+  `record_authored`, only for rows that actually insert, keeping the two
+  tables dedup-consistent — so reads never run the five-way aggregation.
+- First read per user lazily rebuilds that user's rows from the source
+  tables under the `user:<id>` claim in `contribution_backfills` — covers
+  activity recorded before the bumps existed; failures release the claim.
+- `total`, `days`, `by_type`, and the streaks read the rollup; the UNION
+  query still runs, but only for the itemized monthly sections.
+- `current_streak` / `longest_streak` come from consecutive days with ≥1
+  contribution in the day map; `current` tolerates one trailing empty `to`
+  day so a streak isn't broken before the day ends.
 
 ## Alternatives considered
 
@@ -143,17 +184,17 @@ current single-column profile structure:
 - **No year selector** (ship rolling "last year" only) — dropped; matching
   GitHub means the year rail ships now. `years[]` from the RPC keeps the UI
   dumb.
-- **User-preference for the private-contributions opt-out** — GitHub gates
-  this under Contribution settings, but there is no user-preferences
-  storage in the schema. Deferred: self-view is private-inclusive by
-  default, matching GitHub's default.
-- **Git-backed authored-commit counting** — walking every repo's default
-  branch per profile view is far too expensive; would need a denormalized
-  authored-commit table. Out of scope; the pushed-range approximation stands.
-- **Materialized daily rollups / scheduled rollup job** — premature; a single
-  bounded UNION query plus the new indexes is fine at current scale.
-- **Streak metrics (current/longest)** — Forgejo-style, not GitHub. Skipped;
-  easy addition to the same payload later.
+- **Eager history backfill at deploy time** — walking every repo's default
+  branch inside the migration is unbounded work at migrate time. Rejected in
+  favor of lazy per-repo claims: only repos of users whose profiles are
+  actually viewed get walked, bounded by `BACKFILL_WALK_CAP`.
+- **Aggregating the UNION query per read, no rollup** — the shape the first
+  cut of this spec proposed. Rejected once authored commits made the events
+  table heavy: `user_contribution_days` keeps profile reads off the five-way
+  join while the UNION still serves itemized sections.
+- **Background rollup/rebuild jobs** — no scheduler needed; claims in
+  `contribution_backfills` plus facade-path bumps keep the rollup correct
+  and converged without a cron surface.
 
 ## Decisions (resolved)
 
@@ -162,9 +203,14 @@ resolve toward GitHub parity:
 
 1. **Private contributions for self-view** — included (counts + itemized
    rows, `includes_private` label); GitHub shows your own full graph by
-   default. The "private contributions on my profile" opt-out toggle is
-   deferred — it needs a user-preferences surface that doesn't exist yet.
+   default. The "Include private contributions on my profile" opt-out ships
+   in the same change — `show_private_contributions` flag plus a
+   `/settings/profile` checkbox.
 2. **Year selector** — ships in this PR as GitHub's right-hand year rail
    (`years[]` from the RPC, `?from=`/`?to=` URL state), not deferred.
 3. **Comments as contributions** — excluded; GitHub doesn't count them.
 4. **PR scope** — one implementation PR: RPC + DB + profile sections.
+5. **Scope** — Jesse: the items the first cut listed as follow-ups
+   (authored-commit attribution, materialized rollups + lazy backfills, the
+   private-contributions opt-out, streaks) are not follow-ups — they are
+   additions to the same change set and ship in the same PR.
