@@ -39,24 +39,35 @@ df -h / || true
 # /__t inside container jobs; on the host it lives at $AGENT_TOOLSDIRECTORY.
 rm -rf /__t/* "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"/* 2>/dev/null || true
 
+host_dirs_done=0
 if [ -S /var/run/docker.sock ]; then
   DOCKER_BIN="$(command -v docker || true)"
   if [ -z "$DOCKER_BIN" ]; then
     mkdir -p "$DOCKER_BIN_DIR"
-    if curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+    # bounded: a stalled download must not hold the job until its timeout
+    if curl -fsSL --connect-timeout 15 --max-time 120 \
+      "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
       | tar -xz --strip-components=1 -C "$DOCKER_BIN_DIR" docker/docker; then
       DOCKER_BIN="$DOCKER_BIN_DIR/docker"
     fi
   fi
   if [ -n "$DOCKER_BIN" ] && "$DOCKER_BIN" version >/dev/null 2>&1; then
-    "$DOCKER_BIN" system prune -af >/dev/null 2>&1 || true
+    timeout 120 "$DOCKER_BIN" system prune -af >/dev/null 2>&1 || true
     HOST_DIRS=("${FAT_DIRS[@]/#//host}")
-    "$DOCKER_BIN" run --rm -v /:/host alpine rm -rf "${HOST_DIRS[@]}" || true
+    # bounded: the alpine pull is a network call; on failure the direct
+    # rm/sudo path below still runs — prune may have removed a cached image
+    if timeout 120 "$DOCKER_BIN" run --rm -v /:/host alpine rm -rf "${HOST_DIRS[@]}"; then
+      host_dirs_done=1
+    fi
   fi
-elif [ "$(id -u)" = 0 ]; then
-  rm -rf "${FAT_DIRS[@]}" || true
-elif command -v sudo >/dev/null 2>&1; then
-  sudo rm -rf "${FAT_DIRS[@]}" || true
+fi
+
+if [ "$host_dirs_done" != 1 ]; then
+  if [ "$(id -u)" = 0 ]; then
+    rm -rf "${FAT_DIRS[@]}" || true
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo rm -rf "${FAT_DIRS[@]}" || true
+  fi
 fi
 
 echo "==> disk after"

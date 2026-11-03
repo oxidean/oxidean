@@ -325,14 +325,18 @@ echo "==> api carries the bundled s3 env contract"
 # env contract. Pin the exec to a Running pod of the deployment's current
 # pod-template-hash, and give the contract a short settle window.
 api_env() {
-  local hash pod
+  local hash pod rev
   # The deployment's own template never carries pod-template-hash — the
-  # controller stamps it on the ReplicaSets it creates. Read it from the
-  # newest api ReplicaSet; pods with that hash are unambiguous members of
-  # the current rollout even while old-RS pods are still Terminating.
+  # controller stamps it on the ReplicaSets it creates. Match the api
+  # ReplicaSet whose revision annotation equals the deployment's current
+  # revision: a template collision can make k8s reuse an older ReplicaSet,
+  # so newest-by-creation is not guaranteed to be the active one.
+  rev="$(kubectl -n "$NS" get "deploy/${RELEASE}-oxidean-api" \
+    -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')"
+  [ -n "$rev" ] || return 1
   hash="$(kubectl -n "$NS" get rs \
-    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.labels.pod-template-hash}{" "}{.metadata.creationTimestamp}{"\n"}{end}' \
-    | awk -v p="${RELEASE}-oxidean-api-" 'index($1,p)==1 && $3>t {t=$3; h=$2} END{print h}')"
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.labels.pod-template-hash}{" "}{.metadata.annotations.deployment\.kubernetes\.io/revision}{"\n"}{end}' \
+    | awk -v p="${RELEASE}-oxidean-api-" -v r="$rev" 'index($1,p)==1 && $3==r {print $2; exit}')"
   [ -n "$hash" ] || return 1
   pod="$(kubectl -n "$NS" get pods -l "pod-template-hash=${hash}" \
     --field-selector=status.phase=Running \
