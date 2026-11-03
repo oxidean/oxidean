@@ -829,6 +829,61 @@ export type UserFollowListResponse = {
   total: number;
 };
 
+export type GetContributionsRequest = {
+  username: string;
+  from?: string | null;
+  to?: string | null;
+};
+
+export type UserContributionDay = {
+  date: string;
+  count: number;
+};
+
+export type UserContributionByType = {
+  commits: number;
+  pull_requests: number;
+  issues: number;
+  reviews: number;
+};
+
+export type UserContributionRepo = {
+  slug: string;
+  count: number;
+};
+
+export type UserContributionItem = {
+  slug: string;
+  number: number;
+  title: string;
+  href: string;
+};
+
+export type UserContributionSection = {
+  kind: string;
+  total: number;
+  repo_count: number;
+  repos: UserContributionRepo[];
+  items: UserContributionItem[];
+  truncated: boolean;
+};
+
+export type UserContributionMonth = {
+  month: string;
+  sections: UserContributionSection[];
+};
+
+export type UserContributions = {
+  total: number;
+  from: string;
+  to: string;
+  includes_private: boolean;
+  days: UserContributionDay[];
+  by_type: UserContributionByType;
+  months: UserContributionMonth[];
+  years: number[];
+};
+
 export type RepoListMineResponse = {
   repos: RepoPublic[];
 };
@@ -6158,6 +6213,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoListMineResponse>(opts, "user.listWatched", input),
       getPublicProfile: (input: GetPublicProfileRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
+      getContributions: (input: GetContributionsRequest) =>
+        rpcCall<UserContributions>(opts, "user.getContributions", input),
       follow: (input: UserFollowRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.follow", input),
       unfollow: (input: UserFollowRequest) =>

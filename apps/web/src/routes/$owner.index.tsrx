@@ -17,6 +17,7 @@ import { fetchOrgOverview, type OrgOverviewPayload } from "@/lib/ssr-org";
 import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profile";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { useMounted } from "@/lib/use-mounted.tsrx";
+import { UserContributionsSection } from "@/components/profile/user-contributions-section";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -342,6 +343,8 @@ export function UserProfilePage() @{
       @if (profileReadme) {
         <ReadmePanel html={profileReadme.html} fileName={profileReadme.name} />;
       }
+
+      <UserContributionsSection username={username} />
 
       <div className="mt-8 flex gap-4 border-b border-border">
         <button

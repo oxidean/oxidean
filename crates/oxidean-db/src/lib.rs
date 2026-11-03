@@ -62,6 +62,7 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub mod checks;
+pub mod contributions;
 pub mod deployments;
 pub mod discussions;
 pub use actions::{
@@ -73,6 +74,7 @@ pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use checks::{CheckRunAnnotationRow, CheckRunRow, CheckSuiteRow};
+pub use contributions::ContributionEventRow;
 pub use deploy_keys::DeployKeyRow;
 pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
 use dialect::resolve_dialect_from_env as resolve_from_env;
@@ -6683,6 +6685,27 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<RepoActivityRow>, String> {
         repo_activity::list_by_actor_public(self.require_pool()?, actor_id, limit).await
+    }
+
+    /// Normalized contribution events for `user.getContributions` (COL-12):
+    /// commits in pushed ranges, PRs/issues opened, reviews submitted, repos
+    /// created — one row per event (`from` inclusive, `to_exclusive`
+    /// exclusive `YYYY-MM-DD`).
+    pub async fn list_user_contribution_events(
+        &self,
+        user_id: &str,
+        from: &str,
+        to_exclusive: &str,
+        public_only: bool,
+    ) -> Result<Vec<ContributionEventRow>, String> {
+        contributions::list_user_contribution_events(
+            self.require_pool()?,
+            user_id,
+            from,
+            to_exclusive,
+            public_only,
+        )
+        .await
     }
 
     // --- audit events ---

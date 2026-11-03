@@ -833,6 +833,99 @@ pub struct UserFollowListResponse {
     pub total: i64,
 }
 
+/// `user.getContributions` — GitHub-style contribution graph data for a user
+/// profile (COL-12). `from`/`to` are inclusive ISO-8601 dates
+/// (`YYYY-MM-DD`); when omitted the range is the last 365 days ending today.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GetContributionsRequest {
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+}
+
+/// One calendar day of contributions (`date` is `YYYY-MM-DD`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionDay {
+    pub date: String,
+    pub count: i64,
+}
+
+/// Contribution counts by kind over the requested range.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionByType {
+    pub commits: i64,
+    pub pull_requests: i64,
+    pub issues: i64,
+    pub reviews: i64,
+}
+
+/// Per-repo rollup inside a monthly section (commits, repositories).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionRepo {
+    /// `owner/name`.
+    pub slug: String,
+    pub count: i64,
+}
+
+/// Itemized contribution row (pull requests, issues, reviews).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionItem {
+    /// `owner/name`.
+    pub slug: String,
+    pub number: i64,
+    pub title: String,
+    /// Route path (`/{owner}/{name}/pull/{n}` or `…/issues/{n}`).
+    pub href: String,
+}
+
+/// One kind's block inside a monthly section — either `repos` or `items`
+/// is populated depending on the kind.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionSection {
+    /// `commits` | `pull_requests` | `issues` | `reviews` | `repositories`.
+    pub kind: String,
+    /// Total contributions of this kind in the month.
+    pub total: i64,
+    /// Distinct repos touched.
+    pub repo_count: i64,
+    /// Per-repo rollups (`commits`, `repositories` kinds).
+    pub repos: Vec<UserContributionRepo>,
+    /// Itemized rows (`pull_requests`, `issues`, `reviews` kinds), capped.
+    pub items: Vec<UserContributionItem>,
+    /// True when `items` was capped by the per-section item limit.
+    pub truncated: bool,
+}
+
+/// A calendar month of contribution activity, GitHub-style.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributionMonth {
+    /// `YYYY-MM`.
+    pub month: String,
+    pub sections: Vec<UserContributionSection>,
+}
+
+/// `user.getContributions` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserContributions {
+    pub total: i64,
+    /// Effective range (`YYYY-MM-DD`).
+    pub from: String,
+    pub to: String,
+    /// True when private-repo contributions are included — only ever set
+    /// when the viewer is the profile owner.
+    pub includes_private: bool,
+    /// Every day in `from`..=`to` (zero-filled).
+    pub days: Vec<UserContributionDay>,
+    pub by_type: UserContributionByType,
+    /// Monthly sections, newest first.
+    pub months: Vec<UserContributionMonth>,
+    /// Selectable years for the year rail — account-creation year through
+    /// the current year, descending.
+    pub years: Vec<i64>,
+}
+
 /// `repo.listMine` — caller's non-deleted repos, recently updated first (GIT-01 / D-13).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoListMineResponse {

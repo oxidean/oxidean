@@ -3,6 +3,7 @@
 //! issue #162. `user::rate_limit` stays in core — `app.rs` and
 //! `auth::verify_reset` share the lookup limiter.
 
+mod contributions;
 mod dispatch;
 mod follows;
 mod list_starred;
@@ -16,6 +17,7 @@ pub const PROCEDURES: &[&str] = &[
     "user.follow",
     "user.followers.list",
     "user.following.list",
+    "user.getContributions",
     "user.getPublicProfile",
     "user.get_profile",
     "user.listStarred",

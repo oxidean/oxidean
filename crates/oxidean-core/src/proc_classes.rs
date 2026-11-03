@@ -169,6 +169,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "auth.provider_config"
         | "auth.bootstrap_status"
         | "user.getPublicProfile"
+        | "user.getContributions"
         | "org.get"
         | "repo.explore"
         | "invites.get" => Open,
@@ -735,6 +736,7 @@ mod tests {
             "auth.provider_config",
             "auth.bootstrap_status",
             "user.getPublicProfile",
+            "user.getContributions",
             "org.get",
             "repo.explore",
             "invites.get",

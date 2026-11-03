@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{follows, list_starred, lookup, profile};
+use crate::{contributions, follows, list_starred, lookup, profile};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -20,6 +20,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
     match procedure {
         "user.get_profile" => arm!(profile::get_profile(ctx)),
         "user.getPublicProfile" => arm!(profile::get_public_profile(ctx, input)),
+        "user.getContributions" => arm!(contributions::get_contributions(ctx, input)),
         "user.update_profile" => arm!(profile::update_profile(ctx, input)),
         "user.lookup" => arm!(lookup::lookup(ctx, input)),
         "user.listStarred" => arm!(list_starred::list_starred(ctx, input)),
