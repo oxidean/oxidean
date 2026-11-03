@@ -90,8 +90,10 @@ Task 5's integration test.
   assert (a) anonymous gets public-only numbers, (b) the owner sees
   private-repo rows included, (c) `days` covers the full range, (d) unknown
   and banned users 404, (e) `by_type` splits correctly.
-- If a `dialect_*` probe convention covers new queries, add one (see
-  `testing.md` — dialect-touching DB code).
+- Dialect coverage is required for every new query module
+  (`contributions.rs`, `authored_commits.rs`, `contribution_days.rs`) across
+  sqlite/postgres/mysql — see `testing.md` (dialect-touching DB code). The
+  migration ledger test expects the 0094/0095 filenames.
 
 Verify: `cargo nextest run -p oxidean-api user_contributions`.
 

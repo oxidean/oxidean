@@ -221,6 +221,9 @@ pub async fn get_contributions(
     // month (YYYY-MM) → kind → section accumulator
     let mut months: BTreeMap<String, BTreeMap<String, SectionAcc>> = BTreeMap::new();
 
+    // Newest-first so capped sections keep recent items regardless of query order.
+    let mut events = events;
+    events.sort_by(|a, b| b.day.cmp(&a.day));
     for ev in events {
         let month = ev.day.get(..7).unwrap_or(&ev.day).to_string();
         let sec = months
