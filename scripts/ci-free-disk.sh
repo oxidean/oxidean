@@ -51,13 +51,18 @@ if [ -S /var/run/docker.sock ]; then
       DOCKER_BIN="$DOCKER_BIN_DIR/docker"
     fi
   fi
-  if [ -n "$DOCKER_BIN" ] && "$DOCKER_BIN" version >/dev/null 2>&1; then
-    timeout 120 "$DOCKER_BIN" system prune -af >/dev/null 2>&1 || true
+  if [ -n "$DOCKER_BIN" ] && timeout 30 "$DOCKER_BIN" version >/dev/null 2>&1; then
+    timeout -k 15 120 "$DOCKER_BIN" system prune -af >/dev/null 2>&1 || true
     HOST_DIRS=("${FAT_DIRS[@]/#//host}")
     # bounded: the alpine pull is a network call; on failure the direct
     # rm/sudo path below still runs — prune may have removed a cached image
-    if timeout 120 "$DOCKER_BIN" run --rm -v /:/host alpine rm -rf "${HOST_DIRS[@]}"; then
+    HELPER="ci-free-disk-$$"
+    if timeout -k 15 120 "$DOCKER_BIN" run --rm --name "$HELPER" -v /:/host alpine rm -rf "${HOST_DIRS[@]}"; then
       host_dirs_done=1
+    else
+      # the helper's rm runs as PID 1 and can ignore the forwarded signal —
+      # kill it daemon-side so it cannot outlive the job
+      "$DOCKER_BIN" rm -f "$HELPER" >/dev/null 2>&1 || true
     fi
   fi
 fi
