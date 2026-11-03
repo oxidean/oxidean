@@ -62,7 +62,7 @@ if [ -S /var/run/docker.sock ]; then
     else
       # the helper's rm runs as PID 1 and can ignore the forwarded signal —
       # kill it daemon-side so it cannot outlive the job
-      "$DOCKER_BIN" rm -f "$HELPER" >/dev/null 2>&1 || true
+      timeout -k 15 30 "$DOCKER_BIN" rm -f "$HELPER" >/dev/null 2>&1 || true
     fi
   fi
 fi
