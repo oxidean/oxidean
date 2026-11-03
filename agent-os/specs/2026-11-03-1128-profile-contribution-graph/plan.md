@@ -12,7 +12,9 @@ suggested build sequence inside the branch.
   `UserContributionByType` / `UserContributionMonth` /
   `UserContributionSection` / `UserContributionRepo` /
   `UserContributionItem` (all `Serialize + Deserialize + JsonSchema`,
-  matching the existing DTO style).
+  matching the existing DTO style). `UserContributions` also carries
+  `years: Vec<i64>` (account-creation year → current year, descending) for
+  the GitHub-style year rail.
 - `oxidean-api-user`: `contributions.rs` handler, register
   `"user.getContributions"` in `PROCEDURES` + `dispatch.rs`.
 - `proc_classes.rs`: classify as `Open`; add to the public list test at the
@@ -61,7 +63,8 @@ with Task 4.
   call the DB query; aggregate in Rust: `days` (fill gaps client-side or
   server-side — server emits every day in range with zeroes for consistent
   cell math), `by_type`, `months` grouped `YYYY-MM` desc with per-kind
-  sections and per-repo rows; `total`; `includes_private`.
+  sections and per-repo rows; `years` from `users.created_at` → current
+  year descending; `total`; `includes_private`.
 - Item caps: cap itemized PR/issue/review rows per section (e.g. 30) with a
   `truncated` flag, following the insights-page convention.
 
@@ -85,11 +88,18 @@ Verify: `cargo nextest run -p oxidean-api user_contributions`.
 - `apps/web/src/lib/ssr-user-profile.ts`: extend `UserProfilePayload` with
   `contributions: UserContributions | null` (fetch failures must not sink the
   profile — catch to null, per the insights loader's per-section pattern).
-- `components/profile/contribution-graph.tsrx`: 53×7 grid, month labels,
-  legend, tooltips/aria; pure divs, no chart dep.
-- `components/profile/contribution-activity.tsrx`: month sections, per-repo
-  expandable detail (`<details>`-style or Button toggle — check octane skill
-  for the mounted-panel rule before using `@if` swaps).
+  Year selection refetches with explicit `from`/`to` — contributions move to
+  their own `queryOptions` keyed on the range so refetch doesn't reload the
+  whole profile payload.
+- `components/profile/contribution-graph.tsrx`: 53×7 grid (weeks start
+  Sunday), month labels row, weekday labels (Mon/Wed/Fri), Less→More
+  legend, tooltips/aria; pure divs, no chart dep. GitHub's year rail sits
+  beside it — one link per `years[]` entry plus the default "last year"
+  view; selection updates `?from=`/`?to=` in the URL.
+- `components/profile/contribution-activity.tsrx`: "Contribution activity"
+  heading, month sections, per-repo expandable detail (`<details>`-style or
+  Button toggle — check octane skill for the mounted-panel rule before
+  using `@if` swaps).
 - `components/profile/activity-overview.tsrx`: type breakdown bar +
   percentages.
 - `$owner.index.tsrx` `UserProfilePage`: render the three sections between
@@ -114,5 +124,7 @@ Verify: `bun run test` for the touched test file; `make web-lint` +
 
 ## Out of scope (this spec)
 
-- Pinned repos (COL-04), year dropdown UI, streak metrics, REST endpoint,
-  authored-commit dedupe, materialized rollups, comments as contributions.
+- Pinned repos (COL-04), streak metrics, REST endpoint, authored-commit
+  dedupe, materialized rollups, comments as contributions, the GitHub-style
+  "private contributions" opt-out toggle (needs a user-preferences surface
+  that doesn't exist yet), "Contribution settings" dropdown.

@@ -46,7 +46,10 @@ One new anonymous-safe read RPC plus a reworked profile page section.
     activity-overview breakdown
   - `months[]` — GitHub-style monthly sections: commits and repo creations
     grouped per repo `{ slug, count }`; PRs / issues / reviews grouped per
-    repo with itemized `{ number, title, href }` rows (bounded per section).
+    repo with itemized `{ number, title, href }` rows (bounded per section)
+  - `years[]` — selectable years for the GitHub-style year list, derived
+    server-side: account-creation year (`users.created_at`) through the
+    current year, descending.
 - Classified `Open` in `proc_classes` (anonymous-safe: non-self viewers only
   ever receive public-repo data; the private-inclusive branch requires the
   caller's session to be the profile owner). New procedure name goes in
@@ -57,13 +60,18 @@ One new anonymous-safe read RPC plus a reworked profile page section.
 
 ### Visibility
 
-Match the Atom feed's rule and GitHub's behavior:
+Match the Atom feed's rule and GitHub's behavior (confirmed: implementation
+matches what GitHub shows):
 
 - Anonymous viewers and signed-in viewers looking at someone else: public-repo
   contributions only.
 - The profile owner viewing their own profile: public **and** private-repo
-  contributions, with `includes_private: true` so the UI can label it. Itemized
-  rows for private repos are safe here — the viewer is the author.
+  contributions, with `includes_private: true` so the UI can label it — GitHub
+  shows your own full graph by default. Itemized rows for private repos are
+  safe here — the viewer is the author.
+- GitHub also has a "private contributions on my profile" opt-out under
+  Contribution settings. There is no user-preferences surface in the schema
+  today, so the opt-out is a documented follow-up, not part of this pass.
 
 ### Indexes (one migration per dialect, next free number 0094)
 
@@ -78,25 +86,35 @@ Match the Atom feed's rule and GitHub's behavior:
 
 ### Web UI
 
-GitHub's Overview layout, adapted to the current profile structure:
+Mirror GitHub's profile Overview contribution section, adapted to the
+current single-column profile structure:
 
 - `components/profile/contribution-graph.tsrx` — pure-CSS heatmap like the
   insights page's div bar chart (no chart dependency): 53 week-columns × 7
-  day-cells, five intensity buckets, month labels row, `Less → More` legend,
-  per-cell `title` "N contributions on {date}" and an `aria-label`.
-- `components/profile/contribution-activity.tsrx` — month-grouped sections
-  with per-repo expandable detail (commits show `{slug} · N commits`; PRs /
-  issues / reviews show linked `owner/repo#n title` rows), mirroring GitHub's
-  "Contribution activity".
+  day-cells starting Sunday, five intensity buckets, month labels row,
+  weekday labels (Mon/Wed/Fri), `Less → More` legend, per-cell `title`
+  "N contributions on {date}" and an `aria-label`.
+- **Year list** — GitHub's right-hand year rail beside the graph: one link
+  per entry in `years[]`, current year labeled as such implicitly by order;
+  default selection = rolling "last year" view. Selection refetches
+  `user.getContributions` with `from`/`to` (past year → `YYYY-01-01`…
+  `YYYY-12-31`) and mirrors into `?from=`/`?to=` URL params so the view is
+  shareable, like GitHub's `?from=`/`?to=` links.
+- Header line: "{total} contributions in the last year" for the default
+  range, "{total} contributions in {year}" for year selections — same
+  phrasing as GitHub.
+- `components/profile/contribution-activity.tsrx` — "Contribution activity"
+  heading plus month-grouped sections with per-repo expandable detail
+  (commits show `{slug} · N commits`; PRs / issues / reviews show linked
+  `owner/repo#n title` rows), mirroring GitHub's monthly sections.
 - `components/profile/activity-overview.tsrx` — the type-breakdown bar with
-  percentages ("Commits 62% · Pull requests 21% · …") plus "Contributed to N
-  repositories" if cheap to derive from the same payload.
+  percentages ("Commits 62% · Pull requests 21% · …") — GitHub's "Activity
+  overview" equivalent — plus "Contributed to N repositories" if cheap to
+  derive from the same payload.
 - `$owner.index.tsrx` `UserProfilePage` — insert the sections between the
   profile README and the Repositories/Stars tabs; keep the current
   single-column width rather than reshaping the whole page into GitHub's
   sidebar layout in this pass.
-- Header line: "{total} contributions in the last year" (or "in {year}" if a
-  bounded range was requested).
 - Loading: `Skeleton` placeholders; empty state: hide sections entirely for
   users with zero contributions (no sad empty boxes on fresh accounts —
   GitHub hides the graph too).
@@ -122,6 +140,13 @@ GitHub's Overview layout, adapted to the current profile structure:
   the Atom feed's `list_repo_activity_by_actor_public` covers push-kind rows
   only, and a second round trip buys nothing the monthly sections don't
   already show. Revisit if a "show more" deep list is wanted.
+- **No year selector** (ship rolling "last year" only) — dropped; matching
+  GitHub means the year rail ships now. `years[]` from the RPC keeps the UI
+  dumb.
+- **User-preference for the private-contributions opt-out** — GitHub gates
+  this under Contribution settings, but there is no user-preferences
+  storage in the schema. Deferred: self-view is private-inclusive by
+  default, matching GitHub's default.
 - **Git-backed authored-commit counting** — walking every repo's default
   branch per profile view is far too expensive; would need a denormalized
   authored-commit table. Out of scope; the pushed-range approximation stands.
@@ -130,19 +155,16 @@ GitHub's Overview layout, adapted to the current profile structure:
 - **Streak metrics (current/longest)** — Forgejo-style, not GitHub. Skipped;
   easy addition to the same payload later.
 
-## Open questions
+## Decisions (resolved)
 
-1. **Private contributions for self-view** — recommended: include them
-   (counts + itemized rows, `includes_private` label), matching GitHub where
-   you see your own full graph. Alternative: public-only for everyone (pure
-   feed parity, simpler).
-2. **Year selector** — recommended: the RPC accepts `from`/`to` from day one,
-   but the UI ships only "last 365 days" (no year dropdown) in this PR; add
-   the dropdown when a second view exists. Data only goes back to migration
-   0024 anyway.
-3. **Comments as contributions?** — GitHub doesn't count issue/PR comments in
-   the graph; recommended: exclude them (they'd dominate counts for chatty
-   threads).
-4. **PR scope** — recommended: RPC + DB + profile sections land in ONE PR
-   (they're one feature slice; the spec PR itself is docs-only). Splitting
-   backend/frontend is possible if you'd rather review them apart.
+Jesse: implementation should match what GitHub shows. All open questions
+resolve toward GitHub parity:
+
+1. **Private contributions for self-view** — included (counts + itemized
+   rows, `includes_private` label); GitHub shows your own full graph by
+   default. The "private contributions on my profile" opt-out toggle is
+   deferred — it needs a user-preferences surface that doesn't exist yet.
+2. **Year selector** — ships in this PR as GitHub's right-hand year rail
+   (`years[]` from the RPC, `?from=`/`?to=` URL state), not deferred.
+3. **Comments as contributions** — excluded; GitHub doesn't count them.
+4. **PR scope** — one implementation PR: RPC + DB + profile sections.
