@@ -26,8 +26,11 @@ set -uo pipefail
 FAT_DIRS=(/usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/share/swift)
 # Pinned to docker/ci-base/Dockerfile's ARG DOCKER_CLI_VERSION — the rust
 # lanes (dev/cov/release images) ship no docker CLI, so it is fetched on
-# demand when the socket is present but the binary is not.
+# demand when the socket is present but the binary is not. It lands OFF
+# PATH on purpose: tests like the workflow conformance suite gate docker
+# cases on `command -v docker`, and a visible CLI changes what they run.
 DOCKER_CLI_VERSION="${CI_DOCKER_CLI_VERSION:-29.9.2}"
+DOCKER_BIN_DIR=/tmp/ci-free-disk-bin
 
 echo "==> disk before"
 df -h / || true
@@ -37,14 +40,18 @@ df -h / || true
 rm -rf /__t/* "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"/* 2>/dev/null || true
 
 if [ -S /var/run/docker.sock ]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
-      | tar -xz --strip-components=1 -C /usr/local/bin docker/docker || true
+  DOCKER_BIN="$(command -v docker || true)"
+  if [ -z "$DOCKER_BIN" ]; then
+    mkdir -p "$DOCKER_BIN_DIR"
+    if curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+      | tar -xz --strip-components=1 -C "$DOCKER_BIN_DIR" docker/docker; then
+      DOCKER_BIN="$DOCKER_BIN_DIR/docker"
+    fi
   fi
-  if command -v docker >/dev/null 2>&1; then
-    docker system prune -af >/dev/null 2>&1 || true
+  if [ -n "$DOCKER_BIN" ] && "$DOCKER_BIN" version >/dev/null 2>&1; then
+    "$DOCKER_BIN" system prune -af >/dev/null 2>&1 || true
     HOST_DIRS=("${FAT_DIRS[@]/#//host}")
-    docker run --rm -v /:/host alpine rm -rf "${HOST_DIRS[@]}" || true
+    "$DOCKER_BIN" run --rm -v /:/host alpine rm -rf "${HOST_DIRS[@]}" || true
   fi
 elif [ "$(id -u)" = 0 ]; then
   rm -rf "${FAT_DIRS[@]}" || true

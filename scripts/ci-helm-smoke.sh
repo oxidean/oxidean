@@ -320,11 +320,30 @@ kubectl -n "$NS" logs ox-s3-check || true
 kubectl -n "$NS" delete pod ox-s3-check >/dev/null
 
 echo "==> api carries the bundled s3 env contract"
-kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
-  | grep -q "^OXIDEAN_S3_ENDPOINT=http://ox-oxidean-objectstore:9000$" \
+# `kubectl exec deploy/...` resolves to an arbitrary pod — right after a
+# rollout that can be a terminating old-ReplicaSet pod carrying the previous
+# env contract. Pin the exec to a Running pod of the deployment's current
+# pod-template-hash, and give the contract a short settle window.
+api_env() {
+  local hash pod
+  hash="$(kubectl -n "$NS" get "deploy/${RELEASE}-oxidean-api" \
+    -o jsonpath='{.spec.template.metadata.labels.pod-template-hash}')"
+  pod="$(kubectl -n "$NS" get pods -l "pod-template-hash=${hash}" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}')"
+  [ -n "$pod" ] && kubectl -n "$NS" exec "$pod" -- printenv
+}
+api_env_matches() {  # api_env_matches <exact env line>
+  local want="$1" _
+  for _ in $(seq 1 12); do
+    api_env 2>/dev/null | grep -qxF "$want" && return 0
+    sleep 5
+  done
+  return 1
+}
+api_env_matches "OXIDEAN_S3_ENDPOINT=http://ox-oxidean-objectstore:9000" \
   || { echo "FAIL: api missing bundled OXIDEAN_S3_ENDPOINT" >&2; exit 1; }
-kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
-  | grep -q "^OXIDEAN_STORAGE_BACKEND=s3$" \
+api_env_matches "OXIDEAN_STORAGE_BACKEND=s3" \
   || { echo "FAIL: api missing OXIDEAN_STORAGE_BACKEND=s3" >&2; exit 1; }
 
 echo "==> preload seaweedfs image into kind"
@@ -372,8 +391,7 @@ kubectl -n "$NS" logs ox-s3-check || true
 kubectl -n "$NS" delete pod ox-s3-check >/dev/null
 
 echo "==> api carries the seaweedfs s3 endpoint"
-kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-api" -- printenv \
-  | grep -q "^OXIDEAN_S3_ENDPOINT=http://${RELEASE}-seaweedfs-s3:8333$" \
+api_env_matches "OXIDEAN_S3_ENDPOINT=http://${RELEASE}-seaweedfs-s3:8333" \
   || { echo "FAIL: api missing seaweedfs OXIDEAN_S3_ENDPOINT" >&2; exit 1; }
 
 trap - ERR
