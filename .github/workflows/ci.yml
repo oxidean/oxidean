@@ -196,6 +196,11 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
+      # Hosted VMs have started this job at ~6 GB free; the workspace build
+      # writes multiples of that into /ci/target-dev. Reclaim first (mold's
+      # "failed to write to an output file" was the observed failure mode).
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       - name: cargo build bins + nextest archive
         # Consumers run the exact artifacts this produces.
         env:
@@ -362,6 +367,8 @@ jobs:
       CARGO_TARGET_DIR: /ci/target-dev
     steps:
       - uses: actions/checkout@v7
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       - name: bun install
         run: bun install --frozen-lockfile
       - name: knip (TS/.tsrx/.astro dead code)
@@ -517,6 +524,11 @@ jobs:
       CARGO_BUILD_JOBS: "3"
     steps:
       - uses: actions/checkout@v7
+      # Instrumented libtests + test binaries are the largest writes of any
+      # job — reclaim hosted-runner disk before the llvm-cov build (mold's
+      # "failed to write to an output file" was the observed failure mode).
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       - name: bun install
         run: bun install --frozen-lockfile
       - name: aggregator contract
@@ -941,6 +953,9 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -poxidean" --health-interval=5s --health-timeout=5s --health-retries=20
     steps:
       - uses: actions/checkout@v7
+      # Same archive-extract disk pressure api-rust already reclaims for.
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       - uses: dtolnay/rust-toolchain@stable
       # Pinned to the version baked in the ci-base images — archive format is
       # produced by the same nextest that ran `cargo nextest archive`.
@@ -995,6 +1010,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       # archive test binaries embed the build container's workspace root (env!("CARGO_MANIFEST_DIR")); the alias makes those paths resolve on the host.
       - name: alias checkout at the archive's baked workspace root
         run: |
@@ -1038,6 +1055,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: free hosted-runner disk
+        run: ./scripts/ci-free-disk.sh
       - name: gate to Rust-affecting changes
         id: gate
         run: |
