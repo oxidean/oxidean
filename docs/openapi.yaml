@@ -16722,6 +16722,13 @@ components:
           type: boolean
           description: True when instance/org policy requires enrolling a factor (#130).
           default: false
+        show_private_contributions:
+          type: boolean
+          description: |-
+            GitHub-parity contribution setting: include private-repo
+            contributions on the owner's own profile view (COL-12; others never
+            see private rows).
+          default: true
       required:
       - id
       - email
