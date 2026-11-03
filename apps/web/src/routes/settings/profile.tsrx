@@ -7,6 +7,7 @@ import { AccountEmailsSection } from "@/components/settings/account-emails-secti
 import { ProfileAvatarField } from "@/components/settings/profile-avatar-field";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -97,6 +98,7 @@ function ProfileContent() @{
   const [avatarUploadPending, setAvatarUploadPending] = useState(false);
   const [avatarRemovePending, setAvatarRemovePending] = useState(false);
   const [pending, setPending] = useState(false);
+  const [privatePending, setPrivatePending] = useState(false);
 
   const profileForm = useForm({
     defaultValues: {
@@ -188,6 +190,33 @@ function ProfileContent() @{
       cancelled = true;
     };
   }, [loaderData]);
+
+  async function onTogglePrivateContributions(next: boolean) {
+    if (phase.kind !== "ready") return;
+    setPrivatePending(true);
+    try {
+      const res = await apiClient.user.updateProfile({
+        display_name: phase.user.display_name,
+        username: phase.user.username,
+        bio: phase.user.bio,
+        show_private_contributions: next,
+      });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not update contribution settings.");
+        setPrivatePending(false);
+        return;
+      }
+      setPhase((prev) =>
+        prev.kind === "ready" ? { kind: "ready", user: res.data, emails: prev.emails } : prev,
+      );
+      setAuthMeCache(queryClient, res.data);
+      toastSuccess("Contribution settings saved.");
+      setPrivatePending(false);
+    } catch {
+      toastError(NETWORK_ERROR);
+      setPrivatePending(false);
+    }
+  }
 
   async function onAvatarSelected(file: File | undefined) {
     if (!file) return;
@@ -356,6 +385,29 @@ function ProfileContent() @{
             </Button>
           </form>
         </div>
+
+        <section className="mt-10" data-testid="contributions-settings">
+          <h2 className="text-[16px] font-semibold text-foreground">
+            Contributions &amp; activity
+          </h2>
+          <div className="mt-3 flex items-start gap-3">
+            <Checkbox
+              id="show-private-contributions"
+              checked={phase.user.show_private_contributions}
+              disabled={privatePending}
+              onCheckedChange={(checked) => void onTogglePrivateContributions(checked === true)}
+            />
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="show-private-contributions">
+                Include private contributions on my profile
+              </Label>
+              <p className="text-[14px] text-muted-foreground">
+                Your contribution graph counts activity in private repositories only you can see.
+                Others always see your public contributions only.
+              </p>
+            </div>
+          </div>
+        </section>
 
         <AccountEmailsSection initialEmails={phase.emails} />
       </AccountSettingsLayout>;

@@ -107,8 +107,9 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str, visibility: &
 }
 
 /// Seed one of each contribution kind in `repo_id` for `user_id`, all dated
-/// "now" (today's bucket).
-async fn seed_contributions(db: &Database, repo_id: &str, user_id: &str) {
+/// "now" (today's bucket). Commits come from `authored_commits` (attributed
+/// through the user's verified primary email), mirroring the push path.
+async fn seed_contributions(db: &Database, repo_id: &str, user_id: &str, email: &str) {
     let push_id = uuid::Uuid::new_v4().to_string();
     db.insert_repo_activity(
         &push_id,
@@ -124,6 +125,20 @@ async fn seed_contributions(db: &Database, repo_id: &str, user_id: &str) {
     )
     .await
     .expect("insert activity");
+
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let commits: Vec<oxidean_db::ObservedCommit> = (0..3)
+        .map(|i| oxidean_db::ObservedCommit {
+            sha: format!("{:040x}", i + 1),
+            author_email: email.to_string(),
+            authored_at: now.clone(),
+        })
+        .collect();
+    let n = db
+        .record_authored_commits(repo_id, &commits)
+        .await
+        .expect("record authored");
+    assert_eq!(n, 3, "authored commits should land");
 
     let issue_id = uuid::Uuid::new_v4().to_string();
     db.insert_issue(&issue_id, repo_id, user_id, "issue title", "body")
@@ -162,6 +177,29 @@ fn contribution_call(username: &str) -> String {
     format!(r#"{{"procedure":"user.getContributions","input":{{"username":"{username}"}}}}"#)
 }
 
+/// The first contributions read spawns lazy default-branch backfills that
+/// attribute `repo.create`'s scaffold commit (+1 authored commit per repo).
+/// Poll until the walk lands so assertions are deterministic.
+async fn wait_commits(
+    app: &axum::Router,
+    cookie: Option<&str>,
+    username: &str,
+    want: i64,
+) -> serde_json::Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let last = rpc_json(app, cookie, &contribution_call(username)).await;
+        if last["data"]["by_type"]["commits"].as_i64().unwrap_or(0) >= want {
+            return last;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "authored-commit backfill did not land: {last}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test]
 async fn contributions_anonymous_sees_public_only() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -175,21 +213,22 @@ async fn contributions_anonymous_sees_public_only() {
     verify_user(&db, &user_id).await;
     let pub_repo = create_repo(&app, &cookie, "pubrepo", "public").await;
     let priv_repo = create_repo(&app, &cookie, "privrepo", "private").await;
-    seed_contributions(&db, &pub_repo, &user_id).await;
-    seed_contributions(&db, &priv_repo, &user_id).await;
+    seed_contributions(&db, &pub_repo, &user_id, "cg@ex.com").await;
+    seed_contributions(&db, &priv_repo, &user_id, "cg@ex.com").await;
 
-    let v = rpc_json(&app, None, &contribution_call("cgu")).await;
+    // 3 seeded commits + the scaffold commit the backfill attributes.
+    let v = wait_commits(&app, None, "cgu", 4).await;
     assert_eq!(v["ok"], true, "{v}");
     let data = &v["data"];
     assert_eq!(data["includes_private"], false);
-    // public repo only: 3 commits + 1 issue + 1 pull + 1 review + 1 repo created
-    assert_eq!(data["by_type"]["commits"], 3, "{data}");
+    // public repo only: 4 commits + 1 issue + 1 pull + 1 review + 1 repo created
+    assert_eq!(data["by_type"]["commits"], 4, "{data}");
     assert_eq!(data["by_type"]["issues"], 1, "{data}");
     assert_eq!(data["by_type"]["pull_requests"], 1, "{data}");
     assert_eq!(data["by_type"]["reviews"], 1, "{data}");
-    assert_eq!(data["total"], 7, "{data}");
+    assert_eq!(data["total"], 8, "{data}");
     assert_eq!(data["days"].as_array().unwrap().len(), 365, "{data}");
-    assert!(data["months"].as_array().unwrap().len() >= 1);
+    assert!(!data["months"].as_array().unwrap().is_empty());
     assert!(!data["years"].as_array().unwrap().is_empty());
     // no private-repo slugs anywhere
     let s = serde_json::to_string(data).unwrap();
@@ -209,19 +248,20 @@ async fn contributions_owner_includes_private() {
     verify_user(&db, &user_id).await;
     let pub_repo = create_repo(&app, &cookie, "pubrepo", "public").await;
     let priv_repo = create_repo(&app, &cookie, "privrepo", "private").await;
-    seed_contributions(&db, &pub_repo, &user_id).await;
-    seed_contributions(&db, &priv_repo, &user_id).await;
+    seed_contributions(&db, &pub_repo, &user_id, "self@ex.com").await;
+    seed_contributions(&db, &priv_repo, &user_id, "self@ex.com").await;
 
-    let v = rpc_json(&app, Some(&cookie), &contribution_call("selfu")).await;
+    let v = wait_commits(&app, Some(&cookie), "selfu", 8).await;
     assert_eq!(v["ok"], true, "{v}");
     let data = &v["data"];
     assert_eq!(data["includes_private"], true, "{data}");
-    // both repos: 6 commits + 2 issues + 2 pulls + 2 reviews + 2 repo creations
-    assert_eq!(data["by_type"]["commits"], 6, "{data}");
+    // both repos: 8 commits (3 seeded + 1 scaffold each) + 2 issues +
+    // 2 pulls + 2 reviews + 2 repo creations
+    assert_eq!(data["by_type"]["commits"], 8, "{data}");
     assert_eq!(data["by_type"]["issues"], 2, "{data}");
     assert_eq!(data["by_type"]["pull_requests"], 2, "{data}");
     assert_eq!(data["by_type"]["reviews"], 2, "{data}");
-    assert_eq!(data["total"], 14, "{data}");
+    assert_eq!(data["total"], 16, "{data}");
 
     // monthly section shape: commits + itemized kinds grouped under this month
     let month = &data["months"][0];
@@ -285,4 +325,130 @@ async fn contributions_bad_range_rejected() {
     let v = rpc_json(&app, None, body).await;
     assert_eq!(v["ok"], false, "{v}");
     assert_eq!(v["error"]["code"], "rpc.bad_input", "{v}");
+}
+
+#[tokio::test]
+async fn contributions_owner_opted_out_sees_public_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_optout.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "opt@ex.com", "optu").await;
+    verify_user(&db, &user_id).await;
+    let pub_repo = create_repo(&app, &cookie, "pubrepo", "public").await;
+    let priv_repo = create_repo(&app, &cookie, "privrepo", "private").await;
+    seed_contributions(&db, &pub_repo, &user_id, "opt@ex.com").await;
+    seed_contributions(&db, &priv_repo, &user_id, "opt@ex.com").await;
+
+    // Opt out through the profile RPC — same path the settings toggle uses.
+    let body = r#"{"procedure":"user.update_profile","input":{"display_name":"Opt","username":"optu","bio":"","show_private_contributions":false}}"#;
+    let v = rpc_json(&app, Some(&cookie), body).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["data"]["show_private_contributions"], false, "{v}");
+
+    // Backfill lands the scaffold commit (async) — public repo only here.
+    let v = wait_commits(&app, Some(&cookie), "optu", 4).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    // Opted-out owner sees the same public-only view as everyone else.
+    assert_eq!(data["includes_private"], false, "{data}");
+    assert_eq!(data["by_type"]["commits"], 4, "{data}");
+    assert_eq!(data["total"], 8, "{data}");
+    let s = serde_json::to_string(data).unwrap();
+    assert!(!s.contains("privrepo"), "{s}");
+
+    // Re-enabling restores the private-inclusive self view.
+    let body = r#"{"procedure":"user.update_profile","input":{"display_name":"Opt","username":"optu","bio":"","show_private_contributions":true}}"#;
+    rpc_json(&app, Some(&cookie), body).await;
+    let v = wait_commits(&app, Some(&cookie), "optu", 8).await;
+    let data = &v["data"];
+    assert_eq!(data["includes_private"], true, "{data}");
+    assert_eq!(data["total"], 16, "{data}");
+}
+
+#[tokio::test]
+async fn contributions_streaks_and_commit_dedup() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_streak.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "sk@ex.com", "sku").await;
+    verify_user(&db, &user_id).await;
+    let repo = create_repo(&app, &cookie, "streakrepo", "public").await;
+
+    // Three consecutive days ending today, a gap, then a two-day run —
+    // current 3, longest 3.
+    let day = |offset: i64| {
+        (chrono::Utc::now() - chrono::Duration::days(offset))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    let commits: Vec<oxidean_db::ObservedCommit> = [0i64, 1, 2, 30, 31]
+        .iter()
+        .map(|off| oxidean_db::ObservedCommit {
+            sha: format!("{:040x}", off + 0x100),
+            author_email: "sk@ex.com".to_string(),
+            authored_at: day(*off),
+        })
+        .collect();
+    db.record_authored_commits(&repo, &commits)
+        .await
+        .expect("record authored");
+
+    // Re-recording the same shas must not double count (repo, sha) dedup.
+    let again = db
+        .record_authored_commits(&repo, &commits)
+        .await
+        .expect("record again");
+    assert_eq!(again, 0, "re-pushed commits dedupe");
+
+    let v = wait_commits(&app, Some(&cookie), "sku", 6).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    // 5 seeded commits + the scaffold commit the backfill attributes.
+    assert_eq!(data["by_type"]["commits"], 6, "{data}");
+    assert_eq!(data["current_streak"], 3, "{data}");
+    assert_eq!(data["longest_streak"], 3, "{data}");
+}
+
+#[tokio::test]
+async fn contributions_rollup_rebuild_covers_preexisting_rows() {
+    // Rows written before rollups existed get picked up by the lazy
+    // `user:<id>` rebuild on first read — insert straight into the source
+    // tables, bypassing the facade bumps.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_rebuild.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "rb@ex.com", "rbu").await;
+    verify_user(&db, &user_id).await;
+    let repo = create_repo(&app, &cookie, "rbrepo", "public").await;
+
+    let issue_id = uuid::Uuid::new_v4().to_string();
+    db.insert_issue(&issue_id, &repo, &user_id, "old issue", "body")
+        .await
+        .expect("insert issue");
+
+    // Simulate a pre-rollup state by wiping the day rows the facade bump
+    // just wrote, then let the read-path rebuild restore them.
+    db.clear_user_contribution_days(&user_id)
+        .await
+        .expect("clear rollups");
+
+    let v = rpc_json(&app, Some(&cookie), &contribution_call("rbu")).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    assert_eq!(data["by_type"]["issues"], 1, "{data}");
+    assert!(
+        data["total"].as_i64().unwrap() >= 2,
+        "issue + repo creation — {data}"
+    );
 }

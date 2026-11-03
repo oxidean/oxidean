@@ -357,6 +357,23 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     )
     .await;
 
+    // Authored-commit attribution: credit head commits landing on default.
+    if let Ok(bare) = oxidean_api_core::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) {
+        oxidean_api_core::repo::record_authored_merge(
+            &ctx.db,
+            ctx.git.clone(),
+            bare,
+            &accessible.row.id,
+            &row.base_ref,
+            &sha,
+        )
+        .await;
+    }
+
     oxidean_api_core::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),

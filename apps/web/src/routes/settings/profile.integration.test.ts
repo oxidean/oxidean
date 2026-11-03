@@ -9,6 +9,7 @@ const getProfileMock = vi.fn();
 const listMock = vi.fn();
 const meMock = vi.fn();
 const verifyMock = vi.fn();
+const updateProfileMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -20,7 +21,7 @@ vi.mock("@/lib/api-client", () => ({
     },
     user: {
       getProfile: (...args: unknown[]) => getProfileMock(...args),
-      updateProfile: vi.fn(),
+      updateProfile: (...args: unknown[]) => updateProfileMock(...args),
     },
     email: {
       list: (...args: unknown[]) => listMock(...args),
@@ -49,6 +50,7 @@ type LoaderShape =
         email_verified: boolean;
         must_change_credentials: boolean;
         default_branch: string;
+        show_private_contributions: boolean;
       };
       emails: unknown[];
     };
@@ -87,6 +89,7 @@ const readyUser = {
   email_verified: true,
   must_change_credentials: false,
   default_branch: "main",
+  show_private_contributions: true,
 };
 
 const readyEmails = [
@@ -114,6 +117,8 @@ beforeEach(() => {
   listMock.mockReset();
   meMock.mockReset();
   verifyMock.mockReset();
+  updateProfileMock.mockReset();
+  updateProfileMock.mockResolvedValue({ ok: true, data: readyUser });
   applyLoader({ kind: "ready", user: readyUser, emails: readyEmails });
   getProfileMock.mockResolvedValue({ ok: true, data: readyUser });
   listMock.mockResolvedValue({ ok: true, data: readyEmails });
@@ -166,6 +171,28 @@ describe("/settings/profile (Account)", () => {
     expect(account?.textContent).toBe("Account");
     expect(account?.getAttribute("aria-current")).toBe("page");
     expect(nav.querySelector('a[href="/settings/emails"]')).toBeNull();
+  });
+
+  it("Contributions & activity toggles private contributions (COL-12)", async () => {
+    renderWithQueryClient(ProfilePage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("contributions-settings")).toBeInTheDocument();
+    });
+    const toggle = document.getElementById("show-private-contributions")!;
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toBeChecked();
+
+    updateProfileMock.mockResolvedValueOnce({
+      ok: true,
+      data: { ...readyUser, show_private_contributions: false },
+    });
+    toggle.click();
+    await waitFor(() => {
+      expect(updateProfileMock).toHaveBeenCalledWith(
+        expect.objectContaining({ show_private_contributions: false }),
+      );
+    });
   });
 
   it("Enter code opens OTP panel for unverified secondary", async () => {

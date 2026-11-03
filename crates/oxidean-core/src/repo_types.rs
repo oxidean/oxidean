@@ -924,6 +924,11 @@ pub struct UserContributions {
     /// Selectable years for the year rail — account-creation year through
     /// the current year, descending.
     pub years: Vec<i64>,
+    /// Consecutive contributed days ending `to` (or `to`-1 when `to` is
+    /// still in progress). Computed over the requested range.
+    pub current_streak: i64,
+    /// Longest run of consecutive contributed days in the requested range.
+    pub longest_streak: i64,
 }
 
 /// `repo.listMine` — caller's non-deleted repos, recently updated first (GIT-01 / D-13).

@@ -18,6 +18,10 @@ pub struct UserRow {
     pub must_change_credentials: bool,
     /// Account default branch for new repos (D-09); defaults to `main`.
     pub default_branch: String,
+    /// GitHub-parity contribution setting (0095): when true, the owner's own
+    /// profile view includes private-repo contributions. Others never see
+    /// private rows regardless.
+    pub show_private_contributions: bool,
     pub email_verified_at: Option<String>,
     /// Soft-ban timestamp; when set, auth surfaces reject the user.
     pub banned_at: Option<String>,
@@ -62,6 +66,13 @@ macro_rules! map_user {
             default_branch: row
                 .try_get("default_branch")
                 .map_err(|e| format!("user row: {e}"))?,
+            show_private_contributions: row
+                .try_get::<bool, _>("show_private_contributions")
+                .or_else(|_| {
+                    row.try_get::<i64, _>("show_private_contributions")
+                        .map(|v| v != 0)
+                })
+                .unwrap_or(true),
             email_verified_at: row
                 .try_get("email_verified_at")
                 .map_err(|e| format!("user row: {e}"))?,
@@ -78,7 +89,7 @@ macro_rules! map_user {
     }};
 }
 
-const USER_SELECT_PG: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
+const USER_SELECT_PG: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch, show_private_contributions,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE to_char(email_verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS email_verified_at,
        CASE WHEN banned_at IS NULL THEN NULL
@@ -87,7 +98,7 @@ const USER_SELECT_PG: &str = "SELECT id, email, username, password_hash, display
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM users";
 
-const USER_SELECT_MYSQL: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
+const USER_SELECT_MYSQL: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch, show_private_contributions,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE DATE_FORMAT(email_verified_at, '%Y-%m-%dT%H:%i:%sZ') END AS email_verified_at,
        CASE WHEN banned_at IS NULL THEN NULL
@@ -96,7 +107,7 @@ const USER_SELECT_MYSQL: &str = "SELECT id, email, username, password_hash, disp
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM users";
 
-const USER_SELECT_SQLITE: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
+const USER_SELECT_SQLITE: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch, show_private_contributions,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', email_verified_at) END AS email_verified_at,
        CASE WHEN banned_at IS NULL THEN NULL
@@ -556,6 +567,52 @@ WHERE id = ?1",
     find_by_id(pool, id)
         .await?
         .ok_or_else(|| "update default_branch failed: user not found".into())
+}
+
+/// Contribution-setting write (GitHub's "Include private contributions on my
+/// profile" toggle); read side lives on `UserRow.show_private_contributions`.
+pub async fn set_show_private_contributions(
+    pool: &DbPool,
+    id: &str,
+    show: bool,
+) -> Result<UserRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE users SET show_private_contributions = $2, updated_at = now() WHERE id = $1",
+            )
+            .bind(id)
+            .bind(show)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update show_private_contributions failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE users SET show_private_contributions = ?, updated_at = NOW() WHERE id = ?",
+            )
+            .bind(show)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update show_private_contributions failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE users SET show_private_contributions = ?2,
+    updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(show as i64)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update show_private_contributions failed: {e}"))?;
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "update show_private_contributions failed: user not found".into())
 }
 
 pub async fn count_users(pool: &DbPool) -> Result<i64, String> {

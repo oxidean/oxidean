@@ -147,6 +147,8 @@ describe("contribution components (COL-12)", () => {
         by_type: { commits: 0, pull_requests: 0, issues: 0, reviews: 0 },
         months: [],
         years: [2025, 2026],
+        current_streak: 0,
+        longest_streak: 0,
       },
     } as never);
     const { container } = renderWithQueryClient(UserContributionsSection, {
@@ -199,6 +201,8 @@ describe("contribution components (COL-12)", () => {
           },
         ],
         years: [2026, 2025],
+        current_streak: 2,
+        longest_streak: 9,
       },
     } as never);
     const { container } = renderWithQueryClient(UserContributionsSection, {
@@ -214,5 +218,8 @@ describe("contribution components (COL-12)", () => {
     expect(screen.getByText("Contribution activity")).toBeInTheDocument();
     expect(screen.getByText("January 2026")).toBeInTheDocument();
     expect(screen.getByText("Commits 67%")).toBeInTheDocument();
+    expect(screen.getByTestId("contribution-streaks")).toHaveTextContent(
+      "Current streak: 2 days · Longest streak: 9 days",
+    );
   });
 });

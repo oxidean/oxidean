@@ -175,6 +175,15 @@ pub async fn update_profile(
         Err(e) => return Err(db_err(e)),
     };
 
+    let updated = if let Some(show) = req.show_private_contributions {
+        ctx.db
+            .set_show_private_contributions(&session.user_id, show)
+            .await
+            .map_err(db_err)?
+    } else {
+        updated
+    };
+
     let updated = if let Some(branch) = req.default_branch {
         let branch = branch.trim().to_string();
         if branch.is_empty() || branch.len() > 100 {

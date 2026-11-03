@@ -138,27 +138,74 @@ pub async fn get_contributions(
         ));
     }
 
-    let public_only = ctx.session.as_ref().map(|s| s.user_id.as_str()) != Some(user.id.as_str());
-    // `to` is inclusive in the payload; the query takes the next day's bound.
+    // GitHub's rule: the owner sees private contributions only while their
+    // "Include private contributions on my profile" setting is on; every
+    // other viewer always gets the public-only view.
+    let self_view = ctx.session.as_ref().map(|s| s.user_id.as_str()) == Some(user.id.as_str());
+    let public_only = !(self_view && user.show_private_contributions);
+
+    // Materialized rollups (COL-12): one-time per-user rebuild from source
+    // tables under the `user:<id>` claim, kept fresh afterwards by bumps in
+    // the facade insert paths.
+    let user_scope = format!("user:{}", user.id);
+    if let Ok(true) = ctx.db.claim_contribution_backfill(&user_scope).await {
+        if let Err(e) = ctx.db.rebuild_user_contribution_days(&user.id).await {
+            tracing::warn!(error = %e, "contribution rollup rebuild failed");
+            let _ = ctx.db.release_contribution_backfill(&user_scope).await;
+        }
+    }
+
+    // Authored-commit backfill: repos the user plausibly committed to get a
+    // bounded default-branch history walk, spawned async (claimed per repo
+    // so duplicate views never double-walk).
+    if let Ok(repos) = ctx.db.list_actor_contribution_repos(&user.id).await {
+        let repo_ids: Vec<String> = repos.iter().map(|r| r.id.clone()).collect();
+        if let Ok(claimed) = ctx.db.claimed_repo_backfill_scopes(&repo_ids).await {
+            let mut spawned = 0;
+            for repo in repos {
+                if spawned >= 4 {
+                    break;
+                }
+                if claimed.contains(&format!("repo:{}", repo.id)) {
+                    continue;
+                }
+                if let Ok(bare) = oxidean_api_core::git::bare_repo_path(
+                    &ctx.repos_dir,
+                    &repo.owner_slug,
+                    &repo.name,
+                ) {
+                    let branch = repo
+                        .default_branch
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(&repo.default_branch);
+                    oxidean_api_core::repo::spawn_contribution_backfill(
+                        ctx.db.clone(),
+                        ctx.git.clone(),
+                        bare,
+                        repo.id,
+                        format!("refs/heads/{branch}"),
+                    );
+                    spawned += 1;
+                }
+            }
+        }
+    }
+
+    // `to` is inclusive in the payload; the queries take the next day's bound.
     let to_excl = to + Duration::days(1);
+    let from_s = from.format("%Y-%m-%d").to_string();
+    let to_excl_s = to_excl.format("%Y-%m-%d").to_string();
     let events = ctx
         .db
-        .list_user_contribution_events(
-            &user.id,
-            &from.format("%Y-%m-%d").to_string(),
-            &to_excl.format("%Y-%m-%d").to_string(),
-            public_only,
-        )
+        .list_user_contribution_events(&user.id, &from_s, &to_excl_s, public_only)
+        .await
+        .map_err(db_err)?;
+    let day_counts = ctx
+        .db
+        .list_user_contribution_days(&user.id, &from_s, &to_excl_s, public_only)
         .await
         .map_err(db_err)?;
 
-    let mut total = 0_i64;
-    let mut by_type = UserContributionByType {
-        commits: 0,
-        pull_requests: 0,
-        issues: 0,
-        reviews: 0,
-    };
     let mut days: BTreeMap<String, i64> = BTreeMap::new();
     {
         let mut d = from;
@@ -171,17 +218,6 @@ pub async fn get_contributions(
     let mut months: BTreeMap<String, BTreeMap<String, SectionAcc>> = BTreeMap::new();
 
     for ev in events {
-        total += ev.count;
-        match ev.kind.as_str() {
-            "commits" => by_type.commits += ev.count,
-            "pull_request" => by_type.pull_requests += 1,
-            "issue" => by_type.issues += 1,
-            "review" => by_type.reviews += 1,
-            _ => {}
-        }
-        if let Some(c) = days.get_mut(&ev.day) {
-            *c += ev.count;
-        }
         let month = ev.day.get(..7).unwrap_or(&ev.day).to_string();
         let sec = months
             .entry(month)
@@ -228,6 +264,30 @@ pub async fn get_contributions(
         .collect();
     months_out.sort_by(|a, b| b.month.cmp(&a.month));
 
+    // Counts and streaks come from the materialized rollup — the UNION
+    // above exists only for the itemized monthly sections.
+    let mut total = 0_i64;
+    let mut by_type = UserContributionByType {
+        commits: 0,
+        pull_requests: 0,
+        issues: 0,
+        reviews: 0,
+    };
+    for c in &day_counts {
+        total += c.count;
+        match c.kind.as_str() {
+            "commits" => by_type.commits += c.count,
+            "pull_request" => by_type.pull_requests += c.count,
+            "issue" => by_type.issues += c.count,
+            "review" => by_type.reviews += c.count,
+            _ => {}
+        }
+        if let Some(d) = days.get_mut(&c.day) {
+            *d += c.count;
+        }
+    }
+    let (current_streak, longest_streak) = streaks(&days, to);
+
     let join_year = user
         .created_at
         .get(..4)
@@ -247,5 +307,34 @@ pub async fn get_contributions(
         by_type,
         months: months_out,
         years,
+        current_streak,
+        longest_streak,
     })
+}
+
+/// `(current, longest)` consecutive contributed-day runs over the zero-filled
+/// day map. `current` tolerates one trailing empty `to` day — a streak isn't
+/// broken until a full day passes with no contributions.
+fn streaks(days: &BTreeMap<String, i64>, to: NaiveDate) -> (i64, i64) {
+    let key = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+    let mut d = to;
+    if days.get(&key(d)).copied().unwrap_or(0) == 0 {
+        d -= Duration::days(1);
+    }
+    let mut current = 0_i64;
+    while days.get(&key(d)).copied().unwrap_or(0) > 0 {
+        current += 1;
+        d -= Duration::days(1);
+    }
+    let mut longest = 0_i64;
+    let mut run = 0_i64;
+    for c in days.values() {
+        if *c > 0 {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    (current, longest)
 }

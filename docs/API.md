@@ -108,7 +108,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `auth.bootstrap_setup` | One-time `/setup` wizard; creates verified `sys-admin` + session; persists `allow_signup` | No (empty instance only) |
 | `auth.confirm_admin_credentials` | Forced credential change for ENV-seeded admins (`system-administrator` must be changed; email/password may be kept) | Session (seeded admin) |
 | `user.get_profile` | Current user profile | Session |
-| `user.update_profile` | Update `display_name`, `username`, `bio` | Session |
+| `user.update_profile` | Update `display_name`, `username`, `bio`, `show_private_contributions` | Session |
 | `user.lookup` | Username prefix autocomplete (public fields only; never emails) | Session (rate-limited) |
 | `org.create` | Create organization; slug shares username reserved list | Session + verified email |
 | `org.get` | Org profile by slug | Anonymous OK; unknown → `org.not_found` |
@@ -131,7 +131,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `user.follow` / `user.unfollow` | Idempotent user-follow edge writes; returns target `PublicUserProfile` with refreshed counts | Session + verified |
 | `user.followers.list` / `user.following.list` | Public follower/following lists (`username` filter via `q`; offset/limit) | Anonymous OK; unknown → `user.not_found` |
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
-| `user.getContributions` | GitHub-style contribution payload for `/{username}` — zero-filled `days`, `by_type` totals, monthly per-repo `months` sections, selectable `years`; optional `from`/`to` (default last 365 days). `commits` counts pushed ranges (`repository_activity.commits_count`), not authored commits | Anonymous OK; public repos only unless the caller is the profile owner (`includes_private`); unknown/banned → `user.not_found` |
+| `user.getContributions` | GitHub-style contribution payload for `/{username}` — zero-filled `days`, `by_type` totals, `current_streak`/`longest_streak`, monthly per-repo `months` sections, selectable `years`; optional `from`/`to` (default last 365 days). `commits` counts authored commits on default branches (`authored_commits`, attributed by verified author email); totals/days/streaks read the materialized `user_contribution_days` rollup | Anonymous OK; public repos only unless the caller is the profile owner with "Include private contributions" enabled (`includes_private`); unknown/banned → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
@@ -235,7 +235,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | --- | --- | --- | --- |
 | `GET` | `/health` | `system.health` | Anonymous |
 | `GET` | `/user` | `auth.me` | Authenticated account |
-| `PATCH` | `/user` | `user.update_profile` | `name` → `display_name`; `bio`, `username`, `default_branch`; omitted fields keep current values |
+| `PATCH` | `/user` | `user.update_profile` | `name` → `display_name`; `bio`, `username`, `default_branch`, `show_private_contributions`; omitted fields keep current values |
 | `GET` | `/user/repos` | `repo.listMine` | Caller's repos |
 | `POST` | `/user/repos` | `repo.create` | Caller-owned repo |
 | `GET` | `/user/orgs` | `org.listMine` | |

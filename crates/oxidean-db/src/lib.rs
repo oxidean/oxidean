@@ -6,6 +6,7 @@ pub mod admin;
 pub mod audit_events;
 pub mod auth_identities;
 pub mod auth_settings;
+pub mod authored_commits;
 pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
@@ -62,6 +63,7 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub mod checks;
+pub mod contribution_days;
 pub mod contributions;
 pub mod deployments;
 pub mod discussions;
@@ -72,8 +74,10 @@ pub use actions::{
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
+pub use authored_commits::{ContributionRepoRow, ObservedCommit};
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use checks::{CheckRunAnnotationRow, CheckRunRow, CheckSuiteRow};
+pub use contribution_days::ContributionDayCount;
 pub use contributions::ContributionEventRow;
 pub use deploy_keys::DeployKeyRow;
 pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
@@ -673,6 +677,17 @@ impl Database {
         .await?;
         // D-SOC-14: roots get fork_network_id = id (column from 0020_social).
         let _ = stars::set_fork_network_id(self.require_pool()?, &row.id, &row.id).await;
+        if owner_type == "user" {
+            let _ = contribution_days::bump(
+                self.require_pool()?,
+                owner_id,
+                &row.id,
+                contribution_days::day_of(&row.created_at),
+                "repository",
+                1,
+            )
+            .await;
+        }
         Ok(row)
     }
 
@@ -1140,7 +1155,10 @@ impl Database {
         id: &str,
         visibility: &str,
     ) -> Result<RepositoryRow, String> {
-        repositories::update_visibility(self.require_pool()?, id, visibility).await
+        let row = repositories::update_visibility(self.require_pool()?, id, visibility).await?;
+        let _ =
+            contribution_days::retag_repo(self.require_pool()?, id, visibility != "public").await;
+        Ok(row)
     }
 
     pub async fn update_repository_name(
@@ -1245,7 +1263,7 @@ impl Database {
         head_sha: &str,
         draft: bool,
     ) -> Result<PullRow, String> {
-        pulls::insert_pull(
+        let row = pulls::insert_pull(
             self.require_pool()?,
             id,
             repo_id,
@@ -1260,7 +1278,17 @@ impl Database {
             head_sha,
             draft,
         )
-        .await
+        .await?;
+        let _ = contribution_days::bump(
+            self.require_pool()?,
+            author_id,
+            repo_id,
+            contribution_days::day_of(&row.created_at),
+            "pull_request",
+            1,
+        )
+        .await;
+        Ok(row)
     }
 
     pub async fn find_pull_by_repo_number(
@@ -1521,7 +1549,7 @@ impl Database {
         body: &str,
         commit_sha: Option<&str>,
     ) -> Result<PullReviewRow, String> {
-        pulls::insert_pull_review(
+        let row = pulls::insert_pull_review(
             self.require_pool()?,
             id,
             pull_id,
@@ -1530,7 +1558,17 @@ impl Database {
             body,
             commit_sha,
         )
-        .await
+        .await?;
+        let _ = contribution_days::bump_for_pull(
+            self.require_pool()?,
+            author_id,
+            pull_id,
+            contribution_days::day_of(&row.submitted_at),
+            "review",
+            1,
+        )
+        .await;
+        Ok(row)
     }
 
     pub async fn find_pull_review_by_id(&self, id: &str) -> Result<Option<PullReviewRow>, String> {
@@ -1813,7 +1851,18 @@ impl Database {
         title: &str,
         body: &str,
     ) -> Result<IssueRow, String> {
-        issues::insert_issue(self.require_pool()?, id, repo_id, author_id, title, body).await
+        let row =
+            issues::insert_issue(self.require_pool()?, id, repo_id, author_id, title, body).await?;
+        let _ = contribution_days::bump(
+            self.require_pool()?,
+            author_id,
+            repo_id,
+            contribution_days::day_of(&row.created_at),
+            "issue",
+            1,
+        )
+        .await;
+        Ok(row)
     }
 
     pub async fn find_issue_by_id(&self, id: &str) -> Result<Option<IssueRow>, String> {
@@ -3164,6 +3213,15 @@ impl Database {
         default_branch: &str,
     ) -> Result<UserRow, String> {
         users::set_default_branch(self.require_pool()?, id, default_branch).await
+    }
+
+    /// GitHub-parity "Include private contributions on my profile" toggle.
+    pub async fn set_show_private_contributions(
+        &self,
+        id: &str,
+        show: bool,
+    ) -> Result<UserRow, String> {
+        users::set_show_private_contributions(self.require_pool()?, id, show).await
     }
 
     pub async fn count_users(&self) -> Result<i64, String> {
@@ -6706,6 +6764,76 @@ impl Database {
             public_only,
         )
         .await
+    }
+
+    /// Attribute commits observed on a repo's default branch to verified
+    /// users and record the new ones (dedup on `(repository_id, sha)`);
+    /// bumps the contribution rollup for rows that land. Returns rows
+    /// inserted. Best-effort — caller warns, never fails the push.
+    pub async fn record_authored_commits(
+        &self,
+        repository_id: &str,
+        commits: &[ObservedCommit],
+    ) -> Result<u64, String> {
+        authored_commits::record_authored(self.require_pool()?, repository_id, commits).await
+    }
+
+    /// Materialized per-day, per-kind totals backing the heatmap, by_type,
+    /// and streaks (`public_only` excludes private-repo buckets).
+    pub async fn list_user_contribution_days(
+        &self,
+        user_id: &str,
+        from: &str,
+        to_exclusive: &str,
+        public_only: bool,
+    ) -> Result<Vec<ContributionDayCount>, String> {
+        contribution_days::list_days(
+            self.require_pool()?,
+            user_id,
+            from,
+            to_exclusive,
+            public_only,
+        )
+        .await
+    }
+
+    /// Rebuild one user's rollup rows from the source tables (one-time lazy
+    /// backfill; write-time bumps keep it fresh afterwards).
+    pub async fn rebuild_user_contribution_days(&self, user_id: &str) -> Result<(), String> {
+        contribution_days::rebuild_user(self.require_pool()?, user_id).await
+    }
+
+    /// Delete all rollup rows for `user_id` (rebuild/testing helper).
+    pub async fn clear_user_contribution_days(&self, user_id: &str) -> Result<(), String> {
+        contribution_days::clear_user(self.require_pool()?, user_id).await
+    }
+
+    /// Atomically claim a backfill scope (`repo:<id>` / `user:<id>`); the
+    /// winner (`true`) owns the walk, losers must not duplicate it.
+    pub async fn claim_contribution_backfill(&self, scope: &str) -> Result<bool, String> {
+        authored_commits::claim_backfill(self.require_pool()?, scope).await
+    }
+
+    /// Release a failed backfill claim so a later view can retry.
+    pub async fn release_contribution_backfill(&self, scope: &str) -> Result<(), String> {
+        authored_commits::release_backfill(self.require_pool()?, scope).await
+    }
+
+    /// `repo:<id>` scopes already claimed — subtract before spawning walks.
+    pub async fn claimed_repo_backfill_scopes(
+        &self,
+        repo_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, String> {
+        authored_commits::claimed_repo_scopes(self.require_pool()?, repo_ids).await
+    }
+
+    /// Repos `user_id` plausibly authored commits in (pushed to, PRed
+    /// against, merged into, or owns) — lazy history backfill targets.
+    pub async fn list_actor_contribution_repos(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<ContributionRepoRow>, String> {
+        authored_commits::list_actor_contribution_repos(self.require_pool()?, user_id).await
     }
 
     // --- audit events ---

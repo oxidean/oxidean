@@ -130,6 +130,8 @@ export type UserPublic = {
   two_factor_enabled: boolean;
   /** Instance/org policy requires this user to enroll a factor. */
   two_factor_enroll_required: boolean;
+  /** GitHub-parity: include private contributions on the own profile view. */
+  show_private_contributions: boolean;
 };
 
 export type BootstrapStatus = {
@@ -490,6 +492,7 @@ export type UpdateProfileRequest = {
   username: string;
   bio: string;
   default_branch?: string | null;
+  show_private_contributions?: boolean;
 };
 
 export type UserLookupContext =
@@ -882,6 +885,10 @@ export type UserContributions = {
   by_type: UserContributionByType;
   months: UserContributionMonth[];
   years: number[];
+  /** Consecutive contributed days ending `to` (tolerating one in-progress empty day). */
+  current_streak: number;
+  /** Longest run of consecutive contributed days in the requested range. */
+  longest_streak: number;
 };
 
 export type RepoListMineResponse = {

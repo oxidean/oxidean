@@ -1,6 +1,6 @@
 //! Per-user contribution events across the activity tables — feeds
-//! `user.getContributions` (COL-12). One UNION ALL over commit pushes
-//! (`repository_activity`), pull requests opened, issues opened, reviews
+//! `user.getContributions` (COL-12). One UNION ALL over authored commits
+//! (`authored_commits`), pull requests opened, issues opened, reviews
 //! submitted, and repositories created.
 
 use sqlx::Row;
@@ -75,15 +75,13 @@ fn sqlite_day(col: &str) -> String {
 fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> String {
     let slug = concat("COALESCE(ru.username, ro.slug)", "r.name");
     let commits = format!(
-        "SELECT {day} AS day, 'commits' AS kind, {slug} AS repo_slug,\n\
-         a.pr_number AS ref_number, NULL AS title,\n\
-         COALESCE(a.commits_count, 0) AS count\n\
-         FROM repository_activity a\n\
-         INNER JOIN repositories r ON r.id = a.repository_id\n{OWNER_JOINS}\n\
-         WHERE a.actor_id = {{p1}}\n\
-         AND a.push_type IN ('push', 'force_push', 'pr_merge')\n\
-         AND a.created_at >= {{p2}} AND a.created_at < {{p3}}{{vis}}",
-        day = day("a.created_at"),
+        "SELECT c.authored_day AS day, 'commits' AS kind, {slug} AS repo_slug,\n\
+         NULL AS ref_number, NULL AS title, COUNT(*) AS count\n\
+         FROM authored_commits c\n\
+         INNER JOIN repositories r ON r.id = c.repository_id\n{OWNER_JOINS}\n\
+         WHERE c.user_id = {{p1}}\n\
+         AND c.authored_day >= {{dp2}} AND c.authored_day < {{dp3}}{{vis}}\n\
+         GROUP BY c.authored_day, repo_slug",
     );
     let pulls = format!(
         "SELECT {day} AS day, 'pull_request' AS kind, {slug} AS repo_slug,\n\
@@ -155,6 +153,8 @@ pub async fn list_user_contribution_events(
                 .replace("{p1}", "$1")
                 .replace("{p2}", "$2::timestamptz")
                 .replace("{p3}", "$3::timestamptz")
+                .replace("{dp2}", "$2")
+                .replace("{dp3}", "$3")
                 .replace("{vis}", vis);
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*body))
                 .bind(user_id)
@@ -170,6 +170,8 @@ pub async fn list_user_contribution_events(
                 .replace("{p1}", "?")
                 .replace("{p2}", "?")
                 .replace("{p3}", "?")
+                .replace("{dp2}", "?")
+                .replace("{dp3}", "?")
                 .replace("{vis}", vis);
             let mut q = sqlx::query(sqlx::AssertSqlSafe(&*body));
             for _ in 0..5 {
@@ -186,6 +188,8 @@ pub async fn list_user_contribution_events(
                 .replace("{p1}", "?1")
                 .replace("{p2}", "?2")
                 .replace("{p3}", "?3")
+                .replace("{dp2}", "?2")
+                .replace("{dp3}", "?3")
                 .replace("{vis}", vis);
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*body))
                 .bind(user_id)

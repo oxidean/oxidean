@@ -970,12 +970,48 @@ impl GitInterop {
                 .await
         };
         match move_res {
-            Ok(()) => Ok(ExportOutcome {
-                branch: branch.to_string(),
-                git_oid: minted_tip,
-                commits_count: order.len() as u64,
-                before_oid,
-            }),
+            Ok(()) => {
+                // COL-12 authored-commit attribution: commits landing on the
+                // repo's default branch credit their authors. Best-effort —
+                // a walk/record failure never fails the export.
+                if let Ok(Some(row)) = self.db.find_repository_by_id(repo_id).await {
+                    let default_ref = format!(
+                        "refs/heads/{}",
+                        row.default_branch
+                            .strip_prefix("refs/heads/")
+                            .unwrap_or(&row.default_branch)
+                    );
+                    if refname == default_ref {
+                        let before = before_oid.as_deref().unwrap_or("");
+                        match self
+                            .backend
+                            .push_event_commits(repo, before, &minted_tip, 2048)
+                            .await
+                        {
+                            Ok(commits) => {
+                                let observed: Vec<oxidean_db::ObservedCommit> = commits
+                                    .into_iter()
+                                    .map(|c| oxidean_db::ObservedCommit {
+                                        sha: c.sha,
+                                        author_email: c.author_email,
+                                        authored_at: c.authored_at,
+                                    })
+                                    .collect();
+                                let _ = self.db.record_authored_commits(repo_id, &observed).await;
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, repo_id, "export authored-commit walk failed");
+                            }
+                        }
+                    }
+                }
+                Ok(ExportOutcome {
+                    branch: branch.to_string(),
+                    git_oid: minted_tip,
+                    commits_count: order.len() as u64,
+                    before_oid,
+                })
+            }
             Err(GitError::Denied(_)) => Err(warned(InteropError::Forbidden {
                 verdicts: hook_denied_verdicts(),
             })),

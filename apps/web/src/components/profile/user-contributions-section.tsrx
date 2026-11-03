@@ -79,6 +79,16 @@ export function UserContributionsSection(props: { username: string }) @{
           }
         }
       </div>
+      @if (c.longest_streak > 0) {
+        <div
+          className="mt-1 text-[12px] text-muted-foreground"
+          data-testid="contribution-streaks"
+        >
+          {
+            `Current streak: ${c.current_streak} day${c.current_streak === 1 ? "" : "s"} · Longest streak: ${c.longest_streak} day${c.longest_streak === 1 ? "" : "s"}` as string
+          }
+        </div>;
+      }
       <div className="mt-4 flex gap-4">
         <ContributionGraph days={c.days} />
         <nav

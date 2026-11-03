@@ -22,8 +22,8 @@ pub use acl::{
     MemberBasePermission, OrgRole, OwnerRef,
 };
 pub use activity::{
-    record_branch_creation, record_branch_deletion, record_branch_rename, record_pr_merge,
-    record_ref_updates, short_ref, VALID_PUSH_TYPES,
+    record_authored_merge, record_branch_creation, record_branch_deletion, record_branch_rename,
+    record_pr_merge, record_ref_updates, short_ref, spawn_contribution_backfill, VALID_PUSH_TYPES,
 };
 pub use collaborators::resolve_repo_for_admin;
 pub use files::create as file_create;
