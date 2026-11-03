@@ -159,7 +159,7 @@ async fn migrate_reseats_pre_rebase_versions() {
             (92, "oxpilot proposal base sha"),
             (93, "oxpilot connector user fks"),
             (94, "user contribution indexes"),
-            (95, "contribution followups"),
+            (95, "user contribution tables"),
         ],
         "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84, oxpilot at 85-93, and contributions at 94-95"
     );
