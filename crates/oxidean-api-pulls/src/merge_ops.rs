@@ -295,6 +295,16 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         None => message.to_string(),
     };
 
+    // Pre-merge base tip — rebase merges rewrite several commits so the
+    // merge result's first parent is not the old tip; the recorded
+    // attribution range needs the tip the worktree merged onto.
+    let base_tip = ctx
+        .git
+        .rev_parse(&path, &row.base_ref)
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
+
     let sha = match req.method {
         MergeMethod::Merge => {
             ctx.git
@@ -370,6 +380,7 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
             &accessible.row.id,
             &row.base_ref,
             &sha,
+            base_tip.as_deref(),
         )
         .await;
     }

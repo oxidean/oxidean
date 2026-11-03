@@ -426,7 +426,13 @@ pub async fn list_actor_contribution_repos(
             collect!(rows)
         }
         DbPool::MySql(p) => {
-            let q = sqlx::query(sqlx::AssertSqlSafe(sql.replace("{p1}", "?"))).bind(user_id);
+            // MySQL `?` is positional — one bind per occurrence, unlike
+            // Postgres `$1` / SQLite `?1` which reuse a numbered param.
+            let arity = sql.matches("{p1}").count();
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.replace("{p1}", "?")));
+            for _ in 0..arity {
+                q = q.bind(user_id);
+            }
             let rows = q
                 .fetch_all(p)
                 .await

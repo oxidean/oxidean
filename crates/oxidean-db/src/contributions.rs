@@ -79,7 +79,7 @@ fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> Str
          NULL AS ref_number, NULL AS title, COUNT(*) AS count\n\
          FROM authored_commits c\n\
          INNER JOIN repositories r ON r.id = c.repository_id\n{OWNER_JOINS}\n\
-         WHERE c.user_id = {{p1}}\n\
+         WHERE c.user_id = {{p1}} AND r.deleted_at IS NULL\n\
          AND c.authored_day >= {{dp2}} AND c.authored_day < {{dp3}}{{vis}}\n\
          GROUP BY c.authored_day, repo_slug",
     );
@@ -88,7 +88,7 @@ fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> Str
          p.number AS ref_number, p.title AS title, 1 AS count\n\
          FROM pull_requests p\n\
          INNER JOIN repositories r ON r.id = p.repo_id\n{OWNER_JOINS}\n\
-         WHERE p.author_id = {{p1}}\n\
+         WHERE p.author_id = {{p1}} AND r.deleted_at IS NULL\n\
          AND p.created_at >= {{p2}} AND p.created_at < {{p3}}{{vis}}",
         day = day("p.created_at"),
     );
@@ -97,7 +97,7 @@ fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> Str
          i.number AS ref_number, i.title AS title, 1 AS count\n\
          FROM issues i\n\
          INNER JOIN repositories r ON r.id = i.repo_id\n{OWNER_JOINS}\n\
-         WHERE i.author_id = {{p1}}\n\
+         WHERE i.author_id = {{p1}} AND r.deleted_at IS NULL\n\
          AND i.created_at >= {{p2}} AND i.created_at < {{p3}}{{vis}}",
         day = day("i.created_at"),
     );
@@ -107,7 +107,7 @@ fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> Str
          FROM pull_reviews rv\n\
          INNER JOIN pull_requests p ON p.id = rv.pull_id\n\
          INNER JOIN repositories r ON r.id = p.repo_id\n{OWNER_JOINS}\n\
-         WHERE rv.author_id = {{p1}}\n\
+         WHERE rv.author_id = {{p1}} AND r.deleted_at IS NULL\n\
          AND rv.submitted_at >= {{p2}} AND rv.submitted_at < {{p3}}{{vis}}",
         day = day("rv.submitted_at"),
     );
@@ -115,11 +115,13 @@ fn build_query(day: fn(&str) -> String, concat: fn(&str, &str) -> String) -> Str
         "SELECT {day} AS day, 'repository' AS kind, {slug} AS repo_slug,\n\
          NULL AS ref_number, NULL AS title, 1 AS count\n\
          FROM repositories r\n{OWNER_JOINS}\n\
-         WHERE r.owner_type = 'user' AND r.owner_id = {{p1}}\n\
+         WHERE r.owner_type = 'user' AND r.owner_id = {{p1}} AND r.deleted_at IS NULL\n\
          AND r.created_at >= {{p2}} AND r.created_at < {{p3}}{{vis}}",
         day = day("r.created_at"),
     );
-    format!("{commits}\nUNION ALL\n{pulls}\nUNION ALL\n{issues}\nUNION ALL\n{reviews}\nUNION ALL\n{repos}")
+    // `day` is the YYYY-MM-DD output alias in every arm — newest first so
+    // the itemized sections keep the most recent rows under the 30-item cap.
+    format!("{commits}\nUNION ALL\n{pulls}\nUNION ALL\n{issues}\nUNION ALL\n{reviews}\nUNION ALL\n{repos}\nORDER BY day DESC")
 }
 
 fn pg_concat(a: &str, b: &str) -> String {
@@ -149,10 +151,13 @@ pub async fn list_user_contribution_events(
     };
     match pool {
         DbPool::Postgres(p) => {
+            // `::timestamp` parses the YYYY-MM-DD bound with no zone, then
+            // `AT TIME ZONE 'UTC'` pins it to UTC midnight — a bare
+            // `::timestamptz` cast would shift by the session TimeZone.
             let body = build_query(pg_day, pg_concat)
                 .replace("{p1}", "$1")
-                .replace("{p2}", "$2::timestamptz")
-                .replace("{p3}", "$3::timestamptz")
+                .replace("{p2}", "($2::timestamp AT TIME ZONE 'UTC')")
+                .replace("{p3}", "($3::timestamp AT TIME ZONE 'UTC')")
                 .replace("{dp2}", "$2")
                 .replace("{dp3}", "$3")
                 .replace("{vis}", vis);

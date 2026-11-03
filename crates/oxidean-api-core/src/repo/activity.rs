@@ -243,9 +243,12 @@ async fn record_authored_range(
 
 /// Record authored commits a PR merge brought onto the default branch —
 /// GitHub credits each merged head commit to its author once it lands on
-/// default. `merge_sha`'s first parent is the pre-merge tip, so the
-/// `parent..merge` range covers the merge/squash commit plus newly
-/// reachable head work. No-op for non-default bases.
+/// default. `before` is the pre-merge base tip when the caller resolved one
+/// (rebase merges rewrite several commits, so `merge_sha`'s first parent is
+/// the previous rewritten commit — not the old base tip — and a parent walk
+/// would credit only the last commit); `None` falls back to `merge_sha`'s
+/// first parent, which is correct for merge-commit and squash results.
+/// No-op for non-default bases.
 pub async fn record_authored_merge(
     db: &Database,
     git: Arc<dyn GitBackend>,
@@ -253,6 +256,7 @@ pub async fn record_authored_merge(
     repository_id: &str,
     base_ref: &str,
     merge_sha: &str,
+    before: Option<&str>,
 ) {
     let repo = match db.find_repository_by_id(repository_id).await {
         Ok(Some(r)) => r,
@@ -266,12 +270,15 @@ pub async fn record_authored_merge(
     if base != default_head_ref(&repo.default_branch) {
         return;
     }
-    let before = match git.cat_commit(&bare, merge_sha).await {
-        Ok(raw) => raw.parents.first().cloned().unwrap_or_default(),
-        Err(e) => {
-            tracing::warn!(error = %e, repository_id, "merge parent lookup failed");
-            return;
-        }
+    let before = match before.filter(|b| !b.is_empty()) {
+        Some(b) => b.to_string(),
+        None => match git.cat_commit(&bare, merge_sha).await {
+            Ok(raw) => raw.parents.first().cloned().unwrap_or_default(),
+            Err(e) => {
+                tracing::warn!(error = %e, repository_id, "merge parent lookup failed");
+                return;
+            }
+        },
     };
     if before.is_empty() {
         return;

@@ -140,8 +140,12 @@ pub async fn get_contributions(
 
     // GitHub's rule: the owner sees private contributions only while their
     // "Include private contributions on my profile" setting is on; every
-    // other viewer always gets the public-only view.
-    let self_view = ctx.session.as_ref().map(|s| s.user_id.as_str()) == Some(user.id.as_str());
+    // other viewer always gets the public-only view. Bearer callers (PAT,
+    // job tokens) carry `ctx.session.user_id` for the token owner but their
+    // scopes don't cover every private repo the response can name — restrict
+    // the private view to cookie sessions.
+    let self_view = ctx.pat.is_none()
+        && ctx.session.as_ref().map(|s| s.user_id.as_str()) == Some(user.id.as_str());
     let public_only = !(self_view && user.show_private_contributions);
 
     // Materialized rollups (COL-12): one-time per-user rebuild from source
@@ -286,7 +290,7 @@ pub async fn get_contributions(
             *d += c.count;
         }
     }
-    let (current_streak, longest_streak) = streaks(&days, to);
+    let (current_streak, longest_streak) = streaks(&days, to, today);
 
     let join_year = user
         .created_at
@@ -313,12 +317,12 @@ pub async fn get_contributions(
 }
 
 /// `(current, longest)` consecutive contributed-day runs over the zero-filled
-/// day map. `current` tolerates one trailing empty `to` day — a streak isn't
-/// broken until a full day passes with no contributions.
-fn streaks(days: &BTreeMap<String, i64>, to: NaiveDate) -> (i64, i64) {
+/// day map. `current` tolerates one trailing empty `to` day only while `to`
+/// is still in progress — for a past range an empty last day ends the streak.
+fn streaks(days: &BTreeMap<String, i64>, to: NaiveDate, today: NaiveDate) -> (i64, i64) {
     let key = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
     let mut d = to;
-    if days.get(&key(d)).copied().unwrap_or(0) == 0 {
+    if to >= today && days.get(&key(d)).copied().unwrap_or(0) == 0 {
         d -= Duration::days(1);
     }
     let mut current = 0_i64;

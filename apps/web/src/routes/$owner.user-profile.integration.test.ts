@@ -68,7 +68,7 @@ describe("$owner user profile (SOC-02)", () => {
     expect(section).toMatch(/data-testid="contribution-years"/);
 
     const graph = readFileSync(join(dir, "../components/profile/contribution-graph.tsrx"), "utf8");
-    expect(graph).toMatch(/aria-label=\{contributionDayTooltip/);
+    expect(graph).toMatch(/aria-label=\{\s*contributionDayTooltip/);
     expect(graph).toMatch(/data-testid="contribution-graph"/);
 
     const activity = readFileSync(
@@ -218,8 +218,10 @@ describe("contribution components (COL-12)", () => {
     expect(screen.getByText("Contribution activity")).toBeInTheDocument();
     expect(screen.getByText("January 2026")).toBeInTheDocument();
     expect(screen.getByText("Commits 67%")).toBeInTheDocument();
+    // The fixture range ends in the past — the streak is labeled at range
+    // end, not "current".
     expect(screen.getByTestId("contribution-streaks")).toHaveTextContent(
-      "Current streak: 2 days · Longest streak: 9 days",
+      "End-of-range streak: 2 days · Longest streak: 9 days",
     );
   });
 });

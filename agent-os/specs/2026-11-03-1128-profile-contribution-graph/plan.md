@@ -49,12 +49,13 @@ lanes.
 
 - New `src/contributions.rs`: `ContributionEventRow { day, kind, repo_slug,
   ref_number, title, count }` + `pub async fn list_user_contribution_events(
-  pool, user_id, since, public_only) -> Result<Vec<...>, String>`.
-- UNION ALL across: `repository_activity` (commits bucket — `push` /
-  `force_push` / `pr_merge` only, `COALESCE(commits_count,0)`), `pull_requests`,
-  `issues`, `pull_reviews`, `repositories` (repo-creation rows). Every arm
-  joins `repositories r` and applies `r.visibility='public'` when
-  `public_only`; every arm filters actor/owner id and `created_at >= since`.
+  pool, user_id, from, to_exclusive, public_only) -> Result<Vec<...>, String>`.
+- UNION ALL across: `authored_commits` (commits bucket — see Task 8;
+  grouped per `authored_day`), `pull_requests`, `issues`, `pull_reviews`,
+  `repositories` (repo-creation rows). Every arm joins `repositories r`,
+  filters `r.deleted_at IS NULL`, and applies `r.visibility='public'` when
+  `public_only`; every arm filters actor/owner id and `created_at >= from`
+  / `< to_exclusive` (`authored_commits` uses the day column directly).
 - Day extraction per dialect as in `repo_activity.rs` (`to_char` /
   `DATE_FORMAT` / `strftime` → `YYYY-MM-DD`).
 - Façade method on `Database` in `lib.rs` (delegating wrapper, same shape as
@@ -68,7 +69,9 @@ with Task 4.
 - `crates/oxidean-api-user/src/contributions.rs`: validate input (username
   non-empty, date range sane — default last 365 days, cap ~5y, `to >= from`);
   resolve user (404 `user.not_found`, banned → not_found — same as
-  `get_public_profile`); decide `public_only = session.user_id != user.id`;
+  `get_public_profile`); decide `public_only` — cookie-session owner with
+  the setting on sees private rows; bearer/PAT callers and non-owners get
+  the public-only view;
   call the DB query; aggregate in Rust: `days` (fill gaps client-side or
   server-side — server emits every day in range with zeroes for consistent
   cell math), `by_type`, `months` grouped `YYYY-MM` desc with per-kind

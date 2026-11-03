@@ -648,6 +648,7 @@ pub async fn land_group(
                 &scope.repo_id,
                 &group.base_ref,
                 merge_sha,
+                None,
             )
             .await;
         }

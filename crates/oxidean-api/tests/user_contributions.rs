@@ -42,6 +42,17 @@ fn rpc_req_with_cookie(body: &str, cookie: &str) -> Request<Body> {
         .unwrap()
 }
 
+fn rpc_req_with_bearer(body: &str, token: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/rpc")
+        .header("content-type", "application/json")
+        .header("Oxidean-RPC-Version", "1")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
 fn session_cookie_from_response(res: &axum::http::Response<Body>) -> String {
     let set_cookie = res
         .headers()
@@ -80,6 +91,16 @@ async fn rpc_json(app: &axum::Router, cookie: Option<&str>, body: &str) -> serde
             .unwrap(),
         None => app.clone().oneshot(rpc_req(body)).await.unwrap(),
     };
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn rpc_json_bearer(app: &axum::Router, token: &str, body: &str) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_bearer(body, token))
+        .await
+        .unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }
@@ -451,4 +472,112 @@ async fn contributions_rollup_rebuild_covers_preexisting_rows() {
         data["total"].as_i64().unwrap() >= 2,
         "issue + repo creation — {data}"
     );
+}
+
+#[tokio::test]
+async fn contributions_pat_sees_public_only() {
+    // A bearer PAT resolves to a session-equivalent identity for the token
+    // owner, but its scopes don't cover every private repo the response can
+    // name — self-view stays public-only.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_pat.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "pat@ex.com", "patu").await;
+    verify_user(&db, &user_id).await;
+    let pub_repo = create_repo(&app, &cookie, "pubrepo", "public").await;
+    let priv_repo = create_repo(&app, &cookie, "privrepo", "private").await;
+    seed_contributions(&db, &pub_repo, &user_id, "pat@ex.com").await;
+    seed_contributions(&db, &priv_repo, &user_id, "pat@ex.com").await;
+
+    let mint = rpc_json(
+        &app,
+        Some(&cookie),
+        r#"{"procedure":"pat.createClassic","input":{"name":"cli","scopes":["repo"]}}"#,
+    )
+    .await;
+    assert_eq!(mint["ok"], true, "{mint}");
+    let token = mint["data"]["token"].as_str().expect("token");
+
+    // Backfill lands the scaffold commit first (public side only here).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let v = loop {
+        let last = rpc_json_bearer(&app, token, &contribution_call("patu")).await;
+        if last["data"]["by_type"]["commits"].as_i64().unwrap_or(0) >= 4 {
+            break last;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "authored-commit backfill did not land: {last}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    };
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    assert_eq!(data["includes_private"], false, "{data}");
+    assert_eq!(data["by_type"]["commits"], 4, "{data}");
+    assert_eq!(data["total"], 8, "{data}");
+    let s = serde_json::to_string(data).unwrap();
+    assert!(!s.contains("privrepo"), "{s}");
+}
+
+#[tokio::test]
+async fn contributions_past_range_streak_ends_at_to() {
+    // A range whose `to` is in the past gets no trailing-empty-day grace —
+    // the streak at range end is 0 when the last day is empty.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("contrib_past.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, user_id) = signup_and_login(&app, "pp@ex.com", "ppu").await;
+    verify_user(&db, &user_id).await;
+    let repo = create_repo(&app, &cookie, "pastrepo", "public").await;
+
+    // Three consecutive days ending 10 days ago; the queried range ends on
+    // an empty day (5 days ago).
+    let day = |offset: i64| {
+        (chrono::Utc::now() - chrono::Duration::days(offset))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    let commits: Vec<oxidean_db::ObservedCommit> = [10i64, 11, 12]
+        .iter()
+        .map(|off| oxidean_db::ObservedCommit {
+            sha: format!("{:040x}", off + 0x200),
+            author_email: "pp@ex.com".to_string(),
+            authored_at: day(*off),
+        })
+        .collect();
+    db.record_authored_commits(&repo, &commits)
+        .await
+        .expect("record authored");
+
+    let from = day(20).split('T').next().unwrap().to_string();
+    let to = day(5).split('T').next().unwrap().to_string();
+    let body = format!(
+        r#"{{"procedure":"user.getContributions","input":{{"username":"ppu","from":"{from}","to":"{to}"}}}}"#
+    );
+
+    // Poll past the lazy rollup rebuild before asserting streaks.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let v = loop {
+        let last = rpc_json(&app, Some(&cookie), &body).await;
+        if last["data"]["by_type"]["commits"].as_i64().unwrap_or(0) >= 3 {
+            break last;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "rollup rebuild did not land: {last}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    };
+    assert_eq!(v["ok"], true, "{v}");
+    let data = &v["data"];
+    assert_eq!(data["current_streak"], 0, "{data}");
+    assert_eq!(data["longest_streak"], 3, "{data}");
 }

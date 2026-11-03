@@ -85,7 +85,9 @@ export function UserContributionsSection(props: { username: string }) @{
           data-testid="contribution-streaks"
         >
           {
-            `Current streak: ${c.current_streak} day${c.current_streak === 1 ? "" : "s"} · Longest streak: ${c.longest_streak} day${c.longest_streak === 1 ? "" : "s"}` as string
+            // `current_streak` is measured at the range end — for a past
+            // year that isn't "now", so label it accordingly.
+            `${c.to >= new Date().toISOString().slice(0, 10) ? "Current" : "End-of-range"} streak: ${c.current_streak} day${c.current_streak === 1 ? "" : "s"} · Longest streak: ${c.longest_streak} day${c.longest_streak === 1 ? "" : "s"}` as string
           }
         </div>;
       }

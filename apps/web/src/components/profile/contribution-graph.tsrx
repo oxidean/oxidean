@@ -25,6 +25,11 @@ export function ContributionGraph(props: { days: UserContributionDay[] }) @{
   const max = props.days.reduce((a, d) => Math.max(a, d.count), 0);
   const weeks = buildContributionWeeks(props.days);
   const monthLabels = contributionMonthLabels(weeks);
+  // Padding cells are all `null` — key them by week/position so duplicates
+  // never collide (indexOf on a null cell always finds the first one).
+  const keyedWeeks = weeks.map((week, wi) =>
+    week.map((day, di) => ({ day, key: day?.date ?? `pad-${wi}-${di}` })),
+  );
 
   <div className="overflow-x-auto" data-testid="contribution-graph">
     <div className="flex" style={{ gap: `${GAP}px` }}>
@@ -58,10 +63,11 @@ export function ContributionGraph(props: { days: UserContributionDay[] }) @{
           }
         </div>
         <div className="flex" style={{ gap: `${GAP}px` }} role="table">
-          @for (const week of weeks; key week[0]?.date ?? weeks.indexOf(week)) {
+          @for (const week of keyedWeeks; key week.find((c) => c.day)?.key ??
+                keyedWeeks.indexOf(week)) {
             <div className="flex flex-col" style={{ gap: `${GAP}px` }} role="row">
-              @for (const day of week; key day?.date ?? `pad-${week.indexOf(day)}`) {
-                @if (day === null) {
+              @for (const cell of week; key cell.key) {
+                @if (cell.day === null) {
                   <div
                     style={{ width: `${CELL}px`, height: `${CELL}px` }}
                     aria-hidden="true"
@@ -72,12 +78,16 @@ export function ContributionGraph(props: { days: UserContributionDay[] }) @{
                     style={{
                       width: `${CELL}px`,
                       height: `${CELL}px`,
-                      ...cellStyle(contributionLevel(day.count, max)),
+                      ...cellStyle(contributionLevel(cell.day.count, max)),
                     }}
-                    title={contributionDayTooltip(day.date, day.count) as string}
-                    aria-label={contributionDayTooltip(day.date, day.count) as string}
-                    data-date={day.date as string}
-                    data-count={String(day.count) as string}
+                    title={
+                      contributionDayTooltip(cell.day.date, cell.day.count) as string
+                    }
+                    aria-label={
+                      contributionDayTooltip(cell.day.date, cell.day.count) as string
+                    }
+                    data-date={cell.day.date as string}
+                    data-count={String(cell.day.count) as string}
                     role="gridcell"
                   />;
                 }

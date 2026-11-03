@@ -166,14 +166,18 @@ pub async fn list_days(
     } else {
         ""
     };
+    // `SUM` over a BIGINT column returns NUMERIC on Postgres and DECIMAL on
+    // MySQL — neither decodes into i64 — so the aggregate is cast back to an
+    // integer per dialect.
     let sql = format!(
-        "SELECT day, kind, SUM(day_count) AS c FROM user_contribution_days\n\
+        "SELECT day, kind, CAST(SUM(day_count) AS {{int}}) AS c FROM user_contribution_days\n\
          WHERE user_id = {{p1}} AND day >= {{p2}} AND day < {{p3}}{vis}\n\
          GROUP BY day, kind"
     );
     match pool {
         DbPool::Postgres(p) => {
             let q = sql
+                .replace("{int}", "BIGINT")
                 .replace("{p1}", "$1")
                 .replace("{p2}", "$2")
                 .replace("{p3}", "$3");
@@ -188,6 +192,7 @@ pub async fn list_days(
         }
         DbPool::MySql(p) => {
             let q = sql
+                .replace("{int}", "SIGNED")
                 .replace("{p1}", "?")
                 .replace("{p2}", "?")
                 .replace("{p3}", "?");
@@ -202,6 +207,7 @@ pub async fn list_days(
         }
         DbPool::Sqlite(p) => {
             let q = sql
+                .replace("{int}", "INTEGER")
                 .replace("{p1}", "?1")
                 .replace("{p2}", "?2")
                 .replace("{p3}", "?3");
@@ -269,20 +275,20 @@ fn rebuild_arms(day: fn(&str) -> String, p_user: &str) -> Vec<String> {
         format!(
             "SELECT c.user_id, c.repository_id, c.authored_day, 'commits', {priv_expr}, COUNT(*)\n\
              FROM authored_commits c JOIN repositories r ON r.id = c.repository_id\n\
-             WHERE c.user_id = {p_user}\n\
+             WHERE c.user_id = {p_user} AND r.deleted_at IS NULL\n\
              GROUP BY c.user_id, c.repository_id, c.authored_day, r.visibility"
         ),
         format!(
             "SELECT p.author_id, p.repo_id, {d} AS day, 'pull_request', {priv_expr}, COUNT(*)\n\
              FROM pull_requests p JOIN repositories r ON r.id = p.repo_id\n\
-             WHERE p.author_id = {p_user}\n\
+             WHERE p.author_id = {p_user} AND r.deleted_at IS NULL\n\
              GROUP BY p.author_id, p.repo_id, day, r.visibility",
             d = day("p.created_at"),
         ),
         format!(
             "SELECT i.author_id, i.repo_id, {d} AS day, 'issue', {priv_expr}, COUNT(*)\n\
              FROM issues i JOIN repositories r ON r.id = i.repo_id\n\
-             WHERE i.author_id = {p_user}\n\
+             WHERE i.author_id = {p_user} AND r.deleted_at IS NULL\n\
              GROUP BY i.author_id, i.repo_id, day, r.visibility",
             d = day("i.created_at"),
         ),
@@ -291,14 +297,14 @@ fn rebuild_arms(day: fn(&str) -> String, p_user: &str) -> Vec<String> {
              FROM pull_reviews rv\n\
              JOIN pull_requests p ON p.id = rv.pull_id\n\
              JOIN repositories r ON r.id = p.repo_id\n\
-             WHERE rv.author_id = {p_user}\n\
+             WHERE rv.author_id = {p_user} AND r.deleted_at IS NULL\n\
              GROUP BY rv.author_id, p.repo_id, day, r.visibility",
             d = day("rv.submitted_at"),
         ),
         format!(
             "SELECT r.owner_id, r.id, {d} AS day, 'repository', {priv_expr}, COUNT(*)\n\
              FROM repositories r\n\
-             WHERE r.owner_type = 'user' AND r.owner_id = {p_user}\n\
+             WHERE r.owner_type = 'user' AND r.owner_id = {p_user} AND r.deleted_at IS NULL\n\
              GROUP BY r.owner_id, r.id, day, r.visibility",
             d = day("r.created_at"),
         ),

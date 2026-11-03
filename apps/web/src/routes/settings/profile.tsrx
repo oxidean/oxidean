@@ -192,7 +192,7 @@ function ProfileContent() @{
   }, [loaderData]);
 
   async function onTogglePrivateContributions(next: boolean) {
-    if (phase.kind !== "ready") return;
+    if (phase.kind !== "ready" || pending || privatePending) return;
     setPrivatePending(true);
     try {
       const res = await apiClient.user.updateProfile({
@@ -210,6 +210,15 @@ function ProfileContent() @{
         prev.kind === "ready" ? { kind: "ready", user: res.data, emails: prev.emails } : prev,
       );
       setAuthMeCache(queryClient, res.data);
+      // updateProfile echoes the full row — write it back so a refetch
+      // can't clobber unsaved form edits; the contribution view does need
+      // a refetch since the flag changes what it returns.
+      queryClient.setQueryData(
+        ["settings", "settingsProfile"],
+        (old: ProfileLoaderData | undefined) =>
+          old?.kind === "ready" ? { ...old, user: res.data } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["user", "contributions"] });
       toastSuccess("Contribution settings saved.");
       setPrivatePending(false);
     } catch {
@@ -380,7 +389,7 @@ function ProfileContent() @{
                 </div>
               )}
             </profileForm.Field>
-            <Button type="submit" disabled={pending} className="w-full sm:w-auto">
+            <Button type="submit" disabled={pending || privatePending} className="w-full sm:w-auto">
               {(pending ? "Working…" : "Save profile") as string}
             </Button>
           </form>
@@ -394,7 +403,7 @@ function ProfileContent() @{
             <Checkbox
               id="show-private-contributions"
               checked={phase.user.show_private_contributions}
-              disabled={privatePending}
+              disabled={privatePending || pending}
               onCheckedChange={(checked) => void onTogglePrivateContributions(checked === true)}
             />
             <div className="flex flex-col gap-1">

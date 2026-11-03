@@ -11,16 +11,25 @@ export type ContributionRange = {
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** `YYYY-MM-DD` shape plus real-calendar validation — `2025-13-45` matches
+ * the regex but is not a day; the server rejects it, so fall back instead. */
+function isCalendarDay(s: string): boolean {
+  if (!DAY_RE.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 /** `?from`/`?to` URL state — year links set `from=YYYY-01-01`; anything
  * malformed falls back to the default view rather than erroring the RPC. */
 export function resolveContributionRange(searchStr: string): ContributionRange {
   const sp = new URLSearchParams(searchStr.replace(/^\?/, ""));
   const from = sp.get("from") ?? undefined;
   const to = sp.get("to") ?? undefined;
-  if (from && DAY_RE.test(from)) {
+  if (from && isCalendarDay(from)) {
     return {
       from,
-      to: to && DAY_RE.test(to) ? to : undefined,
+      to: to && isCalendarDay(to) ? to : undefined,
       selected: Number(from.slice(0, 4)),
     };
   }
