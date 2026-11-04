@@ -26,6 +26,8 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "pull.update" => arm!(lifecycle::update(ctx, input)),
         "pull.close" => arm!(lifecycle::close(ctx, input)),
         "pull.reopen" => arm!(lifecycle::reopen(ctx, input)),
+        "pull.pin" => arm!(lifecycle::pin(ctx, input)),
+        "pull.unpin" => arm!(lifecycle::unpin(ctx, input)),
         "pull.files" => arm!(merge_ops::files(ctx, input)),
         "pull.commits" => arm!(merge_ops::commits(ctx, input)),
         "pull.comments.list" => arm!(comments::comments_list(ctx, input)),

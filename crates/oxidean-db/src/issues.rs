@@ -20,6 +20,8 @@ pub struct IssueRow {
     /// `milestones.id` — set via `set_issue_milestone`; cleared when the
     /// milestone row is deleted (`ON DELETE SET NULL`).
     pub milestone_id: Option<String>,
+    /// 0-based pin display order; `NULL` = not pinned (COL-04).
+    pub pinned_position: Option<i64>,
     /// Derived `issue_comments` count carried by every `ISSUE_SELECT_*` query.
     pub comment_count: i64,
 }
@@ -60,6 +62,13 @@ macro_rules! map_issue {
             milestone_id: row
                 .try_get("milestone_id")
                 .map_err(|e| format!("issue row: {e}"))?,
+            pinned_position: row
+                .try_get::<Option<i64>, _>("pinned_position")
+                .or_else(|_| {
+                    row.try_get::<Option<i32>, _>("pinned_position")
+                        .map(|v| v.map(i64::from))
+                })
+                .map_err(|e| format!("issue row: {e}"))?,
             comment_count: {
                 let c: i64 = row
                     .try_get("comment_count")
@@ -78,6 +87,7 @@ const ISSUE_SELECT_PG: &str = "SELECT issues.id, issues.repo_id, issues.number, 
        to_char(issues.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(issues.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at,
        issues.milestone_id,
+       issues.pinned_position,
        (SELECT COUNT(*)::bigint FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -88,6 +98,7 @@ const ISSUE_SELECT_MYSQL: &str = "SELECT issues.id, issues.repo_id, issues.numbe
        DATE_FORMAT(issues.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(issues.updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at,
        issues.milestone_id,
+       issues.pinned_position,
        (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -98,6 +109,7 @@ const ISSUE_SELECT_SQLITE: &str = "SELECT issues.id, issues.repo_id, issues.numb
        strftime('%Y-%m-%dT%H:%M:%SZ', issues.created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', issues.updated_at) AS updated_at,
        issues.milestone_id,
+       issues.pinned_position,
        (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -1085,6 +1097,236 @@ pub async fn reopen_issue(pool: &DbPool, id: &str) -> Result<IssueRow, String> {
     find_by_id(pool, id)
         .await?
         .ok_or_else(|| "reopen issue failed: row missing".into())
+}
+
+// --- Pinned issues (COL-04) -------------------------------------------------
+
+/// Sentinel `Err` from [`pin_issue`] when the repo is at its pin cap —
+/// handlers map it to `issue.too_many_pins`.
+pub const ISSUE_TOO_MANY_PINS: &str = "issue.too_many_pins";
+
+/// Pinned issues for a repo in display order (any state — a closed pin stays
+/// pinned, matching GitHub).
+pub async fn list_pinned_issues(pool: &DbPool, repo_id: &str) -> Result<Vec<IssueRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_PG} WHERE repo_id = $1 AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned issues failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_issue!(r));
+            }
+            Ok(out)
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_MYSQL} WHERE repo_id = ? AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned issues failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_issue!(r));
+            }
+            Ok(out)
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_SQLITE} WHERE repo_id = ?1 AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned issues failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_issue!(r));
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Pin `issue_id` at the end of the repo's pin list. No-op when already
+/// pinned; `Err(ISSUE_TOO_MANY_PINS)` when `max_pins` are taken. The count
+/// check + max-position write happen in one transaction so concurrent pins
+/// can't overshoot the cap.
+pub async fn pin_issue(
+    pool: &DbPool,
+    repo_id: &str,
+    issue_id: &str,
+    max_pins: i64,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = $1 FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("pin issue repo lock failed: {e}"))?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0)::bigint FROM issues WHERE repo_id = $1 AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(ISSUE_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE issues SET pinned_position = $2 WHERE id = $1 AND repo_id = $3 AND pinned_position IS NULL",
+            )
+            .bind(issue_id)
+            .bind(next)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = ? FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("pin issue repo lock failed: {e}"))?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0) FROM issues WHERE repo_id = ? AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(ISSUE_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE issues SET pinned_position = ? WHERE id = ? AND repo_id = ? AND pinned_position IS NULL",
+            )
+            .bind(next)
+            .bind(issue_id)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0) FROM issues WHERE repo_id = ?1 AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(ISSUE_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE issues SET pinned_position = ?2 WHERE id = ?1 AND repo_id = ?3 AND pinned_position IS NULL",
+            )
+            .bind(issue_id)
+            .bind(next)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin issue failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Unpin `issue_id` and renumber the survivors so positions stay contiguous
+/// (0-based, ordered) — one transaction, no partial renumber visible.
+pub async fn unpin_issue(pool: &DbPool, repo_id: &str, issue_id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE issues SET pinned_position = NULL WHERE id = $1 AND repo_id = $2")
+                .bind(issue_id)
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin issue failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM issues WHERE repo_id = $1 AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE issues SET pinned_position = $1 WHERE id = $2")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE issues SET pinned_position = NULL WHERE id = ? AND repo_id = ?")
+                .bind(issue_id)
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin issue failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM issues WHERE repo_id = ? AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE issues SET pinned_position = ? WHERE id = ?")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE issues SET pinned_position = NULL WHERE id = ?1 AND repo_id = ?2")
+                .bind(issue_id)
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin issue failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM issues WHERE repo_id = ?1 AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE issues SET pinned_position = ?1 WHERE id = ?2")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin issue renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

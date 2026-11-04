@@ -304,6 +304,35 @@ function IssueDetailPageContent() @{
     }
   }
 
+  async function togglePin() {
+    if (!issue) return;
+    setActionError("");
+    setPending(true);
+    try {
+      const res = issue.pinned
+        ? await apiClient.issue.unpin({
+            owner,
+            name: repoName,
+            number: issue.number,
+          })
+        : await apiClient.issue.pin({
+            owner,
+            name: repoName,
+            number: issue.number,
+          });
+      if (!res.ok) {
+        setActionError(res.error.message || "Could not update pin.");
+        setPending(false);
+        return;
+      }
+      await invalidateIssueCaches();
+      setPending(false);
+    } catch {
+      setActionError(NETWORK_ERROR);
+      setPending(false);
+    }
+  }
+
   async function confirmDelete(confirmNumber: number) {
     if (!issue) return;
     setDeleteError("");
@@ -415,6 +444,17 @@ function IssueDetailPageContent() @{
                     onClick={reopenIssue}
                   >
                     Reopen
+                  </Button>;
+                }
+                @if (canWrite) {
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={pending}
+                    data-testid="issue-pin-toggle"
+                    onClick={togglePin}
+                  >
+                    {(issue?.pinned ? "Unpin" : "Pin") as string}
                   </Button>;
                 }
                 @if (canAdmin && notArchived) {

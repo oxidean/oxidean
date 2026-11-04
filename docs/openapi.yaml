@@ -17483,6 +17483,14 @@ components:
         total:
           type: integer
           format: int64
+        pinned:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssuePublic'
+          description: |-
+            Pinned issues for the pinned box — populated only on the unfiltered
+            open first page (GitHub hides the box under filters/state/offset).
+          default: []
       required:
       - issues
       - total
@@ -17544,6 +17552,12 @@ components:
           format: int64
           description: Number of comments on the issue (shown on list rows).
           default: 0
+        pinned:
+          type: boolean
+          description: |-
+            Repo-maintainer pin (COL-04) — pinned issues surface in the pinned box
+            above the open-issue list.
+          default: false
       required:
       - id
       - repo_id
@@ -17745,6 +17759,14 @@ components:
           type: integer
           format: uint32
           minimum: 0
+        pinned:
+          type: array
+          items:
+            $ref: '#/components/schemas/PullPublic'
+          description: |-
+            Pinned PRs for the pinned box — populated only on the unfiltered open
+            first page (GitHub-style pinned box hides under filters/state/offset).
+          default: []
       required:
       - pulls
       - total
@@ -17820,6 +17842,12 @@ components:
           items:
             $ref: '#/components/schemas/IssueAssigneePublic'
           default: []
+        pinned:
+          type: boolean
+          description: |-
+            Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
+            above the open-PR list.
+          default: false
       required:
       - id
       - repo_id

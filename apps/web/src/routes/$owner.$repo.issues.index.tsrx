@@ -330,6 +330,7 @@ function IssuesListPageContent() @{
         repo={repo}
         canInteract={!!account.user?.email_verified}
         issues={list?.issues ?? []}
+        pinned={list?.pinned ?? []}
         total={list?.total ?? 0}
         filters={filters}
         labels={labels}

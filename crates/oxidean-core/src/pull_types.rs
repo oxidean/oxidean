@@ -123,7 +123,14 @@ pub struct PullPublic {
     pub comment_count: i64,
     #[serde(default)]
     pub assignees: Vec<crate::IssueAssigneePublic>,
+    /// Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
+    /// above the open-PR list.
+    #[serde(default)]
+    pub pinned: bool,
 }
+
+/// GitHub parity — at most three pinned pull requests per repository.
+pub const MAX_PINNED_PULLS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreatePullRequest {
@@ -181,6 +188,10 @@ pub struct PullListResponse {
     pub total: i64,
     pub offset: u32,
     pub limit: u32,
+    /// Pinned PRs for the pinned box — populated only on the unfiltered open
+    /// first page (GitHub-style pinned box hides under filters/state/offset).
+    #[serde(default)]
+    pub pinned: Vec<PullPublic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

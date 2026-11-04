@@ -19,14 +19,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const MAX_PINS = 6;
 
-function pinnedReposQueryOptions(username: string) {
+/** Which owner namespace the pins live in — `/{username}` vs `/{org}` (COL-04). */
+type PinOwnerKind = "user" | "org";
+
+function pinnedReposQueryOptions(kind: PinOwnerKind, slug: string) {
   return queryOptions({
-    queryKey: ["user", "pinnedRepos", username],
+    queryKey: [kind, "pinnedRepos", slug],
     queryFn: async (): Promise<RepoPublic[] | null> => {
-      const res = await apiClient.user.listPinnedRepos({ username });
+      const res =
+        kind === "org"
+          ? await apiClient.org.listPinnedRepos({ slug })
+          : await apiClient.user.listPinnedRepos({ username: slug });
       return res.ok ? res.data.repos : null;
     },
-    enabled: !!username,
+    enabled: !!slug,
     retry: false,
     staleTime: 60_000,
   });
@@ -98,7 +104,8 @@ function PinnedRepoCard(props: { repo: RepoPublic }) @{
 function CustomizePinsDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  username: string;
+  kind: PinOwnerKind;
+  slug: string;
   candidates: RepoPublic[];
   pinnedIds: string[];
 }) @{
@@ -126,10 +133,16 @@ function CustomizePinsDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      const res = await apiClient.user.setPinnedRepos({ repo_ids: selected });
+      const res =
+        props.kind === "org"
+          ? await apiClient.org.setPinnedRepos({
+              slug: props.slug,
+              repo_ids: selected,
+            })
+          : await apiClient.user.setPinnedRepos({ repo_ids: selected });
       if (res.ok) {
         await queryClient.invalidateQueries({
-          queryKey: ["user", "pinnedRepos", props.username],
+          queryKey: [props.kind, "pinnedRepos", props.slug],
         });
         props.onOpenChange(false);
       } else {
@@ -149,7 +162,11 @@ function CustomizePinsDialog(props: {
       <DialogHeader>
         <DialogTitle>Edit pinned repositories</DialogTitle>
         <DialogDescription>
-          {`Select up to ${MAX_PINS} repositories to show on your profile.` as string}
+          {
+            (props.kind === "org"
+              ? `Select up to ${MAX_PINS} repositories to show on the organization profile.`
+              : `Select up to ${MAX_PINS} repositories to show on your profile.`) as string
+          }
         </DialogDescription>
       </DialogHeader>
       <div className="max-h-80 overflow-y-auto rounded-md border border-border">
@@ -215,11 +232,12 @@ function CustomizePinsDialog(props: {
  * list (owner-visible set).
  */
 export function PinnedReposSection(props: {
-  username: string;
-  isSelf: boolean;
+  slug: string;
+  kind: PinOwnerKind;
+  canCustomize: boolean;
   candidates: RepoPublic[];
 }) @{
-  const q = useQuery(pinnedReposQueryOptions(props.username));
+  const q = useQuery(pinnedReposQueryOptions(props.kind, props.slug));
   const pinned = q.data;
   const [customizeOpen, setCustomizeOpen] = useState(false);
 
@@ -236,7 +254,7 @@ export function PinnedReposSection(props: {
     <section className="mt-8" aria-label="Pinned" data-testid="pinned-repos">
       <div className="flex items-center justify-between">
         <h2 className="text-[16px] font-semibold text-foreground">Pinned</h2>
-        @if (props.isSelf) {
+        @if (props.canCustomize) {
           <button
             type="button"
             className="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
@@ -255,12 +273,13 @@ export function PinnedReposSection(props: {
       <CustomizePinsDialog
         open={customizeOpen}
         onOpenChange={setCustomizeOpen}
-        username={props.username}
+        kind={props.kind}
+        slug={props.slug}
         candidates={props.candidates}
         pinnedIds={pinned.map((r) => r.id)}
       />
     </section>;
-  } @else if (props.isSelf && pinned) {
+  } @else if (props.canCustomize && pinned) {
     // Owner with zero pins: keep the customize entry point reachable —
     // hiding the whole section would make pins un-settable.
     <section className="mt-8" aria-label="Pinned" data-testid="pinned-repos">
@@ -278,7 +297,8 @@ export function PinnedReposSection(props: {
       <CustomizePinsDialog
         open={customizeOpen}
         onOpenChange={setCustomizeOpen}
-        username={props.username}
+        kind={props.kind}
+        slug={props.slug}
         candidates={props.candidates}
         pinnedIds={[]}
       />

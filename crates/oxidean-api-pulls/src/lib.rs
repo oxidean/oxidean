@@ -25,6 +25,8 @@ pub const PROCEDURES: &[&str] = &[
     "pull.update",
     "pull.close",
     "pull.reopen",
+    "pull.pin",
+    "pull.unpin",
     "pull.files",
     "pull.commits",
     "pull.comments.list",

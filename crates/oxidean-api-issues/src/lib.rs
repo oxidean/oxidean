@@ -24,6 +24,8 @@ pub const PROCEDURES: &[&str] = &[
     "issue.update",
     "issue.close",
     "issue.reopen",
+    "issue.pin",
+    "issue.unpin",
     "issue.history",
     "issue.delete",
     "issue.comments.list",

@@ -60,6 +60,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullListResp
             total: 0,
             offset,
             limit,
+            pinned: vec![],
         });
     }
     let assignee_id = resolve_username_filter(ctx, req.assignee.as_deref()).await?;
@@ -75,6 +76,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullListResp
             total: 0,
             offset,
             limit,
+            pinned: vec![],
         });
     }
     let label_filter = req
@@ -184,11 +186,31 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullListResp
     };
 
     let pulls = to_public_many(ctx, &rows).await?;
+
+    // GitHub-style pinned box — only on the unfiltered open first page.
+    let pinned = if state == "open"
+        && offset == 0
+        && author_id.is_none()
+        && assignee_id.is_none()
+        && label_filter.is_none()
+        && review_state.is_none()
+        && q.is_none()
+    {
+        let rows = ctx
+            .db
+            .list_pinned_pulls(&accessible.row.id)
+            .await
+            .map_err(db_err)?;
+        to_public_many(ctx, &rows).await?
+    } else {
+        vec![]
+    };
     Ok(PullListResponse {
         pulls,
         total,
         offset,
         limit,
+        pinned,
     })
 }
 
@@ -508,5 +530,57 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         false,
     )
     .await;
+    to_public(ctx, &updated).await
+}
+
+/// `pull.pin` — Write+; add to the repo's pinned box (≤`MAX_PINNED_PULLS`).
+/// Idempotent — pinning an already-pinned pull returns it unchanged.
+pub async fn pin(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: PullRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.pin input: {e}")))?;
+    // Maintainer-only action — `can_edit_pull`'s author ladder does not apply.
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if row.pinned_position.is_none() {
+        ctx.db
+            .pin_pull(
+                &accessible.row.id,
+                &row.id,
+                oxidean_core::MAX_PINNED_PULLS as i64,
+            )
+            .await
+            .map_err(|e| {
+                if e == oxidean_db::pulls::PULL_TOO_MANY_PINS {
+                    AppError::new(
+                        "pull.too_many_pins",
+                        format!(
+                            "at most {} pull requests can be pinned",
+                            oxidean_core::MAX_PINNED_PULLS
+                        ),
+                    )
+                } else {
+                    db_err(e)
+                }
+            })?;
+    }
+    let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    to_public(ctx, &updated).await
+}
+
+/// `pull.unpin` — Write+; remove from the pinned box (survivors renumber).
+pub async fn unpin(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: PullRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.unpin input: {e}")))?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if row.pinned_position.is_some() {
+        ctx.db
+            .unpin_pull(&accessible.row.id, &row.id)
+            .await
+            .map_err(db_err)?;
+    }
+    let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     to_public(ctx, &updated).await
 }

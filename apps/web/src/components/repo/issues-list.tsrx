@@ -1,6 +1,6 @@
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
-import { CircleCheck, CircleDot, MessageSquare, SlidersHorizontal } from "@octanejs/lucide";
+import { CircleCheck, CircleDot, MessageSquare, Pin, SlidersHorizontal } from "@octanejs/lucide";
 import type { IssuePublic, LabelPublic, MilestonePublic, RepoPublic } from "@oxidean/api-client";
 import { MemberLookup } from "@/components/org/member-lookup";
 import { LabelChip } from "@/components/repo/label-chip";
@@ -48,6 +48,9 @@ type IssuesListProps = {
   repoName: string;
   repo: RepoPublic;
   issues: IssuePublic[];
+  /** Pinned box entries — populated by `issue.list` on the unfiltered open
+   * first page (GitHub parity, COL-04). */
+  pinned?: IssuePublic[];
   total: number;
   filters: IssueListFilters;
   labels: LabelPublic[];
@@ -67,6 +70,7 @@ export function IssuesList({
   repoName,
   repo,
   issues,
+  pinned = [],
   total,
   filters,
   labels,
@@ -295,6 +299,52 @@ export function IssuesList({
         Apply
       </button>
     </form>
+
+    @if (pinned.length > 0) {
+      <section aria-label="Pinned issues" data-testid="pinned-issues">
+        <h2 className="mb-2 flex items-center gap-2 text-[14px] font-semibold text-foreground">
+          <Pin aria-hidden size={14} className="text-muted-foreground" />
+          Pinned issues
+        </h2>
+        <List>
+          @for (const issue of pinned; key issue.id) {
+            <ListRow className="items-start gap-3 py-3">
+              @if (issue.state === "open") {
+                <CircleDot
+                  aria-hidden
+                  size={16}
+                  className="mt-0.5 shrink-0 text-success"
+                />;
+              } @else {
+                <CircleCheck
+                  aria-hidden
+                  size={16}
+                  className="mt-0.5 shrink-0 text-[#8250df] dark:text-[#a371f7]"
+                />;
+              }
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <AppLink
+                    href={`${base}/issues/${issue.number}` as string}
+                    className="text-[15px] font-semibold text-foreground no-underline hover:text-primary"
+                  >
+                    {issue.title as string}
+                  </AppLink>
+                  @for (const lab of issue.labels ?? []; key lab.id) {
+                    <LabelChip label={lab} />;
+                  }
+                </div>
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  {
+                    `#${issue.number} opened ${formatRelative(issue.created_at)} by @${issue.author_username}` as string
+                  }
+                </p>
+              </div>
+            </ListRow>;
+          }
+        </List>
+      </section>;
+    }
 
     @if (pending) {
       <List>

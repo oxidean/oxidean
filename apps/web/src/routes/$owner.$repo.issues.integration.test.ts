@@ -21,6 +21,8 @@ const historyMock = vi.fn();
 const updateMock = vi.fn();
 const closeMock = vi.fn();
 const reopenMock = vi.fn();
+const pinMock = vi.fn();
+const unpinMock = vi.fn();
 const deleteMock = vi.fn();
 const commentsListMock = vi.fn();
 const commentsCreateMock = vi.fn();
@@ -58,6 +60,8 @@ vi.mock("@/lib/api-client", () => ({
       update: (...args: unknown[]) => updateMock(...args),
       close: (...args: unknown[]) => closeMock(...args),
       reopen: (...args: unknown[]) => reopenMock(...args),
+      pin: (...args: unknown[]) => pinMock(...args),
+      unpin: (...args: unknown[]) => unpinMock(...args),
       delete: (...args: unknown[]) => deleteMock(...args),
       comments: {
         list: (...args: unknown[]) => commentsListMock(...args),
@@ -165,6 +169,8 @@ beforeEach(() => {
   updateMock.mockReset();
   closeMock.mockReset();
   reopenMock.mockReset();
+  pinMock.mockReset();
+  unpinMock.mockReset();
   deleteMock.mockReset();
   commentsListMock.mockReset();
   commentsCreateMock.mockReset();
@@ -188,6 +194,8 @@ beforeEach(() => {
     data: { issues: [], total: 0 },
   });
   issueGetMock.mockResolvedValue({ ok: true, data: sampleIssue });
+  pinMock.mockResolvedValue({ ok: true, data: { ...sampleIssue, pinned: true } });
+  unpinMock.mockResolvedValue({ ok: true, data: { ...sampleIssue, pinned: false } });
   createMock.mockResolvedValue({ ok: true, data: sampleIssue });
   historyMock.mockResolvedValue({ ok: true, data: { revisions: [] } });
   commentsListMock.mockResolvedValue({ ok: true, data: { comments: [] } });
@@ -424,6 +432,25 @@ describe("/{owner}/{repo}/issues list Wave 0 (D-ISS-16 / D-ISS-19)", () => {
       const calls = listMock.mock.calls.map((c) => c[0] as { offset?: number });
       expect(calls.some((c) => c.offset === 25)).toBe(true);
     });
+  }, 15_000);
+
+  it("pinned box renders above the open list when issue.list returns pins (COL-04)", async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      data: {
+        issues: [sampleIssue],
+        total: 1,
+        pinned: [{ ...sampleIssue, pinned: true }],
+      },
+    });
+    const mod = await loadIssuesListModule();
+    renderWithQueryClient(issuesListPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pinned-issues")).toBeInTheDocument();
+    });
+    // Pinned entries still appear in the ordinary list too (GitHub parity).
+    expect(screen.getAllByText(/Tracer issue/i).length).toBeGreaterThanOrEqual(2);
   }, 15_000);
 
   it("New issue from list when can_write (D-ISS-19 / D-ISS-20)", async () => {
@@ -704,6 +731,46 @@ describe("/{owner}/{repo}/issues/{n} detail Wave 0 (ISS-01..04 / D-ISS-13)", () 
     screen.getByRole("button", { name: /^Delete issue$/i }).click();
     await waitFor(() => {
       expect(screen.getByText(/type.*(issue )?number|confirm/i)).toBeInTheDocument();
+    });
+  }, 15_000);
+
+  it("pin toggle calls issue.pin for Write+ (COL-04)", async () => {
+    const mod = await loadIssueDetailModule();
+    renderWithQueryClient(issueDetailPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-pin-toggle")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("issue-pin-toggle").textContent).toBe("Pin");
+    fireEvent.click(screen.getByTestId("issue-pin-toggle"));
+    await waitFor(() => {
+      expect(pinMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        number: 1,
+      });
+    });
+  }, 15_000);
+
+  it("pinned issue shows Unpin and calls issue.unpin (COL-04)", async () => {
+    issueGetMock.mockResolvedValue({
+      ok: true,
+      data: { ...sampleIssue, pinned: true },
+    });
+    const mod = await loadIssueDetailModule();
+    renderWithQueryClient(issueDetailPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-pin-toggle")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("issue-pin-toggle").textContent).toBe("Unpin");
+    fireEvent.click(screen.getByTestId("issue-pin-toggle"));
+    await waitFor(() => {
+      expect(unpinMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        number: 1,
+      });
     });
   }, 15_000);
 

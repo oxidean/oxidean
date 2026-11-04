@@ -830,6 +830,11 @@ export type SetPinnedReposRequest = {
   repo_ids: string[];
 };
 
+export type SetOrgPinnedReposRequest = {
+  slug: string;
+  repo_ids: string[];
+};
+
 export type GetContributionsRequest = {
   username: string;
   from?: string | null;
@@ -4581,6 +4586,7 @@ export type PullPublic = {
   updated_at: string;
   comment_count?: number;
   assignees?: IssueAssigneePublic[];
+  pinned?: boolean;
 };
 
 export type CreatePullRequest = {
@@ -4619,6 +4625,7 @@ export type PullListResponse = {
   total: number;
   offset: number;
   limit: number;
+  pinned?: PullPublic[];
 };
 
 export type UpdatePullRequest = {
@@ -5008,6 +5015,7 @@ export type IssuePublic = {
   reactions?: ReactionGroupPublic[];
   milestone?: MilestonePublic | null;
   comment_count?: number;
+  pinned?: boolean;
 };
 
 export type CreateIssueRequest = {
@@ -5040,6 +5048,7 @@ export type IssueListRequest = {
 export type IssueListResponse = {
   issues: IssuePublic[];
   total: number;
+  pinned?: IssuePublic[];
 };
 
 export type UpdateIssueRequest = {
@@ -6757,6 +6766,10 @@ export function createClient(opts: CreateClientOptions) {
       create: (input: CreateOrgRequest) => rpcCall<OrgPublic>(opts, "org.create", input),
       get: (input: OrgSlugRequest) => rpcCall<OrgPublic>(opts, "org.get", input),
       listMine: () => rpcCall<OrgListMineResponse>(opts, "org.listMine", {}),
+      listPinnedRepos: (input: OrgSlugRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "org.listPinnedRepos", input),
+      setPinnedRepos: (input: SetOrgPinnedReposRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "org.setPinnedRepos", input),
       updateSettings: (input: OrgUpdateSettingsRequest) =>
         rpcCall<OrgPublic>(opts, "org.updateSettings", input),
       members: {
@@ -6884,6 +6897,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<IssuePublic>(opts, "issue.close", input),
       reopen: (input: IssueRefRequest) =>
         rpcCall<IssuePublic>(opts, "issue.reopen", input),
+      pin: (input: IssueRefRequest) =>
+        rpcCall<IssuePublic>(opts, "issue.pin", input),
+      unpin: (input: IssueRefRequest) =>
+        rpcCall<IssuePublic>(opts, "issue.unpin", input),
       history: (input: IssueRefRequest) =>
         rpcCall<IssueHistoryResponse>(opts, "issue.history", input),
       delete: (input: DeleteIssueRequest) =>
@@ -7134,6 +7151,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullPublic>(opts, "pull.close", input),
       reopen: (input: PullRefRequest) =>
         rpcCall<PullPublic>(opts, "pull.reopen", input),
+      pin: (input: PullRefRequest) =>
+        rpcCall<PullPublic>(opts, "pull.pin", input),
+      unpin: (input: PullRefRequest) =>
+        rpcCall<PullPublic>(opts, "pull.unpin", input),
       files: (input: PullRefRequest) =>
         rpcCall<PullFilesResponse>(opts, "pull.files", input),
       commits: (input: PullRefRequest) =>
