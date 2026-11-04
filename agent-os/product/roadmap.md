@@ -64,7 +64,7 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [~] **COL-01** Milestones: group issues/PRs by release goal with progress and due dates. Issues side shipped — `milestone.*` RPCs, `issue.milestone.set`, the `/issues/milestones` page and issue panel; PR-side milestone coverage still open.
 - [x] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser. (#99)
 - [ ] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions.
-- [ ] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles.
+- [~] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles. User-profile pins shipped — `user_pinned_repos`, `user.listPinnedRepos`/`user.setPinnedRepos` (≤6, ordered, owned repos), the Pinned cards section and "Customize your pins" dialog. Still open: repo issue/PR pinning and org-profile pins.
 - [ ] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today.
 - [ ] **COL-06** CODEOWNERS-enforced review requests (COLLAB-V2-03).
 - [~] **COL-07** Merge queue and auto-merge-when-green (COLLAB-V2-04). Merge queue shipped — `merge_queue.*` RPCs (enqueue/dequeue/get/list/groups), merge groups, branch-protection "must go through the merge queue" mode, merge-panel UI. Standalone auto-merge-when-green on plain PRs still open (`auto_merge` is stubbed null on the REST surface).
@@ -72,7 +72,7 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [ ] **COL-09** Discussions and gists/snippets as separate sharing surfaces.
 - [ ] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01).
 - [ ] **COL-11** Wiki per repository (COLLAB-V2-02).
-- [ ] **COL-12** Contribution graph / profile activity and profile README support.
+- [x] **COL-12** Contribution graph / profile activity and profile README support. (#230)
 - [x] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (`repo.issues.*`/`repo.pulls.*` `getEnabled`/`setEnabled`, `issue.*`/`pull.*` reject `repo.<unit>.disabled` while off, Settings → Features). Wiki/boards remain future units following the same pattern. (#100)
 
 ## Actions (CI)

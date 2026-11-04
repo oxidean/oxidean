@@ -18,12 +18,17 @@ vi.mock("@/lib/api-client", () => ({
   apiClient: {
     user: {
       getContributions: vi.fn(),
+      listPinnedRepos: vi.fn(),
+    },
+    repo: {
+      languages: vi.fn(),
     },
   },
 }));
 
 import { apiClient } from "@/lib/api-client";
 import { ContributionGraph } from "@/components/profile/contribution-graph";
+import { PinnedReposSection } from "@/components/profile/pinned-repos";
 import { UserContributionsSection } from "@/components/profile/user-contributions-section";
 
 afterEach(cleanup);
@@ -78,6 +83,49 @@ describe("$owner user profile (SOC-02)", () => {
     expect(activity).toMatch(/Contribution activity/);
     expect(activity).toMatch(/data-testid="contribution-month"/);
     expect(activity).toMatch(/truncated/);
+  });
+
+  it("lays the profile out GitHub-style — sidebar + content column", () => {
+    const src = readFileSync(join(dir, "$owner.index.tsrx"), "utf8");
+    // Sidebar carries the identity block; content carries README → pins →
+    // contributions → tabs, in that order.
+    expect(src).toMatch(/<aside[^>]*lg:w-\[296px\]/);
+    expect(src).toMatch(/min-w-0 flex-1/);
+    // Order is checked inside UserProfilePage only — the org overview
+    // renders its own ReadmePanel earlier in the file.
+    const userPage = src.indexOf("export function UserProfilePage");
+    const readme = src.indexOf("ReadmePanel html={profileReadme.html}", userPage);
+    const pins = src.indexOf("<PinnedReposSection", userPage);
+    const contrib = src.indexOf("<UserContributionsSection", userPage);
+    const tabs = src.indexOf('onClick={() => setTab("repos")}', userPage);
+    expect(readme).toBeGreaterThan(-1);
+    expect(pins).toBeGreaterThan(readme);
+    expect(contrib).toBeGreaterThan(pins);
+    expect(tabs).toBeGreaterThan(contrib);
+    // Owner actions: Edit profile link + contribution settings dropdown.
+    expect(src).toMatch(/data-testid="profile-edit-button"/);
+    expect(src).toMatch(/isSelf={isSelf}/);
+
+    const section = readFileSync(
+      join(dir, "../components/profile/user-contributions-section.tsrx"),
+      "utf8",
+    );
+    expect(section).toMatch(/ContributionSettingsMenu/);
+    expect(section).toMatch(/show_private_contributions/);
+    expect(section).toMatch(/data-testid="contribution-settings-trigger"/);
+  });
+
+  it("wires the pinned-repos section (COL-04)", () => {
+    const src = readFileSync(
+      join(dir, "../components/profile/pinned-repos.tsrx"),
+      "utf8",
+    );
+    expect(src).toMatch(/apiClient\.user\.listPinnedRepos/);
+    expect(src).toMatch(/apiClient\.user\.setPinnedRepos/);
+    expect(src).toMatch(/data-testid="pinned-repos"/);
+    expect(src).toMatch(/Customize your pins/);
+    // Six-pin cap is GitHub parity.
+    expect(src).toMatch(/MAX_PINS = 6/);
   });
 });
 
@@ -222,6 +270,79 @@ describe("contribution components (COL-12)", () => {
     // end, not "current".
     expect(screen.getByTestId("contribution-streaks")).toHaveTextContent(
       "End-of-range streak: 2 days · Longest streak: 9 days",
+    );
+  });
+});
+
+describe("pinned repos section (COL-04)", () => {
+  const repo = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    owner_id: "u1",
+    owner_type: "user",
+    owner_username: "octo",
+    name,
+    description: `${name} description`,
+    visibility: "public",
+    default_branch: "main",
+    updated_at: "2026-01-01T00:00:00Z",
+    can_admin: false,
+    can_write: false,
+    star_count: 7,
+    open_issue_count: 0,
+    open_pull_count: 0,
+    viewer_has_starred: false,
+    fork_count: 2,
+    ...extra,
+  });
+
+  it("renders pinned cards with language, stars and forks", async () => {
+    vi.mocked(apiClient.user.listPinnedRepos).mockResolvedValueOnce({
+      ok: true,
+      data: { repos: [repo("r1", "alpha"), repo("r2", "beta", { visibility: "private" })] },
+    } as never);
+    vi.mocked(apiClient.repo.languages).mockResolvedValue({
+      ok: true,
+      data: { languages: [{ name: "Rust", bytes: 1000, color: "#dea584" }] },
+    } as never);
+    const { container } = renderWithQueryClient(PinnedReposSection, {
+      props: { username: "octo", isSelf: false, candidates: [] },
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="pinned-repos"]')).toBeInTheDocument(),
+    );
+    expect(screen.getByText("octo/alpha")).toBeInTheDocument();
+    expect(screen.getByText("octo/beta")).toBeInTheDocument();
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Rust").length).toBe(2));
+    // Non-owner never sees the customize entry point.
+    expect(container.querySelector('[data-testid="customize-pins"]')).not.toBeInTheDocument();
+  });
+
+  it("hides for non-owner with zero pins; owner keeps the customize entry", async () => {
+    vi.mocked(apiClient.user.listPinnedRepos).mockResolvedValueOnce({
+      ok: true,
+      data: { repos: [] },
+    } as never);
+    const { container, unmount } = renderWithQueryClient(PinnedReposSection, {
+      props: { username: "octo", isSelf: false, candidates: [] },
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[aria-busy="true"]')).not.toBeInTheDocument(),
+    );
+    expect(container.querySelector('[data-testid="pinned-repos"]')).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(apiClient.user.listPinnedRepos).mockResolvedValueOnce({
+      ok: true,
+      data: { repos: [] },
+    } as never);
+    const own = renderWithQueryClient(PinnedReposSection, {
+      props: { username: "octo", isSelf: true, candidates: [] },
+    });
+    await waitFor(() =>
+      expect(
+        own.container.querySelector('[data-testid="customize-pins"]'),
+      ).toBeInTheDocument(),
     );
   });
 });

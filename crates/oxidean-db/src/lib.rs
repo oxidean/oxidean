@@ -35,6 +35,7 @@ pub mod packages;
 pub mod pages;
 pub mod pat_settings;
 pub mod pats;
+pub mod pinned_repos;
 pub mod pool;
 pub mod probe;
 pub mod projects;
@@ -1026,6 +1027,20 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<String>, String> {
         stars::list_starred_repo_ids(self.require_pool()?, user_id, offset, limit).await
+    }
+
+    /// Pinned repo ids for `user_id`, display order (COL-04 profile pins).
+    pub async fn list_pinned_repo_ids(&self, user_id: &str) -> Result<Vec<String>, String> {
+        pinned_repos::list_pinned_repo_ids(self.require_pool()?, user_id).await
+    }
+
+    /// Atomically replace a user's pin list (ordered, caller-validated ids).
+    pub async fn set_pinned_repos(
+        &self,
+        user_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        pinned_repos::set_pinned_repos(self.require_pool()?, user_id, repository_ids).await
     }
 
     pub async fn list_explore_repositories(

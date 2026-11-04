@@ -1033,6 +1033,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /users/{username}/contributions:
+    get:
+      tags:
+      - users
+      summary: Contribution graph payload (`user.getContributions`) — public data only for non-owners
+      operationId: getUserContributions
+      security: []
+      parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      - name: to
+        in: query
+        required: false
+        schema:
+          type:
+          - string
+          - 'null'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserContributions'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /users/{username}/tokens:
     get:
       tags:
@@ -17025,6 +17065,181 @@ components:
       - display_name
       - bio
       description: Public profile DTO — never includes email (D-SOC-06).
+    UserContributions:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        from:
+          type: string
+          description: Effective range (`YYYY-MM-DD`).
+        to:
+          type: string
+        includes_private:
+          type: boolean
+          description: |-
+            True when private-repo contributions are included — only ever set
+            when the viewer is the profile owner.
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserContributionDay'
+          description: Every day in `from`..=`to` (zero-filled).
+        by_type:
+          $ref: '#/components/schemas/UserContributionByType'
+        months:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserContributionMonth'
+          description: Monthly sections, newest first.
+        years:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: |-
+            Selectable years for the year rail — account-creation year through
+            the current year, descending.
+        current_streak:
+          type: integer
+          format: int64
+          description: |-
+            Consecutive contributed days ending `to` (or `to`-1 when `to` is
+            still in progress). Computed over the requested range.
+        longest_streak:
+          type: integer
+          format: int64
+          description: Longest run of consecutive contributed days in the requested range.
+      required:
+      - total
+      - from
+      - to
+      - includes_private
+      - days
+      - by_type
+      - months
+      - years
+      - current_streak
+      - longest_streak
+      description: '`user.getContributions` response.'
+    UserContributionDay:
+      type: object
+      properties:
+        date:
+          type: string
+        count:
+          type: integer
+          format: int64
+      required:
+      - date
+      - count
+      description: One calendar day of contributions (`date` is `YYYY-MM-DD`).
+    UserContributionByType:
+      type: object
+      properties:
+        commits:
+          type: integer
+          format: int64
+        pull_requests:
+          type: integer
+          format: int64
+        issues:
+          type: integer
+          format: int64
+        reviews:
+          type: integer
+          format: int64
+      required:
+      - commits
+      - pull_requests
+      - issues
+      - reviews
+      description: Contribution counts by kind over the requested range.
+    UserContributionMonth:
+      type: object
+      properties:
+        month:
+          type: string
+          description: '`YYYY-MM`.'
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserContributionSection'
+      required:
+      - month
+      - sections
+      description: A calendar month of contribution activity, GitHub-style.
+    UserContributionSection:
+      type: object
+      properties:
+        kind:
+          type: string
+          description: '`commits` | `pull_requests` | `issues` | `reviews` | `repositories`.'
+        total:
+          type: integer
+          format: int64
+          description: Total contributions of this kind in the month.
+        repo_count:
+          type: integer
+          format: int64
+          description: Distinct repos touched.
+        repos:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserContributionRepo'
+          description: Per-repo rollups (`commits`, `repositories` kinds).
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserContributionItem'
+          description: Itemized rows (`pull_requests`, `issues`, `reviews` kinds), capped.
+        truncated:
+          type: boolean
+          description: True when `items` was capped by the per-section item limit.
+      required:
+      - kind
+      - total
+      - repo_count
+      - repos
+      - items
+      - truncated
+      description: |-
+        One kind's block inside a monthly section — either `repos` or `items`
+        is populated depending on the kind.
+    UserContributionRepo:
+      type: object
+      properties:
+        slug:
+          type: string
+          description: '`owner/name`.'
+        count:
+          type: integer
+          format: int64
+      required:
+      - slug
+      - count
+      description: Per-repo rollup inside a monthly section (commits, repositories).
+    UserContributionItem:
+      type: object
+      properties:
+        slug:
+          type: string
+          description: '`owner/name`.'
+        number:
+          type: integer
+          format: int64
+        title:
+          type: string
+        href:
+          type: string
+          description: Route path (`/{owner}/{name}/pull/{n}` or `…/issues/{n}`).
+      required:
+      - slug
+      - number
+      - title
+      - href
+      description: Itemized contribution row (pull requests, issues, reviews).
     OrgPublic:
       type: object
       properties:

@@ -555,6 +555,26 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/profile/pinned-repos.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/profile/pinned.browser.test.tsx",
+        subject: "customize-pins",
+      },
+    ],
+  },
+  {
+    surface: "components/profile/user-contributions-section.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/profile/pinned.browser.test.tsx",
+        subject: "contribution-settings",
+      },
+    ],
+  },
+  {
     surface: "routes/settings/tokens.index.tsrx",
     coverage: [{ kind: "stack-browser", test: SETTINGS_AVATAR, subject: "tokens" }],
   },

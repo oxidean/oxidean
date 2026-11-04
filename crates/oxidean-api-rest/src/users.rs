@@ -6,8 +6,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Json;
 use oxidean_core::{
-    CreateRepoRequest, ListStarredRequest, OrgListMineResponse, PublicUserProfile,
-    RepoListMineResponse, RepoPublic, RpcResponse, UserPublic,
+    CreateRepoRequest, GetContributionsRequest, ListStarredRequest, OrgListMineResponse,
+    PublicUserProfile, RepoListMineResponse, RepoPublic, RpcResponse, UserContributions,
+    UserPublic,
 };
 use schemars::SchemaGenerator;
 use serde::Deserialize;
@@ -518,6 +519,23 @@ pub const ROUTES: &[RouteDef] = &[
         )),
         mount: || get(list_user_repos),
     },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/contributions",
+        tags: &["users"],
+        operation_id: "getUserContributions",
+        summary: "Contribution graph payload (`user.getContributions`) — public data only for non-owners",
+        procedure: "user.getContributions",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["username"],
+        query: Some(SchemaGenerator::into_root_schema_for::<GetContributionsRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<UserContributions>,
+        )),
+        mount: || get(get_user_contributions),
+    },
     // Gitea access-token REST (`/users/{username}/tokens`) — self-service
     // PAT management; what `tea login`-style clients mint tokens through.
     RouteDef {
@@ -871,6 +889,34 @@ async fn get_user(
         &headers,
         "user.getPublicProfile",
         json!({ "username": p.username }),
+        StatusCode::OK,
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+pub struct ContributionsQuery {
+    /// ISO-8601 `YYYY-MM-DD` — range start (default: `to` − 365 days).
+    #[serde(default)]
+    pub from: Option<String>,
+    /// ISO-8601 `YYYY-MM-DD` — range end (default: today).
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+/// `GET /api/v1/users/{username}/contributions` (`user.getContributions`) —
+/// anonymous-safe; private-repo counts only for the cookie-session owner.
+async fn get_user_contributions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<UserPath>,
+    Query(q): Query<ContributionsQuery>,
+) -> Response {
+    call(
+        &state,
+        &headers,
+        "user.getContributions",
+        json!({ "username": p.username, "from": q.from, "to": q.to }),
         StatusCode::OK,
     )
     .await
