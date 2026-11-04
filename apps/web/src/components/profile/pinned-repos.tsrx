@@ -188,7 +188,9 @@ function CustomizePinsDialog(props: {
           {`${selected.length} of ${MAX_PINS} selected` as string}
         </span>
         @if (error) {
-          <span className="text-destructive" role="alert">{error as string}</span>;
+          <span className="text-destructive" role="alert">
+            {error as string}
+          </span>;
         }
       </div>
       <DialogFooter>
