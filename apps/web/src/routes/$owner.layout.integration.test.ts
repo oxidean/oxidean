@@ -10,6 +10,19 @@ import { renderWithQueryClient } from "@/test/render-with-query";
 
 const orgOverviewMock = vi.fn();
 const userProfileMock = vi.fn();
+const orgListPinnedMock = vi.fn();
+const repoLanguagesMock = vi.fn();
+
+vi.mock("@/lib/api-client", () => ({
+  apiClient: {
+    org: {
+      listPinnedRepos: (...args: unknown[]) => orgListPinnedMock(...args),
+    },
+    repo: {
+      languages: (...args: unknown[]) => repoLanguagesMock(...args),
+    },
+  },
+}));
 
 vi.mock("@/lib/ssr-org", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ssr-org")>();
@@ -61,6 +74,10 @@ const ORG_PAYLOAD = {
 beforeEach(() => {
   orgOverviewMock.mockReset();
   userProfileMock.mockReset();
+  orgListPinnedMock.mockReset();
+  repoLanguagesMock.mockReset();
+  orgListPinnedMock.mockResolvedValue({ ok: true, data: { repos: [] } });
+  repoLanguagesMock.mockResolvedValue({ ok: true, data: { languages: [] } });
   orgOverviewMock.mockResolvedValue(ORG_PAYLOAD);
   userProfileMock.mockResolvedValue(null);
   window.history.pushState({}, "", "/acme");
@@ -96,5 +113,23 @@ describe("/$owner index resolution", () => {
       },
       { timeout: 10_000 },
     );
+  }, 15_000);
+
+  it("org overview mounts the pinned-repos section and loads org pins (COL-04)", async () => {
+    orgListPinnedMock.mockResolvedValue({
+      ok: true,
+      data: { repos: [ORG_PAYLOAD.repos[0]] },
+    });
+    renderWithQueryClient(OrgOverviewPage);
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("pinned-repos")).toBeTruthy();
+      },
+      { timeout: 10_000 },
+    );
+    expect(orgListPinnedMock).toHaveBeenCalledWith({ slug: "acme" });
+    // Org Admin (canAdmin) gets the customize entry point.
+    expect(screen.getByTestId("customize-pins")).toBeTruthy();
   }, 15_000);
 });

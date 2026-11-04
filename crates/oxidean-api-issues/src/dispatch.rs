@@ -26,6 +26,8 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "issue.update" => arm!(issue::update(ctx, input)),
         "issue.close" => arm!(issue::close(ctx, input)),
         "issue.reopen" => arm!(issue::reopen(ctx, input)),
+        "issue.pin" => arm!(issue::pin(ctx, input)),
+        "issue.unpin" => arm!(issue::unpin(ctx, input)),
         "issue.history" => arm!(issue::history(ctx, input)),
         "issue.delete" => arm!(issue::delete(ctx, input)),
         "issue.comments.list" => arm!(issue::comments_list(ctx, input)),

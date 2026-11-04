@@ -104,7 +104,7 @@ describe("$owner user profile (SOC-02)", () => {
     expect(tabs).toBeGreaterThan(contrib);
     // Owner actions: Edit profile link + contribution settings dropdown.
     expect(src).toMatch(/data-testid="profile-edit-button"/);
-    expect(src).toMatch(/isSelf={isSelf}/);
+    expect(src).toMatch(/canCustomize={isSelf}/);
 
     const section = readFileSync(
       join(dir, "../components/profile/user-contributions-section.tsrx"),
@@ -302,7 +302,7 @@ describe("pinned repos section (COL-04)", () => {
       data: { languages: [{ name: "Rust", bytes: 1000, color: "#dea584" }] },
     } as never);
     const { container } = renderWithQueryClient(PinnedReposSection, {
-      props: { username: "octo", isSelf: false, candidates: [] },
+      props: { kind: "user", slug: "octo", canCustomize: false, candidates: [] },
     });
     await waitFor(() =>
       expect(container.querySelector('[data-testid="pinned-repos"]')).toBeInTheDocument(),
@@ -321,7 +321,7 @@ describe("pinned repos section (COL-04)", () => {
       data: { repos: [] },
     } as never);
     const { container, unmount } = renderWithQueryClient(PinnedReposSection, {
-      props: { username: "octo", isSelf: false, candidates: [] },
+      props: { kind: "user", slug: "octo", canCustomize: false, candidates: [] },
     });
     await waitFor(() =>
       expect(container.querySelector('[aria-busy="true"]')).not.toBeInTheDocument(),
@@ -334,7 +334,7 @@ describe("pinned repos section (COL-04)", () => {
       data: { repos: [] },
     } as never);
     const own = renderWithQueryClient(PinnedReposSection, {
-      props: { username: "octo", isSelf: true, candidates: [] },
+      props: { kind: "user", slug: "octo", canCustomize: true, candidates: [] },
     });
     await waitFor(() =>
       expect(own.container.querySelector('[data-testid="customize-pins"]')).toBeInTheDocument(),

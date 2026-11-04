@@ -175,6 +175,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
         return Ok(IssueListResponse {
             issues: vec![],
             total: 0,
+            pinned: vec![],
         });
     }
     let assignee_id = resolve_username_filter(ctx, req.assignee.as_deref()).await?;
@@ -188,6 +189,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
         return Ok(IssueListResponse {
             issues: vec![],
             total: 0,
+            pinned: vec![],
         });
     }
     let label_id = req
@@ -221,6 +223,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
                 return Ok(IssueListResponse {
                     issues: vec![],
                     total: 0,
+                    pinned: vec![],
                 });
             }
             row
@@ -235,6 +238,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
         },
         _ => oxidean_db::MilestoneListFilter::Any,
     };
+    let milestone_is_any = matches!(milestone, oxidean_db::MilestoneListFilter::Any);
 
     let filters = oxidean_db::IssueListFilters {
         state,
@@ -252,7 +256,31 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
         .await
         .map_err(db_err)?;
     let issues = to_public_many(ctx, &rows).await?;
-    Ok(IssueListResponse { issues, total })
+
+    // GitHub shows the pinned box only on the unfiltered open first page —
+    // any active filter, closed/all state, or pagination drops it.
+    let pinned = if state == "open"
+        && offset == 0
+        && author_id.is_none()
+        && assignee_id.is_none()
+        && label_id.is_none()
+        && milestone_is_any
+        && q.is_none()
+    {
+        let rows = ctx
+            .db
+            .list_pinned_issues(&accessible.row.id)
+            .await
+            .map_err(db_err)?;
+        to_public_many(ctx, &rows).await?
+    } else {
+        vec![]
+    };
+    Ok(IssueListResponse {
+        issues,
+        total,
+        pinned,
+    })
 }
 
 async fn resolve_username_filter(
@@ -446,6 +474,60 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     )
     .await;
     notify_actions_issue(ctx, &accessible, "reopened", &updated, &user).await;
+    to_public(ctx, &updated).await
+}
+
+/// `issue.pin` — Write+; add to the repo's pinned box (≤`MAX_PINNED_ISSUES`,
+/// GitHub parity). Idempotent — pinning an already-pinned issue returns it
+/// unchanged.
+pub async fn pin(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.pin input: {e}")))?;
+    // Maintainer-only action — the author-or-Write `can_edit_issue` ladder
+    // does not apply (GitHub gates pin to users with write access).
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if row.pinned_position.is_none() {
+        ctx.db
+            .pin_issue(
+                &accessible.row.id,
+                &row.id,
+                oxidean_core::MAX_PINNED_ISSUES as i64,
+            )
+            .await
+            .map_err(|e| {
+                if e == oxidean_db::issues::ISSUE_TOO_MANY_PINS {
+                    AppError::new(
+                        "issue.too_many_pins",
+                        format!(
+                            "at most {} issues can be pinned",
+                            oxidean_core::MAX_PINNED_ISSUES
+                        ),
+                    )
+                } else {
+                    db_err(e)
+                }
+            })?;
+    }
+    let updated = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    to_public(ctx, &updated).await
+}
+
+/// `issue.unpin` — Write+; remove from the pinned box (survivors renumber).
+pub async fn unpin(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
+    let _user = require_verified(ctx).await?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.unpin input: {e}")))?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if row.pinned_position.is_some() {
+        ctx.db
+            .unpin_issue(&accessible.row.id, &row.id)
+            .await
+            .map_err(db_err)?;
+    }
+    let updated = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     to_public(ctx, &updated).await
 }
 

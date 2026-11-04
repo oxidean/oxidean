@@ -196,6 +196,7 @@ pub fn issue_to_public(
         reactions,
         milestone,
         comment_count: row.comment_count,
+        pinned: row.pinned_position.is_some(),
     })
 }
 

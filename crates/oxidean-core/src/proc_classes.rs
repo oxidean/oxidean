@@ -172,6 +172,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "user.getContributions"
         | "user.listPinnedRepos"
         | "org.get"
+        | "org.listPinnedRepos"
         | "repo.explore"
         | "invites.get" => Open,
 
@@ -261,6 +262,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "issue.links.add"
         | "issue.links.remove"
         | "issue.milestone.set"
+        | "issue.pin"
+        | "issue.unpin"
         | "milestone.create"
         | "milestone.update"
         | "milestone.delete"
@@ -295,6 +298,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.reviewRequests.remove"
         | "pull.merge"
         | "pull.updateBranch"
+        | "pull.pin"
+        | "pull.unpin"
         | "merge_queue.enqueue"
         | "merge_queue.dequeue" => PullsWrite,
 
@@ -528,7 +533,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "org.members.updateRole"
         | "org.invites.create"
         | "org.invites.createLink"
-        | "org.invites.revoke" => OrgWrite,
+        | "org.invites.revoke"
+        | "org.setPinnedRepos" => OrgWrite,
 
         "packages.list" => PackageRead,
         "packages.deleteVersion" | "packages.delete" => PackageDelete,

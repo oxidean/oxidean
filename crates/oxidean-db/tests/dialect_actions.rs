@@ -161,8 +161,10 @@ async fn migrate_reseats_pre_rebase_versions() {
             (94, "user contribution indexes"),
             (95, "user contribution tables"),
             (96, "user pinned repos"),
+            (97, "issue pull pins"),
+            (98, "org pinned repos"),
         ],
-        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84, oxpilot at 85-93, contributions at 94-95, and pins at 96"
+        "post-repair ledger should hold vcs at 53-55 then the actions block at 56-84, oxpilot at 85-93, contributions at 94-95, and pins at 96-98"
     );
     // Repair is idempotent — a second migrate changes nothing.
     db.migrate().await.expect("idempotent migrate");

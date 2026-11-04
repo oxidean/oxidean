@@ -714,6 +714,7 @@ pub fn pull_row_to_public(row: &PullRow, enr: &PullEnrichment) -> Result<PullPub
         updated_at: row.updated_at.clone(),
         comment_count: row.comment_count,
         assignees,
+        pinned: row.pinned_position.is_some(),
     })
 }
 

@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{handlers, invites, members, runners, secrets, vars};
+use crate::{handlers, invites, members, pinned, runners, secrets, vars};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -44,6 +44,8 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "org.invites.list" => arm!(invites::list(ctx, input)),
         "org.invites.revoke" => arm!(invites::revoke(ctx, input)),
         "org.listMine" => arm!(handlers::list_mine(ctx)),
+        "org.listPinnedRepos" => arm!(pinned::list_pinned(ctx, input)),
+        "org.setPinnedRepos" => arm!(pinned::set_pinned(ctx, input)),
         "org.members.add" => arm!(members::add(ctx, input)),
         "org.members.list" => arm!(members::list(ctx, input)),
         "org.members.remove" => arm!(members::remove(ctx, input)),

@@ -19,6 +19,8 @@ const setPinnedMock = vi.fn();
 const getContributionsMock = vi.fn();
 const updateProfileMock = vi.fn();
 const languagesMock = vi.fn();
+const orgListPinnedMock = vi.fn();
+const orgSetPinnedMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -35,6 +37,10 @@ vi.mock("@/lib/api-client", () => ({
       setPinnedRepos: (...args: unknown[]) => setPinnedMock(...args),
       getContributions: (...args: unknown[]) => getContributionsMock(...args),
       updateProfile: (...args: unknown[]) => updateProfileMock(...args),
+    },
+    org: {
+      listPinnedRepos: (...args: unknown[]) => orgListPinnedMock(...args),
+      setPinnedRepos: (...args: unknown[]) => orgSetPinnedMock(...args),
     },
     repo: {
       languages: (...args: unknown[]) => languagesMock(...args),
@@ -105,6 +111,8 @@ beforeEach(() => {
   ]) {
     m.mockReset();
   }
+  orgListPinnedMock.mockReset();
+  orgSetPinnedMock.mockReset();
   meMock.mockReset();
   meMock.mockResolvedValue({ ok: true, data: user });
   updateProfileMock.mockImplementation(async (input: Record<string, unknown>) => ({
@@ -142,8 +150,9 @@ describe("profile pinned repos browser DOM races", () => {
         data: { repos: [repo("r1", "alpha")] },
       });
       await mountWithQueryClient(PinnedReposSection, {
-        username: "ada",
-        isSelf: true,
+        kind: "user",
+        slug: "ada",
+        canCustomize: true,
         candidates: [repo("r1", "alpha"), repo("r2", "beta")],
       });
 
@@ -169,6 +178,53 @@ describe("profile pinned repos browser DOM races", () => {
       expect(setPinnedMock).toHaveBeenCalledWith({
         repo_ids: expect.arrayContaining(["r1", "r2"]),
       });
+
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("org kind lists and saves pins via the org RPCs", async () => {
+    const tracker = trackDomErrors();
+    try {
+      orgListPinnedMock.mockResolvedValue({
+        ok: true,
+        data: { repos: [repo("r1", "alpha")] },
+      });
+      orgSetPinnedMock.mockImplementation(async (input: { repo_ids: string[] }) => ({
+        ok: true,
+        data: { repos: (input.repo_ids ?? []).map((id) => repo(id, `r-${id}`)) },
+      }));
+      await mountWithQueryClient(PinnedReposSection, {
+        kind: "org",
+        slug: "acme",
+        canCustomize: true,
+        candidates: [repo("r1", "alpha"), repo("r2", "beta")],
+      });
+
+      const customize = await waitForSelector('[data-testid="customize-pins"]');
+      await act(async () => {
+        (customize as HTMLElement).click();
+      });
+
+      await waitForSelector('[data-testid="customize-pins-dialog"]');
+      const beta = await waitForSelector('[aria-label="Pin beta"]');
+      await act(async () => {
+        (beta as HTMLElement).click();
+      });
+      const save = await waitForSelector('[data-testid="save-pins-button"]');
+      await act(async () => {
+        (save as HTMLElement).click();
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(orgSetPinnedMock).toHaveBeenCalledWith({
+        slug: "acme",
+        repo_ids: expect.arrayContaining(["r1", "r2"]),
+      });
+      // The user RPCs are untouched on the org path.
+      expect(setPinnedMock).not.toHaveBeenCalled();
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

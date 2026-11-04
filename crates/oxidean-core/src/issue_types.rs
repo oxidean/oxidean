@@ -144,7 +144,14 @@ pub struct IssuePublic {
     /// Number of comments on the issue (shown on list rows).
     #[serde(default)]
     pub comment_count: i64,
+    /// Repo-maintainer pin (COL-04) — pinned issues surface in the pinned box
+    /// above the open-issue list.
+    #[serde(default)]
+    pub pinned: bool,
 }
+
+/// GitHub parity — at most three pinned issues per repository.
+pub const MAX_PINNED_ISSUES: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct IssueAssigneePublic {
@@ -363,6 +370,10 @@ pub struct IssueListRequest {
 pub struct IssueListResponse {
     pub issues: Vec<IssuePublic>,
     pub total: i64,
+    /// Pinned issues for the pinned box — populated only on the unfiltered
+    /// open first page (GitHub hides the box under filters/state/offset).
+    #[serde(default)]
+    pub pinned: Vec<IssuePublic>,
 }
 
 /// Reaction target for `issue.reactions.toggle` (D-ISS-11).

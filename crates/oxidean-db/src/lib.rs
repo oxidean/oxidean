@@ -1043,6 +1043,62 @@ impl Database {
         pinned_repos::set_pinned_repos(self.require_pool()?, user_id, repository_ids).await
     }
 
+    /// Pinned repo ids for `org_id`, display order (COL-04 org pins).
+    pub async fn list_org_pinned_repo_ids(&self, org_id: &str) -> Result<Vec<String>, String> {
+        pinned_repos::list_org_pinned_repo_ids(self.require_pool()?, org_id).await
+    }
+
+    /// Atomically replace an org's pin list (ordered, caller-validated ids).
+    pub async fn set_org_pinned_repos(
+        &self,
+        org_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        pinned_repos::set_org_pinned_repos(self.require_pool()?, org_id, repository_ids).await
+    }
+
+    /// Pinned issues for `repo_id`, display order (COL-04 repo pins).
+    pub async fn list_pinned_issues(&self, repo_id: &str) -> Result<Vec<IssueRow>, String> {
+        issues::list_pinned_issues(self.require_pool()?, repo_id).await
+    }
+
+    /// Pin `issue_id` at the next position — `Err(issues::ISSUE_TOO_MANY_PINS)`
+    /// at the cap, no-op when already pinned.
+    pub async fn pin_issue(
+        &self,
+        repo_id: &str,
+        issue_id: &str,
+        max_pins: i64,
+    ) -> Result<(), String> {
+        issues::pin_issue(self.require_pool()?, repo_id, issue_id, max_pins).await
+    }
+
+    /// Unpin `issue_id` and renumber the survivors contiguously.
+    pub async fn unpin_issue(&self, repo_id: &str, issue_id: &str) -> Result<(), String> {
+        issues::unpin_issue(self.require_pool()?, repo_id, issue_id).await
+    }
+
+    /// Pinned pull requests for `repo_id`, display order (COL-04 repo pins).
+    pub async fn list_pinned_pulls(&self, repo_id: &str) -> Result<Vec<PullRow>, String> {
+        pulls::list_pinned_pulls(self.require_pool()?, repo_id).await
+    }
+
+    /// Pin `pull_id` at the next position — `Err(pulls::PULL_TOO_MANY_PINS)`
+    /// at the cap, no-op when already pinned.
+    pub async fn pin_pull(
+        &self,
+        repo_id: &str,
+        pull_id: &str,
+        max_pins: i64,
+    ) -> Result<(), String> {
+        pulls::pin_pull(self.require_pool()?, repo_id, pull_id, max_pins).await
+    }
+
+    /// Unpin `pull_id` and renumber the survivors contiguously.
+    pub async fn unpin_pull(&self, repo_id: &str, pull_id: &str) -> Result<(), String> {
+        pulls::unpin_pull(self.require_pool()?, repo_id, pull_id).await
+    }
+
     pub async fn list_explore_repositories(
         &self,
         q: Option<&str>,

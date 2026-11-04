@@ -188,6 +188,8 @@ export function OrgOverviewPage() @{
         <ReadmePanel html={profileReadme.html} fileName={profileReadme.name} />;
       }
 
+      <PinnedReposSection kind="org" slug={slug} canCustomize={canAdmin} candidates={repos} />
+
       <section className="mt-10" aria-labelledby="org-repos-heading">
         <h2
           id="org-repos-heading"
@@ -365,7 +367,12 @@ export function UserProfilePage() @{
             <ReadmePanel html={profileReadme.html} fileName={profileReadme.name} />;
           }
 
-          <PinnedReposSection username={username} isSelf={isSelf} candidates={repos} />
+          <PinnedReposSection
+            kind="user"
+            slug={username}
+            canCustomize={isSelf}
+            candidates={repos}
+          />
 
           <UserContributionsSection username={username} isSelf={isSelf} />
 

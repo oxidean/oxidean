@@ -28,6 +28,8 @@ pub struct PullRow {
     pub closed_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// 0-based pin display order; `NULL` = not pinned (COL-04).
+    pub pinned_position: Option<i64>,
     /// Derived `pull_comments` count carried by every `PULL_COLS` select.
     pub comment_count: i64,
 }
@@ -110,6 +112,13 @@ macro_rules! map_pull {
             updated_at: row
                 .try_get("updated_at")
                 .map_err(|e| format!("pull row: {e}"))?,
+            pinned_position: row
+                .try_get::<Option<i64>, _>("pinned_position")
+                .or_else(|_| {
+                    row.try_get::<Option<i32>, _>("pinned_position")
+                        .map(|v| v.map(i64::from))
+                })
+                .map_err(|e| format!("pull row: {e}"))?,
             comment_count: {
                 let v: i64 = row
                     .try_get("comment_count")
@@ -124,7 +133,7 @@ macro_rules! map_pull {
 const PULL_COLS: &str = concat!(
     "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, ",
     "head_repo_id, head_ref, head_sha, merged_at, merged_by, merge_commit_sha, merge_method, ",
-    "closed_at, closed_by, created_at, updated_at, ",
+    "closed_at, closed_by, created_at, updated_at, pinned_position, ",
     "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -137,6 +146,7 @@ const PULL_COLS_PG: &str = concat!(
     "closed_by, ",
     "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, ",
     "to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at, ",
+    "pinned_position, ",
     "(SELECT COUNT(*)::bigint FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -149,6 +159,7 @@ const PULL_COLS_MYSQL: &str = concat!(
     "closed_by, ",
     "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, ",
     "DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at, ",
+    "pinned_position, ",
     "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -533,6 +544,252 @@ pub async fn count_open_pulls_for_repo(pool: &DbPool, repo_id: &str) -> Result<i
         .fetch_one(p)
         .await
         .map_err(|e| format!("count open pulls failed: {e}")),
+    }
+}
+
+// --- Pinned pull requests (COL-04) ------------------------------------------
+
+/// Sentinel `Err` from [`pin_pull`] when the repo is at its pin cap —
+/// handlers map it to `pull.too_many_pins`.
+pub const PULL_TOO_MANY_PINS: &str = "pull.too_many_pins";
+
+/// Pinned PRs for a repo in display order (any state — a closed/merged pin
+/// stays pinned).
+pub async fn list_pinned_pulls(pool: &DbPool, repo_id: &str) -> Result<Vec<PullRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS_PG} FROM pull_requests WHERE repo_id = $1 AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE repo_id = ? AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?1 AND pinned_position IS NOT NULL ORDER BY pinned_position"
+            )))
+            .bind(repo_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pinned pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Pin `pull_id` at the end of the repo's pin list. No-op when already
+/// pinned; `Err(PULL_TOO_MANY_PINS)` when `max_pins` are taken. The count
+/// check + max-position write happen in one transaction so concurrent pins
+/// can't overshoot the cap.
+pub async fn pin_pull(
+    pool: &DbPool,
+    repo_id: &str,
+    pull_id: &str,
+    max_pins: i64,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = $1 FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("pin pull repo lock failed: {e}"))?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0)::bigint FROM pull_requests WHERE repo_id = $1 AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(PULL_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = $2 WHERE id = $1 AND repo_id = $3 AND pinned_position IS NULL",
+            )
+            .bind(pull_id)
+            .bind(next)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = ? FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("pin pull repo lock failed: {e}"))?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0) FROM pull_requests WHERE repo_id = ? AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(PULL_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = ? WHERE id = ? AND repo_id = ? AND pinned_position IS NULL",
+            )
+            .bind(next)
+            .bind(pull_id)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let (count, next): (i64, i64) = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(pinned_position) + 1, 0) FROM pull_requests WHERE repo_id = ?1 AND pinned_position IS NOT NULL",
+            )
+            .bind(repo_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull count failed: {e}"))?;
+            if count >= max_pins {
+                return Err(PULL_TOO_MANY_PINS.into());
+            }
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = ?2 WHERE id = ?1 AND repo_id = ?3 AND pinned_position IS NULL",
+            )
+            .bind(pull_id)
+            .bind(next)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("pin pull failed: {e}"))?;
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Unpin `pull_id` and renumber the survivors so positions stay contiguous
+/// (0-based, ordered) — one transaction, no partial renumber visible.
+pub async fn unpin_pull(pool: &DbPool, repo_id: &str, pull_id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = $1 FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin pull repo lock failed: {e}"))?;
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = NULL WHERE id = $1 AND repo_id = $2",
+            )
+            .bind(pull_id)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM pull_requests WHERE repo_id = $1 AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE pull_requests SET pinned_position = $1 WHERE id = $2")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = ? FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin pull repo lock failed: {e}"))?;
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = NULL WHERE id = ? AND repo_id = ?",
+            )
+            .bind(pull_id)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM pull_requests WHERE repo_id = ? AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE pull_requests SET pinned_position = ? WHERE id = ?")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(
+                "UPDATE pull_requests SET pinned_position = NULL WHERE id = ?1 AND repo_id = ?2",
+            )
+            .bind(pull_id)
+            .bind(repo_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull failed: {e}"))?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM pull_requests WHERE repo_id = ?1 AND pinned_position IS NOT NULL ORDER BY pinned_position",
+            )
+            .bind(repo_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            for (pos, id) in ids.iter().enumerate() {
+                sqlx::query("UPDATE pull_requests SET pinned_position = ?1 WHERE id = ?2")
+                    .bind(pos as i64)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unpin pull renumber failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
     }
 }
 

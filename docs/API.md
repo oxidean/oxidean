@@ -113,6 +113,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `org.create` | Create organization; slug shares username reserved list | Session + verified email |
 | `org.get` | Org profile by slug | Anonymous OK; unknown → `org.not_found` |
 | `org.listMine` | Orgs the caller belongs to (includes caller `role`) | Session + verified |
+| `org.listPinnedRepos` | Profile pins for `/{org}` in display order (Read ACL filter, like `user.listPinnedRepos`) | Anonymous OK; unknown → `org.not_found` |
+| `org.setPinnedRepos` | Replace the org's pins — ordered `repo_ids`, ≤6, org-owned repos only | Org Admin+ |
 | `org.updateSettings` | Update `display_name` / `member_base_permission` | Org Admin+ |
 | `org.members.list` | Members (`username`, `role`, ids — no emails) | Org member |
 | `org.members.add` / `updateRole` / `remove` | Membership mutations | Org Admin+ (Owner-only for Owner grants) |
@@ -162,6 +164,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.pat.getSettings` / `updateSettings` | PAT expiration policy — env defaults vs stored overrides (`default_ttl_days`, `max_ttl_days`, `allow_never_expire`); `clear_overrides` reverts | Sys-admin |
 | `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); create/comment/react = verified + Read; edit/close/reopen = author or Write+ | Session (+ capability) |
 | `issue.comments.*` | Comment CRUD + history; author or Write+ moderate-delete | Session (+ capability) |
+| `issue.pin` / `issue.unpin` | Pinned-issue box entries — ordered, ≤3 per repo; `pinned` flag on `IssuePublic`, `pinned` list on `issue.list` for the unfiltered open first page | Session (+ Write+) |
 | `issue.labels.set` / `assignees.set` / `assigneeCandidates` | Assign labels / assignees (Write+; assignees must have Read+) | Session (+ capability) |
 | `issue.reactions.toggle` | Toggle emoji reaction on issue or comment | Session + verified (+ Read) |
 | `issue.links.list` / `add` / `remove` | Linked issues/PRs (`pr` preferred; legacy `pr_stub` kept) | Session (+ capability) |
@@ -172,6 +175,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.file.create` / `update` / `delete` / `rename` / `upload` / `mkdir` | Browser file edits committed via the web-flow signing key; `new_branch` + `open_pr` for the protected-branch → PR flow | Session + Write+ |
 | `repo.file.commitPolicy` | Whether direct commits to `branch` are allowed or the PR flow is required | Session + Write+ |
 | `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
+| `pull.pin` / `pull.unpin` | Pinned-PR box entries — ordered, ≤3 per repo; `pinned` flag on `PullPublic`, `pinned` list on `pull.list` for the unfiltered open first page | Session (+ Write+) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
 | `pull.comments.list` / `create` / `update` / `delete` / `history` / `resolve` | General + line comments; create = verified + Read, update = author, delete = author or Write+, history = Read+, resolve = Write+ | Session (+ capability) |
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |

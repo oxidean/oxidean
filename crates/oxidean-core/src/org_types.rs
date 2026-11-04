@@ -145,6 +145,15 @@ pub struct OrgSlugRequest {
     pub slug: String,
 }
 
+/// `org.setPinnedRepos` — org-owned repo ids in display order, capped at
+/// [`crate::MAX_PINNED_REPOS`] (COL-04 org half). Response reuses
+/// `RepoListMineResponse`; `org.listPinnedRepos` reuses `OrgSlugRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetOrgPinnedReposRequest {
+    pub slug: String,
+    pub repo_ids: Vec<String>,
+}
+
 /// `org.updateSettings` — Admin+ (D-ORG-02b).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgUpdateSettingsRequest {

@@ -115,6 +115,23 @@ describe("Phase 12 Pulls UI", () => {
     expect(pullsNew).toMatch(/pull-new-head-owner/);
   });
 
+  it("pinned box renders pinned pull requests above the list (COL-04)", () => {
+    const pullsList = readFileSync(
+      join(process.cwd(), "src/components/repo/pulls-list.tsrx"),
+      "utf8",
+    );
+    expect(pullsList).toMatch(/list\.pinned/);
+    expect(pullsList).toMatch(/data-testid="pinned-pulls"/);
+    expect(pullsList).toMatch(/Pinned pull requests/);
+  });
+
+  it("pull detail pin toggle is Write+-gated and calls pull.pin / pull.unpin (COL-04)", () => {
+    expect(pullDetail).toMatch(/data-testid="pull-pin-toggle"/);
+    expect(pullDetail).toMatch(/apiClient\.pull\.pin\(/);
+    expect(pullDetail).toMatch(/apiClient\.pull\.unpin\(/);
+    expect(pullDetail).toMatch(/@if \(canWrite\)/);
+  });
+
   it("pulls list rows show assignees when present", () => {
     const pullsList = readFileSync(
       join(process.cwd(), "src/components/repo/pulls-list.tsrx"),

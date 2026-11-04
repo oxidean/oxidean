@@ -160,6 +160,26 @@ function PullDetailPageContent() @{
     });
   }
 
+  async function togglePin() {
+    if (!pull) return;
+    setBusy(true);
+    setError(null);
+    const res = pull.pinned
+      ? await apiClient.pull.unpin({ owner, name: repoName, number })
+      : await apiClient.pull.pin({ owner, name: repoName, number });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not update pin.");
+      return;
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ["pull", "get", owner, repoName, number],
+    });
+    await queryClient.invalidateQueries({
+      queryKey: ["pull", "list", owner, repoName],
+    });
+  }
+
   @if (loader?.kind === "not_found") {
     <RepoNotFound />;
   } @else {
@@ -240,6 +260,18 @@ function PullDetailPageContent() @{
                     onClick={() => void reopenPull()}
                   >
                     Reopen pull request
+                  </Button>;
+                }
+                @if (canWrite) {
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    data-testid="pull-pin-toggle"
+                    onClick={() => void togglePin()}
+                  >
+                    {(pull.pinned ? "Unpin" : "Pin") as string}
                   </Button>;
                 }
               </div>;

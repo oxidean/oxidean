@@ -8,6 +8,7 @@ mod dispatch;
 pub mod handlers;
 pub mod invites;
 pub mod members;
+pub mod pinned;
 pub mod runners;
 pub mod secrets;
 pub mod vars;
@@ -40,9 +41,11 @@ pub const PROCEDURES: &[&str] = &[
     "org.invites.list",
     "org.invites.revoke",
     "org.listMine",
+    "org.listPinnedRepos",
     "org.members.add",
     "org.members.list",
     "org.members.remove",
     "org.members.updateRole",
+    "org.setPinnedRepos",
     "org.updateSettings",
 ];
