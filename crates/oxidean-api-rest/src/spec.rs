@@ -234,6 +234,84 @@ fn rewrite_refs(v: &mut Value) {
     }
 }
 
+/// Convert schemars' draft-2020-12 null unions into OpenAPI 3.0 `nullable`:
+/// `type: [T…, "null"]` drops `"null"` (collapsing a lone remaining type to a
+/// scalar) and `{any,one}Of` branches that are bare `{"type":"null"}` fold
+/// into `nullable: true`. A sole remaining `anyOf`/`oneOf` branch inlines —
+/// wrapped as `allOf` when it is a bare `$ref`, since 3.0 ignores `$ref`
+/// siblings.
+fn to_nullable(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            let mut nullable = false;
+            if let Some(types) = m.get("type").and_then(|t| t.as_array()) {
+                let non_null: Vec<Value> = types
+                    .iter()
+                    .filter(|t| t.as_str() != Some("null"))
+                    .cloned()
+                    .collect();
+                if non_null.len() != types.len() {
+                    nullable = true;
+                    match non_null.len() {
+                        0 => {
+                            m.remove("type");
+                        }
+                        1 => {
+                            m.insert("type".into(), non_null.into_iter().next().unwrap());
+                        }
+                        _ => {
+                            m.insert("type".into(), Value::Array(non_null));
+                        }
+                    }
+                }
+            }
+            for key in ["anyOf", "oneOf"] {
+                let Some(branches) = m.get(key).and_then(|a| a.as_array()) else {
+                    continue;
+                };
+                let bare_null = |b: &Value| {
+                    b.as_object().is_some_and(|o| o.len() == 1)
+                        && b.get("type").and_then(|t| t.as_str()) == Some("null")
+                };
+                let kept: Vec<Value> = branches.iter().filter(|b| !bare_null(b)).cloned().collect();
+                if kept.len() == branches.len() {
+                    continue;
+                }
+                nullable = true;
+                match kept.as_slice() {
+                    [] => {
+                        m.remove(key);
+                    }
+                    [only] => {
+                        let is_ref = only
+                            .as_object()
+                            .is_some_and(|o| o.len() == 1 && o.contains_key("$ref"));
+                        m.remove(key);
+                        if is_ref {
+                            m.insert("allOf".into(), json!([only]));
+                        } else if let Value::Object(inner) = only.clone() {
+                            for (k, val) in inner {
+                                m.insert(k, val);
+                            }
+                        }
+                    }
+                    _ => {
+                        m.insert(key.into(), Value::Array(kept));
+                    }
+                }
+            }
+            if nullable {
+                m.insert("nullable".into(), json!(true));
+            }
+            for val in m.values_mut() {
+                to_nullable(val);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(to_nullable),
+        _ => {}
+    }
+}
+
 fn error_schema() -> Value {
     json!({
         "type": "object",
@@ -376,6 +454,7 @@ pub fn openapi_doc() -> Value {
         },
     });
     rewrite_refs(&mut doc);
+    to_nullable(&mut doc);
     doc
 }
 

@@ -146,58 +146,51 @@ paths:
                 name:
                   type: string
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 visibility:
                   description: When omitted, API uses instance `default_visibility` (else public) — D-08.
-                  anyOf:
-                  - $ref: '#/components/schemas/RepoVisibility'
-                  - type: 'null'
                   default: null
+                  allOf:
+                  - $ref: '#/components/schemas/RepoVisibility'
+                  nullable: true
                 stack_id:
                   description: |-
                     Stack preset pack id under `assets/stack-presets/` (omit / null = none).
                     Mutually exclusive with `instance_pack_id` / `template_repo_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 instance_pack_id:
                   description: |-
                     Instance-admin template pack id (omit / null = none). Mutually exclusive
                     with `stack_id` / `template_repo_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 template_repo_id:
                   description: |-
                     Source template repository id (omit / null = none). Mutually exclusive
                     with `stack_id` / `instance_pack_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 license_id:
                   description: SPDX license id or omit / null / `"none"` for no LICENSE file.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 gitignore_id:
                   description: Gitignore catalog id under `assets/gitignore/` (omit / null / `"none"` = none).
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 owner:
                   description: Optional owner slug (username or org). Omit → session user (A5 / D-ORG-01).
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -243,20 +236,18 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -284,10 +275,9 @@ paths:
         required: false
         schema:
           description: '`true` → read + unread (`filter=all`); default unread only.'
-          type:
-          - boolean
-          - 'null'
+          type: boolean
           default: null
+          nullable: true
       - name: participating
         in: query
         required: false
@@ -295,46 +285,41 @@ paths:
           description: |-
             `true` → only threads where the caller is directly involved
             (mention / review / assign reasons).
-          type:
-          - boolean
-          - 'null'
+          type: boolean
           default: null
+          nullable: true
       - name: since
         in: query
         required: false
         schema:
           description: ISO-8601 — only threads updated at or after.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: before
         in: query
         required: false
         schema:
           description: ISO-8601 — only threads updated at or before.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1050,16 +1035,14 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: to
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1488,36 +1471,32 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: order
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1562,11 +1541,10 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1605,36 +1583,32 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: order
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1679,36 +1653,32 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: order
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1753,36 +1723,32 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: order
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1827,36 +1793,32 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: order
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1901,11 +1863,10 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -1952,10 +1913,9 @@ paths:
                 slug:
                   type: string
                 display_name:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -2133,52 +2093,46 @@ paths:
                 name:
                   type: string
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 visibility:
                   description: When omitted, API uses instance `default_visibility` (else public) — D-08.
-                  anyOf:
-                  - $ref: '#/components/schemas/RepoVisibility'
-                  - type: 'null'
                   default: null
+                  allOf:
+                  - $ref: '#/components/schemas/RepoVisibility'
+                  nullable: true
                 stack_id:
                   description: |-
                     Stack preset pack id under `assets/stack-presets/` (omit / null = none).
                     Mutually exclusive with `instance_pack_id` / `template_repo_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 instance_pack_id:
                   description: |-
                     Instance-admin template pack id (omit / null = none). Mutually exclusive
                     with `stack_id` / `template_repo_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 template_repo_id:
                   description: |-
                     Source template repository id (omit / null = none). Mutually exclusive
                     with `stack_id` / `instance_pack_id`.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 license_id:
                   description: SPDX license id or omit / null / `"none"` for no LICENSE file.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 gitignore_id:
                   description: Gitignore catalog id under `assets/gitignore/` (omit / null / `"none"` = none).
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -2354,15 +2308,13 @@ paths:
                     id:
                       type: string
                     email:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     role:
                       type: string
                     expires_at:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     invited_by:
                       type: string
                     created_at:
@@ -2416,15 +2368,13 @@ paths:
                     id:
                       type: string
                     email:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     role:
                       type: string
                     expires_at:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     invited_by:
                       type: string
                     created_at:
@@ -2613,28 +2563,25 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -2672,58 +2619,49 @@ paths:
                   description: Remote clone URL (https:// / http://; ssh/git@ currently unsupported).
                   type: string
                 auth_username:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 auth_token:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 auth_password:
                   description: Gitea clients may send `auth_password`; treated as an auth_token alias.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 repo_name:
                   description: New repository name. Empty → derived from the clone URL basename.
                   type: string
                   default: ''
                 repo_owner:
                   description: Target owner slug; omit → caller.
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 mirror:
                   description: Keep the remote as a pull mirror after migrating.
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 private:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 wiki:
                   description: Also clone `{clone_addr}.wiki` into the repository wiki bare.
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 service:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -2795,22 +2733,19 @@ paths:
               type: object
               properties:
                 topics:
-                  type:
-                  - array
-                  - 'null'
+                  type: array
                   items:
                     type: string
                   default: null
+                  nullable: true
                 homepage:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '200':
           description: OK
@@ -2946,30 +2881,27 @@ paths:
           description: |-
             Branch, tag, or SHA to start listing from (default: default branch).
             `sha` mirrors GitHub's parameter name; `ref` is accepted as an alias.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: skip
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3074,10 +3006,9 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3117,10 +3048,9 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3160,10 +3090,9 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3235,9 +3164,8 @@ paths:
                 type: object
                 properties:
                   content:
-                    type:
-                    - object
-                    - 'null'
+                    type: object
+                    nullable: true
                   commit:
                     type: object
                     properties:
@@ -3297,9 +3225,8 @@ paths:
                 type: object
                 properties:
                   content:
-                    type:
-                    - object
-                    - 'null'
+                    type: object
+                    nullable: true
                   commit:
                     type: object
                     properties:
@@ -3345,9 +3272,8 @@ paths:
                     name:
                       type: string
                     avatar_url:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     contributions:
                       type: integer
                     type:
@@ -3555,15 +3481,13 @@ paths:
                     id:
                       type: string
                     email:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     permission:
                       type: string
                     expires_at:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     invited_by:
                       type: string
                     created_at:
@@ -3622,15 +3546,13 @@ paths:
                     id:
                       type: string
                     email:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     permission:
                       type: string
                     expires_at:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     invited_by:
                       type: string
                     created_at:
@@ -3724,10 +3646,9 @@ paths:
         required: false
         schema:
           description: 'When true (Admin), include hidden org labels with `hidden: true`.'
-          type:
-          - boolean
-          - 'null'
+          type: boolean
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3806,28 +3727,25 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -3900,15 +3818,13 @@ paths:
               type: object
               properties:
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 active:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 url:
                   type: string
                 secret:
@@ -3996,32 +3912,27 @@ paths:
               type: object
               properties:
                 description:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 active:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 events:
-                  type:
-                  - array
-                  - 'null'
+                  type: array
                   items:
                     type: string
                   default: null
+                  nullable: true
                 url:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 secret:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '200':
           description: OK
@@ -4110,9 +4021,8 @@ paths:
                     redelivery:
                       type: boolean
                     duration:
-                      type:
-                      - number
-                      - 'null'
+                      type: number
+                      nullable: true
                     status:
                       type: string
                     status_code:
@@ -4120,9 +4030,8 @@ paths:
                     event:
                       type: string
                     action:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -4442,37 +4351,33 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
           description: '`stars` (default) | `updated` | `created`'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -4550,10 +4455,9 @@ paths:
         required: false
         schema:
           description: Username prefix filter (case-insensitive).
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -4573,9 +4477,8 @@ paths:
                     site_admin:
                       type: boolean
                     avatar_url:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
         default:
           description: Error — `{ code, message, data? }` with a mapped HTTP status
           content:
@@ -4635,19 +4538,17 @@ paths:
         required: false
         schema:
           description: Bare branch name — filters to one train.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: state
         in: query
         required: false
         schema:
           description: '`queued` (default) | `merged` | `dequeued` | `all`.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -4867,28 +4768,25 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -5246,64 +5144,62 @@ paths:
               type: object
               properties:
                 required_status_checks:
-                  anyOf:
-                  - type: 'null'
-                  - type: object
-                    properties:
-                      strict:
-                        type: boolean
-                      contexts:
-                        type: array
-                        items:
-                          type: string
-                      checks:
-                        type: array
-                        items:
-                          type: object
+                  type: object
+                  properties:
+                    strict:
+                      type: boolean
+                    contexts:
+                      type: array
+                      items:
+                        type: string
+                    checks:
+                      type: array
+                      items:
+                        type: object
+                  nullable: true
                 required_pull_request_reviews:
-                  anyOf:
-                  - type: 'null'
-                  - type: object
+                  type: object
+                  nullable: true
                 enforce_admins:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 allow_force_pushes:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 allow_deletions:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 required_linear_history:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 required_conversation_resolution:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 required_signatures:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 lock_branch:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
                 required_merge_queue:
                   anyOf:
-                  - type: 'null'
                   - type: boolean
                   - type: object
+                  nullable: true
       responses:
         '200':
           description: OK
@@ -5567,10 +5463,9 @@ paths:
         required: false
         schema:
           description: '`true` → read + unread (`filter=all`); default unread only.'
-          type:
-          - boolean
-          - 'null'
+          type: boolean
           default: null
+          nullable: true
       - name: participating
         in: query
         required: false
@@ -5578,46 +5473,41 @@ paths:
           description: |-
             `true` → only threads where the caller is directly involved
             (mention / review / assign reasons).
-          type:
-          - boolean
-          - 'null'
+          type: boolean
           default: null
+          nullable: true
       - name: since
         in: query
         required: false
         schema:
           description: ISO-8601 — only threads updated at or after.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: before
         in: query
         required: false
         schema:
           description: ISO-8601 — only threads updated at or before.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -6119,19 +6009,17 @@ paths:
         required: false
         schema:
           description: GitHub's name for our `push_type` filter.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: time_period
         in: query
         required: false
         schema:
           description: '`week` | `month` | `year` | `all`.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
@@ -6139,20 +6027,18 @@ paths:
           description: |-
             GitHub `actor`/`direction` params are accepted but unmapped (the proc
             has no actor filter and only emits newest-first).
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -6275,21 +6161,19 @@ paths:
         required: false
         schema:
           description: Page size — GitHub default 30, max 100.
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
           description: 1-based page number.
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -6319,13 +6203,11 @@ paths:
                         created_at:
                           type: string
                         expires_at:
-                          type:
-                          - string
-                          - 'null'
+                          type: string
+                          nullable: true
                         digest:
-                          type:
-                          - string
-                          - 'null'
+                          type: string
+                          nullable: true
                         workflow_run:
                           type: object
                 required:
@@ -6364,21 +6246,19 @@ paths:
         required: false
         schema:
           description: Page size — GitHub default 30, max 100.
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
           description: 1-based page number.
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -6408,13 +6288,11 @@ paths:
                         created_at:
                           type: string
                         expires_at:
-                          type:
-                          - string
-                          - 'null'
+                          type: string
+                          nullable: true
                         digest:
-                          type:
-                          - string
-                          - 'null'
+                          type: string
+                          nullable: true
                         workflow_run:
                           type: object
                 required:
@@ -6470,13 +6348,11 @@ paths:
                   created_at:
                     type: string
                   expires_at:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                   digest:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                   workflow_run:
                     type: object
         default:
@@ -6567,49 +6443,43 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: branch
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: event
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: status
         in: query
         required: false
         schema:
           description: '`queued`/`in_progress`/`waiting`/`completed` or a conclusion name.'
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -7126,49 +6996,43 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: branch
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: event
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: status
         in: query
         required: false
         schema:
           description: '`queued`/`in_progress`/`waiting`/`completed` or a conclusion name.'
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -9060,48 +8924,42 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: ref
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: task
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: environment
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -9753,48 +9611,42 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: ref
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: sort
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: direction
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       - name: page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -9852,16 +9704,14 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       - name: ref
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       responses:
         '204':
           description: OK
@@ -10175,9 +10025,8 @@ paths:
                   token:
                     type: string
                   expires_at:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                 required:
                 - token
         default:
@@ -10214,9 +10063,8 @@ paths:
                   token:
                     type: string
                   expires_at:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                 required:
                 - token
         default:
@@ -10581,9 +10429,8 @@ paths:
                   token:
                     type: string
                   expires_at:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                 required:
                 - token
         default:
@@ -10615,9 +10462,8 @@ paths:
                   token:
                     type: string
                   expires_at:
-                    type:
-                    - string
-                    - 'null'
+                    type: string
+                    nullable: true
                 required:
                 - token
         default:
@@ -11066,34 +10912,30 @@ paths:
         required: false
         schema:
           description: '`open` | `closed` | `all` — default open.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: author
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: label
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: assignee
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: milestone
         in: query
         required: false
@@ -11101,36 +10943,32 @@ paths:
           description: |-
             Milestone filter — a milestone `#N`, `*` (any milestone), or `none`
             (issues without one); GitHub REST semantics.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: q
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -11173,16 +11011,14 @@ paths:
               properties:
                 milestone:
                   description: Milestone `#N` — assigns at create (fires `milestoned`).
-                  type:
-                  - integer
-                  - 'null'
+                  type: integer
                   format: int64
                   default: null
+                  nullable: true
                 body:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 title:
                   type: string
       responses:
@@ -11547,10 +11383,9 @@ paths:
         required: false
         schema:
           description: '`open` | `closed` | `all`.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -11680,9 +11515,8 @@ paths:
                 description:
                   type: string
                 due_on:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 state:
                   type: string
                   enum:
@@ -12196,17 +12030,14 @@ paths:
                       - pr_stub
                       - pr
                     target_number:
-                      type:
-                      - integer
-                      - 'null'
+                      type: integer
+                      nullable: true
                     target_repo_id:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     title:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     created_at:
                       type: string
         default:
@@ -12276,17 +12107,14 @@ paths:
                       - pr_stub
                       - pr
                     target_number:
-                      type:
-                      - integer
-                      - 'null'
+                      type: integer
+                      nullable: true
                     target_repo_id:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     title:
-                      type:
-                      - string
-                      - 'null'
+                      type: string
+                      nullable: true
                     created_at:
                       type: string
         default:
@@ -12598,72 +12426,64 @@ paths:
         required: false
         schema:
           description: '`open` (default) | `closed` | `merged` | `all`'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: author
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: label
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: assignee
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: q
         in: query
         required: false
         schema:
           description: Title/body substring search (same semantics as issue.list `q`).
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: review_state
         in: query
         required: false
         schema:
           description: '`approved` | `changes_requested` | `review_required` | …'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -12706,32 +12526,28 @@ paths:
               type: object
               properties:
                 draft:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 head_name:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 title:
                   type: string
                 body:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 base_ref:
                   type: string
                 head_ref:
                   type: string
                 head_owner:
                   description: Optional fork head owner (defaults to base owner / same-repo).
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -12869,20 +12685,17 @@ paths:
               type: object
               properties:
                 delete_branch:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 commit_message:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 commit_title:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 method:
                   $ref: '#/components/schemas/MergeMethod'
       responses:
@@ -13035,34 +12848,29 @@ paths:
               type: object
               properties:
                 commit_sha:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 start_line:
-                  type:
-                  - integer
-                  - 'null'
+                  type: integer
                   format: int64
                   default: null
+                  nullable: true
                 line:
-                  type:
-                  - integer
-                  - 'null'
+                  type: integer
                   format: int64
                   default: null
+                  nullable: true
                 body:
                   type: string
                 path:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 side:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '201':
           description: Created
@@ -13235,10 +13043,9 @@ paths:
               type: object
               properties:
                 body:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 state:
                   description: '`approved` | `changes_requested` | `commented`'
                   type: string
@@ -13635,25 +13442,21 @@ paths:
               type: object
               properties:
                 prerelease:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 draft:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 body:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 title:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '200':
           description: OK
@@ -13798,27 +13601,23 @@ paths:
               type: object
               properties:
                 prerelease:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 draft:
-                  type:
-                  - boolean
-                  - 'null'
+                  type: boolean
                   default: null
+                  nullable: true
                 tag_name:
                   type: string
                 title:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
                 body:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
                   default: null
+                  nullable: true
       responses:
         '200':
           description: OK
@@ -13941,28 +13740,25 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: limit
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       - name: offset
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -14198,19 +13994,17 @@ paths:
         required: false
         schema:
           description: GitHub's `package_type` — `container` maps to our `oci` format.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: visibility
         in: query
         required: false
         schema:
           description: '`public` | `private` | `internal` (`internal` ≈ private here).'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -14244,19 +14038,17 @@ paths:
         required: false
         schema:
           description: GitHub's `package_type` — `container` maps to our `oci` format.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: visibility
         in: query
         required: false
         schema:
           description: '`public` | `private` | `internal` (`internal` ≈ private here).'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -14290,19 +14082,17 @@ paths:
         required: false
         schema:
           description: GitHub's `package_type` — `container` maps to our `oci` format.
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: visibility
         in: query
         required: false
         schema:
           description: '`public` | `private` | `internal` (`internal` ≈ private here).'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -14890,27 +14680,22 @@ paths:
                 name:
                   type: string
                 details_url:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 external_id:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 status:
                   type: string
                 conclusion:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 started_at:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 completed_at:
-                  type:
-                  - string
-                  - 'null'
+                  type: string
+                  nullable: true
                 output:
                   type: object
       responses:
@@ -15026,37 +14811,33 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: status
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: conclusion
         in: query
         required: false
         schema:
           description: 'Server-side extra over GitHub: fold a conclusion filter in directly.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -15100,37 +14881,33 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: status
         in: query
         required: false
         schema:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: conclusion
         in: query
         required: false
         schema:
           description: 'Server-side extra over GitHub: fold a conclusion filter in directly.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -15476,19 +15253,17 @@ paths:
         required: false
         schema:
           description: '`built` | `errored` | `building`.'
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
       - name: per_page
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           default: null
+          nullable: true
       responses:
         '200':
           description: OK
@@ -15667,9 +15442,8 @@ paths:
         required: false
         schema:
           description: '`open` (default) | `closed` | `all`.'
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       responses:
         '200':
           description: OK
@@ -16119,9 +15893,8 @@ paths:
           description: |-
             `all` | `archived` | `not_archived` (GitHub vocabulary; only
             `archived`/`all` surface archived cards).
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       responses:
         '200':
           description: OK
@@ -16540,11 +16313,10 @@ paths:
         in: query
         required: false
         schema:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: uint32
           minimum: 0
+          nullable: true
       responses:
         '200':
           description: OK
@@ -16735,10 +16507,9 @@ components:
         bio:
           type: string
         avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Public URL path (e.g. `/uploads/avatars/{id}.webp`), not a filesystem path.
+          nullable: true
         role:
           $ref: '#/components/schemas/Role'
         profile_incomplete:
@@ -16888,12 +16659,12 @@ components:
             (subscription row at a non-`ignore` level).
           default: false
         viewer_watch_level:
-          anyOf:
-          - $ref: '#/components/schemas/WatchLevel'
-          - type: 'null'
           description: |-
             Authenticated viewer's watch level — `all` | `participating` | `ignore`;
             absent when the viewer has no subscription row (DEBT-06).
+          allOf:
+          - $ref: '#/components/schemas/WatchLevel'
+          nullable: true
         issues_enabled:
           type: boolean
           description: |-
@@ -16925,15 +16696,14 @@ components:
             Discussions tab. Populated by `repo.get`.
           default: true
         fork_network_id:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
+          nullable: true
         forked_from:
-          anyOf:
-          - $ref: '#/components/schemas/ForkParentSummary'
-          - type: 'null'
           description: Immediate parent when `is_fork` (D-SOC-16).
+          allOf:
+          - $ref: '#/components/schemas/ForkParentSummary'
+          nullable: true
       required:
       - id
       - owner_id
@@ -17043,9 +16813,8 @@ components:
         bio:
           type: string
         avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         follower_count:
           type: integer
           format: int64
@@ -17290,13 +17059,11 @@ components:
         scope:
           $ref: '#/components/schemas/LabelScope'
         org_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         repo_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         hidden:
           type: boolean
           description: True when this org label is hidden for the current repo effective set.
@@ -17330,15 +17097,13 @@ components:
         oid:
           type: string
         tip_author_name:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Tip commit author name when the backend could resolve it.
+          nullable: true
         tip_committed_at:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Tip commit committer date (ISO-8601) when resolvable.
+          nullable: true
       required:
       - name
       - oid
@@ -17382,17 +17147,14 @@ components:
         authored_at:
           type: string
         author_user_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_username:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         signature_status:
           type: string
           description: '`none` | `valid` | `invalid` | `unknown`'
@@ -17427,17 +17189,14 @@ components:
         authored_at:
           type: string
         author_user_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_username:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         signature_status:
           type: string
           default: none
@@ -17556,9 +17315,8 @@ components:
         encoding:
           type: string
         content:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         soft_max_bytes:
           type: integer
           format: uint64
@@ -17592,10 +17350,9 @@ components:
           minimum: 0
           description: Raw byte total for this language on the default branch.
         color:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Linguist-conventional hex color (`#rrggbb`), when known.
+          nullable: true
       required:
       - name
       - bytes
@@ -17623,9 +17380,8 @@ components:
         display_name:
           type: string
         avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         starred_at:
           type: string
           description: When the user starred (ISO-8601).
@@ -17671,10 +17427,9 @@ components:
         updated_at:
           type: string
         secret:
-          type:
-          - string
-          - 'null'
+          type: string
           description: One-time plaintext secret on create/rotate only.
+          nullable: true
       required:
       - id
       - repo_id
@@ -17728,13 +17483,11 @@ components:
         author_username:
           type: string
         closed_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         closed_by:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         updated_at:
@@ -17756,10 +17509,10 @@ components:
           description: Aggregated reaction counts (D-ISS-11).
           default: []
         milestone:
-          anyOf:
-          - $ref: '#/components/schemas/MilestonePublic'
-          - type: 'null'
           description: Milestone this issue belongs to (GitHub embeds the object).
+          allOf:
+          - $ref: '#/components/schemas/MilestonePublic'
+          nullable: true
         comment_count:
           type: integer
           format: int64
@@ -17828,23 +17581,19 @@ components:
         state:
           type: string
         due_on:
-          type:
-          - string
-          - 'null'
+          type: string
           description: '`YYYY-MM-DD` when set.'
+          nullable: true
         creator_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         creator_username:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
         closed_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         updated_at:
@@ -18012,29 +17761,24 @@ components:
         head_sha:
           type: string
         merged_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         merged_by:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         merge_commit_sha:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         merge_method:
-          anyOf:
+          allOf:
           - $ref: '#/components/schemas/MergeMethod'
-          - type: 'null'
+          nullable: true
         closed_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         closed_by:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         updated_at:
@@ -18134,17 +17878,14 @@ components:
         authored_at:
           type: string
         author_user_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_username:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         author_avatar_url:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         signature_status:
           type: string
           default: none
@@ -18181,27 +17922,22 @@ components:
         body:
           type: string
         path:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         side:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         line:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
+          nullable: true
         start_line:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
+          nullable: true
         commit_sha:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         outdated:
           type: boolean
         resolved:
@@ -18252,19 +17988,16 @@ components:
         body:
           type: string
         commit_sha:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         submitted_at:
           type: string
         dismissed_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         dismiss_reason:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
       required:
       - id
       - pull_id
@@ -18289,10 +18022,9 @@ components:
           type: string
           description: '`up_to_date` (no-op) | `updated` (merge commit created on the head).'
         merge_commit_sha:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Merge commit SHA when `status == "updated"`.
+          nullable: true
       required:
       - pull
       - status
@@ -18414,9 +18146,8 @@ components:
         email_verified:
           type: boolean
         banned_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
       required:
@@ -18517,15 +18248,13 @@ components:
           items:
             type: string
         repository_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         ephemeral:
           type: boolean
         last_online:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
           default: ''
@@ -18564,20 +18293,17 @@ components:
         state:
           type: string
         creator_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         creator_username:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         html_url:
           type: string
           description: '`/{owner}/{repo}/projects/{number}` web route.'
         closed_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         updated_at:
@@ -18626,41 +18352,34 @@ components:
         column_id:
           type: string
         note:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Note text — `None` once the card is a linked entity.
+          nullable: true
         content_type:
-          type:
-          - string
-          - 'null'
+          type: string
           description: '`issue` | `pull_request` — the linked entity kind.'
+          nullable: true
         content_id:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Linked entity row id.
+          nullable: true
         content_number:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
           description: Linked entity `#N` — enrichment for the UI (issue/pull number).
+          nullable: true
         content_title:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Linked entity title — enrichment for the UI.
+          nullable: true
         content_state:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Linked entity state — enrichment for the UI.
+          nullable: true
         content_url:
-          type:
-          - string
-          - 'null'
+          type: string
           description: '`/{owner}/{repo}/{issues|pulls}/{number}` web route for linked cards.'
+          nullable: true
         position:
           type: integer
           format: int64
@@ -18668,13 +18387,11 @@ components:
         archived:
           type: boolean
         creator_id:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         creator_username:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         updated_at:
@@ -18715,14 +18432,12 @@ components:
             history exists — create/update responses always carry it).
           default: ''
         updated_at:
-          type:
-          - string
-          - 'null'
+          type: string
+          nullable: true
         content:
-          type:
-          - string
-          - 'null'
+          type: string
           description: Present on `wiki.pages.get` — raw Markdown body.
+          nullable: true
       required:
       - page_name
       - html_url
@@ -18748,10 +18463,9 @@ components:
           type: string
           default: ''
         author_username:
-          type:
-          - string
-          - 'null'
+          type: string
           default: null
+          nullable: true
         timestamp:
           type: string
       required:
