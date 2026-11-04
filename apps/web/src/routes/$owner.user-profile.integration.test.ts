@@ -116,10 +116,7 @@ describe("$owner user profile (SOC-02)", () => {
   });
 
   it("wires the pinned-repos section (COL-04)", () => {
-    const src = readFileSync(
-      join(dir, "../components/profile/pinned-repos.tsrx"),
-      "utf8",
-    );
+    const src = readFileSync(join(dir, "../components/profile/pinned-repos.tsrx"), "utf8");
     expect(src).toMatch(/apiClient\.user\.listPinnedRepos/);
     expect(src).toMatch(/apiClient\.user\.setPinnedRepos/);
     expect(src).toMatch(/data-testid="pinned-repos"/);
@@ -340,9 +337,7 @@ describe("pinned repos section (COL-04)", () => {
       props: { username: "octo", isSelf: true, candidates: [] },
     });
     await waitFor(() =>
-      expect(
-        own.container.querySelector('[data-testid="customize-pins"]'),
-      ).toBeInTheDocument(),
+      expect(own.container.querySelector('[data-testid="customize-pins"]')).toBeInTheDocument(),
     );
   });
 });

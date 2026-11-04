@@ -41,6 +41,10 @@ async fn pinned_repos_for(
         if row.deleted_at.is_some() {
             continue;
         }
+        // Pins stay caller-owned; a transfer can leave a stale pin row.
+        if row.owner_type != "user" || row.owner_id != user.id {
+            continue;
+        }
         let owner_username = if row.owner_type == "org" {
             ctx.db
                 .find_organization_by_id(&row.owner_id)

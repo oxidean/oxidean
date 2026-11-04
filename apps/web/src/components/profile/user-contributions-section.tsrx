@@ -147,11 +147,13 @@ function ContributionSettingsMenu() @{
   const account = useChromeAccountState();
   const mounted = useMounted();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const user = mounted ? account.user : undefined;
 
   async function togglePrivate(next: boolean) {
     if (!user || busy) return;
     setBusy(true);
+    setError(null);
     try {
       const res = await apiClient.user.updateProfile({
         display_name: user.display_name,
@@ -162,7 +164,11 @@ function ContributionSettingsMenu() @{
       if (res.ok) {
         setAuthMeCache(queryClient, res.data);
         void queryClient.invalidateQueries({ queryKey: ["user", "contributions"] });
+      } else {
+        setError(res.error.message || "Could not update contribution settings");
       }
+    } catch {
+      setError("Could not update contribution settings");
     } finally {
       setBusy(false);
     }
@@ -187,6 +193,9 @@ function ContributionSettingsMenu() @{
         >
           Private contributions
         </DropdownMenuCheckboxItem>
+        @if (error) {
+          <p className="px-2 py-1 text-[12px] text-destructive">{error as string}</p>;
+        }
         <DropdownMenuSeparator />
         <DropdownMenuItem>
           <AppLink href="/settings/profile" className="flex-1 no-underline">

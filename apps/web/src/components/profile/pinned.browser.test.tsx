@@ -96,7 +96,13 @@ const contributions = {
 
 beforeEach(() => {
   window.history.pushState({}, "", "/ada");
-  for (const m of [listPinnedMock, setPinnedMock, getContributionsMock, updateProfileMock, languagesMock]) {
+  for (const m of [
+    listPinnedMock,
+    setPinnedMock,
+    getContributionsMock,
+    updateProfileMock,
+    languagesMock,
+  ]) {
     m.mockReset();
   }
   meMock.mockReset();
@@ -180,16 +186,12 @@ describe("profile pinned repos browser DOM races", () => {
       });
       await waitForSelector('[data-testid="user-contributions"]');
 
-      const trigger = await waitForSelector(
-        '[data-testid="contribution-settings-trigger"]',
-      );
+      const trigger = await waitForSelector('[data-testid="contribution-settings-trigger"]');
       await act(async () => {
         (trigger as HTMLElement).click();
       });
 
-      const item = await waitForSelector(
-        '[data-testid="contribution-settings-private"]',
-      );
+      const item = await waitForSelector('[data-testid="contribution-settings-private"]');
       await act(async () => {
         (item as HTMLElement).click();
       });

@@ -54,44 +54,44 @@ function PinnedRepoCard(props: { repo: RepoPublic }) @{
   ).data;
 
   <div className="flex flex-col gap-2 rounded-md border border-border p-4">
-      <div className="flex items-center gap-2">
-        <BookMarked aria-hidden size={16} className="shrink-0 text-muted-foreground" />
-        <AppLink
-          href={`/${slug}`}
-          className="truncate text-[14px] font-semibold text-primary no-underline hover:underline"
-        >
-          {slug as string}
-        </AppLink>
-        @if (props.repo.visibility === "private") {
-          <Badge variant="outline" className="ml-auto shrink-0">
-            Private
-          </Badge>;
-        }
-      </div>
-      <p className="line-clamp-2 min-h-[2.5em] text-[12px] text-muted-foreground">
-        {(props.repo.description?.trim() || "") as string}
-      </p>
-      <div className="mt-auto flex items-center gap-4 text-[12px] text-muted-foreground">
-        @if (lang) {
-          <span className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="inline-block size-3 rounded-full border border-border"
-              style={{ backgroundColor: lang.color ?? "var(--muted-foreground)" }}
-            />
-            {lang.name as string}
-          </span>;
-        }
-        <span className="flex items-center gap-1">
-          <Star aria-hidden size={13} />
-          {String(props.repo.star_count) as string}
-        </span>
-        <span className="flex items-center gap-1">
-          <GitFork aria-hidden size={13} />
-          {String(props.repo.fork_count) as string}
-        </span>
-      </div>
-    </div>;
+    <div className="flex items-center gap-2">
+      <BookMarked aria-hidden size={16} className="shrink-0 text-muted-foreground" />
+      <AppLink
+        href={`/${slug}`}
+        className="truncate text-[14px] font-semibold text-primary no-underline hover:underline"
+      >
+        {slug as string}
+      </AppLink>
+      @if (props.repo.visibility === "private") {
+        <Badge variant="outline" className="ml-auto shrink-0">
+          Private
+        </Badge>;
+      }
+    </div>
+    <p className="line-clamp-2 min-h-[2.5em] text-[12px] text-muted-foreground">
+      {(props.repo.description?.trim() || "") as string}
+    </p>
+    <div className="mt-auto flex items-center gap-4 text-[12px] text-muted-foreground">
+      @if (lang) {
+        <span className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="inline-block size-3 rounded-full border border-border"
+            style={{ backgroundColor: lang.color ?? "var(--muted-foreground)" }}
+          />
+          {lang.name as string}
+        </span>;
+      }
+      <span className="flex items-center gap-1">
+        <Star aria-hidden size={13} />
+        {String(props.repo.star_count) as string}
+      </span>
+      <span className="flex items-center gap-1">
+        <GitFork aria-hidden size={13} />
+        {String(props.repo.fork_count) as string}
+      </span>
+    </div>
+  </div>;
 }
 
 /** "Customize your pins" dialog — checkbox list of the owner's repos. */
@@ -145,65 +145,65 @@ function CustomizePinsDialog(props: {
   const atCap = selected.length >= MAX_PINS;
 
   <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="customize-pins-dialog">
-        <DialogHeader>
-          <DialogTitle>Edit pinned repositories</DialogTitle>
-          <DialogDescription>
-            {`Select up to ${MAX_PINS} repositories to show on your profile.` as string}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="max-h-80 overflow-y-auto rounded-md border border-border">
-          @for (const repo of props.candidates; key repo.id) {
-            <label className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0 hover:bg-muted/50">
-              <Checkbox
-                checked={selected.includes(repo.id)}
-                disabled={!selected.includes(repo.id) && atCap}
-                onCheckedChange={(checked) => toggle(repo.id, checked === true)}
-                aria-label={`Pin ${repo.name}`}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold text-foreground">
-                  {repo.name as string}
-                </span>
-                @if (repo.description?.trim()) {
-                  <span className="block truncate text-[12px] text-muted-foreground">
-                    {repo.description as string}
-                  </span>;
-                }
+    <DialogContent className="sm:max-w-lg" data-testid="customize-pins-dialog">
+      <DialogHeader>
+        <DialogTitle>Edit pinned repositories</DialogTitle>
+        <DialogDescription>
+          {`Select up to ${MAX_PINS} repositories to show on your profile.` as string}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="max-h-80 overflow-y-auto rounded-md border border-border">
+        @for (const repo of props.candidates; key repo.id) {
+          <label className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0 hover:bg-muted/50">
+            <Checkbox
+              checked={selected.includes(repo.id)}
+              disabled={!selected.includes(repo.id) && atCap}
+              onCheckedChange={(checked) => toggle(repo.id, checked === true)}
+              aria-label={`Pin ${repo.name}`}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] font-semibold text-foreground">
+                {repo.name as string}
               </span>
-              @if (repo.visibility === "private") {
-                <Badge variant="outline" className="shrink-0">
-                  Private
-                </Badge>;
+              @if (repo.description?.trim()) {
+                <span className="block truncate text-[12px] text-muted-foreground">
+                  {repo.description as string}
+                </span>;
               }
-            </label>;
-          } @empty {
-            <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
-              No repositories yet — create one before pinning.
-            </p>;
-          }
-        </div>
-        <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-          <span data-testid="pins-selected-count">
-            {`${selected.length} of ${MAX_PINS} selected` as string}
-          </span>
-          @if (error) {
-            <span className="text-destructive">{error as string}</span>;
-          }
-        </div>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="default"
-            disabled={busy}
-            data-testid="save-pins-button"
-            onClick={() => void save()}
-          >
-            {(busy ? "Saving…" : "Save pins") as string}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>;
+            </span>
+            @if (repo.visibility === "private") {
+              <Badge variant="outline" className="shrink-0">
+                Private
+              </Badge>;
+            }
+          </label>;
+        } @empty {
+          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+            No repositories yet — create one before pinning.
+          </p>;
+        }
+      </div>
+      <div className="flex items-center justify-between text-[12px] text-muted-foreground">
+        <span data-testid="pins-selected-count">
+          {`${selected.length} of ${MAX_PINS} selected` as string}
+        </span>
+        @if (error) {
+          <span className="text-destructive">{error as string}</span>;
+        }
+      </div>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="default"
+          disabled={busy}
+          data-testid="save-pins-button"
+          onClick={() => void save()}
+        >
+          {(busy ? "Saving…" : "Save pins") as string}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 /**
