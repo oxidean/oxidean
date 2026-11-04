@@ -151,9 +151,11 @@ paths:
                   nullable: true
                 visibility:
                   description: When omitted, API uses instance `default_visibility` (else public) — D-08.
-                  default: null
-                  allOf:
+                  anyOf:
                   - $ref: '#/components/schemas/RepoVisibility'
+                  - enum:
+                    - null
+                  default: null
                   nullable: true
                 stack_id:
                   description: |-
@@ -2098,9 +2100,11 @@ paths:
                   nullable: true
                 visibility:
                   description: When omitted, API uses instance `default_visibility` (else public) — D-08.
-                  default: null
-                  allOf:
+                  anyOf:
                   - $ref: '#/components/schemas/RepoVisibility'
+                  - enum:
+                    - null
+                  default: null
                   nullable: true
                 stack_id:
                   description: |-
@@ -16659,11 +16663,13 @@ components:
             (subscription row at a non-`ignore` level).
           default: false
         viewer_watch_level:
+          anyOf:
+          - $ref: '#/components/schemas/WatchLevel'
+          - enum:
+            - null
           description: |-
             Authenticated viewer's watch level — `all` | `participating` | `ignore`;
             absent when the viewer has no subscription row (DEBT-06).
-          allOf:
-          - $ref: '#/components/schemas/WatchLevel'
           nullable: true
         issues_enabled:
           type: boolean
@@ -16700,9 +16706,11 @@ components:
           description: Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
           nullable: true
         forked_from:
-          description: Immediate parent when `is_fork` (D-SOC-16).
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/ForkParentSummary'
+          - enum:
+            - null
+          description: Immediate parent when `is_fork` (D-SOC-16).
           nullable: true
       required:
       - id
@@ -17509,9 +17517,11 @@ components:
           description: Aggregated reaction counts (D-ISS-11).
           default: []
         milestone:
-          description: Milestone this issue belongs to (GitHub embeds the object).
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/MilestonePublic'
+          - enum:
+            - null
+          description: Milestone this issue belongs to (GitHub embeds the object).
           nullable: true
         comment_count:
           type: integer
@@ -17770,8 +17780,10 @@ components:
           type: string
           nullable: true
         merge_method:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/MergeMethod'
+          - enum:
+            - null
           nullable: true
         closed_at:
           type: string

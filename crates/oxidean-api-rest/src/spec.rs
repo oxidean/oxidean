@@ -237,9 +237,11 @@ fn rewrite_refs(v: &mut Value) {
 /// Convert schemars' draft-2020-12 null unions into OpenAPI 3.0 `nullable`:
 /// `type: [T…, "null"]` drops `"null"` (collapsing a lone remaining type to a
 /// scalar) and `{any,one}Of` branches that are bare `{"type":"null"}` fold
-/// into `nullable: true`. A sole remaining `anyOf`/`oneOf` branch inlines —
-/// wrapped as `allOf` when it is a bare `$ref`, since 3.0 ignores `$ref`
-/// siblings.
+/// into `nullable: true`. A sole remaining non-`$ref` branch inlines; a sole
+/// `$ref` branch keeps its `anyOf`/`oneOf` and gains an `enum: [null]` branch,
+/// because `allOf` must hold for every value (including null) and 3.0 ignores
+/// `$ref` siblings — `allOf: [$ref]` + `nullable` would not actually admit
+/// null under strict 3.0 semantics.
 fn to_nullable(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -283,15 +285,15 @@ fn to_nullable(v: &mut Value) {
                         m.remove(key);
                     }
                     [only] => {
-                        let is_ref = only
-                            .as_object()
-                            .is_some_and(|o| o.len() == 1 && o.contains_key("$ref"));
-                        m.remove(key);
+                        let is_ref = only.as_object().is_some_and(|o| o.contains_key("$ref"));
                         if is_ref {
-                            m.insert("allOf".into(), json!([only]));
-                        } else if let Value::Object(inner) = only.clone() {
-                            for (k, val) in inner {
-                                m.insert(k, val);
+                            m.insert(key.into(), json!([only.clone(), { "enum": [Value::Null] }]));
+                        } else {
+                            m.remove(key);
+                            if let Value::Object(inner) = only.clone() {
+                                for (k, val) in inner {
+                                    m.insert(k, val);
+                                }
                             }
                         }
                     }
@@ -516,6 +518,38 @@ mod tests {
                 "dangling schema ref {name} in openapi doc"
             );
         }
+    }
+
+    /// A nullable `$ref` property must admit null under strict OpenAPI 3.0
+    /// semantics: `allOf` applies to every value, so `allOf: [$ref]` +
+    /// `nullable` would reject null. The emitted shape is
+    /// `anyOf: [$ref, {enum: [null]}]` + `nullable` (the latter as a hint for
+    /// tools that honour it next to composition).
+    #[test]
+    fn nullable_ref_property_admits_null() {
+        let doc = openapi_doc();
+        let visibility = &doc["paths"]["/user/repos"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]["properties"]["visibility"];
+        let any_of = visibility["anyOf"].as_array().expect("anyOf branches");
+        let admits_null = any_of.iter().any(|b| {
+            b.as_object().is_some_and(|o| {
+                o.get("enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|e| e.iter().any(Value::is_null))
+            })
+        });
+        assert!(
+            admits_null,
+            "visibility schema must admit null: {visibility}"
+        );
+        let keeps_ref = any_of
+            .iter()
+            .any(|b| b["$ref"].as_str() == Some("#/components/schemas/RepoVisibility"));
+        assert!(
+            keeps_ref,
+            "visibility schema must keep its ref: {visibility}"
+        );
+        assert_eq!(visibility["nullable"], json!(true));
     }
 
     /// Building the router must not panic (axum rejects overlapping
