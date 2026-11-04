@@ -640,6 +640,18 @@ pub async fn land_group(
             Some(&subject),
         )
         .await;
+        if let Ok(bare) = crate::git::bare_repo_path(&deps.repos_dir, &scope.owner, &scope.name) {
+            crate::repo::record_authored_merge(
+                &deps.db,
+                deps.git.clone(),
+                bare,
+                &scope.repo_id,
+                &group.base_ref,
+                merge_sha,
+                None,
+            )
+            .await;
+        }
         crate::pull::emit_pull_event_db(
             &deps.db,
             &scope.owner,

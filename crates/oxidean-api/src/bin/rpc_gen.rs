@@ -130,6 +130,8 @@ export type UserPublic = {
   two_factor_enabled: boolean;
   /** Instance/org policy requires this user to enroll a factor. */
   two_factor_enroll_required: boolean;
+  /** GitHub-parity: include private contributions on the own profile view. */
+  show_private_contributions: boolean;
 };
 
 export type BootstrapStatus = {
@@ -490,6 +492,7 @@ export type UpdateProfileRequest = {
   username: string;
   bio: string;
   default_branch?: string | null;
+  show_private_contributions?: boolean;
 };
 
 export type UserLookupContext =
@@ -827,6 +830,65 @@ export type UserFollowPublic = {
 export type UserFollowListResponse = {
   users: UserFollowPublic[];
   total: number;
+};
+
+export type GetContributionsRequest = {
+  username: string;
+  from?: string | null;
+  to?: string | null;
+};
+
+export type UserContributionDay = {
+  date: string;
+  count: number;
+};
+
+export type UserContributionByType = {
+  commits: number;
+  pull_requests: number;
+  issues: number;
+  reviews: number;
+};
+
+export type UserContributionRepo = {
+  slug: string;
+  count: number;
+};
+
+export type UserContributionItem = {
+  slug: string;
+  number: number;
+  title: string;
+  href: string;
+};
+
+export type UserContributionSection = {
+  kind: string;
+  total: number;
+  repo_count: number;
+  repos: UserContributionRepo[];
+  items: UserContributionItem[];
+  truncated: boolean;
+};
+
+export type UserContributionMonth = {
+  month: string;
+  sections: UserContributionSection[];
+};
+
+export type UserContributions = {
+  total: number;
+  from: string;
+  to: string;
+  includes_private: boolean;
+  days: UserContributionDay[];
+  by_type: UserContributionByType;
+  months: UserContributionMonth[];
+  years: number[];
+  /** Consecutive contributed days ending `to` (tolerating one in-progress empty day). */
+  current_streak: number;
+  /** Longest run of consecutive contributed days in the requested range. */
+  longest_streak: number;
 };
 
 export type RepoListMineResponse = {
@@ -6158,6 +6220,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoListMineResponse>(opts, "user.listWatched", input),
       getPublicProfile: (input: GetPublicProfileRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
+      getContributions: (input: GetContributionsRequest) =>
+        rpcCall<UserContributions>(opts, "user.getContributions", input),
       follow: (input: UserFollowRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.follow", input),
       unfollow: (input: UserFollowRequest) =>

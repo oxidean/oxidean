@@ -1,13 +1,38 @@
 //! Repository activity feed — durable push / branch / merge events + `repo.activity.list`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxidean_db::Database;
-use oxidean_git::GitBackend;
+use oxidean_db::{Database, ObservedCommit};
+use oxidean_git::{GitBackend, PushEventCommit};
 use uuid::Uuid;
 
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
+
+/// Per-push enumeration cap — same 2048 bound GitHub puts on push-event
+/// commit lists.
+const PUSH_WALK_CAP: u32 = 2048;
+/// One lazy history backfill walks at most this many commits (documented
+/// truncation; repos deeper than that keep the newest 20k attributed).
+const BACKFILL_WALK_CAP: u32 = 20_000;
+
+fn default_head_ref(default_branch: &str) -> String {
+    let b = default_branch
+        .strip_prefix("refs/heads/")
+        .unwrap_or(default_branch);
+    format!("refs/heads/{b}")
+}
+
+fn observed(commits: Vec<PushEventCommit>) -> Vec<ObservedCommit> {
+    commits
+        .into_iter()
+        .map(|c| ObservedCommit {
+            sha: c.sha,
+            author_email: c.author_email,
+            authored_at: c.authored_at,
+        })
+        .collect()
+}
 
 pub const VALID_PUSH_TYPES: &[&str] = &[
     "push",
@@ -117,6 +142,13 @@ pub async fn record_ref_updates(
     if updates.is_empty() || actor_id.is_empty() {
         return;
     }
+    // Authored-commit attribution (COL-12) needs the repo's default branch —
+    // only commits landing on it count, per GitHub's rule. One lookup per
+    // call, only when a git walk is even possible.
+    let repo_row = match (git.is_some(), bare) {
+        (true, Some(_)) => db.find_repository_by_id(repository_id).await.ok().flatten(),
+        _ => None,
+    };
     for (before, after, ref_name) in updates {
         let forced = if let (_, Some(path)) = (git.as_ref(), bare) {
             !is_zero_oid(before)
@@ -154,7 +186,156 @@ pub async fn record_ref_updates(
                 "repository activity insert failed"
             );
         }
+        if let (Some(g), Some(path), Some(repo)) = (git.as_ref(), bare, repo_row.as_ref()) {
+            if *ref_name == default_head_ref(&repo.default_branch) && !is_zero_oid(after) {
+                record_authored_range(
+                    db,
+                    g.as_ref(),
+                    path,
+                    repository_id,
+                    before,
+                    after,
+                    PUSH_WALK_CAP,
+                )
+                .await;
+                spawn_contribution_backfill(
+                    db.clone(),
+                    g.clone(),
+                    path.to_path_buf(),
+                    repository_id.to_string(),
+                    default_head_ref(&repo.default_branch),
+                );
+            }
+        }
     }
+}
+
+/// Walk `before..after` (zero/empty `before` = full history to `after`) and
+/// record authored commits for `repository_id`. Best-effort: failures warn,
+/// never fail the caller's operation.
+async fn record_authored_range(
+    db: &Database,
+    git: &dyn GitBackend,
+    bare: &Path,
+    repository_id: &str,
+    before: &str,
+    after: &str,
+    cap: u32,
+) {
+    if is_zero_oid(after) {
+        return;
+    }
+    let old = if is_zero_oid(before) { "" } else { before };
+    match git.push_event_commits(bare, old, after, cap).await {
+        Ok(commits) => {
+            if let Err(e) = db
+                .record_authored_commits(repository_id, &observed(commits))
+                .await
+            {
+                tracing::warn!(error = %e, repository_id, "authored-commit record failed");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, repository_id, "authored-commit walk failed");
+        }
+    }
+}
+
+/// Record authored commits a PR merge brought onto the default branch —
+/// GitHub credits each merged head commit to its author once it lands on
+/// default. `before` is the pre-merge base tip when the caller resolved one
+/// (rebase merges rewrite several commits, so `merge_sha`'s first parent is
+/// the previous rewritten commit — not the old base tip — and a parent walk
+/// would credit only the last commit); `None` falls back to `merge_sha`'s
+/// first parent, which is correct for merge-commit and squash results.
+/// No-op for non-default bases.
+pub async fn record_authored_merge(
+    db: &Database,
+    git: Arc<dyn GitBackend>,
+    bare: PathBuf,
+    repository_id: &str,
+    base_ref: &str,
+    merge_sha: &str,
+    before: Option<&str>,
+) {
+    let repo = match db.find_repository_by_id(repository_id).await {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+    let base = if base_ref.starts_with("refs/") {
+        base_ref.to_string()
+    } else {
+        format!("refs/heads/{base_ref}")
+    };
+    if base != default_head_ref(&repo.default_branch) {
+        return;
+    }
+    let before = match before.filter(|b| !b.is_empty()) {
+        Some(b) => b.to_string(),
+        None => match git.cat_commit(&bare, merge_sha).await {
+            Ok(raw) => raw.parents.first().cloned().unwrap_or_default(),
+            Err(e) => {
+                tracing::warn!(error = %e, repository_id, "merge parent lookup failed");
+                return;
+            }
+        },
+    };
+    if before.is_empty() {
+        return;
+    }
+    record_authored_range(
+        db,
+        git.as_ref(),
+        &bare,
+        repository_id,
+        &before,
+        merge_sha,
+        PUSH_WALK_CAP,
+    )
+    .await;
+    spawn_contribution_backfill(db.clone(), git, bare, repository_id.to_string(), base);
+}
+
+/// Claim the `repo:<id>` backfill scope and spawn a full-history walk of the
+/// repo's default branch into `authored_commits`. No-op when another caller
+/// already claimed or finished it; a failed walk releases the claim so a
+/// later push/profile-view retries.
+///
+/// `PathBuf` + owned handles — the task outlives the request that spawned it.
+pub fn spawn_contribution_backfill(
+    db: Database,
+    git: Arc<dyn GitBackend>,
+    bare: PathBuf,
+    repository_id: String,
+    default_ref_name: String,
+) {
+    tokio::spawn(async move {
+        let scope = format!("repo:{repository_id}");
+        match db.claim_contribution_backfill(&scope).await {
+            Ok(true) => {}
+            _ => return,
+        }
+        let res = async {
+            let tip = git
+                .verify_commit_oid(&bare, &default_ref_name)
+                .await
+                .map_err(|e| format!("tip lookup: {e}"))?;
+            let Some(tip) = tip else {
+                return Ok(0u64);
+            };
+            let commits = git
+                .push_event_commits(&bare, "", &tip, BACKFILL_WALK_CAP)
+                .await
+                .map_err(|e| format!("history walk: {e}"))?;
+            db.record_authored_commits(&repository_id, &observed(commits))
+                .await
+        }
+        .await;
+        if let Err(e) = res {
+            tracing::warn!(error = %e, repository_id = %repository_id, "contribution backfill failed");
+            let _ = db.release_contribution_backfill(&scope).await;
+        }
+    });
 }
 
 /// Record a UI/API branch create (no receive-pack).

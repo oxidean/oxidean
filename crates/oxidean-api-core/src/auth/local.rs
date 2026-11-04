@@ -36,6 +36,7 @@ pub async fn user_to_public(db: &Database, row: &UserRow) -> UserPublic {
         },
         two_factor_enabled,
         two_factor_enroll_required,
+        show_private_contributions: row.show_private_contributions,
     }
 }
 

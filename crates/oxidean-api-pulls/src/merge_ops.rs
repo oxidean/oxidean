@@ -295,6 +295,16 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         None => message.to_string(),
     };
 
+    // Pre-merge base tip — rebase merges rewrite several commits so the
+    // merge result's first parent is not the old tip; the recorded
+    // attribution range needs the tip the worktree merged onto.
+    let base_tip = ctx
+        .git
+        .rev_parse(&path, &row.base_ref)
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
+
     let sha = match req.method {
         MergeMethod::Merge => {
             ctx.git
@@ -356,6 +366,24 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         },
     )
     .await;
+
+    // Authored-commit attribution: credit head commits landing on default.
+    if let Ok(bare) = oxidean_api_core::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) {
+        oxidean_api_core::repo::record_authored_merge(
+            &ctx.db,
+            ctx.git.clone(),
+            bare,
+            &accessible.row.id,
+            &row.base_ref,
+            &sha,
+            base_tip.as_deref(),
+        )
+        .await;
+    }
 
     oxidean_api_core::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),

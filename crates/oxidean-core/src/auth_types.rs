@@ -90,6 +90,15 @@ pub struct UserPublic {
     /// True when instance/org policy requires enrolling a factor (#130).
     #[serde(default)]
     pub two_factor_enroll_required: bool,
+    /// GitHub-parity contribution setting: include private-repo
+    /// contributions on the owner's own profile view (COL-12; others never
+    /// see private rows).
+    #[serde(default = "show_private_contributions_default")]
+    pub show_private_contributions: bool,
+}
+
+fn show_private_contributions_default() -> bool {
+    true
 }
 
 fn default_branch_main() -> String {
@@ -240,6 +249,10 @@ pub struct UpdateProfileRequest {
     /// When set, updates the account default branch for new repos (D-09).
     #[serde(default)]
     pub default_branch: Option<String>,
+    /// When set, toggles "Include private contributions on my profile"
+    /// (GitHub's Contribution settings; COL-12).
+    #[serde(default)]
+    pub show_private_contributions: Option<bool>,
 }
 
 /// `user.lookup` autocomplete input (ORG-01 / D-ORG-03). Prefix is matched on username only.

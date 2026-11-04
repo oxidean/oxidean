@@ -545,6 +545,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: FORGE_ISSUES, subject: "release" }],
   },
   {
+    surface: "routes/settings/profile.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/settings/profile.browser.test.tsx",
+        subject: "show-private-contributions",
+      },
+    ],
+  },
+  {
     surface: "routes/settings/tokens.index.tsrx",
     coverage: [{ kind: "stack-browser", test: SETTINGS_AVATAR, subject: "tokens" }],
   },
