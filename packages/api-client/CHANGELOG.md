@@ -3,6 +3,13 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.6.0] - 2026-11-04
+
+### Features
+
+- feat(profile): pinned repos, sidebar layout, and contribution settings (1a2d981)
+- feat: pin issues/PRs per repo and repos on org profiles (COL-04) (#233) (3513b74)
+
 ## [0.5.0] - 2026-11-04
 
 ### Features

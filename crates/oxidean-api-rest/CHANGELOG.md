@@ -2,6 +2,18 @@
 
 All notable changes to this component are documented here.
 
+## [0.4.0] - 2026-11-04
+
+### Features
+
+- feat(profile): pinned repos, sidebar layout, and contribution settings (1a2d981)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+
 ## [0.3.3] - 2026-11-04
 
 ### Dependencies

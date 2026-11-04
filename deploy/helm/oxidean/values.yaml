@@ -15,7 +15,7 @@ api:
   replicaCount: 1 # single-writer: raw git repos live on a RWO PVC (CliGitBackend)
   image:
     repository: ghcr.io/oxidean/oxidean-api
-    tag: "0.6.0"
+    tag: "0.7.0"
     pullPolicy: IfNotPresent
   # Structural envs are rendered by the chart; use `env` for any additional
   # non-secret OXIDEAN_* knobs (RUST_LOG, OXIDEAN_OXPILOT_*, mail, SSO client
@@ -41,7 +41,7 @@ web:
   replicaCount: 1 # stateless — scale freely
   image:
     repository: ghcr.io/oxidean/oxidean-web
-    tag: "0.6.0"
+    tag: "0.7.0"
     pullPolicy: IfNotPresent
   env: {}
   resources:

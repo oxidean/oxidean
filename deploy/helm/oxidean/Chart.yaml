@@ -5,8 +5,8 @@ type: application
 # version is the chart semver (carrier for the `oxidean-chart` versioning
 # component); appVersion tracks the `oxidean-api` server version. Both are
 # stamped by the release train — see docs/VERSIONING.md (kind = "helm").
-version: "0.2.1"
-appVersion: "0.6.0"
+version: "0.2.2"
+appVersion: "0.7.0"
 kubeVersion: ">=1.25.0-0"
 # Vendored at build/package time (`helm dependency build`); charts/*.tgz is
 # gitignored, Chart.lock is committed. SeaweedFS is the k8s-native bundled

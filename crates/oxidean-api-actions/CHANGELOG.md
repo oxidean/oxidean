@@ -2,6 +2,14 @@
 
 All notable changes to this component are documented here.
 
+## [0.2.5] - 2026-11-04
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+
 ## [0.2.4] - 2026-11-04
 
 ### Dependencies

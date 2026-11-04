@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.4.2] - 2026-11-04
+
+### Dependencies
+
+- Bumped for changes in `oxidean-core`
+
 ## [0.4.1] - 2026-11-04
 
 ### Dependencies
