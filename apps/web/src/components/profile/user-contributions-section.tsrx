@@ -194,7 +194,9 @@ function ContributionSettingsMenu() @{
           Private contributions
         </DropdownMenuCheckboxItem>
         @if (error) {
-          <p className="px-2 py-1 text-[12px] text-destructive">{error as string}</p>;
+          <p role="alert" className="px-2 py-1 text-[12px] text-destructive">
+            {error as string}
+          </p>;
         }
         <DropdownMenuSeparator />
         <DropdownMenuItem>
