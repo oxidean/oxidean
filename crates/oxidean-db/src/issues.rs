@@ -1253,6 +1253,11 @@ pub async fn unpin_issue(pool: &DbPool, repo_id: &str, issue_id: &str) -> Result
     match pool {
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = $1 FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin issue repo lock failed: {e}"))?;
             sqlx::query("UPDATE issues SET pinned_position = NULL WHERE id = $1 AND repo_id = $2")
                 .bind(issue_id)
                 .bind(repo_id)
@@ -1278,6 +1283,11 @@ pub async fn unpin_issue(pool: &DbPool, repo_id: &str, issue_id: &str) -> Result
         }
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("SELECT id FROM repositories WHERE id = ? FOR UPDATE")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unpin issue repo lock failed: {e}"))?;
             sqlx::query("UPDATE issues SET pinned_position = NULL WHERE id = ? AND repo_id = ?")
                 .bind(issue_id)
                 .bind(repo_id)
