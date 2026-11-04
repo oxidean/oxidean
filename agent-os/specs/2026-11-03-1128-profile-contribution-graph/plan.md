@@ -178,7 +178,24 @@ rebuild; `settings/profile.integration.test.ts` covers the toggle.
 
 ## Out of scope (this spec)
 
-- Pinned repos (COL-04), REST `/api/v1` endpoint, comments as
-  contributions, GitHub's profile-page "Contribution settings" dropdown
-  (its private-contributions toggle ships on `/settings/profile` instead),
-  the full GitHub sidebar layout reshaping.
+- Comments as contributions (GitHub doesn't count them), repo-level
+  issue/PR pinning and org-profile pins (COL-04 remainder), pinned-repos
+  for repos the user doesn't own (GitHub's dialog offers only your own —
+  we match it), a dedicated `/{username}?tab=stars` route (tabs stay
+  inline state).
+
+Shipped in the same change set after Jesse pulled the remaining items in
+(a second PR folded them back into this spec):
+
+- REST `/api/v1` endpoint — `GET /users/{username}/contributions`.
+- GitHub's profile-page "Contribution settings" dropdown — owner-only
+  menu on the contributions heading carrying the private-contributions
+  toggle (writes `show_private_contributions` via `user.updateProfile`)
+  plus a link back to `/settings/profile`.
+- Full GitHub sidebar layout — `/{username}` reshaped to avatar/bio/
+  follow + follower counts on a 296px left rail, README → Pinned →
+  contributions → Repos/Stars tabs on the right.
+- Pinned repos on user profiles (COL-04 profile half) — migration 0096
+  `user_pinned_repos`, `user.listPinnedRepos`/`user.setPinnedRepos`
+  (≤6, ordered, caller-owned only), Pinned cards section with language/
+  stars/forks, owner "Customize your pins" dialog.

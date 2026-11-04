@@ -131,6 +131,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `user.follow` / `user.unfollow` | Idempotent user-follow edge writes; returns target `PublicUserProfile` with refreshed counts | Session + verified |
 | `user.followers.list` / `user.following.list` | Public follower/following lists (`username` filter via `q`; offset/limit) | Anonymous OK; unknown → `user.not_found` |
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
+| `user.listPinnedRepos` | Profile pins for `/{username}` in display order (Read ACL filter — private pins resolve only for viewers who can read them) | Anonymous OK; unknown/banned → `user.not_found` |
+| `user.setPinnedRepos` | Replace the caller's pins — ordered `repo_ids`, ≤6, caller-owned repos only | Session + verified |
 | `user.getContributions` | GitHub-style contribution payload for `/{username}` — zero-filled `days`, `by_type` totals, `current_streak`/`longest_streak`, monthly per-repo `months` sections, selectable `years`; optional `from`/`to` (default last 365 days). `commits` counts authored commits on default branches (`authored_commits`, attributed by verified author email); totals/days/streaks read the materialized `user_contribution_days` rollup | Anonymous OK; public repos only unless the caller is the profile owner with "Include private contributions" enabled (`includes_private`); unknown/banned → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
@@ -241,6 +243,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/user/orgs` | `org.listMine` | |
 | `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
 | `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
+| `GET` | `/users/{username}/contributions` | `user.getContributions` | `from`, `to` query params; anonymous OK — public repos only for non-owners |
 | `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
 | `GET`/`POST` | `/users/{username}/tokens` | `pat.list` / `pat.createClassic` | Gitea token REST; self only; Gitea scope names translated |
 | `DELETE` | `/users/{username}/tokens/{token}` | `pat.revoke` | 204 |

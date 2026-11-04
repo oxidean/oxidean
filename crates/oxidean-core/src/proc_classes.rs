@@ -170,6 +170,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "auth.bootstrap_status"
         | "user.getPublicProfile"
         | "user.getContributions"
+        | "user.listPinnedRepos"
         | "org.get"
         | "repo.explore"
         | "invites.get" => Open,
@@ -490,7 +491,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "email.list" => EmailRead,
         "email.add" | "email.remove" | "email.setPrimary" | "email.resendVerify" => EmailWrite,
 
-        "user.update_profile" => ProfileWrite,
+        "user.update_profile" | "user.setPinnedRepos" => ProfileWrite,
         "user.follow" | "user.unfollow" => FollowWrite,
         "user.followers.list" | "user.following.list" => FollowRead,
         "user.listStarred" => StarringRead,
@@ -737,6 +738,7 @@ mod tests {
             "auth.bootstrap_status",
             "user.getPublicProfile",
             "user.getContributions",
+            "user.listPinnedRepos",
             "org.get",
             "repo.explore",
             "invites.get",

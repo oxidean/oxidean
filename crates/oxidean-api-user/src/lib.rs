@@ -8,6 +8,7 @@ mod dispatch;
 mod follows;
 mod list_starred;
 mod lookup;
+mod pinned;
 mod profile;
 
 pub use dispatch::dispatch;
@@ -20,7 +21,9 @@ pub const PROCEDURES: &[&str] = &[
     "user.getContributions",
     "user.getPublicProfile",
     "user.get_profile",
+    "user.listPinnedRepos",
     "user.listStarred",
+    "user.setPinnedRepos",
     "user.listWatched",
     "user.lookup",
     "user.unfollow",

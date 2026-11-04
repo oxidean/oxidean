@@ -1,9 +1,22 @@
-import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { useState } from "octane";
+import { ChevronDown } from "@octanejs/lucide";
 import type { UserContributions } from "@oxidean/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
 import { apiClient } from "@/lib/api-client";
 import { AppLink } from "@/components/ui/app-link";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { setAuthMeCache } from "@/lib/session-queries";
+import { useChromeAccountState } from "@/lib/use-chrome-account";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { ContributionGraph } from "@/components/profile/contribution-graph";
 import { ContributionActivity } from "@/components/profile/contribution-activity";
 import {
@@ -45,7 +58,7 @@ const TYPE_LABELS: { key: keyof UserContributions["by_type"]; label: string }[] 
  * Contribution graph + year rail + "Contribution activity" for `/{username}`
  * (COL-12). Hidden entirely for zero-contribution users (GitHub parity).
  */
-export function UserContributionsSection(props: { username: string }) @{
+export function UserContributionsSection(props: { username: string; isSelf?: boolean }) @{
   const searchStr = useSearchString();
   const range = resolveContributionRange(searchStr);
   const q = useQuery(userContributionsQueryOptions(props.username, range.from, range.to));
@@ -64,11 +77,16 @@ export function UserContributionsSection(props: { username: string }) @{
             `${c.total} contribution${c.total === 1 ? "" : "s"} in ${contributionRangeLabel(range)}` as string
           }
         </h2>
-        @if (c.includes_private) {
-          <span className="text-[12px] text-muted-foreground">
-            Includes private contributions
-          </span>;
-        }
+        <div className="flex items-center gap-3">
+          @if (c.includes_private) {
+            <span className="text-[12px] text-muted-foreground">
+              Includes private contributions
+            </span>;
+          }
+          @if (props.isSelf) {
+            <ContributionSettingsMenu />;
+          }
+        </div>
       </div>
       <div className="mt-1 text-[12px] text-muted-foreground" data-testid="contribution-breakdown">
         @for (const t of TYPE_LABELS; key t.key) {
@@ -113,6 +131,81 @@ export function UserContributionsSection(props: { username: string }) @{
       </div>
       <ContributionActivity months={c.months} />
     </section>;
+  } @else {
+    <></>;
+  }
+}
+
+/**
+ * GitHub "Contribution settings" dropdown — owner-only, sits beside the
+ * contributions heading. The private-contributions checkbox writes
+ * `show_private_contributions` through `user.updateProfile` (same path as
+ * /settings/profile), then refetches the contribution view.
+ */
+function ContributionSettingsMenu() @{
+  const queryClient = useQueryClient();
+  const account = useChromeAccountState();
+  const mounted = useMounted();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const user = mounted ? account.user : undefined;
+
+  async function togglePrivate(next: boolean) {
+    if (!user || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiClient.user.updateProfile({
+        display_name: user.display_name,
+        username: user.username,
+        bio: user.bio,
+        show_private_contributions: next,
+      });
+      if (res.ok) {
+        setAuthMeCache(queryClient, res.data);
+        void queryClient.invalidateQueries({ queryKey: ["user", "contributions"] });
+      } else {
+        setError(res.error.message || "Could not update contribution settings");
+      }
+    } catch {
+      setError("Could not update contribution settings");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  @if (user) {
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[12px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+        disabled={busy}
+        data-testid="contribution-settings-trigger"
+      >
+        Contribution settings
+        <ChevronDown aria-hidden size={13} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuCheckboxItem
+          checked={user.show_private_contributions !== false}
+          disabled={busy}
+          onCheckedChange={(checked) => void togglePrivate(checked === true)}
+          data-testid="contribution-settings-private"
+        >
+          Private contributions
+        </DropdownMenuCheckboxItem>
+        @if (error) {
+          <p role="alert" className="px-2 py-1 text-[12px] text-destructive">
+            {error as string}
+          </p>;
+        }
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>
+          <AppLink href="/settings/profile" className="flex-1 no-underline">
+            Profile settings
+          </AppLink>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>;
   } @else {
     <></>;
   }

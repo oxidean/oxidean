@@ -832,6 +832,14 @@ export type UserFollowListResponse = {
   total: number;
 };
 
+export type ListPinnedReposRequest = {
+  username: string;
+};
+
+export type SetPinnedReposRequest = {
+  repo_ids: string[];
+};
+
 export type GetContributionsRequest = {
   username: string;
   from?: string | null;
@@ -6222,6 +6230,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
       getContributions: (input: GetContributionsRequest) =>
         rpcCall<UserContributions>(opts, "user.getContributions", input),
+      listPinnedRepos: (input: ListPinnedReposRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "user.listPinnedRepos", input),
+      setPinnedRepos: (input: SetPinnedReposRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "user.setPinnedRepos", input),
       follow: (input: UserFollowRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.follow", input),
       unfollow: (input: UserFollowRequest) =>

@@ -943,6 +943,22 @@ pub struct RepoListByOwnerRequest {
     pub owner: String,
 }
 
+/// `user.listPinnedRepos` input — the profile owner's username (COL-04).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ListPinnedReposRequest {
+    pub username: String,
+}
+
+/// `user.setPinnedRepos` input — caller-owned repo ids in display order,
+/// capped at [`MAX_PINNED_REPOS`]. Response reuses `RepoListMineResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPinnedReposRequest {
+    pub repo_ids: Vec<String>,
+}
+
+/// GitHub parity — at most six pinned repos on a profile.
+pub const MAX_PINNED_REPOS: usize = 6;
+
 /// `repo.get` / `repo.refs` input — owner + name (GIT-05).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoGetRequest {

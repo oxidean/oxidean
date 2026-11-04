@@ -1,6 +1,6 @@
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useEffect, useState } from "octane";
-import { BookMarked, Star } from "@octanejs/lucide";
+import { BookMarked, Star, Users } from "@octanejs/lucide";
 import { ReadmePanel } from "@/components/repo/readme-panel";
 import { AvatarPreview } from "@/components/avatar-preview";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profil
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { useMounted } from "@/lib/use-mounted.tsrx";
 import { UserContributionsSection } from "@/components/profile/user-contributions-section";
+import { PinnedReposSection } from "@/components/profile/pinned-repos";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -300,189 +301,220 @@ export function UserProfilePage() @{
     </div>;
   } @else {
     <div className="mx-auto max-w-6xl px-4 py-12">
-      <div className="flex flex-wrap items-start gap-4">
-        <AvatarPreview user={profile} size={80} />
-        <div>
-          <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.2] text-foreground">
-            {display as string}
-          </h1>
-          @if (display !== username) {
-            <p className="mt-1 text-[16px] text-muted-foreground">
-              {"@" + (username as string)}
-            </p>;
-          }
+      <div className="lg:flex lg:gap-8">
+        <aside className="mb-8 shrink-0 lg:mb-0 lg:w-[296px]">
+          <div className="flex items-start gap-4 lg:block">
+            <AvatarPreview user={profile} size={80} className="lg:hidden" />
+            <AvatarPreview user={profile} size={260} className="hidden lg:block" />
+            <div className="min-w-0 lg:mt-4">
+              <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.25] text-foreground lg:text-[28px]">
+                {display as string}
+              </h1>
+              @if (display !== username) {
+                <p className="text-[16px] font-light text-muted-foreground lg:text-[20px]">
+                  {username as string}
+                </p>;
+              }
+            </div>
+          </div>
           @if (profile.bio?.trim()) {
-            <p className="mt-3 max-w-xl text-[16px] text-muted-foreground">
-              {profile.bio as string}
-            </p>;
+            <p className="mt-4 text-[16px] text-muted-foreground">{profile.bio as string}</p>;
           }
-          <p className="mt-3 text-[14px] text-muted-foreground" data-testid="profile-follow-counts">
+          @if (signedIn) {
+            <div className="mt-4">
+              @if (isSelf) {
+                <AppLink
+                  href="/settings/profile"
+                  className={cn(
+                    buttonVariants({ variant: "secondary" }),
+                    "h-9 w-full justify-center text-[14px]",
+                  )}
+                  data-testid="profile-edit-button"
+                >
+                  Edit profile
+                </AppLink>;
+              } @else {
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-9 w-full text-[14px]"
+                  disabled={followBusy}
+                  aria-pressed={followingNow}
+                  data-testid="profile-follow-button"
+                  onClick={() => void toggleFollow()}
+                >
+                  {(followingNow ? "Following" : "Follow") as string}
+                </Button>;
+              }
+            </div>;
+          }
+          <p
+            className="mt-4 flex items-center gap-1.5 text-[14px] text-muted-foreground"
+            data-testid="profile-follow-counts"
+          >
+            <Users aria-hidden size={15} className="shrink-0" />
             <span className="font-semibold text-foreground">{String(followerCount)}</span>
             {(followerCount === 1 ? " follower · " : " followers · ") as string}
             <span className="font-semibold text-foreground">{String(followingCount)}</span>
             {" following" as string}
           </p>
-        </div>
-        @if (signedIn && !isSelf) {
-          <div className="ml-auto">
-            <Button
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          @if (profileReadme) {
+            <ReadmePanel html={profileReadme.html} fileName={profileReadme.name} />;
+          }
+
+          <PinnedReposSection username={username} isSelf={isSelf} candidates={repos} />
+
+          <UserContributionsSection username={username} isSelf={isSelf} />
+
+          <div className="mt-8 flex gap-4 border-b border-border">
+            <button
               type="button"
-              variant="secondary"
-              className="h-9 px-4 text-[14px]"
-              disabled={followBusy}
-              aria-pressed={followingNow}
-              data-testid="profile-follow-button"
-              onClick={() => void toggleFollow()}
+              className={
+                (tab === "repos"
+                  ? "border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground"
+                  : "pb-2 text-[14px] text-muted-foreground") as string
+              }
+              onClick={() => setTab("repos")}
             >
-              {(followingNow ? "Following" : "Follow") as string}
-            </Button>
-          </div>;
-        }
-      </div>
-
-      @if (profileReadme) {
-        <ReadmePanel html={profileReadme.html} fileName={profileReadme.name} />;
-      }
-
-      <UserContributionsSection username={username} />
-
-      <div className="mt-8 flex gap-4 border-b border-border">
-        <button
-          type="button"
-          className={
-            (tab === "repos"
-              ? "border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground"
-              : "pb-2 text-[14px] text-muted-foreground") as string
-          }
-          onClick={() => setTab("repos")}
-        >
-          Repositories
-        </button>
-        @if (isSelf) {
-          <button
-            type="button"
-            className={
-              (tab === "stars"
-                ? "border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground"
-                : "pb-2 text-[14px] text-muted-foreground") as string
+              Repositories
+            </button>
+            @if (isSelf) {
+              <button
+                type="button"
+                className={
+                  (tab === "stars"
+                    ? "border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground"
+                    : "pb-2 text-[14px] text-muted-foreground") as string
+                }
+                onClick={() => setTab("stars")}
+              >
+                Stars
+              </button>;
             }
-            onClick={() => setTab("stars")}
-          >
-            Stars
-          </button>;
-        }
-      </div>
+          </div>
 
-      @if (tab === "stars" && isSelf) {
-        <section className="mt-6" aria-label="Starred repositories">
-          @if (starred.length === 0) {
-            <EmptyState
-              icon={<Star aria-hidden size={22} />}
-              title="No starred repositories yet"
-              description="Repositories you star will be collected here for quick access."
-            />;
+          @if (tab === "stars" && isSelf) {
+            <section className="mt-6" aria-label="Starred repositories">
+              @if (starred.length === 0) {
+                <EmptyState
+                  icon={<Star aria-hidden size={22} />}
+                  title="No starred repositories yet"
+                  description="Repositories you star will be collected here for quick access."
+                />;
+              } @else {
+                <List>
+                  @for (const repo of starred; key repo.id) {
+                    <ListRow className="items-start gap-3 py-4">
+                      <Star
+                        aria-hidden
+                        size={18}
+                        className="mt-0.5 shrink-0 text-muted-foreground"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <AppLink
+                          href={
+                            ("/" +
+                              repo.owner_username +
+                              "/" +
+                              repo.name) as string
+                          }
+                          className="text-[16px] font-semibold text-primary no-underline hover:underline"
+                        >
+                          {(repo.owner_username + "/" + repo.name) as string}
+                        </AppLink>
+                        @if (
+                          repo.description?.trim()
+                        ) {
+                          <p className="mt-1 text-[14px] text-muted-foreground">
+                            {repo.description as string}
+                          </p>;
+                        }
+                      </div>
+                    </ListRow>;
+                  }
+                </List>;
+              }
+            </section>;
           } @else {
-            <List>
-              @for (const repo of starred; key repo.id) {
-                <ListRow className="items-start gap-3 py-4">
-                  <Star
-                    aria-hidden
-                    size={18}
-                    className="mt-0.5 shrink-0 text-muted-foreground"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <AppLink
-                      href={
-                        ("/" + repo.owner_username + "/" + repo.name) as string
-                      }
-                      className="text-[16px] font-semibold text-primary no-underline hover:underline"
-                    >
-                      {(repo.owner_username + "/" + repo.name) as string}
-                    </AppLink>
-                    @if (
-                      repo.description?.trim()
-                    ) {
-                      <p className="mt-1 text-[14px] text-muted-foreground">
-                        {repo.description as string}
-                      </p>;
-                    }
-                  </div>
-                </ListRow>;
-              }
-            </List>;
-          }
-        </section>;
-      } @else {
-        <section className="mt-6" aria-label="Repositories">
-          @if (repos.length === 0) {
-            <EmptyState
-              icon={<BookMarked aria-hidden size={22} />}
-              title="No repositories yet"
-              description={
-                isSelf
-                  ? "Create a repository to start hosting your code on Oxidean."
-                  : "This user hasn't published any repositories yet."
-              }
-              action={
-                isSelf ? (
-                  <AppLink
-                    href="/new"
-                    className={cn(buttonVariants({ variant: "default", size: "sm" }))}
-                  >
-                    New repository
-                  </AppLink>
-                ) : undefined
-              }
-            />;
-          } @else {
-            <List>
-              @for (const repo of repos; key repo.id) {
-                <ListRow className="items-start gap-3 py-4">
-                  <BookMarked
-                    aria-hidden
-                    size={18}
-                    className="mt-0.5 shrink-0 text-muted-foreground"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
+            <section className="mt-6" aria-label="Repositories">
+              @if (repos.length === 0) {
+                <EmptyState
+                  icon={<BookMarked aria-hidden size={22} />}
+                  title="No repositories yet"
+                  description={
+                    isSelf
+                      ? "Create a repository to start hosting your code on Oxidean."
+                      : "This user hasn't published any repositories yet."
+                  }
+                  action={
+                    isSelf ? (
                       <AppLink
-                        href={`/${username as string}/${repo.name as string}`}
-                        className="text-[16px] font-semibold text-primary no-underline hover:underline"
+                        href="/new"
+                        className={cn(
+                          buttonVariants({ variant: "default", size: "sm" }),
+                        )}
                       >
-                        {repo.name as string}
+                        New repository
                       </AppLink>
-                      <Badge
-                        variant={
-                          repo.visibility === "private" ? "outline" : "success"
+                    ) : undefined
+                  }
+                />;
+              } @else {
+                <List>
+                  @for (const repo of repos; key repo.id) {
+                    <ListRow className="items-start gap-3 py-4">
+                      <BookMarked
+                        aria-hidden
+                        size={18}
+                        className="mt-0.5 shrink-0 text-muted-foreground"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <AppLink
+                            href={`/${username as string}/${repo.name as string}`}
+                            className="text-[16px] font-semibold text-primary no-underline hover:underline"
+                          >
+                            {repo.name as string}
+                          </AppLink>
+                          <Badge
+                            variant={
+                              repo.visibility === "private"
+                                ? "outline"
+                                : "success"
+                            }
+                          >
+                            {
+                              (repo.visibility === "private"
+                                ? "Private"
+                                : "Public") as string
+                            }
+                          </Badge>
+                        </div>
+                        @if (
+                          repo.description?.trim()
+                        ) {
+                          <p className="mt-1 text-[14px] text-muted-foreground">
+                            {repo.description as string}
+                          </p>;
                         }
-                      >
-                        {
-                          (repo.visibility === "private"
-                            ? "Private"
-                            : "Public") as string
+                        @if (repo.star_count) {
+                          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                            <Star aria-hidden size={13} />
+                            <span>{String(repo.star_count)}</span>
+                          </div>;
                         }
-                      </Badge>
-                    </div>
-                    @if (
-                      repo.description?.trim()
-                    ) {
-                      <p className="mt-1 text-[14px] text-muted-foreground">
-                        {repo.description as string}
-                      </p>;
-                    }
-                    @if (repo.star_count) {
-                      <div className="mt-2 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                        <Star aria-hidden size={13} />
-                        <span>{String(repo.star_count)}</span>
-                      </div>;
-                    }
-                  </div>
-                </ListRow>;
+                      </div>
+                    </ListRow>;
+                  }
+                </List>;
               }
-            </List>;
+            </section>;
           }
-        </section>;
-      }
+        </div>
+      </div>
     </div>;
   }
 }

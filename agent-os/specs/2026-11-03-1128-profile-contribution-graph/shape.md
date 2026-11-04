@@ -59,8 +59,8 @@ One new anonymous-safe read RPC plus a reworked profile page section.
   caller's session to be the profile owner). New procedure name goes in
   `oxidean-api-user`'s `PROCEDURES`, `dispatch`, `rpc-gen` output, and the
   proc-class table.
-- No REST `/api/v1` endpoint in this pass — GitHub exposes no equivalent;
-  easy follow-up via the existing façade if wanted.
+- REST alias ships with it: `GET /api/v1/users/{username}/contributions`
+  (`from`/`to` query params) through the existing RouteDef façade.
 
 ### Visibility
 
@@ -100,8 +100,8 @@ matches what GitHub shows):
 
 ### Web UI
 
-Mirror GitHub's profile Overview contribution section, adapted to the
-current single-column profile structure:
+Mirror GitHub's profile Overview — both the contribution section and the
+two-column profile shell it sits in:
 
 - `components/profile/contribution-graph.tsrx` — pure-CSS heatmap like the
   insights page's div bar chart (no chart dependency): 53 week-columns × 7
@@ -125,10 +125,11 @@ current single-column profile structure:
   percentages ("Commits 62% · Pull requests 21% · …") — GitHub's "Activity
   overview" equivalent — plus "Contributed to N repositories" if cheap to
   derive from the same payload.
-- `$owner.index.tsrx` `UserProfilePage` — insert the sections between the
-  profile README and the Repositories/Stars tabs; keep the current
-  single-column width rather than reshaping the whole page into GitHub's
-  sidebar layout in this pass.
+- `$owner.index.tsrx` `UserProfilePage` — GitHub's two-column profile:
+  296px left rail (avatar, name/username, bio, Edit/Follow action,
+  follower counts) beside a content column holding profile README →
+  Pinned → contributions → Repos/Stars tabs; collapses to one column
+  under `lg`.
 - Loading: `Skeleton` placeholders; empty state: hide sections entirely for
   users with zero contributions (no sad empty boxes on fresh accounts —
   GitHub hides the graph too).
@@ -175,8 +176,9 @@ current single-column profile structure:
 ## Alternatives considered
 
 - **Full GitHub sidebar layout** (avatar/bio/follow left, tabs right) —
-  bigger reshaping of `UserProfilePage`; worth doing later but orthogonal to
-  COL-12's gap. Deferred: keep the current column and insert the sections.
+  first deferred as orthogonal reshaping, then pulled into the change set
+  when Jesse asked for the profile page to match GitHub's overview: the
+  296px identity rail and the content column now mirror that layout.
 - **Itemized activity via a second paginated RPC** (`user.listActivity`) —
   the Atom feed's `list_repo_activity_by_actor_public` covers push-kind rows
   only, and a second round trip buys nothing the monthly sections don't
@@ -184,6 +186,17 @@ current single-column profile structure:
 - **No year selector** (ship rolling "last year" only) — dropped; matching
   GitHub means the year rail ships now. `years[]` from the RPC keeps the UI
   dumb.
+- **REST `/api/v1` contributions endpoint deferred** — pulled into the
+  change set: `GET /users/{username}/contributions` aliases the same
+  procedure (`from`/`to` query params, anonymous-safe).
+- **Contribution-settings dropdown on the profile page deferred to
+  settings** — pulled in: GitHub shows the menu on the graph header, so
+  the owner gets it there too (plus a link back to `/settings/profile`).
+- **Pinned repos deferred to COL-04 wholesale** — pulled in for the
+  profile half: `user_pinned_repos` + `user.listPinnedRepos`/
+  `user.setPinnedRepos` (≤6 ordered, caller-owned repos — GitHub's
+  customize dialog offers only your own) and the Pinned cards section.
+  Repo issue/PR pinning and org-profile pins remain COL-04 scope.
 - **Eager history backfill at deploy time** — walking every repo's default
   branch inside the migration is unbounded work at migrate time. Rejected in
   favor of lazy per-repo claims: only repos of users whose profiles are

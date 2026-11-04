@@ -234,6 +234,90 @@ fn rewrite_refs(v: &mut Value) {
     }
 }
 
+/// Convert schemars' draft-2020-12 null unions into OpenAPI 3.0 `nullable`:
+/// `type: [T…, "null"]` drops `"null"` (collapsing a lone remaining type to a
+/// scalar) and `{any,one}Of` branches that are bare `{"type":"null"}` fold
+/// into `nullable: true`. A sole remaining non-`$ref` branch inlines; a sole
+/// `$ref` branch keeps its `anyOf`/`oneOf` and gains an `enum: [null]` branch,
+/// because `allOf` must hold for every value (including null) and 3.0 ignores
+/// `$ref` siblings — `allOf: [$ref]` + `nullable` would not actually admit
+/// null under strict 3.0 semantics. Multi-branch unions keep an explicit
+/// `enum: [null]` branch for the same reason: `nullable` does not make an
+/// `anyOf` admit null.
+fn to_nullable(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            let mut nullable = false;
+            if let Some(types) = m.get("type").and_then(|t| t.as_array()) {
+                let non_null: Vec<Value> = types
+                    .iter()
+                    .filter(|t| t.as_str() != Some("null"))
+                    .cloned()
+                    .collect();
+                if non_null.len() != types.len() {
+                    nullable = true;
+                    match non_null.len() {
+                        0 => {
+                            m.remove("type");
+                        }
+                        1 => {
+                            m.insert("type".into(), non_null.into_iter().next().unwrap());
+                        }
+                        _ => {
+                            m.insert("type".into(), Value::Array(non_null));
+                        }
+                    }
+                }
+            }
+            for key in ["anyOf", "oneOf"] {
+                let Some(branches) = m.get(key).and_then(|a| a.as_array()) else {
+                    continue;
+                };
+                let bare_null = |b: &Value| {
+                    b.as_object().is_some_and(|o| o.len() == 1)
+                        && b.get("type").and_then(|t| t.as_str()) == Some("null")
+                };
+                let kept: Vec<Value> = branches.iter().filter(|b| !bare_null(b)).cloned().collect();
+                if kept.len() == branches.len() {
+                    continue;
+                }
+                nullable = true;
+                match kept.as_slice() {
+                    [] => {
+                        m.remove(key);
+                    }
+                    [only] => {
+                        let is_ref = only.as_object().is_some_and(|o| o.contains_key("$ref"));
+                        if is_ref {
+                            m.insert(key.into(), json!([only.clone(), { "enum": [Value::Null] }]));
+                        } else {
+                            m.remove(key);
+                            if let Value::Object(inner) = only.clone() {
+                                for (k, val) in inner {
+                                    m.insert(k, val);
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        let mut branches = kept;
+                        branches.push(json!({ "enum": [Value::Null] }));
+                        m.insert(key.into(), Value::Array(branches));
+                    }
+                }
+            }
+            if nullable {
+                m.insert("nullable".into(), json!(true));
+            }
+            for val in m.values_mut() {
+                to_nullable(val);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(to_nullable),
+        _ => {}
+    }
+}
+
 fn error_schema() -> Value {
     json!({
         "type": "object",
@@ -376,6 +460,7 @@ pub fn openapi_doc() -> Value {
         },
     });
     rewrite_refs(&mut doc);
+    to_nullable(&mut doc);
     doc
 }
 
@@ -437,6 +522,67 @@ mod tests {
                 "dangling schema ref {name} in openapi doc"
             );
         }
+    }
+
+    /// A nullable `$ref` property must admit null under strict OpenAPI 3.0
+    /// semantics: `allOf` applies to every value, so `allOf: [$ref]` +
+    /// `nullable` would reject null. The emitted shape is
+    /// `anyOf: [$ref, {enum: [null]}]` + `nullable` (the latter as a hint for
+    /// tools that honour it next to composition).
+    #[test]
+    fn nullable_ref_property_admits_null() {
+        let doc = openapi_doc();
+        let visibility = &doc["paths"]["/user/repos"]["post"]["requestBody"]["content"]
+            ["application/json"]["schema"]["properties"]["visibility"];
+        let any_of = visibility["anyOf"].as_array().expect("anyOf branches");
+        let admits_null = any_of.iter().any(|b| {
+            b.as_object().is_some_and(|o| {
+                o.get("enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|e| e.iter().any(Value::is_null))
+            })
+        });
+        assert!(
+            admits_null,
+            "visibility schema must admit null: {visibility}"
+        );
+        let keeps_ref = any_of
+            .iter()
+            .any(|b| b["$ref"].as_str() == Some("#/components/schemas/RepoVisibility"));
+        assert!(
+            keeps_ref,
+            "visibility schema must keep its ref: {visibility}"
+        );
+        assert_eq!(visibility["nullable"], json!(true));
+    }
+
+    /// A union that keeps two or more non-null branches cannot rely on
+    /// `nullable: true` alone — under strict 3.0 semantics `nullable` does not
+    /// make an `anyOf` admit null. The transform must therefore retain an
+    /// explicit `{enum: [null]}` branch alongside the kept branches.
+    #[test]
+    fn multi_branch_nullable_union_admits_null() {
+        let doc = openapi_doc();
+        let enforce_admins = &doc["paths"]["/repos/{owner}/{repo}/branches/{branch}/protection"]
+            ["put"]["requestBody"]["content"]["application/json"]["schema"]["properties"]
+            ["enforce_admins"];
+        let any_of = enforce_admins["anyOf"].as_array().expect("anyOf branches");
+        let admits_null = any_of.iter().any(|b| {
+            b.as_object().is_some_and(|o| {
+                o.get("enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|e| e.iter().any(Value::is_null))
+            })
+        });
+        assert!(
+            admits_null,
+            "enforce_admins schema must admit null: {enforce_admins}"
+        );
+        assert!(
+            any_of.len() >= 3,
+            "enforce_admins keeps its non-null branches: {enforce_admins}"
+        );
+        assert_eq!(enforce_admins["nullable"], json!(true));
     }
 
     /// Building the router must not panic (axum rejects overlapping
