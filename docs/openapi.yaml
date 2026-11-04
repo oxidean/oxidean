@@ -5168,41 +5168,57 @@ paths:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 allow_force_pushes:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 allow_deletions:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 required_linear_history:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 required_conversation_resolution:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 required_signatures:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 lock_branch:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
                 required_merge_queue:
                   anyOf:
                   - type: boolean
                   - type: object
+                  - enum:
+                    - null
                   nullable: true
       responses:
         '200':

@@ -241,7 +241,9 @@ fn rewrite_refs(v: &mut Value) {
 /// `$ref` branch keeps its `anyOf`/`oneOf` and gains an `enum: [null]` branch,
 /// because `allOf` must hold for every value (including null) and 3.0 ignores
 /// `$ref` siblings — `allOf: [$ref]` + `nullable` would not actually admit
-/// null under strict 3.0 semantics.
+/// null under strict 3.0 semantics. Multi-branch unions keep an explicit
+/// `enum: [null]` branch for the same reason: `nullable` does not make an
+/// `anyOf` admit null.
 fn to_nullable(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -298,7 +300,9 @@ fn to_nullable(v: &mut Value) {
                         }
                     }
                     _ => {
-                        m.insert(key.into(), Value::Array(kept));
+                        let mut branches = kept;
+                        branches.push(json!({ "enum": [Value::Null] }));
+                        m.insert(key.into(), Value::Array(branches));
                     }
                 }
             }
@@ -550,6 +554,35 @@ mod tests {
             "visibility schema must keep its ref: {visibility}"
         );
         assert_eq!(visibility["nullable"], json!(true));
+    }
+
+    /// A union that keeps two or more non-null branches cannot rely on
+    /// `nullable: true` alone — under strict 3.0 semantics `nullable` does not
+    /// make an `anyOf` admit null. The transform must therefore retain an
+    /// explicit `{enum: [null]}` branch alongside the kept branches.
+    #[test]
+    fn multi_branch_nullable_union_admits_null() {
+        let doc = openapi_doc();
+        let enforce_admins = &doc["paths"]["/repos/{owner}/{repo}/branches/{branch}/protection"]
+            ["put"]["requestBody"]["content"]["application/json"]["schema"]["properties"]
+            ["enforce_admins"];
+        let any_of = enforce_admins["anyOf"].as_array().expect("anyOf branches");
+        let admits_null = any_of.iter().any(|b| {
+            b.as_object().is_some_and(|o| {
+                o.get("enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|e| e.iter().any(Value::is_null))
+            })
+        });
+        assert!(
+            admits_null,
+            "enforce_admins schema must admit null: {enforce_admins}"
+        );
+        assert!(
+            any_of.len() >= 3,
+            "enforce_admins keeps its non-null branches: {enforce_admins}"
+        );
+        assert_eq!(enforce_admins["nullable"], json!(true));
     }
 
     /// Building the router must not panic (axum rejects overlapping
