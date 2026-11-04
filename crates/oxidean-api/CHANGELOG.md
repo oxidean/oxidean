@@ -3,6 +3,21 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.6.0] - 2026-11-04
+
+### Features
+
+- feat(profile): contribution graph and activity sections on user profiles (#230) (d5899a6)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-api-pulls`
+- Bumped for changes in `oxidean-api-user`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+- Bumped for changes in `oxidean-vcs`
+
 ## [0.5.0] - 2026-11-02
 
 ### Features
