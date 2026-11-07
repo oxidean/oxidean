@@ -26,10 +26,20 @@ helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
 
 The `forge-tls` Secret is yours to create: either let cert-manager issue it
 (ingress annotations) or create the TLS Secret in the release namespace
-yourself — the chart ships no edge of its own. For a plain-HTTP LAN eval,
-drop to `env=development` **and** set the LAN origin:
-`--set env=development --set publicOrigin=http://192.168.x.y` — otherwise
-clone URLs and magic links keep pointing at `localhost:8080`. The
+yourself — the chart ships no edge of its own.
+
+For a plain-HTTP LAN eval, install without the production ingress
+settings — the chart's default catch-all ingress answers on whatever
+address the LAN reaches, and `env=development` plus the LAN origin keeps
+clone URLs and magic links off `localhost:8080`:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
+  --set env=development \
+  --set publicOrigin=http://192.168.x.y
+```
+
+The
 trade-offs are in
 [SELF-HOSTING.md](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md).
 

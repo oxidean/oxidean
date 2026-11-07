@@ -22,12 +22,39 @@ on:
         type: string
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SRC_REF: ${{ inputs.src_ref }}
+        run: |
+          set -euo pipefail
+          # Dispatch inputs reach the reusable call as text — validate the tag
+          # shape before it can carry anything else into a run step.
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            [[ "$TAG" =~ ^ox-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must be a stable ox-vX.Y.Z tag"; exit 1; }
+            [[ -z "$SRC_REF" || "$SRC_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || { echo "::error::invalid src_ref charset"; exit 1; }
+          fi
+          # Prerelease ox-v*-beta.N tags never carry a matching manifest
+          # version — check the version part after the ox-v prefix.
+          ver="${TAG#ox-v}"
+          if [[ "$ver" == *-* ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease tag $TAG — docs bundle skipped"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   pack:
-    # prerelease tags (any '-' suffix) never carry a matching manifest version
-    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')
+    needs: guard
+    if: needs.guard.outputs.proceed == 'true'
     permissions:
       contents: write
-    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.4
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.5
     with:
       tag: ${{ inputs.tag || github.ref_name }}
       src-ref: ${{ inputs.src_ref }}
