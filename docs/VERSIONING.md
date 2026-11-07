@@ -41,6 +41,11 @@ in `ox-cli.yml`.
 Version numbers live in the per-component manifests only — never in
 `versioning.toml` — so the registry stays stable while versions move.
 
+The curated `docs/site/` bundle attaches only to `ox-v*` releases via
+`.github/workflows/docs-release.yml`; its `manifest.yaml` `version:` must
+equal the tag's SemVer, so bump it with every `ox-v*` tag even when the
+docs content is unchanged (the pack gate hard-fails on a mismatch).
+
 ## Commit grammar (enforced)
 
 Every non-exempt commit subject must match:

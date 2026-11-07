@@ -1,0 +1,108 @@
+---
+title: Docker Compose
+description: "Run a complete Oxidean forge with Docker Compose: published images, one volume, optional TLS and Actions profiles."
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+The self-host bundle lives in
+[`deploy/selfhost/`](https://github.com/oxidean/oxidean/tree/main/deploy/selfhost)
+of the main repository. Copy `docker-compose.yml`, `Caddyfile`, and
+`.env.example` into an empty directory (plus
+`docker-compose.docker-sock.yml` only if you plan to run `docker://`
+Actions jobs).
+
+## Local evaluation
+
+<Steps>
+
+1. Grab the bundle files and prepare the environment:
+
+   ```bash
+   mkdir oxidean && cd oxidean
+   # copy docker-compose.yml, Caddyfile, .env.example from deploy/selfhost
+   cp .env.example .env
+   ```
+
+2. Set `POSTGRES_PASSWORD` and `OXIDEAN_ACTIONS_SECRETS_KEY` in `.env`
+   (`openssl rand -hex 24` / `openssl rand -base64 32`). For evaluation
+   only, also set `OXIDEAN_ENV=development`.
+
+3. Bring the stack up:
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. Open `http://localhost:8080`. **`/setup`** walks you through the
+   admin account and auth providers.
+
+</Steps>
+
+Tear down with `docker compose down` (add `-v` to drop the data volume).
+
+## Production shape
+
+<Steps>
+
+1. Point a DNS name at the host and keep ports 80/443 reachable.
+
+2. Set the public identity in `.env` so generated links and clone URLs
+   point at the forge instead of localhost:
+
+   ```bash
+   OXIDEAN_PUBLIC_ORIGIN=https://git.example.com
+   OXIDEAN_SSH_HOST=git.example.com
+   ```
+
+   `OXIDEAN_SSH_PORT` defaults to `2222`; publish it from `api` or map
+   it through your edge.
+
+3. Provision the web-flow signing key. Auto-generation is disabled in
+   production and creating a repository with a UI-seeded initial commit
+   fails closed without it. Set `OXIDEAN_WEB_FLOW_PRIVATE_KEY` in
+   `.env`, or drop `web-flow` / `web-flow.pub` into `/var/ssh` inside
+   the `oxidean_data` volume:
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -f web-flow && base64 -w0 web-flow
+   ```
+
+   Details: [required secrets](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md#required-secrets).
+
+4. Set `DOMAIN` (and the posted secrets) in `.env` and leave
+   `OXIDEAN_ENV` unset (production default).
+
+5. Bring the edge profile up with the stack:
+
+   ```bash
+   docker compose --profile tls up -d
+   ```
+
+   Caddy terminates TLS for `$DOMAIN` with Let's Encrypt and proxies to
+   `web:3000`. Running your own edge instead? One `reverse_proxy
+   web:3000` line is the whole contract.
+
+6. Enable CI capacity when you need it. Runners must register before they
+   can claim jobs. Mint a **one-time** registration token under **Admin →
+   Runners** in the web UI (or via `admin.actions.createRegistrationToken`),
+   hand it to the runner, then start the profile:
+
+   ```bash
+   # .env: OXIDEAN_RUNNER_REGISTRATION_TOKEN=<one-time token>
+   docker compose --profile actions up -d
+   ```
+
+   The runner persists its registration (`/data/runner.json` on its `/data`
+   volume) and the token is only needed for that first enroll. The same env
+   token is **reusable while set** on the api side: fine for local eval
+   (set it on both `api` and `runner`), but leave it unset on
+   internet-facing instances and always prefer minted one-time tokens.
+
+</Steps>
+
+<Aside type="note">
+  Prefer object storage for packages/artifacts? The `s3` profile bundles an eval-grade RustFS store;
+  `OXIDEAN_STORAGE_BACKEND` and the `OXIDEAN_S3_*` set cover external endpoints too; see
+  [configuration](/configuration/).
+</Aside>

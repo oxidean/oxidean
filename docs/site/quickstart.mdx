@@ -1,0 +1,59 @@
+---
+title: Quickstart
+description: Create your first repository on Oxidean, on the hosted cloud or your own install.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+The fastest route depends on where your forge lives. Oxidean Cloud and a
+self-hosted install run the same codebase, so everything after sign-in is
+identical.
+
+<Tabs>
+	<TabItem label="Oxidean Cloud">
+		<Steps>
+			1. Sign in (or create an account) on your Oxidean instance.
+			2. Click **New repository**, pick an owner (you or an organization),
+			   name it, and choose visibility.
+			3. Push an existing checkout:
+			   ```bash
+			   git remote add origin https://<instance>/<owner>/<repo>.git
+			   git push -u origin main
+			   ```
+			   or clone the fresh repo and commit as usual.
+			4. Open a pull request from a branch, turn on actions, publish a
+			   package. It all lives under the same origin.
+		</Steps>
+	</TabItem>
+	<TabItem label="Self-hosted">
+		<Steps>
+			1. Bring the stack up (see
+			   [Docker](/self-hosting/docker/) or
+			   [Kubernetes](/self-hosting/kubernetes/)):
+			   ```bash
+			   docker compose up -d
+			   ```
+			2. Open the instance and walk through **`/setup`**. On a fresh
+			   install it creates the admin account and lets you choose auth
+			   providers.
+			3. Create a repository and push exactly as you would on the cloud.
+			4. For git over SSH, expose `OXIDEAN_SSH_PORT` (default `2222`) and
+			   add your key under **Settings → SSH keys**.
+		</Steps>
+		<Aside type="tip">
+			Two things hold state: forge content (repos, LFS, packages, action
+			logs) in the `oxidean_data` volume on `api`, and the bundled
+			Postgres database in `postgres_data`. Back up both at one
+			consistent point; see the
+			[backup procedure](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md#backup).
+			Enabled profiles may add their own volumes (`objectstore_data`,
+			`runner_data`, `caddy_data`).
+		</Aside>
+	</TabItem>
+</Tabs>
+
+## Where to next
+
+- [Self-hosting overview](/self-hosting/): architecture and profiles
+- [`ox` CLI](/cli/): drive the forge from your shell
+- [Configuration](/configuration/): the `OXIDEAN_*` env contract

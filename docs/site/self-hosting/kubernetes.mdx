@@ -1,0 +1,61 @@
+---
+title: Kubernetes (Helm)
+description: Install the Oxidean forge on Kubernetes with the published Helm chart.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The same images that run the Compose bundle ship as a Helm chart. For a
+cluster-local eval the chart defaults are enough:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean
+```
+
+Any install with real users needs its public URL up front: `env=production`
+(the default) expects HTTPS, and the forge builds clone URLs, magic links,
+and SSO redirects from `publicOrigin`:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
+  --set publicOrigin=https://git.example.com \
+  --set ingress.host=git.example.com \
+  --set 'ingress.tls[0].secretName=forge-tls' \
+  --set 'ingress.tls[0].hosts[0]=git.example.com'
+```
+
+`ingress.host` also becomes the advertised git-over-SSH host. TLS itself is
+delegated to your ingress controller (cert-manager annotations and friends);
+the chart ships no edge of its own. For a plain-HTTP LAN eval
+(`http://192.168.x.y`), drop to `env=development` — the trade-offs are in
+[SELF-HOSTING.md](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md).
+
+Chart source lives in
+[`deploy/helm/oxidean/`](https://github.com/oxidean/oxidean/tree/main/deploy/helm/oxidean)
+of the main repository.
+
+## Values that matter
+
+| Value                 | Default     | What it controls                                                                    |
+| --------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `postgres.enabled`    | `true`      | Bundled Postgres vs. external `DATABASE_URL` (Postgres, MySQL, or SQLite dialects). |
+| `objectstore.enabled` | `false`     | Bundled RustFS object store (eval-grade). Opt-in; also needs `storage.backend=s3` to serve. |
+| `seaweedfs.enabled`   | `false`     | Production-shaped bundled store, mutually exclusive with `objectstore`.            |
+| `runner.enabled`      | `false`     | In-cluster Actions runner for CI jobs.                                              |
+
+External S3-compatible endpoints override the same `OXIDEAN_S3_*`
+environment contract used by the Compose surface: no per-surface config
+fork.
+
+<Aside type="tip">
+  Moving an existing Compose install onto Kubernetes? The repo ships a dedicated walkthrough:
+  [SELFHOST-MIGRATE-TO-K8S.md](https://github.com/oxidean/oxidean/blob/main/docs/SELFHOST-MIGRATE-TO-K8S.md).
+</Aside>
+
+## Ingress
+
+`web` is still the single HTTP origin on Kubernetes: point your ingress at
+the `web` service for HTTP(S). Git-over-SSH is raw TCP, so it cannot ride
+the HTTP ingress; the chart gives it a separate `LoadBalancer` service,
+advertised via `ssh.host` / `ssh.port` (they fall back to `ingress.host`
+and external port `22`).

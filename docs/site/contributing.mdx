@@ -1,0 +1,43 @@
+---
+title: Contributing
+description: "How to contribute to Oxidean: the monorepo layout, commit conventions, and where to start."
+---
+
+Oxidean is MIT-licensed and developed in the open at
+[oxidean/oxidean](https://github.com/oxidean/oxidean). Issues and pull
+requests are welcome on GitHub. Security reports follow
+[SECURITY.md](https://github.com/oxidean/oxidean/blob/main/SECURITY.md),
+not public issues.
+
+## The codebase
+
+One repository, one product:
+
+- **Bun + Turborepo** workspaces: `apps/web` (Octane + Astro UI),
+  `packages/*` (shared TS, generated API client)
+- **Cargo workspace**: `crates/*` (API, domain types, DB layer, web
+  tier, runner)
+- **`deploy/`**: self-host compose bundle, Helm chart, CI images
+- **`docs/`**: architecture, API, configuration, testing, versioning
+
+## Conventions worth knowing
+
+- Commits and PR titles follow `type(scope): subject`
+  (`feat`, `fix`, `docs`, `chore`, `test`, `ci`, …), enforced by a
+  `commit-msg` hook and CI `commit-lint`. Subjects drive per-component
+  SemVer bumps and changelogs; see
+  [VERSIONING.md](https://github.com/oxidean/oxidean/blob/main/docs/VERSIONING.md).
+- The web UI is **Octane** (`.tsrx`), not React. Component conventions
+  live in `AGENTS.md` and the repo's skills.
+- Generated code (like the TS RPC client) is never hand-edited; change
+  the source and regenerate.
+- No AI/tool attribution trailers on commits or PRs.
+
+## Start here
+
+- [CONTRIBUTING.md](https://github.com/oxidean/oxidean/blob/main/CONTRIBUTING.md):
+  workflow and review expectations
+- [docs/DEVELOPMENT.md](https://github.com/oxidean/oxidean/blob/main/docs/DEVELOPMENT.md):
+  toolchain setup (`bun`, `cargo`, `protoc`, Docker Compose)
+- [docs/TESTING.md](https://github.com/oxidean/oxidean/blob/main/docs/TESTING.md):
+  the CI gates a PR must pass

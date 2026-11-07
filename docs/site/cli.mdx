@@ -1,0 +1,123 @@
+---
+title: ox CLI
+description: "The ox command-line client: repositories, issues, pull requests, actions runs, releases, packages, registries, and agent surfaces from the shell."
+---
+
+`ox` is the Oxidean command-line client: the same workflows the web UI
+offers, scriptable from your shell. It talks to any Oxidean instance, cloud
+or self-hosted, and gates itself on the instance's capability manifest, so
+older servers get a clean "not supported" instead of a wrong request.
+
+## Install
+
+Every forge serves its own matching build at `/cli`, install scripts and
+binaries included:
+
+```bash
+curl -fsSL https://<your-instance>/cli/install.sh | sh
+```
+
+Prebuilt binaries also ship on the repository's
+[releases page](https://github.com/oxidean/oxidean/releases). `ox
+self-update` swaps the binary for the build your instance serves, so the
+client and server never drift apart.
+
+## Authentication and config
+
+```bash
+ox auth login --instance https://forge.example.com --token oxidean_pat_…
+ox auth login --web                  # browser/device grant
+ox auth status|refresh|revoke|switch # token lifecycle + multi-instance
+ox auth setup-git                    # register ox as the git credential helper
+ox auth token                        # print the resolved token (for scripts)
+ox config list|get|set               # local config (tokens redacted)
+```
+
+Scripts and CI authenticate with an access token created under **Settings →
+Personal access tokens** in the web UI.
+
+## The everyday surface
+
+```bash
+ox repo view|fork octo/demo             # fork: [--into-owner o] [--into-name n]
+ox repo create demo [--org octo] [--visibility public|private]
+ox repo edit|rename|archive|transfer|delete o/n
+ox repo clone|sync o/n               # clone runs git clone locally
+ox repo star|watch o/n
+ox repo deploy-key|collaborator|invites ...
+ox repo branch-protection|tag-protection o/n --pattern glob
+ox repo mirror get|set|sync o/n      # push, pull, and two-way mirroring
+ox repo lfs|quota|merge-settings o/n
+
+ox issue list|view|create|edit|close|reopen|comment o/n
+ox pr list|view|create|merge|diff|files|checks o/n
+ox pr review o/n <n> --approve|--request-changes|--comment
+ox pr ready|update-branch|checkout o/n <n>
+
+ox run list|view|watch o/n           # watch: --exit-status for CI gates
+ox run rerun|cancel o/n <run-id> [--failed-only]
+ox workflow list|view|run o/n
+ox workflow template list|view o/n
+ox workflow create o/n --template <id>
+
+ox release list|create|edit o/n [<tag>]
+ox release upload|download o/n <tag> <files...>
+ox pkg list [--owner octo]
+
+ox secret list|set|delete o/n        # --body | --file | stdin
+ox status create o/n --sha s --context c --state success
+ox label|webhook list|create|edit|delete ...
+ox org list|view|create|members|invites
+ox notification list|read|unread
+ox search <query> --type repos|issues|pulls|code|...
+ox user view|starred|watched <u>
+ox ssh-key|gpg-key|email list|add|delete
+ox browse [o/n]                      # open the repo in a browser
+```
+
+## Agent-facing commands
+
+```bash
+ox skill print|install               # embedded agent SKILL.md → harness dirs
+ox mcp print|install|status|remove   # wire the instance's /api/mcp endpoint
+                                     # into harness MCP configs
+ox pilot pair <code>                 # redeem a /oxpilot pairing code
+ox pilot run|connect|status          # claim → execute → report loop for
+                                     # remote targets (dials out; no inbound)
+```
+
+## The `vcs` surface
+
+Alongside git, repositories can opt into Oxidean's own changeset-model VCS
+(`ox vcs enable`): server-side commits, diffs, blame, merges, rebases, and
+sparse checkouts, with resumable git import and export back to git refs
+through the protected ref-update path.
+
+```bash
+ox vcs commit o/n -m "msg" --add vpath=local
+ox vcs log|diff|blame|show o/n
+ox vcs merge|rebase|checkout o/n
+ox vcs import o/n                    # git → changesets
+ox vcs export o/n <cs> --branch b    # changesets → git commits
+```
+
+## Output and scripting
+
+Most commands take `--json`, and `--jq` applies a jq expression server-side
+shape:
+
+```bash
+ox repo list --json | jq '.data.repos[].name'
+ox issue list octo/demo --jq '.issues[] | "\(.number)\t\(.title)"'
+```
+
+[`ox api`](https://github.com/oxidean/oxidean/blob/main/docs/API.md) is the
+raw-RPC escape hatch when a subcommand does not cover what you need:
+
+```bash
+ox api issue.get -f owner=octo -f name=demo -F number=12
+```
+
+The full surface, flag by flag, is
+[docs/CLI.md](https://github.com/oxidean/oxidean/blob/main/docs/CLI.md) in
+the repository.
