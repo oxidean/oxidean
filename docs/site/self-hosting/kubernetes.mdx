@@ -29,15 +29,24 @@ The `forge-tls` Secret is yours to create: either let cert-manager issue it
 yourself — the chart ships no edge of its own.
 
 For a plain-HTTP LAN eval, install without the production ingress
-settings — the chart's default catch-all ingress answers on whatever
-address the LAN reaches, and `env=development` plus the LAN origin keeps
-clone URLs and magic links off `localhost:8080`:
+settings — `env=development` plus the LAN origin keeps clone URLs and
+magic links off `localhost:8080`:
 
 ```bash
 helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
   --set env=development \
   --set publicOrigin=http://192.168.x.y
 ```
+
+The catch-all only creates an Ingress resource — a LAN-reachable ingress
+controller (Traefik on k3s, ingress-nginx elsewhere) must exist to
+answer it, so `publicOrigin` should be the address and port that
+controller actually serves. For SSH clones on a single-load-balancer
+cluster, add `--set ssh.service.type=ClusterIP` and map port 22 through
+the controller's TCP services (ingress-nginx `tcp-services` ConfigMap);
+when SSH keeps its own LoadBalancer, set `ssh.host` to that address
+instead — it defaults to `ingress.host` and drives the clone URLs the
+UI shows.
 
 The
 trade-offs are in

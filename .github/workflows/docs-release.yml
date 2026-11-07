@@ -21,6 +21,9 @@ on:
         default: ""
         type: string
 
+# Minimal default — jobs that need the token declare it themselves.
+permissions: {}
+
 jobs:
   guard:
     runs-on: ubuntu-latest
@@ -37,7 +40,10 @@ jobs:
           # shape before it can carry anything else into a run step.
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
             [[ "$TAG" =~ ^ox-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must be a stable ox-vX.Y.Z tag"; exit 1; }
-            [[ -z "$SRC_REF" || "$SRC_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || { echo "::error::invalid src_ref charset"; exit 1; }
+            # Restricted to protected refs: a fork PR ref would pack
+            # arbitrary content into a release asset — the manifest gate
+            # checks a version field, not content provenance.
+            [[ -z "$SRC_REF" || "$SRC_REF" =~ ^(main|master|ox-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.-]*)$ ]] || { echo "::error::src_ref must be main, master, or an ox-vX.Y.Z tag"; exit 1; }
           fi
           # Prerelease ox-v*-beta.N tags never carry a matching manifest
           # version — check the version part after the ox-v prefix.
@@ -54,7 +60,7 @@ jobs:
     if: needs.guard.outputs.proceed == 'true'
     permissions:
       contents: write
-    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.5
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.6
     with:
       tag: ${{ inputs.tag || github.ref_name }}
       src-ref: ${{ inputs.src_ref }}
