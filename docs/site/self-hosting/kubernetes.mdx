@@ -43,8 +43,13 @@ controller (Traefik on k3s, ingress-nginx elsewhere) must exist to
 answer it, so `publicOrigin` should be the address and port that
 controller actually serves. For SSH clones on a single-load-balancer
 cluster, add `--set ssh.service.type=ClusterIP` and map port 22 through
-the controller's TCP services (ingress-nginx `tcp-services` ConfigMap);
-when SSH keeps its own LoadBalancer, set `ssh.host` to that address
+the controller's TCP services. For ingress-nginx that takes all three
+pieces — the `tcp-services` ConfigMap entry, the controller configured
+to consume it (`--tcp-services-configmap`, or the `tcp` value of the
+ingress-nginx Helm chart), and port 22 exposed on the controller's own
+Service; the ConfigMap alone does not publish the port
+([ingress-nginx TCP/UDP services](https://kubernetes.github.io/ingress-nginx/user-guide/exposing-tcp-udp-services/)).
+When SSH keeps its own LoadBalancer, set `ssh.host` to that address
 instead — it defaults to `ingress.host` and drives the clone URLs the
 UI shows.
 
