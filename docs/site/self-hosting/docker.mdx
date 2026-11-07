@@ -70,8 +70,9 @@ Tear down with `docker compose down` (add `-v` to drop the data volume).
 
    Details: [required secrets](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md#required-secrets).
 
-4. Set `DOMAIN` (and the posted secrets) in `.env` and leave
-   `OXIDEAN_ENV` unset (production default).
+4. Set `DOMAIN`, `POSTGRES_PASSWORD`, and `OXIDEAN_ACTIONS_SECRETS_KEY`
+   in `.env` — the stack cannot start without them. Leave `OXIDEAN_ENV`
+   unset (production default).
 
 5. Bring the edge profile up with the stack:
 

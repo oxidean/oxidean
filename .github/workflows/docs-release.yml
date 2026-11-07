@@ -1,23 +1,39 @@
 name: docs site release
 
 on:
+  # ox-v* tags are pushed by the release App token during the stable cut, so
+  # tag-push fires this workflow normally. Prerelease ox-v*-beta.N tags are
+  # skipped on the job below — the manifest tracks the stable line only.
   push:
     tags:
       - "ox-v*"
+  # Bootstrap / re-attach: tag = target release, src_ref = a ref that carries
+  # docs/site (e.g. main) for releases that predate the docs contract.
   workflow_dispatch:
     inputs:
       tag:
         description: Release tag to attach the docs bundle to (e.g. ox-v0.4.2)
         required: true
         type: string
+      src_ref:
+        description: Ref supplying docs/site content when the tag predates it (default = tag)
+        required: false
+        default: ""
+        type: string
 
 jobs:
   pack:
+    # prerelease tags (any '-' suffix) never carry a matching manifest version
+    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')
     permissions:
       contents: write
-    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.2
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.4
     with:
       tag: ${{ inputs.tag || github.ref_name }}
+      src-ref: ${{ inputs.src_ref }}
       product: oxidean
+      # the ox release is created by ox-cli.yml after the binary matrix —
+      # the bundle waits for the published release instead of racing it
+      release-wait-minutes: 90
     secrets:
       site_dispatch_token: ${{ secrets.DOCS_SITE_DISPATCH_TOKEN }}

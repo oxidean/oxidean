@@ -264,6 +264,14 @@ jobs:
           # read the bumped carriers as fromVersion and double-bump.
           bun scripts/versioning/cli.ts changelog --plan /tmp/stable-plan.json
           bun scripts/versioning/cli.ts bump --plan /tmp/stable-plan.json
+          # The docs bundle packs from the tagged commit, and its manifest
+          # version must equal the ox tag version or the pack gate rejects it.
+          # docs/site/manifest.yaml is not a versioning.toml carrier, so sync
+          # it to the ox component's bump here, inside the same commit.
+          ox_ver="$(jq -r '.entries[] | select(.component == "ox") | .toVersion' /tmp/stable-plan.json)"
+          if [[ -n "$ox_ver" && "$ox_ver" != "null" ]]; then
+            sed -i -E "s/^version: .*/version: \"$ox_ver\"/" docs/site/manifest.yaml
+          fi
           # WIRE_VERSION is embedded into the generated api-client + OpenAPI
           # spec — regen so the bump commit doesn't fail rpc-sync on its own CI.
           make rpc-gen openapi-gen

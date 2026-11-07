@@ -5,8 +5,11 @@ description: "The ox command-line client: repositories, issues, pull requests, a
 
 `ox` is the Oxidean command-line client: the same workflows the web UI
 offers, scriptable from your shell. It talks to any Oxidean instance, cloud
-or self-hosted, and gates itself on the instance's capability manifest, so
-older servers get a clean "not supported" instead of a wrong request.
+or self-hosted. When the instance supplies a valid capability manifest, `ox`
+gates itself on it, so commands the server does not support return a clean
+"not supported" instead of a wrong request. Instances too old to serve a
+manifest are treated as supporting everything — an unsupported command may
+then fail at the RPC endpoint instead.
 
 ## Install
 
