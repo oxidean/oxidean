@@ -112,7 +112,9 @@ function HomeContent() {
     return (
       <>
         <div data-anon-landing>
-          <AnonLanding />
+          <div className="flex min-h-screen flex-col">
+            <AnonLanding />
+          </div>
         </div>
         {renderedTree == null ? (
           <div data-home-skeleton>
@@ -146,7 +148,9 @@ function HomeContent() {
   // the auth.me settle (issue #143).
   return (
     <div data-anon-landing>
-      <AnonLanding />
+      <div className="flex min-h-screen flex-col">
+        <AnonLanding />
+      </div>
     </div>
   );
 }
@@ -157,6 +161,15 @@ function HomeContent() {
  * "Get started" CTA is always rendered and gated in CSS by the
  * `data-oxidean-signup` stamp on <html> (web tier + client stamp sync), so
  * signup open/closed changes mutate <html> — not this subtree.
+ */
+/**
+ * Sections render inside a `flex min-h-screen flex-col` wrapper (both
+ * `data-anon-landing` branches own one — kept identical so the settle swap
+ * keeps the same tree). `.oxidean-main` is forced to `min-height: 100vh` so
+ * the footer starts below the fold; when the landing is shorter than the
+ * viewport that rule leaves a bare strip between the last section and the
+ * footer. The wrapper lifts the residual into this column and the CTA band's
+ * `flex-1` absorbs it, so the band always reaches the footer.
  */
 function AnonLandingImpl() @{
   <>
@@ -242,7 +255,7 @@ function AnonLandingImpl() @{
       </div>
     </section>
 
-    <section className="border-t border-border bg-card/50 py-24">
+    <section className="flex flex-1 flex-col justify-center border-t border-border bg-card/50 py-24">
       <div className="mx-auto max-w-6xl px-4">
         <h2 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
           One forge. Cloud or yours.
