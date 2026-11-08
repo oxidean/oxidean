@@ -5,7 +5,8 @@
 .claude
 .agents
 .railway
-agent-os
+.ox-agent
+.devin
 node_modules
 **/node_modules
 target

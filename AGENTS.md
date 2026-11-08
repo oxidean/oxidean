@@ -25,7 +25,7 @@ The web app uses **Octane**, not React as the UI runtime. React-shaped hooks exi
 
 Before editing UI under `apps/web`:
 
-1. Read the project skill [`.agents/skills/octane/SKILL.md`](.agents/skills/octane/SKILL.md).
+1. Read the project skill [`.ox-agent/skills/octane/SKILL.md`](.ox-agent/skills/octane/SKILL.md).
 2. Prefer official reference: https://octanejs.dev/llms.txt and https://octanejs.dev/docs/differences-from-react
 3. Author components in **`.tsrx`** with `function Comp() @{ … }`, `@if` / `@else` (no `@else if`), `@for`, native `onInput` for text fields.
 4. Never mix `return (` JSX with Rivet `@{` / `@if` in the same component — that breaks exports/hydration.
@@ -41,19 +41,19 @@ Before editing UI under `apps/web`:
 
 ## In-repo skills (always)
 
-When a task matches a skill under [`.agents/skills/`](.agents/skills/), **read and follow that skill** before inventing a workflow. Cursor rule: [`.cursor/rules/use-in-repo-skills.mdc`](.cursor/rules/use-in-repo-skills.mdc). Claude Code loads the same trees via the [`.claude/skills/`](.claude/skills) symlink. Examples: Octane UI → `octane`; Railway/deploy → `use-railway`; Rust async → `rust-async-patterns`; prose finalize → `clean-user-facing-text`; watermark strip → `remove-ai-marks`; commit subjects/version bumps → `semver-conventions`.
+When a task matches a skill under [`.ox-agent/skills/`](.ox-agent/skills/), **read and follow that skill** before inventing a workflow. Cursor rule: [`.cursor/rules/use-in-repo-skills.mdc`](.cursor/rules/use-in-repo-skills.mdc). Harnesses that scan `.agents/skills/` or `.claude/skills/` reach the same tree via symlinks. Examples: Octane UI → `octane`; Railway/deploy → `use-railway`; Rust async → `rust-async-patterns`; prose finalize → `clean-user-facing-text`; watermark strip → `remove-ai-marks`; commit subjects/version bumps → `semver-conventions`.
 
 ## AI watermarks / provenance hygiene
 
-Vendored skills (pin and refresh notes in [`.agents/skills/README-watermarks.md`](.agents/skills/README-watermarks.md)):
+Vendored skills (pin and refresh notes in [`.ox-agent/skills/README-watermarks.md`](.ox-agent/skills/README-watermarks.md)):
 
-- [`.agents/skills/remove-ai-marks/`](.agents/skills/remove-ai-marks/) — strip Unicode / C2PA / container AI metadata via the watermarks-remover HTTP service
-- [`.agents/skills/clean-user-facing-text/`](.agents/skills/clean-user-facing-text/) — self-contained prose hygiene (no service)
+- [`.ox-agent/skills/remove-ai-marks/`](.ox-agent/skills/remove-ai-marks/) — strip Unicode / C2PA / container AI metadata via the watermarks-remover HTTP service
+- [`.ox-agent/skills/clean-user-facing-text/`](.ox-agent/skills/clean-user-facing-text/) — self-contained prose hygiene (no service)
 
-Claude Code also loads the same skills from [`.claude/skills/`](.claude/skills/) (symlinks to `.agents/skills/`).
+Claude Code also loads the same skills from [`.claude/skills/`](.claude/skills/) (resolves to `.ox-agent/skills/`).
 
 `remove-ai-marks` auto-starts the HTTP service for the run via
-[`.agents/skills/remove-ai-marks/scripts/oxidean-watermarks-service.sh`](.agents/skills/remove-ai-marks/scripts/oxidean-watermarks-service.sh)
+[`.ox-agent/skills/remove-ai-marks/scripts/oxidean-watermarks-service.sh`](.ox-agent/skills/remove-ai-marks/scripts/oxidean-watermarks-service.sh)
 (`ensure` → work → `teardown`). Checkout: gitignored `tmp/watermarks-remover`
 (cloned on demand). Do not vendor `service/` into this repo. Do not invent
 local cleaners if ensure fails. Use `clean-user-facing-text` for offline
@@ -73,8 +73,8 @@ Object storage: `OXIDEAN_STORAGE_BACKEND=fs|s3` + the `OXIDEAN_S3_*` set —
 authoritative parsing/validation in `crates/oxidean-storage/src/config.rs`.
 Both surfaces bundle an eval-grade RustFS store (compose `s3` profile ↔
 helm `objectstore.enabled`); `seaweedfs.enabled` is the production-shaped alternative (mutually exclusive). External endpoints override the same envs.
-Specs: `agent-os/specs/2026-11-01-1425-storage-blob-backend/` (trait) and
-`agent-os/specs/2026-11-01-1934-selfhost-object-store/` (bundled topology).
+Specs: `.ox-agent/context/specs/2026-11-01-1425-storage-blob-backend/` (trait) and
+`.ox-agent/context/specs/2026-11-01-1934-selfhost-object-store/` (bundled topology).
 Compose→k8s data migration: `docs/SELFHOST-MIGRATE-TO-K8S.md`.
 
 ## Commands agents should know
@@ -115,11 +115,13 @@ PR CI lanes run inside self-owned images (`ghcr.io/<owner>/oxidean-ci:{dev,relea
 
 The `Main` branch ruleset requires every `ci.yml` job plus `images.yml`'s `meta` to pass on a PR's head commit; path-filtered workflows (`ox-cli.yml`, `ci-base.yml`) and fork-empty matrices are deliberately excluded (a required check that never runs blocks the PR forever). **When you add, rename, or remove a job — including matrix values (`shard`, `dialect`, `svc`) — in a required workflow, update the ruleset's check list in the same change.** Procedure and the `gh api` calls: [docs/TESTING.md](docs/TESTING.md#required-status-checks-merge-gate).
 
-## Planning / Agent OS
+## Planning / Ox-Agent
 
-Structured work runs through **Agent OS** skills under `.agents/skills/` (`agent-os-plan-product`, `agent-os-shape-spec`, `agent-os-discover-standards`, `agent-os-index-standards`, `agent-os-inject-standards`) plus `bm-prd-creator` for idea→PRD→milestones. Product docs live under `agent-os/product/`, team standards under `agent-os/standards/`, and specs under `agent-os/specs/` — one canonical home each; `.claude/skills`, `.devin/skills`, and root `CLAUDE.md` are symlinks, never second copies. The shipped v1.0 GSD-era milestone history and the retired AI-DLC intent records are archived read-only at [`agent-os/specs/_archive/`](agent-os/specs/_archive/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `agent-os/specs/_archive/gsd/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.
+Structured work runs through **ox-agent** — the repository-local AI-SDLC runtime whose state, skills, and contracts live under `.ox-agent/` (managed block below). New work opens as a work item (`ox-agent start <title>`) and rides the `normal` pipeline — discovery → brainstorming → specification → planning → implementation → verification → shipping → retrospective. Chat-driven agents (Telegram/messaging surfaces, ACP hosts) never block on synchronous questions: `ox-agent input` files durable requests a human answers asynchronously.
 
-Chat-driven agents (Telegram/messaging surfaces, ACP hosts — no plan mode or interactive question forms) follow [`.agents/skills/agent-os-async-flow/SKILL.md`](.agents/skills/agent-os-async-flow/SKILL.md): it adapts the upstream skills' plan-mode/AskUserQuestion requirements for async conversations — autonomous spec drafts, open questions in plain text, review via draft PR.
+Durable project knowledge lives under `.ox-agent/context/` (indexed via `ox-agent context index`): product docs in `context/product/`, team standards in `context/standards/`, standing decisions in `context/decisions/`, and the spec record in `context/specs/`. The shipped v1.0 GSD-era milestone history, retired AI-DLC intent records, and the Agent OS migration plan are archived read-only at [`context/specs/_archive/`](.ox-agent/context/specs/_archive/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `.ox-agent/context/specs/_archive/gsd/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.
+
+`.ox-agent/skills/` is the single skills home — ox-owned skills are materialized and repaired by the binary; project extensions (octane, semver-conventions, rust-*, security-review, …) sit alongside as project-local skills. `.agents/skills`, `.claude/skills`, and `.devin/skills/*` are symlinks into it, never second copies.
 
 ## Scratch files (`tmp/`)
 
@@ -129,5 +131,36 @@ Use repo-root [`tmp/`](tmp/README.md) for agent and local scratch (screenshots, 
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/CODE_PRACTICES.md](docs/CODE_PRACTICES.md). Cursor rules under `.cursor/rules/` encode the same expectations for agents.
 
-**Commits are SemVer-prefixed and enforced**: every commit subject must match `type(optional-scope): subject` (`feat`, `fix`, `docs`, `chore`, …). A `commit-msg` hook checks locally (`make setup` installs it — `--no-verify` bypasses, but CI `commit-lint` still checks the PR range + title). Subjects drive per-component SemVer bumps and changelogs — pick accurate types/scopes. Full grammar, bump semantics, and release flow: [docs/VERSIONING.md](docs/VERSIONING.md); agent checklist: [`.agents/skills/semver-conventions/SKILL.md`](.agents/skills/semver-conventions/SKILL.md).
+**Commits are SemVer-prefixed and enforced**: every commit subject must match `type(optional-scope): subject` (`feat`, `fix`, `docs`, `chore`, …). A `commit-msg` hook checks locally (`make setup` installs it — `--no-verify` bypasses, but CI `commit-lint` still checks the PR range + title). Subjects drive per-component SemVer bumps and changelogs — pick accurate types/scopes. Full grammar, bump semantics, and release flow: [docs/VERSIONING.md](docs/VERSIONING.md); agent checklist: [`.ox-agent/skills/semver-conventions/SKILL.md`](.ox-agent/skills/semver-conventions/SKILL.md).
 
+
+<!-- ox-agent:begin -->
+## Ox-Agent toolkit
+
+This repository is managed by `ox-agent` — a repository-local AI-SDLC
+runtime. Project state, skills, and contracts live under `.ox-agent/`.
+
+- `ox-agent doctor` validates the setup; `ox-agent start <title>` opens work items.
+- Work items carry state in `index.json`; drive them with
+  `ox-agent transition|archive|unblock|status`.
+- Human input is durable, never synchronous. When you need an answer or a
+  gated approval, file `ox-agent input request` and END THE TURN —
+  chat prompts expire before humans see them. Poll with
+  `ox-agent input pending` / `input wait --timeout <budget>`;
+  answers arrive via `input respond <id> --by <name> --answer "..."`
+  (approvals: `--approve|--reject`). Escalated runs and gate hits file
+  these requests automatically; a skill asks a
+  question with `next_action.type: await_input` — the run stays
+  dispatchable and the answer lands in the next packet under `context.inputs`.
+- Skills are contracts, not free-form prompts: `.ox-agent/skills/<name>/SKILL.md`
+  plus input/output `schemas/`.
+- Compile the bounded packet (`ox-agent context compile <wi> --skill <s>`)
+  or dispatch via `ox-agent run <wi>`; results land in `runtime/runs/`
+  and are schema-validated on collection.
+- Materialized skills also resolve under `.ox-agent/skills/` for harnesses
+  that scan that path.
+
+Do not edit `.ox-agent/skills`, `schemas`, `workflows`, `pipelines`,
+`lifecycle`, or `integrations` in place — they are materialized assets
+tracked by `assets.lock`. Add extension skills as new directories instead.
+<!-- ox-agent:end -->

@@ -1,6 +1,6 @@
 //! `oxidean-storage` — the [`BlobStore`] abstraction every non-git
 //! persistent store migrates behind (issue #210, spec
-//! `agent-os/specs/2026-11-01-1425-storage-blob-backend`).
+//! `.ox-agent/context/specs/2026-11-01-1425-storage-blob-backend`).
 //!
 //! Two backends, one trait:
 //!

@@ -5,38 +5,36 @@ alwaysApply: true
 
 # Use in-repo skills
 
-Before implementing, debugging, deploying, or writing substantial prose, **load and follow** the matching skill under [`.agents/skills/`](../../.agents/skills/) (Claude Code: [`.claude/skills/`](../../.claude/skills/) symlinks to the same files). Do not invent a parallel workflow when a project skill already covers the task.
+Before implementing, debugging, deploying, or writing substantial prose, **load and follow** the matching skill under [`.ox-agent/skills/`](../../.ox-agent/skills/) — also reachable via the [`.agents/skills/`](../../.agents/skills/) and [`.claude/skills/`](../../.claude/skills/) symlinks. Do not invent a parallel workflow when a project skill already covers the task.
 
 ## How to pick a skill
 
-1. Scan skill names/descriptions in `.agents/skills/*/SKILL.md`.
+1. Scan skill names/descriptions in `.ox-agent/skills/*/SKILL.md`.
 2. Read the skill file immediately when it matches the task.
 3. Prefer project skills over generic habits or external defaults.
-4. For chat-based Agent OS feature spec work, use `agent-os-async-flow` instead of the generic shape-spec mapping. Keep the `agent-os-plan-product` mapping for product planning.
+4. Spec/planning work runs through **ox-agent work items**, not loose docs: `ox-agent start <title>` opens the item, then the `normal` pipeline stages (discovery → brainstorming → specification → planning → implementation) map onto the ox-owned skills below. Human questions go through durable `ox-agent input` requests — never synchronous prompts.
 
 ## Common mappings
 
 | Situation | Skill |
 |-----------|--------|
-| `apps/web` UI / `.tsrx` / Octane | [octane](../../.agents/skills/octane/SKILL.md) |
-| New or reshaped visual UI | [frontend-design](../../.agents/skills/frontend-design/SKILL.md), [web-design-guidelines](../../.agents/skills/web-design-guidelines/SKILL.md) when auditing |
-| Rust API / async / idioms | [rust-async-patterns](../../.agents/skills/rust-async-patterns/SKILL.md), [rust-best-practices](../../.agents/skills/rust-best-practices/SKILL.md) |
-| Test-first / red-green | [tdd](../../.agents/skills/tdd/SKILL.md) |
-| Hard bugs / regressions | [diagnosing-bugs](../../.agents/skills/diagnosing-bugs/SKILL.md) |
-| Module design / seams | [codebase-design](../../.agents/skills/codebase-design/SKILL.md), [improve-codebase-architecture](../../.agents/skills/improve-codebase-architecture/SKILL.md) |
-| Railway / cloud deploy / flags | [use-railway](../../.agents/skills/use-railway/SKILL.md) |
-| User-facing prose finalize | [clean-user-facing-text](../../.agents/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
-| AI watermark / provenance strip | [remove-ai-marks](../../.agents/skills/remove-ai-marks/SKILL.md) |
-| Spec / planning for significant work | [agent-os-shape-spec](../../.agents/skills/agent-os-shape-spec/SKILL.md), [agent-os-plan-product](../../.agents/skills/agent-os-plan-product/SKILL.md) |
-| Agent OS feature spec work over chat / no interactive question UI | [agent-os-async-flow](../../.agents/skills/agent-os-async-flow/SKILL.md) |
-| Idea → PRD → milestones | [bm-prd-creator](../../.agents/skills/bm-prd-creator/SKILL.md) |
-| Standards index/inject/discover | [agent-os-index-standards](../../.agents/skills/agent-os-index-standards/SKILL.md), [agent-os-inject-standards](../../.agents/skills/agent-os-inject-standards/SKILL.md), [agent-os-discover-standards](../../.agents/skills/agent-os-discover-standards/SKILL.md) |
-| Security review | [security-review](../../.agents/skills/security-review/SKILL.md) |
+| `apps/web` UI / `.tsrx` / Octane | [octane](../../.ox-agent/skills/octane/SKILL.md) |
+| New or reshaped visual UI | [frontend-design](../../.ox-agent/skills/frontend-design/SKILL.md), [web-design-guidelines](../../.ox-agent/skills/web-design-guidelines/SKILL.md) when auditing |
+| Rust API / async / idioms | [rust-async-patterns](../../.ox-agent/skills/rust-async-patterns/SKILL.md), [rust-best-practices](../../.ox-agent/skills/rust-best-practices/SKILL.md) |
+| Test-first / red-green | [tdd](../../.ox-agent/skills/tdd/SKILL.md) |
+| Hard bugs / regressions | [diagnosing-bugs](../../.ox-agent/skills/diagnosing-bugs/SKILL.md) |
+| Module design / seams | [codebase-design](../../.ox-agent/skills/codebase-design/SKILL.md), [improve-codebase-architecture](../../.ox-agent/skills/improve-codebase-architecture/SKILL.md) |
+| Railway / cloud deploy / flags | [use-railway](../../.ox-agent/skills/use-railway/SKILL.md) |
+| User-facing prose finalize | [clean-user-facing-text](../../.ox-agent/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
+| AI watermark / provenance strip | [remove-ai-marks](../../.ox-agent/skills/remove-ai-marks/SKILL.md) |
+| Spec / planning for significant work | `ox-agent start` + [discover-context](../../.ox-agent/skills/discover-context/SKILL.md), [specify](../../.ox-agent/skills/specify/SKILL.md), [multi-stage-plan](../../.ox-agent/skills/multi-stage-plan/SKILL.md) |
+| Decision records | [adr](../../.ox-agent/skills/adr/SKILL.md) → `context/decisions/` |
+| Security review | [security-review](../../.ox-agent/skills/security-review/SKILL.md), [code-review](../../.ox-agent/skills/code-review/SKILL.md) |
 
-Agent OS skills read and write `agent-os/` (product docs, standards, specs); archives live under `agent-os/specs/_archive/` — read-only provenance, never edited.
+Durable knowledge lives under `.ox-agent/context/` — product docs, standards, ADRs, and the spec record (including the read-only `_archive/` provenance). `ox-agent context index` rebuilds the catalog after edits.
 
 ## Do not
 
 - Skip a matching skill because the change “looks small.”
 - Re-derive Octane, Railway, or watermark procedures from memory when the skill exists.
-- Vendor alternate skill copies outside `.agents/skills/` without an explicit ask.
+- Edit ox-owned materialized files (`.ox-agent/skills`, `schemas`, `workflows`, `pipelines`, `lifecycle`, `integrations`) in place — add extension skills as new directories instead.

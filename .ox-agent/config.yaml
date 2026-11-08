@@ -1,0 +1,55 @@
+schema_version: 1
+project:
+    name: oxidean
+    test_command: make test
+workflow:
+    default_profile: normal
+    profiles:
+        normal:
+            - discovery
+            - brainstorming
+            - specification
+            - planning
+            - implementation
+            - verification
+            - shipping
+            - retrospective
+skills:
+    enabled:
+        - discover-context
+        - brainstorm
+        - specify
+        - adr
+        - multi-stage-plan
+        - tdd
+        - implementation
+        - code-review
+        - verify
+        - discussion
+        - progress
+        - shipping
+        - retrospective
+        - clean-user-facing-text
+        - remove-ai-marks
+    stage_skills:
+        brainstorming:
+            - brainstorm
+            - adr
+        discovery:
+            - discover-context
+        implementation:
+            - tdd
+            - implementation
+        planning:
+            - multi-stage-plan
+        retrospective:
+            - retrospective
+            - progress
+        shipping:
+            - shipping
+        specification:
+            - specify
+            - adr
+        verification:
+            - code-review
+            - verify
