@@ -123,7 +123,7 @@ services:
       OXIDEAN_SSH_HOST_KEY_DIR: ${OXIDEAN_SSH_HOST_KEY_DIR:-/var/ssh}
       # Status page theme shared with the web tier (default|meme).
       OXIDEAN_STATUS_PAGE_THEME: ${OXIDEAN_STATUS_PAGE_THEME:-}
-      # Object storage (spec agent-os/specs/2026-11-01-1934-selfhost-object-store):
+      # Object storage (spec .ox-agent/context/specs/2026-11-01-1934-selfhost-object-store):
       # fs = POSIX under /var (default); s3 = BlobStore-backed stores write to
       # S3-compatible object storage as the api's consumer rollout lands.
       # Defaults target the bundled `--profile s3` objectstore; override every

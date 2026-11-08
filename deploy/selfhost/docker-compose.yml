@@ -74,7 +74,7 @@ services:
       OXIDEAN_ACTIONS_ARTIFACTS_DIR: /var/actions-artifacts
       OXIDEAN_ACTIONS_CACHE_DIR: /var/actions-cache
       OXIDEAN_PAGES_DIR: /var/pages
-      # Object storage (spec agent-os/specs/2026-11-01-1934-selfhost-object-store):
+      # Object storage (spec .ox-agent/context/specs/2026-11-01-1934-selfhost-object-store):
       # fs = POSIX under /var (default); s3 = BlobStore-backed stores write to
       # S3-compatible object storage as the api's consumer rollout lands.
       # Defaults target the bundled `--profile s3` objectstore; override every

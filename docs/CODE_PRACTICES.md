@@ -71,7 +71,7 @@ Details: [TESTING.md](TESTING.md).
 - Update the nearest package README when a package’s purpose or public commands change.
 - Prefer linking to `docs/*` over duplicating long guides.
 - Comments explain **why** (threat model, dialect quirk, Octane pitfall), not what the next line does.
-- Do not commit planning chatter into product docs unless asked; product docs and standards live under `agent-os/` and archived planning history under `agent-os/specs/_archive/`.
+- Do not commit planning chatter into product docs unless asked; product docs and standards live under `.ox-agent/context/` and archived planning history under `.ox-agent/context/specs/_archive/` (work items under `.ox-agent/work/`).
 
 ## Security & privacy
 
