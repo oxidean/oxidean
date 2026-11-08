@@ -19,5 +19,5 @@ type(optional-scope)[!]: subject
 
 Each crate, Bun workspace, and the RPC wire contract carries an independent
 SemVer starting at `0.1.0`; tags are `<tag_prefix><semver>`. Full grammar,
-bump semantics, and release flow: [`docs/VERSIONING.md`](../../docs/VERSIONING.md)
-and `.agents/skills/semver-conventions/`.
+bump semantics, and release flow: [`docs/VERSIONING.md`](../../../docs/VERSIONING.md)
+and `.ox-agent/skills/semver-conventions/`.

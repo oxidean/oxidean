@@ -1,8 +1,8 @@
 # Code style
 
 Distilled conventions; canonical detail lives in
-[`docs/CODE_PRACTICES.md`](../../docs/CODE_PRACTICES.md) and
-[`AGENTS.md`](../../AGENTS.md).
+[`docs/CODE_PRACTICES.md`](../../../docs/CODE_PRACTICES.md) and
+[`AGENTS.md`](../../../AGENTS.md).
 
 ## Shared
 

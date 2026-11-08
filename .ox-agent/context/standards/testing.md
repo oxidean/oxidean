@@ -35,4 +35,4 @@ mandated posture.
   shipping; prefer Docker (`make up`, `make smoke`) over bare-metal
   debugging.
 
-Details: [`docs/TESTING.md`](../../docs/TESTING.md).
+Details: [`docs/TESTING.md`](../../../docs/TESTING.md).

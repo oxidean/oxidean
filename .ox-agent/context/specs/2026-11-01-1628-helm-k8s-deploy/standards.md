@@ -1,7 +1,7 @@
 # Standards for Helm/Kubernetes Deployment
 
-The following standards apply to this work (index:
-[`.ox-agent/context/standards/index.yml`](../../standards/index.yml)). Chart work is
+The following standards apply to this work (directory:
+[`.ox-agent/context/standards/`](../../standards/)). Chart work is
 mostly YAML/CI, so `rust`, `web-ui`, and `code-style` are not the binding
 constraints — process and secrets rules are.
 
@@ -51,7 +51,7 @@ type(optional-scope)[!]: subject
 
 Each crate, Bun workspace, and the RPC wire contract carries an independent
 SemVer starting at `0.1.0`; tags are `<tag_prefix><semver>`. Full grammar,
-bump semantics, and release flow: [`docs/VERSIONING.md`](../../../docs/VERSIONING.md)
+bump semantics, and release flow: [`docs/VERSIONING.md`](../../../../docs/VERSIONING.md)
 and `.agents/skills/semver-conventions/`.
 
 ---
@@ -122,4 +122,4 @@ mandated posture.
   shipping; prefer Docker (`make up`, `make smoke`) over bare-metal
   debugging.
 
-Details: [`docs/TESTING.md`](../../../docs/TESTING.md).
+Details: [`docs/TESTING.md`](../../../../docs/TESTING.md).

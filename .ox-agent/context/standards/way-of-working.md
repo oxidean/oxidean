@@ -11,7 +11,7 @@
   suffix; remote branches auto-delete after merge.
 - Prefer the smallest change that fits an existing pattern and existing
   workspace deps over new frameworks or libraries.
-- In-repo skills under `.agents/skills/` are the documented how-we-work —
+- In-repo skills under `.ox-agent/skills/` are the documented how-we-work —
   load a matching skill before inventing a workflow.
 - Scratch/temp files go under gitignored `tmp/`, never the repo root or
   source trees.

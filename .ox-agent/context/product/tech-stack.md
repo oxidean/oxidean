@@ -18,5 +18,5 @@ workspace (`crates/*`). Do not invent alternatives; extend existing patterns.
 | Package manager | Bun 1.4.4 (`bun install --frozen-lockfile`; `npm ci` only inside `.railway/`); GNU Make is the task façade |
 | CI | GitHub Actions inside self-owned digest-pinned `oxidean-ci:*` images; Rust via cargo-nextest, web via Vitest 5 + Playwright Chromium |
 
-Canonical docs: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md),
-[`docs/API.md`](../../docs/API.md), [`docs/CONFIGURATION.md`](../../docs/CONFIGURATION.md).
+Canonical docs: [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md),
+[`docs/API.md`](../../../docs/API.md), [`docs/CONFIGURATION.md`](../../../docs/CONFIGURATION.md).

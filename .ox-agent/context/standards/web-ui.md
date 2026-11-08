@@ -1,7 +1,7 @@
 # Web UI
 
 The web app is **Octane** — `.tsrx` islands on Astro static shells — never
-React JSX. Load `.agents/skills/octane/SKILL.md` before editing `apps/web`;
+React JSX. Load `.ox-agent/skills/octane/SKILL.md` before editing `apps/web`;
 `.cursor/rules/octane-ui.mdc` encodes the same rules for Cursor.
 
 Non-negotiables:
