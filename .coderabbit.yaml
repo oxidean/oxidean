@@ -70,9 +70,15 @@ reviews:
   poem: false
   labeling_instructions: []
   path_instructions: []
-  auto_review:
+  auto_approvals:
+    # Approve automatically once a review is clean and all threads are
+    # resolved; CodeRabbit requests changes on blocking findings instead.
     enabled: true
-    auto_incremental_review: true
+  auto_review:
+    # Reviews run on demand only (@coderabbitai review / dashboard), not
+    # automatically on open or push.
+    enabled: false
+    auto_incremental_review: false
     ignore_title_keywords: []
     drafts: false
     base_branches: []
