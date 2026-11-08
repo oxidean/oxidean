@@ -34,24 +34,22 @@ Before committing web UI changes: `make web-lint` and `make web-format-check` (`
 ## Authoring `.tsrx`
 
 ```tsrx
-export function Example(props: { title: string }) {
+export function Example(props: { title: string }) @{
   const [open, setOpen] = useState(false);
 
-  @{
-    <section>
-      <h1>{props.title as string}</h1>
-      @if (open) {
-        <p>Visible</p>
-      } @else {
-        <p>Hidden</p>
-      }
-      <button type="button" onClick={() => setOpen(!open)}>Toggle</button>
-    </section>
-  }
+  <section>
+    <h1>{props.title as string}</h1>
+    @if (open) {
+      <p>Visible</p>
+    } @else {
+      <p>Hidden</p>
+    }
+    <button type="button" onClick={() => setOpen(!open)}>Toggle</button>
+  </section>;
 }
 ```
 
-- `@{ … }` is the template return shorthand — **one** output node (element or `<>…</>`).
+- `@{ … }` **is** the component body — setup statements (hooks, consts, handlers) run first, then **one** output node (element or `<>…</>`) ending in `;`. There is no `return (`; never nest `@{` inside a plain `{ }` body — nothing renders.
 - Dynamic text often needs `{expr as string}` when not provably a string.
 - Hooks may be conditional (compiler call-site slots). Do **not** put a hook in a plain JS `for` loop — use `@for` or a child component.
 - **Hook-calling helpers must live in `.tsrx`/`.tsx` files.** Slots are compiler-injected per call site — a helper in plain `.ts` (e.g. `useX() { const a = useQuery(...); const b = useQuery(...); }`) gives every hook call the same slot → shared observer/state → options rotation → refetch/remount loop. Renaming `foo.ts` → `foo.tsrx` is the fix; extensionless imports don't change.
@@ -77,7 +75,7 @@ Template directives only inside `@{ }` / directive bodies:
 - **Each directive arm renders a single node** — `@if`/`@else`/`@for` bodies emitting multiple sibling elements must wrap them in `<>…</>` (octane ≥0.10 rejects multi-node arms that older compilers tolerated).
 - **No `/*` in element text** — inside template text `/*` opens a block comment and swallows the closing tag to EOF ("Unclosed tag '<x>'"). Write such strings as expressions instead: `{"/api/actions/*" as string}`.
 
-Plain JS control flow belongs in setup (above `@{`), not mixed as React ternary soup inside broken `return (` templates.
+Plain JS control flow belongs in the setup statements at the top of `@{ }`, before the output node — not mixed as React ternary soup inside broken `return (` templates.
 
 ## Mixing React (rare)
 
