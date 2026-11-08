@@ -1,0 +1,72 @@
+name: docs site release
+
+on:
+  # ox-v* tags are pushed by the release App token during the stable cut, so
+  # tag-push fires this workflow normally. Prerelease ox-v*-beta.N tags are
+  # skipped on the job below — the manifest tracks the stable line only.
+  push:
+    tags:
+      - "ox-v*"
+  # Bootstrap / re-attach: tag = target release, src_ref = a ref that carries
+  # docs/site (e.g. main) for releases that predate the docs contract.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the docs bundle to (e.g. ox-v0.4.2)
+        required: true
+        type: string
+      src_ref:
+        description: Ref supplying docs/site content when the tag predates it (default = tag)
+        required: false
+        default: ""
+        type: string
+
+# Minimal default — jobs that need the token declare it themselves.
+permissions: {}
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SRC_REF: ${{ inputs.src_ref }}
+        run: |
+          set -euo pipefail
+          # Dispatch inputs reach the reusable call as text — validate the tag
+          # shape before it can carry anything else into a run step.
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            [[ "$TAG" =~ ^ox-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must be a stable ox-vX.Y.Z tag"; exit 1; }
+            # Restricted to protected refs: a fork PR ref would pack
+            # arbitrary content into a release asset — the manifest gate
+            # checks a version field, not content provenance.
+            [[ -z "$SRC_REF" || "$SRC_REF" =~ ^(main|master|ox-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.-]*)$ ]] || { echo "::error::src_ref must be main, master, or an ox-vX.Y.Z tag"; exit 1; }
+          fi
+          # Prerelease ox-v*-beta.N tags never carry a matching manifest
+          # version — check the version part after the ox-v prefix.
+          ver="${TAG#ox-v}"
+          if [[ "$ver" == *-* ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease tag $TAG — docs bundle skipped"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  pack:
+    needs: guard
+    if: needs.guard.outputs.proceed == 'true'
+    permissions:
+      contents: write
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.6
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+      src-ref: ${{ inputs.src_ref }}
+      product: oxidean
+      # the ox release is created by ox-cli.yml after the binary matrix —
+      # the bundle waits for the published release instead of racing it
+      release-wait-minutes: 90
+    secrets:
+      site_dispatch_token: ${{ secrets.DOCS_SITE_DISPATCH_TOKEN }}

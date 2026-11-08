@@ -1,0 +1,46 @@
+---
+title: Self-hosting overview
+description: "Run the complete Oxidean forge from published images: web UI, API, database, git-over-SSH, plus optional TLS edge and Actions runner."
+---
+
+Oxidean self-hosts from **published images**: no repository checkout, no
+Rust or Bun toolchain, no build step. Pick your surface:
+
+| Surface        | Start with                                | Bundled pieces                                              |
+| -------------- | ----------------------------------------- | ----------------------------------------------------------- |
+| Docker Compose | [Docker guide](/self-hosting/docker/)     | postgres always; `tls` / `actions` / `s3` profiles          |
+| Kubernetes     | [Helm guide](/self-hosting/kubernetes/)   | `postgres.enabled`, `objectstore.enabled`, `runner.enabled` |
+
+## Architecture
+
+| Service                        | Image                            | Role                                                                                                                                                                         |
+| ------------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web`                          | `ghcr.io/oxidean/oxidean-web`    | Single HTTP origin: serves the UI **and** reverse-proxies every API path: RPC, git smart-HTTP + LFS, `/v2` `/npm` `/generic` registries, `/cli`, badges, Pages, OAuth, `/api/rpc/ws` websockets. |
+| `api`                          | `ghcr.io/oxidean/oxidean-api`    | Forge API + git backend. Owns the `/var` state volume and the raw-TCP SSH listener.                                                                                          |
+| `postgres`                     | `postgres:18-alpine`             | Bundled database; swap for an external `DATABASE_URL`, MySQL, or SQLite.                                                                                                    |
+| `caddy` _(profile `tls`)_      | `caddy:2-alpine`                 | TLS terminator for your domain (Let's Encrypt auto-HTTPS). Optional; bring your own edge instead.                                                                           |
+| `runner` _(profile `actions`)_ | `ghcr.io/oxidean/oxidean-runner` | CI job executor; opt-in, one per fleet.                                                                                                                                      |
+
+Because `oxidean-web` already routes API paths internally, the edge is a
+one-line `reverse_proxy web:3000`. SSH is the only second socket: raw TCP
+on `OXIDEAN_SSH_PORT` (default `2222`) straight to `api`.
+
+All forge state lives in **one named volume** (`oxidean_data` at `/var` on
+`api`): bare repos, LFS objects, packages, release assets, uploads,
+template packs, VCS objects, action logs/artifacts/cache, and the SSH
+host-key dir.
+
+## Prerequisites
+
+- Docker Engine + Compose v2, or a Kubernetes cluster for the Helm path
+- For the TLS path: a DNS name pointing at the host with ports 80/443
+  reachable (Let's Encrypt)
+- For git-over-SSH: a free TCP port (default `2222`)
+
+:::note[Canonical reference]
+The authoritative install docs ship with the repo:
+[SELF-HOSTING.md](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md),
+[DEPLOYMENT.md](https://github.com/oxidean/oxidean/blob/main/docs/DEPLOYMENT.md),
+and the [deploy/selfhost](https://github.com/oxidean/oxidean/tree/main/deploy/selfhost)
+bundle. These pages summarize; those files are truth.
+:::

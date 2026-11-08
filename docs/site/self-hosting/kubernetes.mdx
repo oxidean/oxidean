@@ -1,0 +1,88 @@
+---
+title: Kubernetes (Helm)
+description: Install the Oxidean forge on Kubernetes with the published Helm chart.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The same images that run the Compose bundle ship as a Helm chart. For a
+cluster-local eval the chart defaults are enough:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean
+```
+
+Any install with real users needs its public URL up front: `env=production`
+(the default) expects HTTPS, and the forge builds clone URLs, magic links,
+and SSO redirects from `publicOrigin`:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
+  --set publicOrigin=https://git.example.com \
+  --set ingress.host=git.example.com \
+  --set 'ingress.tls[0].secretName=forge-tls' \
+  --set 'ingress.tls[0].hosts[0]=git.example.com'
+```
+
+The `forge-tls` Secret is yours to create: either let cert-manager issue it
+(ingress annotations) or create the TLS Secret in the release namespace
+yourself — the chart ships no edge of its own.
+
+For a plain-HTTP LAN eval, install without the production ingress
+settings — `env=development` plus the LAN origin keeps clone URLs and
+magic links off `localhost:8080`:
+
+```bash
+helm install oxidean oci://ghcr.io/oxidean/charts/oxidean \
+  --set env=development \
+  --set publicOrigin=http://192.168.x.y
+```
+
+The catch-all only creates an Ingress resource — a LAN-reachable ingress
+controller (Traefik on k3s, ingress-nginx elsewhere) must exist to
+answer it, so `publicOrigin` should be the address and port that
+controller actually serves. For SSH clones on a single-load-balancer
+cluster, add `--set ssh.service.type=ClusterIP` and map port 22 through
+the controller's TCP services. For ingress-nginx that takes all three
+pieces — the `tcp-services` ConfigMap entry, the controller configured
+to consume it (`--tcp-services-configmap`, or the `tcp` value of the
+ingress-nginx Helm chart), and port 22 exposed on the controller's own
+Service; the ConfigMap alone does not publish the port
+([ingress-nginx TCP/UDP services](https://kubernetes.github.io/ingress-nginx/user-guide/exposing-tcp-udp-services/)).
+When SSH keeps its own LoadBalancer, set `ssh.host` to that address
+instead — it defaults to `ingress.host` and drives the clone URLs the
+UI shows.
+
+The
+trade-offs are in
+[SELF-HOSTING.md](https://github.com/oxidean/oxidean/blob/main/docs/SELF-HOSTING.md).
+
+Chart source lives in
+[`deploy/helm/oxidean/`](https://github.com/oxidean/oxidean/tree/main/deploy/helm/oxidean)
+of the main repository.
+
+## Values that matter
+
+| Value                 | Default     | What it controls                                                                    |
+| --------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `postgres.enabled`    | `true`      | Bundled Postgres vs. external `DATABASE_URL` (Postgres, MySQL, or SQLite dialects). |
+| `objectstore.enabled` | `false`     | Bundled RustFS object store (eval-grade). Opt-in; also needs `storage.backend=s3` to serve. |
+| `seaweedfs.enabled`   | `false`     | Production-shaped bundled store, mutually exclusive with `objectstore`.            |
+| `runner.enabled`      | `false`     | In-cluster Actions runner for CI jobs.                                              |
+
+External S3-compatible endpoints override the same `OXIDEAN_S3_*`
+environment contract used by the Compose surface: no per-surface config
+fork.
+
+<Aside type="tip">
+  Moving an existing Compose install onto Kubernetes? The repo ships a dedicated walkthrough:
+  [SELFHOST-MIGRATE-TO-K8S.md](https://github.com/oxidean/oxidean/blob/main/docs/SELFHOST-MIGRATE-TO-K8S.md).
+</Aside>
+
+## Ingress
+
+`web` is still the single HTTP origin on Kubernetes: point your ingress at
+the `web` service for HTTP(S). Git-over-SSH is raw TCP, so it cannot ride
+the HTTP ingress; the chart gives it a separate `LoadBalancer` service,
+advertised via `ssh.host` / `ssh.port` (they fall back to `ingress.host`
+and external port `22`).

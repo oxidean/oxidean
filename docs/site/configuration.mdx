@@ -1,0 +1,36 @@
+---
+title: Configuration
+description: The OXIDEAN_* environment contract shared by the compose bundle, the Helm chart, and Oxidean Cloud.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every deployment surface (Compose, Helm, and Oxidean Cloud) honors the
+same `OXIDEAN_*` environment contract. No per-surface forks: a variable
+that works in `deploy/selfhost/.env` means the same thing in Helm values
+and on the hosted service.
+
+## The shape of it
+
+| Area        | Representative variables                                               |
+| ----------- | ---------------------------------------------------------------------- |
+| Environment | `OXIDEAN_ENV` (`development` only for local eval)                      |
+| Database    | `DATABASE_URL`, Postgres default; MySQL and SQLite dialects supported |
+| Storage     | `OXIDEAN_STORAGE_BACKEND=fs\|s3` plus the `OXIDEAN_S3_*` endpoint set  |
+| Git SSH     | `OXIDEAN_SSH_PORT` (default `2222`), raw TCP to `api`                 |
+| Actions     | `OXIDEAN_ACTIONS_SECRETS_KEY`, runner registration settings            |
+| Origins     | `OXIDEAN_API_ORIGIN` (web→api routing, internal in the bundle)         |
+
+<Aside type="note">
+  Authoritative parsing and validation live in the forge's config crates; the complete variable list
+  is [CONFIGURATION.md](https://github.com/oxidean/oxidean/blob/main/docs/CONFIGURATION.md) in the
+  main repository. This page is an orientation map, not the source of truth.
+</Aside>
+
+## Secrets
+
+Keep real secrets out of version control. The Compose bundle's
+`.env.example` documents what to generate
+(`openssl rand -hex 24` for `POSTGRES_PASSWORD`,
+`openssl rand -base64 32` for `OXIDEAN_ACTIONS_SECRETS_KEY`); Helm installs
+should use Kubernetes secrets or an external secrets manager.

@@ -1,0 +1,26 @@
+manifest_version: 1
+product:
+  slug: oxidean
+  name: Oxidean
+  repo: oxidean/oxidean
+  tag_pattern: "ox-v*"
+version: "0.4.2"
+pages:
+  - label: Oxidean
+    link: /
+  - label: Quickstart
+    link: /quickstart/
+  - label: Self-hosting
+    items:
+      - label: Overview
+        link: /self-hosting/
+      - label: Docker
+        link: /self-hosting/docker/
+      - label: Kubernetes
+        link: /self-hosting/kubernetes/
+  - label: ox CLI
+    link: /cli/
+  - label: Configuration
+    link: /configuration/
+  - label: Contributing
+    link: /contributing/
