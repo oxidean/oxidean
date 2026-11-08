@@ -206,14 +206,26 @@ done
 echo "==> kind cluster smoke"
 kind get clusters | grep -qx "${KIND_CLUSTER:-kind}" || { echo "FAIL: kind cluster ${KIND_CLUSTER:-kind} not found" >&2; exit 1; }
 
+# Pull a registry image straight into the kind node's containerd. `kind
+# load docker-image` pipes `docker save` through `ctr import
+# --all-platforms`, which fails on pulled multi-arch images when the saved
+# index references blobs docker never stored (content digest not found).
+# `ctr pull` resolves to the node platform only, so no digests go missing.
+kind_preload() {
+  local image="$1" repo node
+  case "$image" in */*) repo="$image" ;; *) repo="library/$image" ;; esac
+  for node in $(kind get nodes --name "${KIND_CLUSTER:-kind}"); do
+    docker exec -i "$node" ctr --namespace=k8s.io images pull "docker.io/$repo"
+  done
+}
+
 if [ "${HELM_SMOKE_SKIP_KIND_LOAD:-0}" != "1" ]; then
   echo "==> loading images into kind"
   kind load docker-image --name "${KIND_CLUSTER:-kind}" "oxidean-api:${API_TAG}" "oxidean-web:${WEB_TAG}"
 fi
 
 echo "==> preload postgres image into kind"
-docker pull postgres:18-alpine >/dev/null
-kind load docker-image --name "${KIND_CLUSTER:-kind}" postgres:18-alpine
+kind_preload postgres:18-alpine
 
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -274,9 +286,8 @@ kubectl -n "$NS" exec "deploy/${RELEASE}-oxidean-postgres" -- \
   pg_isready -U oxidean >/dev/null || { echo "FAIL: postgres pg_isready" >&2; exit 1; }
 
 echo "==> preload objectstore + init images into kind"
-docker pull rustfs/rustfs:1.0.4 >/dev/null
-docker pull amazon/aws-cli:2.39.3 >/dev/null
-kind load docker-image --name "${KIND_CLUSTER:-kind}" rustfs/rustfs:1.0.4 amazon/aws-cli:2.39.3
+kind_preload rustfs/rustfs:1.0.4
+kind_preload amazon/aws-cli:2.39.3
 
 echo "==> upgrade to storage.backend=s3 + bundled objectstore"
 helm upgrade "$RELEASE" "$CHART" -n "$NS" \
@@ -357,8 +368,7 @@ api_env_matches "OXIDEAN_STORAGE_BACKEND=s3" \
   || { echo "FAIL: api missing OXIDEAN_STORAGE_BACKEND=s3" >&2; exit 1; }
 
 echo "==> preload seaweedfs image into kind"
-docker pull chrislusf/seaweedfs:4.51 >/dev/null
-kind load docker-image --name "${KIND_CLUSTER:-kind}" chrislusf/seaweedfs:4.51
+kind_preload chrislusf/seaweedfs:4.51
 
 echo "==> upgrade to bundled SeaweedFS (swap providers)"
 helm upgrade "$RELEASE" "$CHART" -n "$NS" \
