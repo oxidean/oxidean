@@ -902,7 +902,7 @@ jobs:
       - name: load compose images
         run: ./scripts/ci-load-compose-images.sh /tmp/oxidean-ci-images/oxidean-ci-images.tgz
       - name: setup helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.22.1
       - name: create kind cluster
