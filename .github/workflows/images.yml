@@ -394,7 +394,7 @@ jobs:
         with:
           ref: ${{ needs.meta.outputs.sha }}
       - name: setup helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.22.1
       - name: package + push chart
