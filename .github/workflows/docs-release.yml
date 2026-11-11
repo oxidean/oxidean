@@ -4,9 +4,16 @@ on:
   # ox-v* tags are pushed by the release App token during the stable cut, so
   # tag-push fires this workflow normally. Prerelease ox-v*-beta.N tags are
   # skipped on the job below — the manifest tracks the stable line only.
+  #
+  # Merges to main republish the CURRENT stable tag's bundle from main's
+  # docs/site — the published "latest" docs track main between releases.
+  # The guard below only lets the pack run when the pushed range touched
+  # docs/site/, so non-docs merges exit in seconds.
   push:
     tags:
       - "ox-v*"
+    branches:
+      - main
   # Bootstrap / re-attach: tag = target release, src_ref = a ref that carries
   # docs/site (e.g. main) for releases that predate the docs contract.
   workflow_dispatch:
@@ -24,46 +31,110 @@ on:
 # Minimal default — jobs that need the token declare it themselves.
 permissions: {}
 
+# Repacks clobber the same release asset — serialize so a queued merge
+# repack can't race a tag pack or another merge's repack.
+concurrency:
+  group: docs-site-release
+  cancel-in-progress: false
+
 jobs:
   guard:
     runs-on: ubuntu-latest
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
+      tag: ${{ steps.check.outputs.tag }}
+      src_ref: ${{ steps.check.outputs.src_ref }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - id: check
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
           SRC_REF: ${{ inputs.src_ref }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # Dispatch inputs reach the reusable call as text — validate the tag
-          # shape before it can carry anything else into a run step.
-          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            [[ "$TAG" =~ ^ox-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must be a stable ox-vX.Y.Z tag"; exit 1; }
-            # Restricted to protected refs: a fork PR ref would pack
-            # arbitrary content into a release asset — the manifest gate
-            # checks a version field, not content provenance.
-            [[ -z "$SRC_REF" || "$SRC_REF" =~ ^(main|master|ox-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.-]*)$ ]] || { echo "::error::src_ref must be main, master, or an ox-vX.Y.Z tag"; exit 1; }
-          fi
-          # Prerelease ox-v*-beta.N tags never carry a matching manifest
-          # version — check the version part after the ox-v prefix.
-          ver="${TAG#ox-v}"
-          if [[ "$ver" == *-* ]]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "prerelease tag $TAG — docs bundle skipped"
-          else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          fi
+          proceed=true
+          src_ref="$SRC_REF"
+          case "$EVENT" in
+            workflow_dispatch)
+              # Dispatch inputs reach the reusable call as text — validate the
+              # tag shape before it can carry anything else into a run step.
+              [[ "$TAG" =~ ^ox-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must be a stable ox-vX.Y.Z tag"; exit 1; }
+              # Restricted to protected refs: a fork PR ref would pack
+              # arbitrary content into a release asset — the manifest gate
+              # checks a version field, not content provenance.
+              [[ -z "$SRC_REF" || "$SRC_REF" =~ ^(main|master|ox-v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.-]*)$ ]] || { echo "::error::src_ref must be main, master, or an ox-vX.Y.Z tag"; exit 1; }
+              ;;
+            push)
+              if [[ "$REF" == refs/tags/ox-v* ]]; then
+                # Prerelease ox-v*-beta.N tags never carry a matching manifest
+                # version — check the version part after the ox-v prefix.
+                ver="${TAG#ox-v}"
+                if [[ "$ver" == *-* ]]; then
+                  proceed=false
+                  echo "prerelease tag $TAG — docs bundle skipped"
+                fi
+                src_ref=""
+              elif [[ "$REF" == refs/heads/main ]]; then
+                # Main merges republish under the newest stable tag — only
+                # when the pushed range actually touched docs/site.
+                before="$BEFORE"
+                [[ "$before" =~ ^0+$ ]] && before="$(git rev-parse "$AFTER^")"
+                # Capture first: under pipefail, grep -q can SIGPIPE git diff
+                # mid-write and the ! would misread that as "no changes"; a
+                # failed diff should error, not silently skip the repack.
+                if ! changed="$(git diff --name-only "$before" "$AFTER")"; then
+                  echo "::error::git diff $before..$AFTER failed — cannot tell whether docs/site changed"
+                  exit 1
+                fi
+                if ! grep -q '^docs/site/' <<<"$changed"; then
+                  proceed=false
+                  echo "no docs/site changes in $before..$AFTER — bundle not repacked"
+                else
+                  TAG="$(git tag -l 'ox-v*' | grep -E '^ox-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
+                  [[ -n "$TAG" ]] || { echo "::error::no stable ox-vX.Y.Z tag found"; exit 1; }
+                  # If main's manifest ever drifts ahead of the stable tag
+                  # (e.g. a dev-version bump), skip instead of failing the
+                  # pack gate on every docs merge until the next cut.
+                  mv="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' docs/site/manifest.yaml | head -1)"
+                  if [[ "$mv" != "${TAG#ox-v}" ]]; then
+                    proceed=false
+                    echo "manifest version $mv != stable tag $TAG — skipping repack until versions realign"
+                  else
+                    src_ref=main
+                    echo "main push repacks docs/site under $TAG"
+                  fi
+                fi
+              else
+                proceed=false
+                echo "unexpected push ref $REF — nothing to do"
+              fi
+              ;;
+          esac
+          {
+            echo "proceed=$proceed"
+            echo "tag=$TAG"
+            echo "src_ref=$src_ref"
+          } >> "$GITHUB_OUTPUT"
 
   pack:
     needs: guard
     if: needs.guard.outputs.proceed == 'true'
     permissions:
       contents: write
-    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.6
+      # issues:write — the v0.1.7 reusable files a tracking issue when the
+      # site dispatch fails (caller must grant; callee declares it).
+      issues: write
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.7
     with:
-      tag: ${{ inputs.tag || github.ref_name }}
-      src-ref: ${{ inputs.src_ref }}
+      tag: ${{ needs.guard.outputs.tag }}
+      src-ref: ${{ needs.guard.outputs.src_ref }}
       product: oxidean
       # the ox release is created by ox-cli.yml after the binary matrix —
       # the bundle waits for the published release instead of racing it
