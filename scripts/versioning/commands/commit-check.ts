@@ -104,7 +104,7 @@ const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | -
 `;
 
 /** `git commit -v` scissors line: "# ------------------------ >8 ----..." */
-const SCISSORS_RE = /^[ \t]*[#;][ \t]+-{3,}[ \t]>8[ \t]-{3,}[ \t]*$/;
+const SCISSORS_RE = /^[ \t]*[#;][ \t]+-{20,}[ \t]>8[ \t]-{20,}[ \t]*$/;
 
 /** CLI body — parse argv, run the check, print, return exit code. */
 export function commitCheckCommand(
@@ -186,18 +186,9 @@ export function commitCheckCommand(
     for (const f of result.failures) process.stderr.write(`${f.error}\n`);
     return 2;
   }
-  // Per-commit report lines on stdout, warnings on stderr (BR1.8-style split).
-  for (const msg of messages) {
-    const parsed = parseCommit(msg, { allowed_types: [], reserved_scopes: [], entries: [] });
-    void parsed;
-  }
-  for (const msg of messages) {
-    const label = msg.sha ? `commit ${msg.sha.slice(0, 10)}` : "commit";
-    const failed = result.failures.find((f) => f.sha === msg.sha);
-    process.stdout.write(
-      failed ? `${label}: ${failed.error}\n` : `${label}: ok\n`,
-    );
-  }
+  // Per-commit report lines on stdout (all problems joined per commit),
+  // warnings on stderr (BR1.8-style split).
+  for (const line of result.lines) process.stdout.write(`${line}\n`);
   for (const w of result.warnings) process.stderr.write(`${w}\n`);
   return result.exitCode;
 }

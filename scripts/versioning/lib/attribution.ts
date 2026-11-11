@@ -8,18 +8,23 @@
  * Returns one human-readable violation per matched rule; an empty array
  * means clean. Grammar stays in `parseCommit` — this module only answers
  * "does this text carry AI/tool attribution or invisible markers".
+ *
+ * The reference is grep -E, which is line-based: `\s` and `[^>]` there
+ * cannot cross newlines, so the JS port uses `[^\S\n]` (horizontal
+ * whitespace) and `[^>\n]` to keep the same matching domain.
  */
 
 const AI_COAUTHOR_LINE = /^\s*co-?authored-by:/i;
 // AI vendors, bots, and *-ai-* / [bot] addresses. A human
 // Co-authored-by is fine; the ban is on machine attribution.
 const AI_COAUTHOR_VENDOR =
-  /claude|cursor|copilot|chatgpt|codex|gemini|devin-ai|cognition\.ai|devin\.ai[\s>]|openai|anthropic|codeium|windsurf|swe-|\[bot\]|[a-z0-9-]*bot@|ai-integration/i;
+  /claude|cursor|copilot|chatgpt|codex|gemini|devin-ai|cognition\.ai|devin\.ai[^\S\n>]|openai|anthropic|codeium|windsurf|swe-|\[bot\]|[a-z0-9-]*bot@|ai-integration/i;
 // "Generated with <tool>", "Made with: X", "Authored via X" — the tool
 // names that sign output, plus the trailer forms regardless of vendor.
 const GENERATOR_FOOTER =
-  /(generated|made|created|authored|written|produced)\s+(with|by|via)\s*\[?\s*(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-)/i;
-const GENERATOR_TRAILER = /^\s*(generated|made|authored)[- ](with|by|via)\s*:/im;
+  /(generated|made|created|authored|written|produced)[^\S\n]+(with|by|via)[^\S\n]*\[?[^\S\n]*(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-)/i;
+const GENERATOR_TRAILER =
+  /^[^\S\n]*(generated|made|authored)[- ](with|by|via)[^\S\n]*:/im;
 const BOT_EMOJI = /🤖/;
 // AI named as the author/agent — not as the subject of the change
 // ("add Copilot webhook" stays legal).
@@ -27,7 +32,7 @@ const AI_SELF_ATTRIBUTION =
   /\b(as an ai|i generated this|authored by (claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|swe-))\b/i;
 // Vendor-stamped HTML comments smuggled into the message.
 const ATTRIBUTION_HTML_COMMENT =
-  /<!--[^>]*(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|generated|🤖)/i;
+  /<!--[^>\n]*(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|generated|🤖)/i;
 // Zero-width / invisible markers: U+200B..U+200D, U+2060, U+FEFF.
 const ZERO_WIDTH_MARKER = /[\u200B-\u200D\u2060\uFEFF]/;
 
