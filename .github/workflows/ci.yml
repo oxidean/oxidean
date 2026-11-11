@@ -1022,8 +1022,8 @@ jobs:
                 --workspace-remap "${{ github.workspace }}" \
                 --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions) | binary_id(oxidean-db::dialect_oxpilot)' "$@"
           }
-          probe postgres postgres://oxidean:***@localhost:5432/oxidean
-          probe mysql mysql://oxidean:***@127.0.0.1:3306/oxidean
+          probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
+          probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
           # sqlite serializes: the probe/vcs/actions binaries share one
           # database file and parallel migrations race (duplicate column on
           # migration 6).
@@ -1034,8 +1034,8 @@ jobs:
           # ubuntu-latest has git + bash + docker, so docker_gated conformance
           # cases execute for real here.
           for admin_url in \
-            "postgres://oxidean:***@localhost:5432/postgres" \
-            "mysql://root:***@127.0.0.1:3306/"; do
+            "postgres://oxidean:oxidean@localhost:5432/postgres" \
+            "mysql://root:oxidean@127.0.0.1:3306/"; do
             echo "==> workflow_conformance: $admin_url"
             OXIDEAN_TEST_DATABASE_URL="$admin_url" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
