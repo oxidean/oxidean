@@ -51,13 +51,6 @@ vi.mock("@/lib/toast", () => ({
   toastWarning: vi.fn(),
 }));
 
-// ProfileAvatarField pulls @octanejs/dropzone → attr-accept, whose ESM build
-// is broken under vitest browser deps — the avatar path is not the gated
-// surface here (stack-browser settings-profile-avatar covers it).
-vi.mock("@/components/settings/profile-avatar-field", () => ({
-  ProfileAvatarField: () => null,
-}));
-
 import { ProfilePage } from "./profile";
 
 const user = {
