@@ -128,9 +128,6 @@ jobs:
     if: needs.guard.outputs.proceed == 'true'
     permissions:
       contents: write
-      # Lets the reusable file a tracking issue when the site dispatch
-      # fails (docs-manifest release.yml @v0.1.7+); harmless before that.
-      issues: write
     uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.6
     with:
       tag: ${{ needs.guard.outputs.tag }}
