@@ -77,6 +77,9 @@ export default defineConfig({
       "@": path.resolve(rootDir, "./src"),
       // ClientRouter isn't present in happy-dom — stub pushes real history.
       "astro:transitions/client": path.resolve(rootDir, "./src/test/astro-transitions-stub.ts"),
+      // Same fake-ESM workaround as astro.config.mjs — the browser project
+      // resolves dropzone's attr-accept import through this config instead.
+      "attr-accept": path.resolve(rootDir, "./src/shims/attr-accept.ts"),
     },
   },
   // Pre-bundle deps Vite discovers mid-suite so Chromium iframes are
@@ -100,6 +103,9 @@ export default defineConfig({
       // Two-factor UI (#130) — QR + WebAuthn ceremony wrappers.
       "qrcode",
       "@simplewebauthn/browser",
+      // Pulled transitively by octane (bun-store layout — not root-resolvable);
+      // nested include matches the optimizer's reported chain.
+      "octane > devalue",
     ],
   },
   test: {

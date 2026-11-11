@@ -60,12 +60,6 @@ vi.mock("@/lib/ssr-auth", async (importOriginal) => {
   return { ...actual, fetchSessionMe: fetchSessionMeMock };
 });
 
-// FileDropzone pulls attr-accept, whose ESM build is broken under vitest
-// browser deps — the upload path is not the gated surface here.
-vi.mock("@/components/ui/file-dropzone", () => ({
-  FileDropzone: () => null,
-}));
-
 import { AdminTemplatesPage } from "./templates";
 
 const sysAdmin = {

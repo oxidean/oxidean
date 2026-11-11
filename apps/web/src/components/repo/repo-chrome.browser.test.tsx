@@ -20,31 +20,36 @@ const unwatchMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    // vitest 5.1 mocks browser modules through an import map that misses
+    // .tsrx specifiers — satisfy the real useChromeAccountState hook here
+    // instead of mocking the module (same pattern as profile.browser.test).
+    auth: {
+      me: async () => ({
+        ok: true,
+        data: {
+          id: "u1",
+          email: "ada@example.com",
+          username: "ada",
+          display_name: "Ada",
+          bio: "",
+          avatar_url: null,
+          role: "user",
+          profile_incomplete: false,
+          email_verified: true,
+          must_change_credentials: false,
+        },
+      }),
+      bootstrapStatus: async () => ({ ok: true, data: { needs_setup: false } }),
+      providerConfig: async () => ({
+        ok: true,
+        data: { mode: "local", allow_signup: true },
+      }),
+    },
     repo: {
       watch: (...args: unknown[]) => watchMock(...args),
       unwatch: (...args: unknown[]) => unwatchMock(...args),
     },
   },
-}));
-
-vi.mock("@/lib/use-chrome-account", () => ({
-  useChromeAccountState: () => ({
-    pending: false,
-    user: {
-      id: "u1",
-      email: "ada@example.com",
-      username: "ada",
-      display_name: "Ada",
-      bio: "",
-      avatar_url: null,
-      role: "user",
-      profile_incomplete: false,
-      email_verified: true,
-      must_change_credentials: false,
-    },
-    needsSetup: false,
-    allowSignup: true,
-  }),
 }));
 
 beforeEach(() => {
@@ -135,6 +140,7 @@ describe("RepoChrome watch-level menu (DEBT-06)", () => {
         repo: repoFixture("participating"),
         active: "code",
       });
+      await waitForTestId("repo-watch-menu");
       await clickTestId("repo-watch-menu");
       await waitForTestId("repo-watch-unwatch");
       await clickTestId("repo-watch-unwatch");

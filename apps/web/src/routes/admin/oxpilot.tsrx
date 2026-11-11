@@ -37,7 +37,7 @@ import {
 } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 
-export type AdminOxpilotLoaderData =
+type AdminOxpilotLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
   | { kind: "error"; message: string }
@@ -154,7 +154,7 @@ export function AdminOxpilotPage() @{
   </AppPage>;
 }
 
-export function AdminOxpilotContent() @{
+function AdminOxpilotContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminOxpilotQueryOptions()).data;
 
