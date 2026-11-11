@@ -37,7 +37,7 @@ Before editing UI under `apps/web`:
 - Dialect SQL lives in `crates/oxidean-db` only; API must not branch on DB dialect.
 - No production secrets in repo, CI, or docs examples. Use `.env.example` / `docs/dev-auth.env.example`.
 - Prefer extending existing patterns over new frameworks, state libraries, or UI kits.
-- **No AI attribution** on commits or PRs: never add `Co-authored-by` / `Generated with` / `Made-with` (or similar) for Cursor, Claude, Copilot, or any AI/tool unless the user explicitly asks in the current turn. See [`.cursor/rules/no-ai-attribution.mdc`](.cursor/rules/no-ai-attribution.mdc).
+- **No AI attribution** on commits or PRs: never add `Co-authored-by` / `Generated with` / `Made-with` (or similar) for Cursor, Claude, Copilot, or any AI/tool — `commit-check` enforces this unconditionally (commits, titles, PR bodies). See [`.cursor/rules/no-ai-attribution.mdc`](.cursor/rules/no-ai-attribution.mdc).
 
 ## In-repo skills (always)
 

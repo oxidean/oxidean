@@ -62,7 +62,7 @@ describe("images.yml image lane", () => {
   test("component tag lanes map to their service image", () => {
     // oxidean-api-v*→api, web-v*/oxidean-web-v*→web, oxidean-runner-v*→runner.
     expect(yml).toContain(
-      'tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*"]',
+      'tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*", "oxidean-chart-v*.*.*"]',
     );
     expect(yml).toContain("oxidean-api-v*) svc=api");
     expect(yml).toContain("web-v*) svc=web");

@@ -72,3 +72,70 @@ describe("commitCheckCommand — modes", () => {
     expect(commitCheckCommand(root, ["--bogus", "x"])).toBe(2);
   });
 });
+
+describe("attribution scan", () => {
+  const root = join(import.meta.dir, "../../..");
+
+  test("AI Co-authored-by trailer in body → exit 1", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-Authored-By: Claude <noreply@anthropic.com>\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures[0].error).toContain("attribution: AI Co-authored-by trailer");
+  });
+
+  test("human Co-authored-by stays clean", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: Jane Doe <jane@example.com>\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  test("generator footer and zero-width marker both fail", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nGenerated with Cursor\n" },
+      { subject: "feat(core): y", body: "invisible\u200Bmarker" },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures.map((f) => f.error).join("\n")).toContain(
+      "AI generator footer",
+    );
+    expect(r.failures.map((f) => f.error).join("\n")).toContain(
+      "zero-width/invisible attribution marker",
+    );
+  });
+
+  test("--scan-file lints attribution only, no grammar", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cc-scan-"));
+    tmp.push(dir);
+    const clean = join(dir, "clean.txt");
+    const dirty = join(dir, "dirty.txt");
+    writeFileSync(clean, "not even a commit subject\n");
+    writeFileSync(dirty, "body\n\nMade-with: Copilot\n");
+    expect(commitCheckCommand(root, ["--scan-file", clean])).toBe(0);
+    expect(commitCheckCommand(root, ["--scan-file", dirty])).toBe(1);
+  });
+
+  test("--file cuts the diff below the scissors line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cc-"));
+    tmp.push(dir);
+    const f = join(dir, "COMMIT_EDITMSG");
+    // Marker inside the -v diff must not fail; marker in the message must.
+    writeFileSync(
+      f,
+      "feat(core): x\n\n# ------------------------ >8 ------------------------\n+Co-Authored-By: Claude <noreply@anthropic.com>\n",
+    );
+    expect(commitCheckCommand(root, ["--file", f])).toBe(0);
+    writeFileSync(
+      f,
+      "feat(core): x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n# ------------------------ >8 ------------------------\n",
+    );
+    expect(commitCheckCommand(root, ["--file", f])).toBe(1);
+  });
+});

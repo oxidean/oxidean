@@ -7,10 +7,12 @@
 import { readFileSync } from "node:fs";
 import { loadRegistry, type RegistryConfig } from "../lib/registry.ts";
 import { parseCommit, type CommitMessage } from "../lib/commit.ts";
+import { scanAttribution } from "../lib/attribution.ts";
 
 export const usage =
-  "commit-check (--message|--file|--range|--pr-title) <v>\n" +
-  "                                lint commit message(s) against the grammar";
+  "commit-check (--message|--file|--range|--pr-title|--scan-file) <v>\n" +
+  "                                lint commit message(s) against the grammar;\n" +
+  "                                --scan-file lints attribution markers only";
 
 export interface CommitCheckDeps {
   /** Injectable range enumeration for tests — defaults to `git log`. */
@@ -76,23 +78,33 @@ export function checkMessages(
   for (const msg of messages) {
     const parsed = parseCommit(msg, registry);
     const label = msg.sha ? `commit ${msg.sha.slice(0, 10)}` : "commit";
-    if (!parsed.valid) {
-      failures.push({ sha: msg.sha, error: parsed.error! });
-      lines.push(`${label}: ${parsed.error}`);
-    } else {
-      lines.push(`${label}: ok${parsed.exempt ? " (exempt)" : ""}`);
-    }
+    const problems: string[] = [];
+    if (!parsed.valid) problems.push(parsed.error!);
+    // Attribution scans the whole message (subject + body + footers),
+    // not just the grammar surface — trailers and hidden markers live
+    // below the subject line.
+    const text =
+      msg.body === undefined ? msg.subject : `${msg.subject}\n${msg.body}`;
+    for (const v of scanAttribution(text)) problems.push(`attribution: ${v}`);
+    for (const p of problems) failures.push({ sha: msg.sha, error: p });
+    lines.push(
+      `${label}: ${problems.length ? problems.join("; ") : `ok${parsed.exempt ? " (exempt)" : ""}`}`,
+    );
     warnings.push(...parsed.warnings.map((w) => `${label}: ${w}`));
   }
   return { exitCode: failures.length > 0 ? 1 : 0, lines, failures, warnings };
 }
 
-const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | --range <a..b> | --pr-title <t>)
+const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | --range <a..b> | --pr-title <t> | --scan-file <path>)
   --message <m>   lint a literal commit message (subject + body)
   --file <path>   lint the message in a commit-msg file (git hook)
   --range <a..b>  lint every commit in a git range (CI)
   --pr-title <t>  lint a PR title (same grammar)
+  --scan-file <path>  attribution-marker scan only (PR body; no grammar)
 `;
+
+/** `git commit -v` scissors line: "# ------------------------ >8 ----..." */
+const SCISSORS_RE = /^[ \t]*[#;][ \t]+-{3,}[ \t]>8[ \t]-{3,}[ \t]*$/;
 
 /** CLI body — parse argv, run the check, print, return exit code. */
 export function commitCheckCommand(
@@ -102,9 +114,21 @@ export function commitCheckCommand(
 ): number {
   const mode = argv[0];
   const value = argv[1];
-  if (!mode || argv.length !== 2 || !["--message", "--file", "--range", "--pr-title"].includes(mode)) {
+  if (!mode || argv.length !== 2 || !["--message", "--file", "--range", "--pr-title", "--scan-file"].includes(mode)) {
     process.stderr.write(USAGE);
     return 2;
+  }
+
+  if (mode === "--scan-file") {
+    try {
+      const violations = scanAttribution(readFileSync(value, "utf-8"));
+      for (const v of violations) process.stderr.write(`commit-check: ${v}\n`);
+      if (violations.length === 0) process.stdout.write("commit-check: ok\n");
+      return violations.length === 0 ? 0 : 1;
+    } catch (err) {
+      process.stderr.write(`commit-check: ${err instanceof Error ? err.message : String(err)}\n`);
+      return 2;
+    }
   }
 
   let messages: CommitMessage[];
@@ -123,7 +147,14 @@ export function commitCheckCommand(
         break;
       }
       case "--file": {
-        const text = readFileSync(value, "utf-8");
+        const raw = readFileSync(value, "utf-8");
+        // `git commit -v` appends the staged diff below the scissors
+        // line — everything past it is not message text. Comment lines
+        // before it stay in the scanned body: a marker hidden in one
+        // must fail here exactly as it would in CI.
+        const rawLines = raw.split("\n");
+        const cut = rawLines.findIndex((l) => SCISSORS_RE.test(l));
+        const text = cut === -1 ? raw : rawLines.slice(0, cut).join("\n");
         const nl = text.indexOf("\n");
         messages = [
           {

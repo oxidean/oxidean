@@ -155,6 +155,46 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bun scripts/versioning/cli.ts commit-check --pr-title "$PR_TITLE"
+      - name: scan PR body for attribution markers
+        # Bot-authored bodies (dependabot, renovate) are platform-
+        # generated boilerplate — GitHub injects zero-width spaces into
+        # @-mentions for anti-ping, which this scan exists to catch.
+        # Not a human attribution surface; commits/title still lint.
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" > pr-body.txt
+          # CodeRabbit owns the release-notes block it injects into the
+          # description — exempt that managed section, scan the rest.
+          # Count only the full HTML markers: a plain-text mention of
+          # the phrase is not a block. Unbalanced pairs still fail —
+          # a stray start marker could hide attribution after it.
+          open_m='<!-- This is an auto-generated comment: release notes by coderabbit.ai -->'
+          close_m='<!-- end of auto-generated comment: release notes by coderabbit.ai -->'
+          opens=$(grep -cF "$open_m" pr-body.txt || :)
+          closes=$(grep -cF "$close_m" pr-body.txt || :)
+          if [ "$opens" != "$closes" ]; then
+            echo "commit-check: unbalanced CodeRabbit release-notes markers in PR body" >&2
+            exit 1
+          fi
+          # ordered, non-nesting extraction: drop each start→end pair
+          # (markers included), keep every other byte — same-line text
+          # around markers and unmatched/out-of-order markers verbatim.
+          awk -v S="$open_m" -v E="$close_m" '
+            { buf = buf $0 "\n" }
+            END {
+              out = ""; rest = buf
+              while ((i = index(rest, S)) > 0) {
+                tail = substr(rest, i + length(S))
+                j = index(tail, E)
+                if (j == 0) break
+                out = out substr(rest, 1, i - 1)
+                rest = substr(tail, j + length(E))
+              }
+              printf "%s", out rest
+            }' pr-body.txt > pr-body-clean.txt
+          bun scripts/versioning/cli.ts commit-check --scan-file pr-body-clean.txt
       - name: registry completeness
         run: bun scripts/versioning/cli.ts check
 
@@ -979,8 +1019,8 @@ jobs:
                 --workspace-remap "${{ github.workspace }}" \
                 --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_vcs) | binary_id(oxidean-db::dialect_actions) | binary_id(oxidean-db::dialect_oxpilot)' "$@"
           }
-          probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
-          probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
+          probe postgres postgres://oxidean:***@localhost:5432/oxidean
+          probe mysql mysql://oxidean:***@127.0.0.1:3306/oxidean
           # sqlite serializes: the probe/vcs/actions binaries share one
           # database file and parallel migrations race (duplicate column on
           # migration 6).
@@ -991,8 +1031,8 @@ jobs:
           # ubuntu-latest has git + bash + docker, so docker_gated conformance
           # cases execute for real here.
           for admin_url in \
-            "postgres://oxidean:oxidean@localhost:5432/postgres" \
-            "mysql://root:oxidean@127.0.0.1:3306/"; do
+            "postgres://oxidean:***@localhost:5432/postgres" \
+            "mysql://root:***@127.0.0.1:3306/"; do
             echo "==> workflow_conformance: $admin_url"
             OXIDEAN_TEST_DATABASE_URL="$admin_url" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
