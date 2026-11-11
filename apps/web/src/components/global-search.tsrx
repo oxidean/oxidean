@@ -32,9 +32,9 @@ import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
 /** Header omnibar — multi-entity suggest + full /search results. */
-export const GLOBAL_SEARCH_LABEL = "Search Oxidean";
+const GLOBAL_SEARCH_LABEL = "Search Oxidean";
 
-export const GLOBAL_SEARCH_PLACEHOLDER = "Search repositories, users, orgs…";
+const GLOBAL_SEARCH_PLACEHOLDER = "Search repositories, users, orgs…";
 
 type GlobalSearchProps = {
   className?: string;

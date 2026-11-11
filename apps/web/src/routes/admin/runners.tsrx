@@ -57,7 +57,7 @@ export function AdminRunnersPage() @{
   </AppPage>;
 }
 
-export function AdminRunnersContent() @{
+function AdminRunnersContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminRunnersQueryOptions()).data;
   const [tokenOnce, setTokenOnce] = useState<string | null>(null);

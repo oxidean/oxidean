@@ -120,7 +120,7 @@ function PermissionSelect({
   </SelectRoot>;
 }
 
-export type CollaboratorsPanelProps = {
+type CollaboratorsPanelProps = {
   owner: string;
   name: string;
 };

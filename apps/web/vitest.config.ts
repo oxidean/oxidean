@@ -100,6 +100,9 @@ export default defineConfig({
       // Two-factor UI (#130) — QR + WebAuthn ceremony wrappers.
       "qrcode",
       "@simplewebauthn/browser",
+      // Pulled transitively by octane (bun-store layout — not root-resolvable);
+      // nested include matches the optimizer's reported chain.
+      "octane > devalue",
     ],
   },
   test: {

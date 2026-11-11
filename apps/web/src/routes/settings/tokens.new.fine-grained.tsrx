@@ -12,7 +12,7 @@ import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-export type TokensNewFgLoaderData =
+type TokensNewFgLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic; policy: PatPolicyPublic | null };
@@ -67,7 +67,7 @@ export function TokensNewFineGrainedPage() @{
   </AppPage>;
 }
 
-export function TokensNewFineGrainedContent() @{
+function TokensNewFineGrainedContent() @{
   const loaderData = useQuery(settingsTokensNewFgQueryOptions()).data;
 
   useEffect(() => {

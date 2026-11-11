@@ -15,7 +15,7 @@ import { fetchUserGetProfile } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-export type GeneralLoaderData =
+type GeneralLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic };
@@ -60,7 +60,7 @@ export function GeneralPage() @{
   </AppPage>;
 }
 
-export function GeneralContent() @{
+function GeneralContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(settingsGeneralQueryOptions()).data;
 
