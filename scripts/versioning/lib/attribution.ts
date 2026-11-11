@@ -35,7 +35,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE =
-  /^[^\S\n]*(via|by|using|with)[^\S\n]+(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-[0-9a-z.-]*)([^\S\n-]ai)?[^\S\n.!]*$/im;
+  /^[^\S\n]*(via|by|using|with)[^\S\n]+(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-[0-9a-z.-]*)([ \t-]ai)?[ \t.,;:!?…]*$/im;
 const BOT_EMOJI = /🤖/;
 // AI named as the author/agent — not as the subject of the change
 // ("add Copilot webhook" stays legal).

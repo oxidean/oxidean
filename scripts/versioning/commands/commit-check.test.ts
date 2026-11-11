@@ -141,6 +141,17 @@ describe("attribution scan", () => {
     expect(r.exitCode).toBe(1);
   });
 
+  test("via-line with trailing punctuation fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nvia Cursor.\n" },
+      { subject: "feat(core): y", body: "\nvia devin-ai\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures.map((f) => f.error).join("\n")).toContain(
+      "attribution: attribution via-line",
+    );
+  });
+
   test("standalone via-line footer fails", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nvia Cursor\n" },
