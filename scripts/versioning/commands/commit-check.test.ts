@@ -124,6 +124,23 @@ describe("attribution scan", () => {
     expect(r.exitCode).toBe(1);
   });
 
+  test("human surname ending in bot stays clean", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: Alice Talbot <alice.talbot@example.org>\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  test("via-line with ' AI' suffix on any vendor fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nvia Claude AI\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
   test("standalone via-line footer fails", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nvia Cursor\n" },

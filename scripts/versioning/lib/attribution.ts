@@ -18,7 +18,7 @@ const AI_COAUTHOR_LINE = /^\s*co-?authored-by:/i;
 // Unambiguous machine signals anywhere in the trailer: [bot] tags,
 // bot@ addresses, *-ai-integration logins, AI-vendor domains.
 const AI_COAUTHOR_VENDOR =
-  /\[bot\]|[a-z0-9-]*bot@|ai-integration|noreply@(anthropic|openai)\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code)\.(com|ai|dev|io)>/i;
+  /\[bot\]|(^|[<.\s_-])bot@|ai-integration|noreply@(anthropic|openai)\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code)\.(com|ai|dev|io)>/i;
 // A bare vendor identity as the display name — "Co-authored-by:
 // Claude <noreply@anthropic.com>" hits the domain rule above; this
 // catches no-email and generic-mailbox forms. Human names that merely
@@ -35,7 +35,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE =
-  /^[^\S\n]*(via|by|using|with)[^\S\n]+(claude|cursor|copilot|chatgpt|codex|gemini|devin([^\S\n-]ai)?|openai|anthropic|codeium|windsurf|swe-[0-9a-z.-]*)[^\S\n.!]*$/im;
+  /^[^\S\n]*(via|by|using|with)[^\S\n]+(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-[0-9a-z.-]*)([^\S\n-]ai)?[^\S\n.!]*$/im;
 const BOT_EMOJI = /🤖/;
 // AI named as the author/agent — not as the subject of the change
 // ("add Copilot webhook" stays legal).
