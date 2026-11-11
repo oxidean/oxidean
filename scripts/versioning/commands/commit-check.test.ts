@@ -97,6 +97,51 @@ describe("attribution scan", () => {
     expect(r.exitCode).toBe(0);
   });
 
+  test("human co-author with vendor-token name stays clean", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: Claude Martin <claude.martin@example.com>\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  test("vendor display name without email still fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nCo-authored-by: Claude\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
+  test("bot/[bot] trailer fails on machine signals", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: devin-ai-integration[bot] <158+x[bot]@users.noreply.github.com>\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
+  test("standalone via-line footer fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nvia Cursor\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures[0].error).toContain("attribution: attribution via-line");
+  });
+
+  test("prose containing a vendor word stays clean", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\ninstalled via cursor extension, see docs\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
   test("generator footer and zero-width marker both fail", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nGenerated with Cursor\n" },

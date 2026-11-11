@@ -17,6 +17,9 @@ on:
     # pull_request jobs fail to acquire runners (empty steps / runner_id 0).
     branches: [main, 'cursor/**']
   pull_request:
+    # edited re-fires the gate on title/body changes — otherwise a
+    # post-green metadata edit could land attribution unchecked.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 concurrency:
