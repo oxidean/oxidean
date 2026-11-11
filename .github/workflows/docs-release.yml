@@ -48,6 +48,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: check
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
@@ -85,11 +86,18 @@ jobs:
                 # when the pushed range actually touched docs/site.
                 before="$BEFORE"
                 [[ "$before" =~ ^0+$ ]] && before="$(git rev-parse "$AFTER^")"
-                if ! git diff --name-only "$before" "$AFTER" | grep -q '^docs/site/'; then
+                # Capture first: under pipefail, grep -q can SIGPIPE git diff
+                # mid-write and the ! would misread that as "no changes"; a
+                # failed diff should error, not silently skip the repack.
+                if ! changed="$(git diff --name-only "$before" "$AFTER")"; then
+                  echo "::error::git diff $before..$AFTER failed — cannot tell whether docs/site changed"
+                  exit 1
+                fi
+                if ! grep -q '^docs/site/' <<<"$changed"; then
                   proceed=false
                   echo "no docs/site changes in $before..$AFTER — bundle not repacked"
                 else
-                  TAG="$(git tag -l 'ox-v*' | grep -E '^ox-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+                  TAG="$(git tag -l 'ox-v*' | grep -E '^ox-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
                   [[ -n "$TAG" ]] || { echo "::error::no stable ox-vX.Y.Z tag found"; exit 1; }
                   # If main's manifest ever drifts ahead of the stable tag
                   # (e.g. a dev-version bump), skip instead of failing the
@@ -109,9 +117,11 @@ jobs:
               fi
               ;;
           esac
-          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "src_ref=$src_ref" >> "$GITHUB_OUTPUT"
+          {
+            echo "proceed=$proceed"
+            echo "tag=$TAG"
+            echo "src_ref=$src_ref"
+          } >> "$GITHUB_OUTPUT"
 
   pack:
     needs: guard
