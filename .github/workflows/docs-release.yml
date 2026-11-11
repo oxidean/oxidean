@@ -128,7 +128,10 @@ jobs:
     if: needs.guard.outputs.proceed == 'true'
     permissions:
       contents: write
-    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.6
+      # issues:write — the v0.1.7 reusable files a tracking issue when the
+      # site dispatch fails (caller must grant; callee declares it).
+      issues: write
+    uses: oxidean/docs-manifest/.github/workflows/release.yml@v0.1.7
     with:
       tag: ${{ needs.guard.outputs.tag }}
       src-ref: ${{ needs.guard.outputs.src_ref }}
