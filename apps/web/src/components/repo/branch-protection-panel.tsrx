@@ -492,11 +492,7 @@ export function BranchProtectionPanel(props: {
 }
 
 /** Repo Settings → Protected tags (GIT-21). */
-export function TagProtectionPanel(props: {
-  owner: string;
-  name: string;
-  can_admin: boolean;
-}) @{
+function TagProtectionPanel(props: { owner: string; name: string; can_admin: boolean }) @{
   const owner = props.owner;
   const name = props.name;
   const canAdmin = props.can_admin;

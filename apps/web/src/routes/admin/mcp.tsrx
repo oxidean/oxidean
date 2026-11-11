@@ -18,7 +18,7 @@ import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminMcpSettings, fetchSessionMe } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 
-export type AdminMcpLoaderData =
+type AdminMcpLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
   | { kind: "error"; message: string }
@@ -82,7 +82,7 @@ export function AdminMcpPage() @{
   </AppPage>;
 }
 
-export function AdminMcpContent() @{
+function AdminMcpContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminMcpQueryOptions()).data;
 

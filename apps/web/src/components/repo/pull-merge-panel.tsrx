@@ -4,7 +4,7 @@ import { useState } from "octane";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 
-export type PullMergePanelProps = {
+type PullMergePanelProps = {
   owner: string;
   repoName: string;
   number: number;

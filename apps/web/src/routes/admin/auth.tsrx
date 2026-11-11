@@ -51,7 +51,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { AppLink } from "@/components/ui/app-link";
 
-export type AdminAuthLoaderData =
+type AdminAuthLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
   | { kind: "error"; message: string }
@@ -215,7 +215,7 @@ export function AdminAuthPage() @{
   </AppPage>;
 }
 
-export function AdminAuthContent() @{
+function AdminAuthContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminAuthQueryOptions()).data;
 

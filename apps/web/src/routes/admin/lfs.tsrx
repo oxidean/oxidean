@@ -25,7 +25,7 @@ import { fetchAdminLfsSettings, fetchAdminLfsUsage, fetchSessionMe } from "@/lib
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
 import { AppLink } from "@/components/ui/app-link";
 
-export type AdminLfsLoaderData =
+type AdminLfsLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
   | { kind: "error"; message: string }
@@ -121,7 +121,7 @@ export function AdminLfsPage() @{
   </AppPage>;
 }
 
-export function AdminLfsContent() @{
+function AdminLfsContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminLfsQueryOptions()).data;
 

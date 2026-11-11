@@ -210,7 +210,13 @@ jobs:
           - { name: debian,       image: debian:trixie-slim,         pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
           - { name: ubuntu,       image: ubuntu:24.04,               pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
           - { name: fedora,       image: fedora:latest,              pm: "dnf install -y -q curl",                                                 expect: gnu }
-          - { name: arch,         image: archlinux:latest,           pm: "pacman -Sy --noconfirm curl",                                            expect: gnu }
+          # archlinux:latest's glibc spawns a getaddrinfo thread the runner's
+          # default dockerd seccomp profile blocks (curl exit 6 — pacman -Sy dies
+          # instantly). seccomp=unconfined is the upstream workaround; scoped to
+          # this leg only since sibling images' libc doesn't hit the blocked call.
+          # https://bbs.archlinux.org/viewtopic.php?id=300582 — retest once
+          # runner dockerd's default seccomp profile catches up with glibc.
+          - { name: arch,         image: archlinux:latest,           pm: "pacman -Sy --noconfirm curl",                                            expect: gnu, seccomp: unconfined }
           - { name: alpine,       image: alpine:latest,              pm: "apk add -q curl",                                                        expect: musl }
           - { name: opensuse,     image: opensuse/tumbleweed:latest, pm: "zypper --non-interactive install --no-recommends curl",                    expect: gnu }
           - { name: debian-arm64, image: debian:trixie-slim,         pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu, platform: linux/arm64 }
@@ -252,10 +258,12 @@ jobs:
       - name: install + smoke inside ${{ matrix.image }}
         env:
           PLATFORM: ${{ matrix.platform }}
+          SECCOMP: ${{ matrix.seccomp }}
         run: |
           set -euo pipefail
           docker run --rm --network "$NET_NAME" -e FIXTURE_NAME -e FIXTURE_PORT \
             ${PLATFORM:+--platform $PLATFORM} \
+            ${SECCOMP:+--security-opt seccomp=$SECCOMP} \
             "${{ matrix.image }}" sh -c '${{ matrix.pm }} >/dev/null 2>&1 && \
               curl -fsSL http://$FIXTURE_NAME:$FIXTURE_PORT/cli/install.sh | sh && \
               "$HOME/.local/bin/ox" --version && "$HOME/.local/bin/ox" --help >/dev/null' \
