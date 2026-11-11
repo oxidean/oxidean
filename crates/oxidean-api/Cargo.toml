@@ -119,7 +119,7 @@ tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
 wiremock = "0.6.5"
-webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softpasskey"] }
+webauthn-authenticator-rs = { version = "0.6.2", default-features = false, features = ["softpasskey"] }
 zip = { version = "9.0", default-features = false, features = ["deflate"] }
 
 [build-dependencies]

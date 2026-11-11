@@ -31,6 +31,7 @@ pub mod recovery;
 pub mod store;
 pub mod totp;
 
+use base64::Engine;
 use cookie::time::Duration as TimeDuration;
 use oxidean_core::{AppError, TwoFactorCompletePublic, UserPublic};
 use oxidean_db::{Database, UserRow};
@@ -376,10 +377,7 @@ pub fn make_webauthn() -> Result<Webauthn, AppError> {
 
 /// `CredentialID` → base64url string (storage form).
 pub fn cred_id_str(id: &CredentialID) -> Result<String, AppError> {
-    serde_json::to_value(id)
-        .ok()
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .ok_or_else(|| AppError::new("internal.error", "credential id encoding failed"))
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id))
 }
 
 pub async fn load_passkeys(
