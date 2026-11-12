@@ -10,8 +10,5 @@ export function getStaticPaths() {
 ---
 
 <AppShell title="Oxidean">
-	{/* `transition:persist` — every pull sub-path shares this shell, so tab
-	    clicks (/commits /checks /changes) carry the mounted island across the
-	    ClientRouter swap instead of remounting (state + scroll survive). */}
-	<PullDetailPage client:load transition:persist />
+	<PullDetailPage client:load />
 </AppShell>

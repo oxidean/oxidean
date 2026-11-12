@@ -202,10 +202,7 @@ function PullDetailPageContent() @{
         <p className="text-muted-foreground">Loading…</p>;
       } @else {
         @if (prNewUi && loader?.kind === "ready") {
-          // Island persists across pull-internal ClientRouter swaps — key the
-          // leaf on pull identity so /pull/N → /pull/M still remounts state.
           <PullDetailV2
-            key={`${owner}/${repoName}/${number}` as string}
             owner={owner}
             repoName={repoName}
             number={number}
@@ -225,7 +222,7 @@ function PullDetailPageContent() @{
             }
           />;
         } @else {
-          <div className="space-y-4" key={`${owner}/${repoName}/${number}` as string}>
+          <div className="space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
               <div className="min-w-0">
                 <h2 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-tight">
