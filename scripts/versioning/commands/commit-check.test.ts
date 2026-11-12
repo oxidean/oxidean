@@ -262,6 +262,19 @@ describe("attribution scan", () => {
     expect(r.failures).toHaveLength(3);
   });
 
+  test("ai-agent/ai-assistant email local parts fail", () => {
+    const r = checkMessages(
+      registry,
+      [
+        "Co-authored-by: devin.ai-agent@x.com",
+        "Co-authored-by: agent-ai@x.com",
+        "Co-authored-by: devin.ai-assistant@x.com",
+      ].map((body) => ({ subject: "feat(core): x", body: `\n${body}\n` })),
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.failures).toHaveLength(3);
+  });
+
   test("standalone via-line footer fails", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nvia Cursor\n" },
@@ -351,6 +364,24 @@ describe("attribution scan", () => {
     writeFileSync(
       f,
       "feat(core): x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n# ------------------------ >8 ------------------------\n",
+    );
+    expect(commitCheckCommand(root, ["--file", f])).toBe(1);
+  });
+
+  test("--file scissors cut survives CRLF line endings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cc-"));
+    tmp.push(dir);
+    const f = join(dir, "COMMIT_EDITMSG");
+    // autocrlf=true checkouts hand the hook CRLF messages; the scissors
+    // marker must still cut or the staged diff scans as message text.
+    writeFileSync(
+      f,
+      "feat(core): x\r\n\r\n# ------------------------ >8 ------------------------\r\n+Co-Authored-By: Claude <noreply@anthropic.com>\r\n",
+    );
+    expect(commitCheckCommand(root, ["--file", f])).toBe(0);
+    writeFileSync(
+      f,
+      "feat(core): x\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n# ------------------------ >8 ------------------------\r\n",
     );
     expect(commitCheckCommand(root, ["--file", f])).toBe(1);
   });

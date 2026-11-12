@@ -173,7 +173,7 @@ export function commitCheckCommand(
         // must fail here exactly as it would in CI.
         const prefix = (deps.commentPrefix ?? (() => resolveCommentPrefix(rootDir)))();
         const marker = `${prefix} ------------------------ >8 ------------------------`;
-        const rawLines = raw.split("\n").map((l) => l.replace(/\\r$/, ""));
+        const rawLines = raw.split("\n").map((l) => l.replace(/\r$/, ""));
         const cut = rawLines.findIndex((l) => l === marker);
         const precut = cut === -1 ? rawLines : rawLines.slice(0, cut);
         // Grammar sees the cleaned message — comment and blank lines
