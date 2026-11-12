@@ -281,6 +281,28 @@ describe("attribution scan", () => {
     expect(commitCheckCommand(root, ["--scan-file", dirty])).toBe(1);
   });
 
+  test("CRLF line endings cannot evade the scan", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\r\nCo-authored-by: x <bot@anthropic.com>\r\nvia Cursor\r\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures.map((f) => f.error).join("\n")).toContain(
+      "attribution via-line",
+    );
+  });
+
+  test("empty --range fails loudly instead of passing silently", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cc-range-"));
+    tmp.push(dir);
+    const code = commitCheckCommand(dir, ["--range", "a..b"], {
+      logRange: () => [],
+    });
+    expect(code).toBe(1);
+  });
+
   test("--file cuts the diff below the scissors line", () => {
     const dir = mkdtempSync(join(tmpdir(), "cc-"));
     tmp.push(dir);

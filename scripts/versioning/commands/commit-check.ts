@@ -192,7 +192,14 @@ export function commitCheckCommand(
       }
       case "--range": {
         const enumerate = deps.logRange ?? gitLogRange;
-        messages = enumerate(rootDir, value).map((c) => ({
+        const commits = enumerate(rootDir, value);
+        // An empty-but-valid range (typo'd or post-force-push SHA) must
+        // fail loudly — silently linting zero commits is a false pass.
+        if (commits.length === 0) {
+          process.stderr.write(`commit-check: empty range ${value}\n`);
+          return 1;
+        }
+        messages = commits.map((c) => ({
           sha: c.sha,
           subject: c.subject,
           body: c.body,
