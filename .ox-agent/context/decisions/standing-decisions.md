@@ -35,8 +35,8 @@ raw decision/audit trail). Do not re-ask these in planning.
   green CI (`production-deploy.yml`, `Oxidean / production` environment).
 - `railway config apply` runs from operator machines only; apply tokens never
   enter repo or CI.
-- Release automation pushes use the `oxidean-release` App or `RELEASE_TOKEN`
-  — never `GITHUB_TOKEN`.
+- Release automation pushes use the `oxidean-release` App
+  — never `GITHUB_TOKEN` or a maintainer PAT.
 
 ## Engineering
 

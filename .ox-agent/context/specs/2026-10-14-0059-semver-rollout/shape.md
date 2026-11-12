@@ -16,8 +16,8 @@ semver-prefixed commits plus agent skills/helpers for the practice.
 - `versioning.toml` registration requires an existing workspace member with
   a literal `[package] version`
 - Changelog tiers: per-component files plus one global changelog
-- Release pushes use the `oxidean-release` App / `RELEASE_TOKEN` — never
-  `GITHUB_TOKEN`
+- Release pushes use the `oxidean-release` App — never `GITHUB_TOKEN`
+  or a maintainer PAT
 
 ## Context
 
