@@ -12867,16 +12867,18 @@ paths:
               title: CreatePullCommentRequest
               type: object
               properties:
+                pending:
+                  description: |-
+                    Persist as a pending review draft instead of a submitted comment —
+                    only the author sees it until `pull.reviews.submit` links it.
+                  type: boolean
+                  default: null
+                  nullable: true
                 commit_sha:
                   type: string
                   default: null
                   nullable: true
                 start_line:
-                  type: integer
-                  format: int64
-                  default: null
-                  nullable: true
-                line:
                   type: integer
                   format: int64
                   default: null
@@ -12889,6 +12891,11 @@ paths:
                   nullable: true
                 side:
                   type: string
+                  default: null
+                  nullable: true
+                line:
+                  type: integer
+                  format: int64
                   default: null
                   nullable: true
       responses:
@@ -18025,6 +18032,11 @@ components:
           type: string
           description: Review this comment was submitted under (pending-review linkage).
           nullable: true
+        pending:
+          type: boolean
+          description: |-
+            Server-persisted review draft — only visible to the author until a
+            submitted review links it.
         created_at:
           type: string
         updated_at:
@@ -18037,6 +18049,7 @@ components:
       - body
       - outdated
       - resolved
+      - pending
       - created_at
       - updated_at
     DeletePullCommentResponse:
