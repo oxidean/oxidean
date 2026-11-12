@@ -209,7 +209,7 @@ function OverviewCommentItem(props: {
       </span>
       @if (c.path) {
         <span className="font-mono text-[12px] text-muted-foreground">
-          {`${c.path}:${c.line ?? "?"}` as string}
+          {`${c.path}${c.line != null ? `:${c.line}` : ""}` as string}
         </span>;
       }
       @if (c.outdated) {

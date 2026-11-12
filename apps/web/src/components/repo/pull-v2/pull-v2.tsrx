@@ -39,7 +39,13 @@ type PullV2Tab = "overview" | "commits" | "checks" | "changes";
 export function pullV2TabFromSplat(splat: string): PullV2Tab {
   if (splat === "commits") return "commits";
   if (splat === "checks") return "checks";
-  if (splat === "changes" || splat.startsWith("changes/") || splat === "files") return "changes";
+  if (
+    splat === "changes" ||
+    splat.startsWith("changes/") ||
+    splat === "files" ||
+    splat.startsWith("files/")
+  )
+    return "changes";
   return "overview";
 }
 

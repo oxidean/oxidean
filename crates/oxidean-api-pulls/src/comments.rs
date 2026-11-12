@@ -262,6 +262,9 @@ pub async fn comments_create(
             ));
         }
     }
+    if req.line.is_some_and(|l| l < 1) || req.start_line.is_some_and(|l| l < 1) {
+        return Err(AppError::new("rpc.bad_input", "line numbers start at 1"));
+    }
     let pending = req.pending.unwrap_or(false);
     // Drafts only resolve through pull.reviews.submit (Write+) — a Read-only
     // author could never publish them, so reject rather than store orphans.
