@@ -194,7 +194,16 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   });
 
   const filesQ = useQuery({
-    queryKey: ["pull", "files", props.owner, props.repoName, props.number, false, null] as const,
+    queryKey: [
+      "pull",
+      "files",
+      props.owner,
+      props.repoName,
+      props.number,
+      "all",
+      false,
+      null,
+    ] as const,
     queryFn: async () => {
       const res = await apiClient.pull.files({
         owner: props.owner,
@@ -585,6 +594,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             repoName={props.repoName}
             number={props.number}
             canInteract={props.canInteract}
+            canWrite={props.canWrite}
             isAuthor={props.isAuthor}
             currentUserId={props.currentUserId}
             changesSha={props.changesSha}
@@ -599,7 +609,6 @@ export function PullDetailV2(props: PullDetailV2Props) @{
         <aside className="sticky top-36 hidden max-h-[calc(100vh-10rem)] w-80 shrink-0 self-start overflow-hidden rounded-md border border-border bg-card lg:block">
           <PullV2CommentsPanel
             comments={comments}
-            pendingCount={0}
             currentUserId={props.currentUserId}
             owner={props.owner}
             repoName={props.repoName}

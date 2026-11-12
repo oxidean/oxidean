@@ -51,14 +51,14 @@ type PullV2ChangesProps = {
   repoName: string;
   number: number;
   canInteract: boolean;
+  /** Write+ capability — pending drafts + review submit are Write-gated. */
+  canWrite?: boolean;
   isAuthor: boolean;
   currentUserId: string;
   /** `/pull/N/changes/<sha>` or `/pull/N/changes/<base>..<head>` (#261). */
   changesSha?: string;
   /** PR head sha — anchors new review comments + "View file" links. */
   headSha?: string;
-  /** PR head branch name — preferred "View file" ref when provided. */
-  headRef?: string;
   /** Lifted comments-panel state — the page header toggle drives it too. */
   panelOpen?: boolean;
   onPanelToggle?: (open: boolean) => void;
@@ -449,7 +449,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
         : scope.kind === "since"
           ? "Since your last review"
           : "All commits";
-  const viewFileRef = props.headRef ?? props.headSha ?? "";
+  const viewFileRef = props.headSha ?? "";
 
   <div className="space-y-3" data-testid="pull-v2-changes">
     @if (noPriorReview) {
@@ -843,6 +843,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
                       viewed={viewedSet.has(f.path)}
                       marksEnabled={marksEnabled}
                       canInteract={props.canInteract}
+                      canWrite={props.canWrite ?? false}
                       minimizeComments={minimizeComments}
                       pending={pendingComments.filter((c) => c.path === f.path)}
                       submitted={submittedComments.filter((c) => c.path === f.path)}
@@ -891,7 +892,6 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
         <aside className="sticky top-36 hidden max-h-[calc(100vh-10rem)] w-80 shrink-0 self-start overflow-hidden rounded-md border border-border bg-card lg:block">
           <PullV2CommentsPanel
             comments={allComments}
-            pendingCount={pendingComments.length}
             currentUserId={props.currentUserId}
             owner={props.owner}
             repoName={props.repoName}
@@ -904,7 +904,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
       }
     </div>
 
-    @if (props.canInteract) {
+    @if (props.canWrite) {
       <div className="sticky bottom-0 z-10">
         <PullV2ReviewBar
           pending={pendingComments}

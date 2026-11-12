@@ -22,13 +22,11 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
  * The pull page owns tab state and has no tab-prop channel — flip "Files
  * changed" through its own DOM button so the commit-scoped URL (loaded via
  * the same click) shows the diff instead of leaving the user on Commits.
+ * The tab buttons carry `data-tab` ids — never match on their label text.
  */
 function openFilesTab() {
-  const tablist = document.querySelector('[role="tablist"]');
-  const btn = [...(tablist?.querySelectorAll("button") ?? [])].find(
-    (b) => b.textContent?.trim() === "Files changed",
-  );
-  (btn as HTMLButtonElement | undefined)?.click();
+  const btn = document.querySelector('[role="tablist"] [data-tab="files"]');
+  (btn as HTMLButtonElement | null)?.click();
 }
 
 export function PullCommits(props: PullCommitsProps) @{

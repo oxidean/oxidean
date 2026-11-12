@@ -129,6 +129,8 @@ function LineDraftBox(props: {
   body: string;
   busy: boolean;
   error: string | null;
+  /** Write+ — "Add review comment" persists a server-side pending draft. */
+  canWrite: boolean;
   /** Range comment header (`start_line..line`) when the draft came from a drag. */
   rangeLabel: string | null;
   onBody: (next: string) => void;
@@ -148,15 +150,17 @@ function LineDraftBox(props: {
       onInput={(e) => props.onBody((e.currentTarget as HTMLTextAreaElement).value)}
     />
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        className="rounded-md bg-primary px-2 py-1 text-[13px] font-medium text-primary-foreground disabled:opacity-60"
-        disabled={props.busy || !props.body.trim()}
-        data-testid="pull-v2-line-draft-add"
-        onClick={() => props.onSubmit(true)}
-      >
-        Add review comment
-      </button>
+      @if (props.canWrite) {
+        <button
+          type="button"
+          className="rounded-md bg-primary px-2 py-1 text-[13px] font-medium text-primary-foreground disabled:opacity-60"
+          disabled={props.busy || !props.body.trim()}
+          data-testid="pull-v2-line-draft-add"
+          onClick={() => props.onSubmit(true)}
+        >
+          Add review comment
+        </button>;
+      }
       <button
         type="button"
         className="rounded-md border border-border px-2 py-1 text-[13px] text-foreground hover:bg-muted disabled:opacity-60"
@@ -254,6 +258,8 @@ function RowNotes(props: {
   draftError: string | null;
   comments: PullCommentPublic[];
   canInteract: boolean;
+  /** Write+ — hides the pending-draft "Add review comment" path. */
+  canWrite: boolean;
   minimizeComments: boolean;
   onDraftBody: (body: string) => void;
   onSubmitDraft: (pending: boolean) => void;
@@ -266,6 +272,7 @@ function RowNotes(props: {
         body={props.draftBody}
         busy={props.draftBusy}
         error={props.draftError}
+        canWrite={props.canWrite}
         rangeLabel={
           props.draft.startLine != null && props.draft.line != null
             ? `Commenting on lines ${props.draft.startLine}–${props.draft.line}`
@@ -304,6 +311,8 @@ export function PullV2DiffFile(props: {
   /** Viewed checkbox/marks allowed — false on scoped (sha/range/since) views. */
   marksEnabled: boolean;
   canInteract: boolean;
+  /** Write+ capability — pending review drafts are Write-gated (#263). */
+  canWrite?: boolean;
   minimizeComments: boolean;
   /** Server-side pending drafts anchored to this file. */
   pending: PullCommentPublic[];
@@ -620,6 +629,7 @@ export function PullV2DiffFile(props: {
           draftError={props.draftError}
           comments={fileComments}
           canInteract={props.canInteract}
+          canWrite={props.canWrite ?? false}
           minimizeComments={props.minimizeComments}
           onDraftBody={props.onDraftBody}
           onSubmitDraft={props.onSubmitDraft}
@@ -757,6 +767,7 @@ export function PullV2DiffFile(props: {
                       draftError={props.draftError}
                       comments={commentsByRow.get(line.index) ?? []}
                       canInteract={props.canInteract}
+                      canWrite={props.canWrite ?? false}
                       minimizeComments={props.minimizeComments}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}
@@ -894,6 +905,7 @@ export function PullV2DiffFile(props: {
                       draftError={props.draftError}
                       comments={commentsByRow.get(line.index) ?? []}
                       canInteract={props.canInteract}
+                      canWrite={props.canWrite ?? false}
                       minimizeComments={props.minimizeComments}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}

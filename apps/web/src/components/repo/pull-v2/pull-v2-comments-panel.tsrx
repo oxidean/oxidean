@@ -46,7 +46,7 @@ function PanelCommentRow(props: {
             if (c.path) props.onJump(c.path);
           }}
         >
-          {`${c.path}:${c.line ?? "?"}` as string}
+          {`${c.path}${c.line != null ? `:${c.line}` : ""}` as string}
         </a>;
       } @else {
         <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
@@ -90,13 +90,10 @@ function PanelCommentRow(props: {
  * Right-side comments index for the v2 pull experience (WI-0001 S7):
  * every pull review comment with All / Unresolved / Mine filter chips and
  * jump-to-file links. Server-persisted review drafts (pending === true)
- * group at the top with a discard affordance; local (client-side) drafts
- * still report through `pendingCount` as "not shown".
+ * group at the top with a discard affordance.
  */
 export function PullV2CommentsPanel(props: {
   comments: PullCommentPublic[];
-  /** Local drafts not yet posted server-side (changes tab only). */
-  pendingCount?: number;
   currentUserId: string;
   /** Repo coordinates enable the pending-draft discard RPC. */
   owner?: string;
@@ -118,7 +115,6 @@ export function PullV2CommentsPanel(props: {
   });
   const pendingItems = filtered.filter((c) => c.pending);
   const postedItems = filtered.filter((c) => !c.pending);
-  const localDrafts = props.pendingCount ?? 0;
   const canDiscard = !!(props.canInteract && props.owner && props.repoName && props.number);
 
   async function discard(c: PullCommentPublic) {
@@ -232,13 +228,6 @@ export function PullV2CommentsPanel(props: {
         data-testid="pull-v2-panel-error"
       >
         {error as string}
-      </p>;
-    }
-    @if (localDrafts > 0) {
-      <p className="border-t border-border px-3 py-2 text-[12px] text-muted-foreground">
-        {
-          `${localDrafts} pending comment${localDrafts === 1 ? "" : "s"} not shown — submit the review to post them.` as string
-        }
       </p>;
     }
   </div>;

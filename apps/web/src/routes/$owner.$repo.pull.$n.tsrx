@@ -338,6 +338,7 @@ function PullDetailPageContent() @{
                     ? "border-b-2 border-primary pb-2 text-sm font-semibold"
                     : "pb-2 text-sm text-muted-foreground") as string
                 }
+                data-tab="conversation"
                 onClick={() => setTab("conversation")}
               >
                 Conversation
@@ -349,6 +350,7 @@ function PullDetailPageContent() @{
                     ? "border-b-2 border-primary pb-2 text-sm font-semibold"
                     : "pb-2 text-sm text-muted-foreground") as string
                 }
+                data-tab="commits"
                 onClick={() => setTab("commits")}
               >
                 Commits
@@ -360,6 +362,7 @@ function PullDetailPageContent() @{
                     ? "border-b-2 border-primary pb-2 text-sm font-semibold"
                     : "pb-2 text-sm text-muted-foreground") as string
                 }
+                data-tab="checks"
                 onClick={() => setTab("checks")}
               >
                 Checks
@@ -371,6 +374,7 @@ function PullDetailPageContent() @{
                     ? "border-b-2 border-primary pb-2 text-sm font-semibold"
                     : "pb-2 text-sm text-muted-foreground") as string
                 }
+                data-tab="files"
                 onClick={() => setTab("files")}
               >
                 Files changed

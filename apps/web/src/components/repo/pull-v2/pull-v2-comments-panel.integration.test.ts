@@ -55,7 +55,6 @@ function renderPanel(overrides: Record<string, unknown> = {}) {
   return renderWithQueryClient(PullV2CommentsPanel, {
     props: {
       comments: [POSTED, PENDING] as never,
-      pendingCount: 0,
       currentUserId: "u9",
       owner: "ada",
       repoName: "hello",
@@ -137,11 +136,18 @@ describe("PullV2CommentsPanel", () => {
     });
   });
 
-  it("keeps the local-draft footer for unsaved client drafts", async () => {
-    renderPanel({ pendingCount: 2 });
+  it("renders file-level comments as bare paths without a line suffix", async () => {
+    renderPanel({
+      comments: [
+        {
+          ...POSTED,
+          id: "c3",
+          line: null,
+        },
+      ] as never,
+    });
     await screen.findByTestId("pull-v2-comments-panel");
-    expect(
-      screen.getByText("2 pending comments not shown — submit the review to post them."),
-    ).toBeTruthy();
+    expect(screen.getByText("src/a.ts")).toBeTruthy();
+    expect(screen.queryByText("src/a.ts:")).toBeNull();
   });
 });

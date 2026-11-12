@@ -142,6 +142,7 @@ function renderChanges(overrides: Record<string, unknown> = {}) {
       repoName: "core",
       number: 3,
       canInteract: true,
+      canWrite: true,
       isAuthor: false,
       currentUserId: "u1",
       headSha: "abc123def",

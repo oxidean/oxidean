@@ -76,6 +76,7 @@ const CHANGES_PROPS = {
   repoName: "hello",
   number: 42,
   canInteract: true,
+  canWrite: true,
   isAuthor: false,
   currentUserId: "u2",
   headSha: "deadbeef0123",

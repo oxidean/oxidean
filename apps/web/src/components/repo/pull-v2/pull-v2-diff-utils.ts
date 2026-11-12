@@ -15,13 +15,13 @@ export type ChangesScope =
   /** Client-only selection (no URL) — diffs the caller's last review..head. */
   | { kind: "since" };
 
-/** `<sha>` or `<base>..<head>` → scope; `since` is applied by the caller. */
+/** `<sha>` or `<base>..<head>` (also `...`) → scope; `since` is applied by the caller. */
 export function parseChangesScope(changesSha?: string | null): ChangesScope {
   if (!changesSha) return { kind: "none" };
   const i = changesSha.indexOf("..");
   if (i >= 0) {
     const base = changesSha.slice(0, i);
-    const head = changesSha.slice(i + 2);
+    const head = changesSha.slice(i + 2).replace(/^\.+/, "");
     if (base && head) return { kind: "range", base, head };
     return { kind: "none" };
   }

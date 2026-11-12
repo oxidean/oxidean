@@ -713,7 +713,7 @@ function PullV2Conversation(props: {
  */
 export function PullV2Overview(props: PullV2OverviewProps) @{
   <div className="flex items-start gap-6" data-testid="pull-v2-overview">
-    <div className="min-w0 flex-1 space-y-6">
+    <div className="min-w-0 flex-1 space-y-6">
       <PullV2MergeCard
         owner={props.owner}
         repoName={props.repoName}
