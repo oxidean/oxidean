@@ -28,8 +28,11 @@ const AI_COAUTHOR_VENDOR =
 // here, never in a single rule, or the rules drift apart. In RegExp
 // templates, `\\S`/`\\n` render as `\S`/`\n`.
 const VENDOR =
-  "claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|github[^\\S\\n]+copilot|(claude|gemini)[^\\S\\n]+(opus|sonnet|pro|ultra)|swe-[0-9a-z.-]*";
-const AI_COAUTHOR_NAME = new RegExp(`^(${VENDOR})((?:[^\\S\\n]|-)ai)?$`, "i");
+  "claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|github[^\\S\\n]+copilot|claude[^\\S\\n]+code|(claude|gemini)[^\\S\\n]+(opus|sonnet|pro|ultra)|swe-[0-9a-z.-]*";
+const AI_COAUTHOR_NAME = new RegExp(
+  `^\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?$`,
+  "i",
+);
 // "Generated with <tool>", "Made with: X", "Authored via X" — the tool
 // names that sign output, plus the trailer forms regardless of vendor.
 // connector may carry a colon ("Created with: Cursor"); the vendor token
@@ -43,7 +46,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE = new RegExp(
-  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+(${VENDOR})((?:[^\\S\\n]|-)ai)?(?:(?:[^\\S\\n])|[.,;:!?…])*$`,
+  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?(?:(?:[^\\S\\n])|[.,;:!?…])*$`,
   "im",
 );
 // A robot emoji is only a signature when it carries attribution context:
@@ -56,7 +59,7 @@ const BOT_EMOJI_CONTEXT =
 // AI named as the author/agent — not as the subject of the change
 // ("add Copilot webhook" stays legal).
 const AI_SELF_ATTRIBUTION = new RegExp(
-  `\\b(as an ai|i generated this|authored by (${VENDOR}))\\b`,
+  `\\b(as an ai|i generated this|authored by \\[?(${VENDOR}))\\b`,
   "i",
 );
 // Vendor-stamped HTML comments smuggled into the message.
