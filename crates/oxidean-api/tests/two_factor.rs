@@ -14,6 +14,7 @@ use oxidean_api::email::{EmailError, EmailSender, OutboundEmail};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use tower::ServiceExt;
+use webauthn_authenticator_rs::prelude::WebauthnAuthenticator;
 
 #[derive(Default)]
 struct RecordingSender {
@@ -568,9 +569,7 @@ async fn passkey_register_then_login_completes_via_assertion() {
     // Register a platform passkey while signed in.
     let origin =
         webauthn_authenticator_rs::prelude::Url::parse("http://localhost:8080").expect("origin");
-    let mut authenticator = webauthn_authenticator_rs::prelude::WebauthnAuthenticator::new(
-        webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
-    );
+    let mut authenticator = webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true);
 
     let (_, v, _) = rpc(
         &app,
@@ -840,9 +839,7 @@ async fn identifier_first_passkey_completes_without_password() {
 
     let origin =
         webauthn_authenticator_rs::prelude::Url::parse("http://localhost:8080").expect("origin");
-    let mut authenticator = webauthn_authenticator_rs::prelude::WebauthnAuthenticator::new(
-        webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
-    );
+    let mut authenticator = webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true);
     let (_, v, _) = rpc(
         &app,
         &two_factor_req(
