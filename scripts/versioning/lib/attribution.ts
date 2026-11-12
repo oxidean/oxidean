@@ -17,8 +17,17 @@
 const AI_COAUTHOR_LINE = /^\s*co-?authored-by:/i;
 // Unambiguous machine signals anywhere in the trailer: [bot] tags,
 // bot@ addresses, *-ai-integration logins, AI-vendor domains.
-const AI_COAUTHOR_VENDOR =
-  /\[bot\]|(^|[<.\s_-])bot@|ai-integration|noreply@(anthropic|openai)\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code)\.(com|ai|dev|io)([^\S\n>]|>|$)/i;
+const VENDOR =
+  "claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|github[^\\S\\n]+copilot|claude[^\\S\\n]+code|(claude|gemini)[^\\S\\n]+(opus|sonnet|pro|ultra)|swe-[0-9a-z.-]*";
+
+// AI-vendor domains (literal list of vendor-owned domains — never
+// github.com, or humans on the privacy relay get flagged), plus a vendor
+// token inside a bare email (no <display name>) — bot forms like
+// "Co-authored-by: 175728472+Copilot@users.noreply.github.com".
+const AI_COAUTHOR_VENDOR = new RegExp(
+  `\\[bot\\]|(^|[<.\\s_+-])bot@|ai-integration|noreply@(anthropic|openai)\\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code|cursor|gemini|chatgpt|codex|copilot|google)\\.(com|ai|dev|io)([^\\S\\n>]|>|$)|:[^\\S\\n]*[^<\\s]*(${VENDOR})[^<\\s]*@`,
+  "i",
+);
 // A bare vendor identity as the display name — "Co-authored-by:
 // Claude <noreply@anthropic.com>" hits the domain rule above; this
 // catches no-email and generic-mailbox forms. Human names that merely
@@ -27,10 +36,8 @@ const AI_COAUTHOR_VENDOR =
 // One vendor alternation shared by every pattern below — extend it
 // here, never in a single rule, or the rules drift apart. In RegExp
 // templates, `\\S`/`\\n` render as `\S`/`\n`.
-const VENDOR =
-  "claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|github[^\\S\\n]+copilot|claude[^\\S\\n]+code|(claude|gemini)[^\\S\\n]+(opus|sonnet|pro|ultra)|swe-[0-9a-z.-]*";
 const AI_COAUTHOR_NAME = new RegExp(
-  `^\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?$`,
+  `^\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n-]?ai))?$`,
   "i",
 );
 // "Generated with <tool>", "Made with: X", "Authored via X" — the tool
@@ -46,7 +53,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE = new RegExp(
-  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?([^a-z0-9]|$)`,
+  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n-]?ai))?([^a-z0-9]|$)`,
   "im",
 );
 // A robot emoji is only a signature when it carries attribution context:

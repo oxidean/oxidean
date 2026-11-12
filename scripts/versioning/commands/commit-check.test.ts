@@ -238,6 +238,30 @@ describe("attribution scan", () => {
     );
   });
 
+  test("vendor token inside a bare co-author email fails", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: 175728472+Copilot@users.noreply.github.com\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures[0].error).toContain("attribution:");
+  });
+
+  test("glued -ai vendor names and plus-form bot addresses fail", () => {
+    const r = checkMessages(
+      registry,
+      [
+        "Co-authored-by: ClaudeAI <a@b.c>",
+        "Co-authored-by: jesse+copilot-bot@x.com",
+        "via claudeai",
+      ].map((body) => ({ subject: "feat(core): x", body: `\n${body}\n` })),
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.failures).toHaveLength(3);
+  });
+
   test("standalone via-line footer fails", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nvia Cursor\n" },
