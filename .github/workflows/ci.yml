@@ -630,11 +630,17 @@ jobs:
           # literal URIs, whichever the image uses). Package authenticity
           # is unaffected: Release/InRelease are archive-signed regardless
           # of which host serves them.
-          if sudo apt-get update -o Acquire::Retries=2; then
-            echo "ubuntu archives reachable — stock mirrors fine"
-            exit 0
+          apt_log=$(mktemp)
+          if sudo apt-get update -o Acquire::Retries=2 2>&1 | tee "$apt_log"; then
+            if grep -Eq 'Temporary failure resolving|Failed to fetch|Could not resolve|Some index files failed' "$apt_log"; then
+              echo "::warning::apt-get update reported fetch/resolution failures — failing apt sources over to public mirrors"
+            else
+              echo "ubuntu archives reachable — stock mirrors fine"
+              exit 0
+            fi
+          else
+            echo "::warning::apt-get update failed — failing apt sources over to public mirrors"
           fi
-          echo "::warning::ubuntu.com unreachable — failing apt sources over to public mirrors"
           if [ -f /etc/apt/apt-mirrors.txt ]; then
             printf '%s\n' \
               'https://mirrors.ocf.berkeley.edu/ubuntu/' \
@@ -643,8 +649,7 @@ jobs:
               | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           fi
           sudo sed -i -E \
-            -e 's#https?://(azure\.)?archive\.ubuntu\.com/ubuntu#https://mirrors.ocf.berkeley.edu/ubuntu#g' \
-            -e 's#https?://security\.ubuntu\.com/ubuntu#https://mirrors.ocf.berkeley.edu/ubuntu#g' \
+            -e 's#https?://[^/[:space:]]+\.ubuntu\.com/ubuntu([/[:space:]]|$)#https://mirrors.ocf.berkeley.edu/ubuntu\1#g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get update -o Acquire::Retries=3
       - name: install Playwright chromium (browsers + sysdeps)
