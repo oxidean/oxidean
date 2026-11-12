@@ -3715,7 +3715,6 @@ dependencies = [
  "oxidean-api-notification",
  "oxidean-api-oauth",
  "oxidean-api-org",
- "oxidean-api-oxpilot",
  "oxidean-api-packages",
  "oxidean-api-pages",
  "oxidean-api-pat",
@@ -4000,35 +3999,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxidean-api-oxpilot"
-version = "0.2.2"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.23.1",
- "bytes",
- "chrono",
- "futures-util",
- "http-body-util",
- "oxidean-api",
- "oxidean-api-core",
- "oxidean-core",
- "oxidean-db",
- "oxidean-vcs",
- "rand 0.10.3",
- "reqwest 0.13.5",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tower",
- "tracing",
- "url",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "oxidean-api-packages"
 version = "0.2.5"
 dependencies = [
@@ -4195,7 +4165,6 @@ version = "0.4.2"
 dependencies = [
  "anstyle",
  "async-trait",
- "base64 0.23.1",
  "dialoguer",
  "hex",
  "indicatif",
@@ -4203,7 +4172,6 @@ dependencies = [
  "jaq-json",
  "jaq-std",
  "keyring",
- "libc",
  "oxidean-core",
  "oxidean-vcs",
  "reqwest 0.13.5",
@@ -4215,7 +4183,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "wiremock",
- "zeroize",
 ]
 
 [[package]]

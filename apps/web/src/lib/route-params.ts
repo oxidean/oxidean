@@ -57,7 +57,6 @@ const RESERVED_TOP_SEGMENTS = new Set([
   "notifications",
   "oauth",
   "orgs",
-  "oxpilot",
   "reset-password",
   "search",
   "settings",

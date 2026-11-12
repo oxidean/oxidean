@@ -179,16 +179,6 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
     ("self-update", &[]),
     ("skill", &[("print", &[]), ("install", &[])]),
     (
-        "pilot",
-        &[
-            ("pair", &[]),
-            ("run", &[]),
-            ("connect", &[]),
-            ("disconnect", &[]),
-            ("status", &[]),
-        ],
-    ),
-    (
         "mcp",
         &[
             ("print", &[]),

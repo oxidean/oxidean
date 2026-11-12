@@ -192,8 +192,6 @@ spec:
               value: "true"
             - name: OXIDEAN_MCP_ENABLED
               value: "true"
-            - name: OXIDEAN_OXPILOT_ENABLED
-              value: "1"
             - name: OXIDEAN_ALLOW_SIGNUP
               value: {{ .Values.allowSignup | quote }}
             - name: OXIDEAN_AUTO_MIGRATE

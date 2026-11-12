@@ -458,30 +458,6 @@ const HELP: &[(&str, &str)] = &[
         "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer",
     ),
     (
-        "pilot",
-        "ox pilot — connect this machine as an oxpilot computer-use target\n\n  ox pilot pair <code>   redeem a UI-minted pairing code + custody the verifier\n  ox pilot run           claim → execute → report loop (alias: connect)\n  ox pilot disconnect    forget a target locally (server target stays until revoked)\n  ox pilot status        list registered targets + custody probe\n\nPair a machine from the /oxpilot UI, then `ox pilot run` dials out to the\nforge — no inbound listener needed. Capabilities are the closed C3 set\n(exec_shell, fs_read, fs_write); every action requires an owner grant\napproved in the UI. Successful commands exit 0; usage-class errors exit 2.",
-    ),
-    (
-        "pilot pair",
-        "ox pilot pair <code> [--label <name>] [--caps <list>] [--verbose]\n\nRedeems a short-lived single-use pairing code minted in the /oxpilot UI,\ncustodies the returned verifier (OS keyring, or the 0600 pilot-secrets.json\nfallback on headless), and writes a pilot-targets.json row.\n\n--caps accepts a comma list and/or repeats (exec_shell, fs_read, fs_write);\nomitted pairs with the full set. The server records the granted caps — the\nloop refuses action kinds outside them locally.",
-    ),
-    (
-        "pilot run",
-        "ox pilot run [--target <id|label>] [--root <dir>] [--wait-seconds <n>]\n              [--exec-timeout <n>] [--verbose]\n\nRuns the claim → execute → report loop for one paired target: claim\nlong-polls, executes granted actions under --root's filesystem jail, and\nreports bounded, secret-scrubbed results. Heartbeats fire every 15s.\nSIGINT/SIGTERM cancel in-flight actions, report them, then exit clean;\na revoked target or dead credential exits without retrying.",
-    ),
-    (
-        "pilot disconnect",
-        "ox pilot disconnect [--target <id|label>]\n\nForgets the target locally — deletes the custodied verifier and the\npilot-targets.json row. Local-only: the server-side target and any\npending grants persist until revoked from the /oxpilot UI.",
-    ),
-    (
-        "pilot status",
-        "ox pilot status\n\nLists registered targets (id, label, caps, paired-at) with a live probe\nof verifier custody — reports keyring/file/missing per row without ever\nprinting secret material.",
-    ),
-    (
-        "pilot connect",
-        "ox pilot connect — alias for `ox pilot run`.",
-    ),
-    (
         "mcp",
         "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config.",
     ),
@@ -1271,31 +1247,6 @@ pub enum Command {
         upgrade: bool,
         detected: bool,
     },
-    /// `pilot pair <code>` — redeem a UI-minted pairing code, custody the
-    /// verifier locally, and register this machine as a connector target.
-    PilotPair {
-        code: String,
-        label: Option<String>,
-        caps: Option<Vec<String>>,
-        verbose: bool,
-    },
-    /// `pilot run` — the claim/execute/report loop against the C3 connector
-    /// routes; exits on auth revocation or a fatal route error.
-    PilotRun {
-        target: Option<String>,
-        root: Option<String>,
-        wait_seconds: Option<u64>,
-        exec_timeout: Option<u64>,
-        verbose: bool,
-    },
-    /// `pilot disconnect` — local forget only; the server-side target and
-    /// grants live until revoked in the UI.
-    PilotDisconnect {
-        target: Option<String>,
-    },
-    /// `pilot status` — list registered targets with a live custody probe
-    /// (never prints secret material).
-    PilotStatus,
     McpPrint {
         harness: Option<String>,
     },
@@ -3775,83 +3726,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 detected: f.bools.contains("--detected"),
             }
         }
-        ("pilot", "pair", "") => {
-            // `--caps` lives ONLY in `multi_flags` — listing it as a
-            // value-flag too made `scan` route every repeat to `f.values`
-            // and drop all but the last.
-            let f = scan(tail, &["--label"], &["--verbose"], &["--caps"])?;
-            let code = f
-                .positionals
-                .first()
-                .cloned()
-                .ok_or_else(|| usage("ox pilot pair: expected <code>"))?;
-            if f.positionals.len() > 1 {
-                return Err(usage("ox pilot pair: unexpected extra arguments"));
-            }
-            // `--caps` accepts a comma list and/or repeats; merged into one
-            // set. The empty-after-split case surfaces as `Some(vec![])` so
-            // `pilot::pair` can refuse with its own message.
-            let caps = if f.multi.iter().any(|(k, _)| k == "--caps") {
-                Some(
-                    f.multi
-                        .iter()
-                        .filter(|(k, _)| k == "--caps")
-                        .map(|(_, v)| v)
-                        .flat_map(|v| v.split(','))
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<String>>(),
-                )
-            } else {
-                None
-            };
-            Command::PilotPair {
-                code,
-                label: f.values.get("--label").cloned(),
-                caps,
-                verbose: f.bools.contains("--verbose"),
-            }
-        }
-        ("pilot", "run", "") | ("pilot", "connect", "") => {
-            let f = scan(
-                tail,
-                &["--target", "--root", "--wait-seconds", "--exec-timeout"],
-                &["--verbose"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "pilot run")?;
-            let parse_secs = |name: &str| -> Result<Option<u64>, UsageError> {
-                f.values
-                    .get(name)
-                    .map(|v| {
-                        v.trim().parse::<u64>().map_err(|_| {
-                            usage(format!(
-                                "ox pilot run: {name} must be a non-negative integer"
-                            ))
-                        })
-                    })
-                    .transpose()
-            };
-            Command::PilotRun {
-                target: f.values.get("--target").cloned(),
-                root: f.values.get("--root").cloned(),
-                wait_seconds: parse_secs("--wait-seconds")?,
-                exec_timeout: parse_secs("--exec-timeout")?,
-                verbose: f.bools.contains("--verbose"),
-            }
-        }
-        ("pilot", "disconnect", "") => {
-            let f = scan(tail, &["--target"], &[], &[])?;
-            expect_no_positionals(&f, "pilot disconnect")?;
-            Command::PilotDisconnect {
-                target: f.values.get("--target").cloned(),
-            }
-        }
-        ("pilot", "status", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "pilot status")?;
-            Command::PilotStatus
-        }
         ("mcp", "print", "") => {
             let f = scan(tail, &["--harness"], &[], &[])?;
             expect_no_positionals(&f, "mcp print")?;
@@ -4230,7 +4104,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "webhook",
                 "self-update",
                 "skill",
-                "pilot",
                 "mcp",
                 "api",
                 "vcs",

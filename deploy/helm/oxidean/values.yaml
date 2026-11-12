@@ -18,7 +18,7 @@ api:
     tag: "0.7.0"
     pullPolicy: IfNotPresent
   # Structural envs are rendered by the chart; use `env` for any additional
-  # non-secret OXIDEAN_* knobs (RUST_LOG, OXIDEAN_OXPILOT_*, mail, SSO client
+  # non-secret OXIDEAN_* knobs (RUST_LOG, mail, SSO client
   # ids, OXIDEAN_EGRESS_ALLOW_PRIVATE, …). Secret values belong in `secrets.env`.
   env: {}
   resources:
@@ -94,9 +94,8 @@ secrets:
   # env=production — see webFlowKey below.
   webFlowPrivateKey: ""
   # Extra secret envs rendered into the chart Secret, NAME: value —
-  # OXIDEAN_OXPILOT_API_KEY, OXIDEAN_OXPILOT_SECRETS_KEY,
   # OXIDEAN_OIDC_CLIENT_SECRET, OXIDEAN_SMTP_URL, OXIDEAN_RESEND_API_KEY,
-  # WORKOS_*, OXIDEAN_OXPILOT_BASE_URL, …
+  # WORKOS_*, …
   env: {}
 # Provision the web-flow signing keypair by initContainer (ssh-keygen into
 # the ssh host-key volume). Only used when secrets.webFlowPrivateKey is unset.
