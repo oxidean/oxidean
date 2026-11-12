@@ -74,6 +74,8 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const seqRef = useRef(0);
+  // Discards land mid-submit too — track ids so the post loop skips them.
+  const discardedRef = useRef(new Set<number>());
 
   const filesQ = useQuery({
     queryKey: [
@@ -216,6 +218,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   }
 
   function discardPending(id: number) {
+    discardedRef.current.add(id);
     setPending((prev) => prev.filter((c) => c.id !== id));
   }
 
@@ -228,8 +231,15 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
     // the scoped `<sha>` when the URL carries one, else head.
     const anchorSha = props.changesSha ?? props.headSha ?? null;
     const commentIds: string[] = [];
+    const postedIds = new Set<number>();
+    const dropPosted = () => setPending((prev) => prev.filter((c) => !postedIds.has(c.id)));
+    const invalidateComments = () =>
+      queryClient.invalidateQueries({
+        queryKey: ["pull", "comments", props.owner, props.repoName, props.number],
+      });
     for (let i = 0; i < pending.length; i++) {
       const c = pending[i];
+      if (discardedRef.current.has(c.id)) continue;
       const cr = await apiClient.pull.comments.create({
         owner: props.owner,
         name: props.repoName,
@@ -241,12 +251,16 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
         commit_sha: anchorSha,
       });
       if (!cr.ok) {
-        setPending(pending.slice(i));
+        // Keep only entries that were never posted — functionally, so drafts
+        // added mid-flight survive and discarded ones stay gone.
+        dropPosted();
         setReviewBusy(false);
         setReviewError(cr.error.message || "Could not post a pending comment");
+        void invalidateComments();
         return;
       }
       commentIds.push(cr.data.id);
+      postedIds.add(c.id);
     }
     const res = await apiClient.pull.reviews.submit({
       owner: props.owner,
@@ -259,12 +273,13 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
     if (!res.ok) {
       // Comments already posted stay posted; dropping them from `pending`
       // avoids re-creating them (the link step validates fresh ids).
-      setPending([]);
+      dropPosted();
       setReviewBusy(false);
       setReviewError(res.error.message || "Review failed");
+      void invalidateComments();
       return;
     }
-    setPending([]);
+    dropPosted();
     setDraft(null);
     setDraftBody("");
     setReviewBusy(false);
