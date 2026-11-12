@@ -1603,6 +1603,62 @@ impl Database {
         pulls::list_pull_assignees_for_pulls(self.require_pool()?, pull_ids).await
     }
 
+    /// Replace the assignee set on a pull (WI-0001).
+    pub async fn set_pull_assignees(
+        &self,
+        pull_id: &str,
+        user_ids: &[String],
+    ) -> Result<(), String> {
+        pulls::set_pull_assignees(self.require_pool()?, pull_id, user_ids).await
+    }
+
+    /// Labels on a pull, name-sorted (WI-0001).
+    pub async fn list_pull_labels(&self, pull_id: &str) -> Result<Vec<LabelRow>, String> {
+        issue_labels::list_labels_for_pull(self.require_pool()?, pull_id).await
+    }
+
+    /// Batch `list_pull_labels` — `(pull_id, label)` pairs in one round trip.
+    pub async fn list_pull_labels_for_pulls(
+        &self,
+        pull_ids: &[String],
+    ) -> Result<Vec<(String, LabelRow)>, String> {
+        issue_labels::list_labels_for_pulls(self.require_pool()?, pull_ids).await
+    }
+
+    /// Replace the label set on a pull (WI-0001).
+    pub async fn set_pull_labels(&self, pull_id: &str, label_ids: &[String]) -> Result<(), String> {
+        pulls::set_pull_labels(self.require_pool()?, pull_id, label_ids).await
+    }
+
+    /// Mark/unmark a changed file viewed for a user (WI-0001).
+    pub async fn set_pull_file_view(
+        &self,
+        pull_id: &str,
+        user_id: &str,
+        path: &str,
+        head_sha: &str,
+        viewed: bool,
+    ) -> Result<(), String> {
+        pulls::set_pull_file_view(
+            self.require_pool()?,
+            pull_id,
+            user_id,
+            path,
+            head_sha,
+            viewed,
+        )
+        .await
+    }
+
+    /// Paths a user marked viewed on a pull (WI-0001).
+    pub async fn list_pull_file_views(
+        &self,
+        pull_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<String>, String> {
+        pulls::list_pull_file_views(self.require_pool()?, pull_id, user_id).await
+    }
+
     /// Subset of `pull_ids` carrying a label matching `label` (id or name).
     pub async fn pull_ids_with_label(
         &self,

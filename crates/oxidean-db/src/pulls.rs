@@ -2729,3 +2729,253 @@ ORDER BY lower(u.username)",
         }
     }
 }
+
+/// Replace the label set on a pull (M:N via `pull_labels`, WI-0001).
+pub async fn set_pull_labels(
+    pool: &DbPool,
+    pull_id: &str,
+    label_ids: &[String],
+) -> Result<(), String> {
+    let (del, ins): (&str, &str) = match pool {
+        DbPool::Postgres(_) => (
+            "DELETE FROM pull_labels WHERE pull_id = $1",
+            "INSERT INTO pull_labels (pull_id, label_id) VALUES ($1, $2)",
+        ),
+        DbPool::MySql(_) => (
+            "DELETE FROM pull_labels WHERE pull_id = ?",
+            "INSERT INTO pull_labels (pull_id, label_id) VALUES (?, ?)",
+        ),
+        DbPool::Sqlite(_) => (
+            "DELETE FROM pull_labels WHERE pull_id = ?1",
+            "INSERT INTO pull_labels (pull_id, label_id) VALUES (?1, ?2)",
+        ),
+    };
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull labels failed: {e}"))?;
+            for id in label_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull label failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull labels failed: {e}"))?;
+            for id in label_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull label failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull labels failed: {e}"))?;
+            for id in label_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull label failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Replace the assignee set on a pull (M:N via `pull_assignees`, WI-0001).
+pub async fn set_pull_assignees(
+    pool: &DbPool,
+    pull_id: &str,
+    user_ids: &[String],
+) -> Result<(), String> {
+    let (del, ins): (&str, &str) = match pool {
+        DbPool::Postgres(_) => (
+            "DELETE FROM pull_assignees WHERE pull_id = $1",
+            "INSERT INTO pull_assignees (pull_id, user_id) VALUES ($1, $2)",
+        ),
+        DbPool::MySql(_) => (
+            "DELETE FROM pull_assignees WHERE pull_id = ?",
+            "INSERT INTO pull_assignees (pull_id, user_id) VALUES (?, ?)",
+        ),
+        DbPool::Sqlite(_) => (
+            "DELETE FROM pull_assignees WHERE pull_id = ?1",
+            "INSERT INTO pull_assignees (pull_id, user_id) VALUES (?1, ?2)",
+        ),
+    };
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull assignees failed: {e}"))?;
+            for id in user_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull assignee failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull assignees failed: {e}"))?;
+            for id in user_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull assignee failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(del)
+                .bind(pull_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear pull assignees failed: {e}"))?;
+            for id in user_ids {
+                sqlx::query(ins)
+                    .bind(pull_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert pull assignee failed: {e}"))?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Upsert or delete a per-user "viewed" mark on a changed file (WI-0001).
+pub async fn set_pull_file_view(
+    pool: &DbPool,
+    pull_id: &str,
+    user_id: &str,
+    path: &str,
+    head_sha: &str,
+    viewed: bool,
+) -> Result<(), String> {
+    if viewed {
+        match pool {
+            DbPool::Postgres(p) => sqlx::query(
+                "INSERT INTO pull_file_views (pull_id, user_id, path, head_sha) \
+                 VALUES ($1, $2, $3, $4) \
+                 ON CONFLICT (pull_id, user_id, path) DO UPDATE SET head_sha = $4, viewed_at = now()",
+            ).bind(pull_id).bind(user_id).bind(path).bind(head_sha).execute(p).await
+                .map(|_| ()).map_err(|e| format!("mark pull file viewed failed: {e}")),
+            DbPool::MySql(p) => sqlx::query(
+                "INSERT INTO pull_file_views (pull_id, user_id, path, head_sha) \
+                 VALUES (?, ?, ?, ?) \
+                 ON DUPLICATE KEY UPDATE head_sha = VALUES(head_sha), viewed_at = CURRENT_TIMESTAMP",
+            ).bind(pull_id).bind(user_id).bind(path).bind(head_sha).execute(p).await
+                .map(|_| ()).map_err(|e| format!("mark pull file viewed failed: {e}")),
+            DbPool::Sqlite(p) => sqlx::query(
+                "INSERT INTO pull_file_views (pull_id, user_id, path, head_sha) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT (pull_id, user_id, path) DO UPDATE SET head_sha = ?4, viewed_at = strftime('%Y-%m-%d %H:%M:%S','now')",
+            ).bind(pull_id).bind(user_id).bind(path).bind(head_sha).execute(p).await
+                .map(|_| ()).map_err(|e| format!("mark pull file viewed failed: {e}")),
+        }
+    } else {
+        match pool {
+            DbPool::Postgres(p) => sqlx::query(
+                "DELETE FROM pull_file_views WHERE pull_id = $1 AND user_id = $2 AND path = $3",
+            )
+            .bind(pull_id)
+            .bind(user_id)
+            .bind(path)
+            .execute(p)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("unmark pull file viewed failed: {e}")),
+            DbPool::MySql(p) => sqlx::query(
+                "DELETE FROM pull_file_views WHERE pull_id = ? AND user_id = ? AND path = ?",
+            )
+            .bind(pull_id)
+            .bind(user_id)
+            .bind(path)
+            .execute(p)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("unmark pull file viewed failed: {e}")),
+            DbPool::Sqlite(p) => sqlx::query(
+                "DELETE FROM pull_file_views WHERE pull_id = ?1 AND user_id = ?2 AND path = ?3",
+            )
+            .bind(pull_id)
+            .bind(user_id)
+            .bind(path)
+            .execute(p)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("unmark pull file viewed failed: {e}")),
+        }
+    }
+}
+
+/// Paths the user marked viewed on this pull (WI-0001).
+pub async fn list_pull_file_views(
+    pool: &DbPool,
+    pull_id: &str,
+    user_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT path FROM pull_file_views WHERE pull_id = $1 AND user_id = $2",
+        )
+        .bind(pull_id)
+        .bind(user_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull file views failed: {e}")),
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT path FROM pull_file_views WHERE pull_id = ? AND user_id = ?")
+                .bind(pull_id)
+                .bind(user_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull file views failed: {e}"))
+        }
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT path FROM pull_file_views WHERE pull_id = ?1 AND user_id = ?2",
+        )
+        .bind(pull_id)
+        .bind(user_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull file views failed: {e}")),
+    }
+}

@@ -934,3 +934,119 @@ pub async fn set_issue_assignees(
     }
     Ok(())
 }
+
+/// Labels on a pull (`pull_labels` join), name-sorted (WI-0001).
+pub async fn list_labels_for_pull(pool: &DbPool, pull_id: &str) -> Result<Vec<LabelRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_PG}
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id = $1
+ORDER BY lower(labels.name)"
+            )))
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_label!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_MYSQL}
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id = ?
+ORDER BY LOWER(labels.name)"
+            )))
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_label!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_SQLITE}
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id = ?1
+ORDER BY lower(labels.name)"
+            )))
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_label!(r))).collect()
+        }
+    }
+}
+
+/// Batch `list_labels_for_pull` — `(pull_id, label)` pairs in one round trip.
+pub async fn list_labels_for_pulls(
+    pool: &DbPool,
+    pull_ids: &[String],
+) -> Result<Vec<(String, LabelRow)>, String> {
+    if pull_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    macro_rules! map_pair {
+        ($row:expr) => {{
+            let row = $row;
+            let pull_id: String = row
+                .try_get("pull_id")
+                .map_err(|e| format!("pull label row: {e}"))?;
+            Ok((pull_id, map_label!(row)))
+        }};
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT pl.pull_id, labels.*
+FROM ({LABEL_SELECT_PG}) labels
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id = ANY($1)
+ORDER BY lower(labels.name)"
+            )))
+            .bind(pull_ids)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| map_pair!(r)).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, pull_ids.len());
+            let q_str = format!(
+                "SELECT pl.pull_id, labels.*
+FROM ({LABEL_SELECT_MYSQL}) labels
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id IN ({in_list})
+ORDER BY LOWER(labels.name)"
+            );
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
+            let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| map_pair!(r)).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, pull_ids.len());
+            let q_str = format!(
+                "SELECT pl.pull_id, labels.*
+FROM ({LABEL_SELECT_SQLITE}) labels
+INNER JOIN pull_labels pl ON pl.label_id = labels.id
+WHERE pl.pull_id IN ({in_list})
+ORDER BY lower(labels.name)"
+            );
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
+            let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull labels failed: {e}"))?;
+            rows.iter().map(|r| map_pair!(r)).collect()
+        }
+    }
+}

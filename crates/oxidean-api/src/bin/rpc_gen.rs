@@ -4619,6 +4619,7 @@ export type PullPublic = {
   updated_at: string;
   comment_count?: number;
   assignees?: IssueAssigneePublic[];
+  labels?: LabelPublic[];
   pinned?: boolean;
 };
 
@@ -4969,6 +4970,32 @@ export type SetIssueAssigneesRequest = {
   name: string;
   number: number;
   userIds: string[];
+};
+
+export type SetPullLabelsRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  labelIds: string[];
+};
+
+export type SetPullAssigneesRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  userIds: string[];
+};
+
+export type PullFilesSetViewedRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  path: string;
+  viewed: boolean;
+};
+
+export type PullFilesViewedResponse = {
+  viewed_paths: string[];
 };
 
 export type AssigneeCandidatesRequest = {
@@ -6835,6 +6862,20 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullPublic>(opts, "pull.unpin", input),
       files: (input: PullRefRequest) =>
         rpcCall<PullFilesResponse>(opts, "pull.files", input),
+      filesViewed: {
+        set: (input: PullFilesSetViewedRequest) =>
+          rpcCall<PullFilesViewedResponse>(opts, "pull.files.setViewed", input),
+        list: (input: PullRefRequest) =>
+          rpcCall<PullFilesViewedResponse>(opts, "pull.files.listViewed", input),
+      },
+      labels: {
+        set: (input: SetPullLabelsRequest) =>
+          rpcCall<PullPublic>(opts, "pull.labels.set", input),
+      },
+      assignees: {
+        set: (input: SetPullAssigneesRequest) =>
+          rpcCall<PullPublic>(opts, "pull.assignees.set", input),
+      },
       commits: (input: PullRefRequest) =>
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),
       merge: (input: MergePullRequest) =>

@@ -123,6 +123,9 @@ pub struct PullPublic {
     pub comment_count: i64,
     #[serde(default)]
     pub assignees: Vec<crate::IssueAssigneePublic>,
+    /// Labels applied to the pull (effective repo/org label set).
+    #[serde(default)]
+    pub labels: Vec<crate::LabelPublic>,
     /// Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
     /// above the open-PR list.
     #[serde(default)]
@@ -386,6 +389,52 @@ pub struct SubmitPullReviewRequest {
     pub state: String,
     #[serde(default)]
     pub body: Option<String>,
+}
+
+/// `pull.labels.set` — replace the pull's labels (Write+; ids must be in the
+/// repo's effective label set, mirroring `issue.labels.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullLabelsRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "labelIds", alias = "label_ids")]
+    pub label_ids: Vec<String>,
+}
+
+/// `pull.assignees.set` — replace the pull's assignees (Write+; each user
+/// needs Read+ on the repo, mirroring `issue.assignees.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullAssigneesRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "userIds", alias = "user_ids")]
+    pub user_ids: Vec<String>,
+}
+
+/// `pull.files.setViewed` — mark one changed file viewed/unviewed for the
+/// calling user (per-user review state, WI-0001).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesSetViewedRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    pub path: String,
+    pub viewed: bool,
+}
+
+/// `pull.files.listViewed` — paths the calling user already marked viewed.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesViewedRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesViewedResponse {
+    pub viewed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
