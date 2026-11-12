@@ -671,6 +671,38 @@ jobs:
         run: chmod +x target/debug/*
       - name: bun install
         run: bun install --frozen-lockfile
+      - name: ubuntu archive reachability + mirror fallback
+        run: |
+          # Hosted-runner DNS intermittently stops resolving *.ubuntu.com
+          # (observed 2026-11-11 across several runs on ubuntu-26.04) while
+          # other domains stay fine — playwright's --with-deps then dies on
+          # apt. Probe once up front; on failure repoint apt at public
+          # mirrors on non-ubuntu.com domains (deb822 mirror+file list plus
+          # literal URIs, whichever the image uses). Package authenticity
+          # is unaffected: Release/InRelease are archive-signed regardless
+          # of which host serves them.
+          apt_log=$(mktemp)
+          if sudo apt-get update -o Acquire::Retries=2 2>&1 | tee "$apt_log"; then
+            if grep -Eq 'Temporary failure resolving|Failed to fetch|Could not resolve|Some index files failed' "$apt_log"; then
+              echo "::warning::apt-get update reported fetch/resolution failures — failing apt sources over to public mirrors"
+            else
+              echo "ubuntu archives reachable — stock mirrors fine"
+              exit 0
+            fi
+          else
+            echo "::warning::apt-get update failed — failing apt sources over to public mirrors"
+          fi
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' \
+              'https://mirrors.ocf.berkeley.edu/ubuntu/' \
+              'https://mirrors.kernel.org/ubuntu/' \
+              'https://archive.ubuntu.com/ubuntu/' \
+              | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          sudo sed -i -E \
+            -e 's#https?://[^/[:space:]]+\.ubuntu\.com/ubuntu([/[:space:]]|$)#https://mirrors.ocf.berkeley.edu/ubuntu\1#g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3
       - name: install Playwright chromium (browsers + sysdeps)
         run: cd apps/web && bunx playwright install --with-deps chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
