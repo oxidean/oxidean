@@ -13062,6 +13062,14 @@ paths:
               title: SubmitPullReviewRequest
               type: object
               properties:
+                comment_ids:
+                  description: |-
+                    Pending review comments to link to the new review — must exist on
+                    this pull and be authored by the submitter.
+                  type: array
+                  items:
+                    type: string
+                  default: []
                 body:
                   type: string
                   default: null
@@ -16560,6 +16568,15 @@ components:
             contributions on the owner's own profile view (COL-12; others never
             see private rows).
           default: true
+        experiments:
+          type: array
+          items:
+            type: string
+          description: |-
+            Enabled experiment flag keys (WI-0001) — validated keys from
+            `crate::experiments::EXPERIMENTS`. Empty for users with no rows and
+            always empty for anonymous callers' views of other users.
+          default: []
       required:
       - id
       - email
@@ -17842,6 +17859,12 @@ components:
           items:
             $ref: '#/components/schemas/IssueAssigneePublic'
           default: []
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabelPublic'
+          description: Labels applied to the pull (effective repo/org label set).
+          default: []
         pinned:
           type: boolean
           description: |-
@@ -17998,6 +18021,10 @@ components:
           type: boolean
         resolved:
           type: boolean
+        review_id:
+          type: string
+          description: Review this comment was submitted under (pending-review linkage).
+          nullable: true
         created_at:
           type: string
         updated_at:
