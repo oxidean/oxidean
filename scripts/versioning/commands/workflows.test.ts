@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -122,10 +122,12 @@ describe("release.yml generic lane", () => {
     expect(yml).not.toContain("steps.tag.outputs.component");
   });
 
-  test("dispatch lane takes {component, channel} and never GITHUB_TOKEN-pushes tags", () => {
+  test("dispatch lane takes {component, channel} and pushes tags as the release App", () => {
     expect(yml).toContain("component:");
     expect(yml).toContain("channel:");
-    expect(yml).toContain("secrets.RELEASE_TOKEN");
+    expect(yml).toContain("actions/create-github-app-token");
+    expect(yml).toContain("vars.RELEASE_APP_ID");
+    expect(yml).not.toContain("secrets.RELEASE_TOKEN");
   });
 });
 
@@ -145,9 +147,12 @@ describe("release-beta.yml channel lane", () => {
     expect(yml).not.toContain("gh pr create");
   });
 
-  test("tag pushes ride RELEASE_TOKEN so downstream lanes fire", () => {
-    expect(yml).toContain("secrets.RELEASE_TOKEN");
-    expect(yml).not.toContain("github.token");
+  test("tag pushes ride the release App so downstream lanes fire", () => {
+    expect(yml).toContain("actions/create-github-app-token");
+    expect(yml).toContain("vars.RELEASE_APP_ID");
+    expect(yml).toContain("secrets.RELEASE_APP_PRIVATE_KEY");
+    expect(yml).toContain("token: ${{ steps.release-token.outputs.token }}");
+    expect(yml).not.toContain("secrets.RELEASE_TOKEN");
   });
 
   test("fork-gated and pins the pushed SHA", () => {
@@ -255,9 +260,9 @@ describe("pr-env-teardown.sh GitHub legs", () => {
   });
 
   test("deployment inactivation prefers the job token's deployments:write", () => {
-    // GH_ADMIN_TOKEN resolves App → RELEASE_TOKEN → github.token; the PAT
-    // may lack deployments:write while the job's GITHUB_TOKEN is granted it
-    // (inactivate 403s in runs 40147871008/40150179728). Statuses prefer it.
+    // GH_ADMIN_TOKEN resolves to the release App mint; the job's GITHUB_TOKEN
+    // is granted deployments:write (inactivate 403s in runs
+    // 40147871008/40150179728). Statuses prefer it.
     expect(script).toContain(
       'GH_TOKEN="${GH_TOKEN:-$admin_token}" gh api -X POST "repos/${REPO}/deployments/${dep}/statuses"',
     );
@@ -298,10 +303,10 @@ describe("pr-env-teardown.sh GitHub legs", () => {
       expect(yml).toContain("permission-packages: write");
       expect(yml).toContain("owner: ${{ github.repository_owner }}");
       expect(yml).toContain(
-        "GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token || secrets.RELEASE_TOKEN }}",
+        "GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token }}",
       );
       expect(yml).toContain(
-        "GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token || secrets.RELEASE_TOKEN }}",
+        "GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token }}",
       );
     }
   });
@@ -347,5 +352,22 @@ describe("ci.yml web-browser suite", () => {
     // retries, once, with playwright browser debug logs for forensics.
     expect(yml).toContain("VITEST_BROWSER_CONNECTION_CLOSED");
     expect(yml).toContain("DEBUG=pw:browser");
+  });
+});
+
+describe("RELEASE_TOKEN retirement", () => {
+  // The maintainer PAT's credential expired — every lane that referenced it
+  // either 403'd at checkout (release-beta, 9 consecutive red runs) or rode
+  // it as a silent fallback (release.yml dispatch, images.yml cleanup-pr,
+  // pr-env-sweep.yml). All tag/admin pushes now authenticate as the release
+  // GitHub App; the secret itself is deleted once this lands.
+  test("no workflow references secrets.RELEASE_TOKEN", () => {
+    const dir = join(ROOT, ".github/workflows");
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".yml") && !f.endsWith(".yaml")) continue;
+      expect(readFileSync(join(dir, f), "utf-8")).not.toContain(
+        "secrets.RELEASE_TOKEN",
+      );
+    }
   });
 });

@@ -141,7 +141,7 @@ admin_token="${GH_ADMIN_TOKEN:-}"
 if [[ -z "$admin_token" ]]; then
   # No env-capable credential — the env object is out of reach; the job
   # token can still retire its deployments.
-  degrade "no env-delete token (release App Administration mint and RELEASE_TOKEN both unavailable) — env state unknown; attempting deployment inactivation anyway"
+  degrade "no env-delete token (release App Administration mint unavailable) — env state unknown; attempting deployment inactivation anyway"
   if ! inactivate_env_deployments; then
     status=1
   fi
@@ -260,7 +260,7 @@ if (( degraded > 0 )); then
       echo
       printf '%s\n' "${degraded_notes[@]}"
       echo
-      echo "To clear them: grant the release App **Administration: write** (env deletes) and **Packages: write** (GHCR deletes), or point \`RELEASE_TOKEN\` at a PAT with admin + read:packages + delete:packages."
+      echo "To clear them: grant the release App **Administration: write** (env deletes) and **Packages: write** (GHCR deletes)."
     } >> "$GITHUB_STEP_SUMMARY"
   fi
 fi

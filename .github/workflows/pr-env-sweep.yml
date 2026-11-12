@@ -20,7 +20,6 @@
 #     fails that step loudly instead of cascading 403s; teardown then falls
 #     back to marking the env's deployments inactive (Deployments write
 #     covers that path — also granted to the job's GITHUB_TOKEN below).
-#   RELEASE_TOKEN    — fallback maintainer PAT for the same purpose.
 
 name: PR env sweep
 
@@ -55,11 +54,11 @@ jobs:
         if: ${{ vars.RELEASE_APP_ID != '' }}
         uses: actions/create-github-app-token@v3
         # Per-leg mints: an ungranted scope 422s its own mint — loud in the
-        # run UI — while continue-on-error lets that leg fall back to
-        # RELEASE_TOKEN degraded. Splitting the mints keeps one missing
-        # grant from poisoning every leg at once: administration is what
-        # DELETE /environments actually checks; deployments covers the
-        # status inactivation fallback.
+        # run UI — while continue-on-error lets that leg degrade with no
+        # token. Splitting the mints keeps one missing grant from poisoning
+        # every leg at once: administration is what DELETE /environments
+        # actually checks; deployments covers the status inactivation
+        # fallback.
         continue-on-error: true
         with:
           client-id: ${{ vars.RELEASE_APP_ID }}
@@ -86,13 +85,13 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
           GH_TOKEN: ${{ github.token }}
-          # Env admin token preference order: release App → maintainer PAT —
-          # no GITHUB_TOKEN tail, it can never manage environments.
-          GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token || secrets.RELEASE_TOKEN }}
+          # Env admin token: release App only — no GITHUB_TOKEN tail, it can
+          # never manage environments.
+          GH_ADMIN_TOKEN: ${{ steps.apptok_env.outputs.token }}
           # Package version deletes ride their own chain — same shape, a
           # separate org-scoped App grant so a missing Administration grant
           # doesn't take GHCR cleanup down with it.
-          GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token || secrets.RELEASE_TOKEN }}
+          GH_PKG_TOKEN: ${{ steps.apptok_pkg.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: scripts/pr-env-sweep.sh
       - name: heal service-source drift + cancelled deploy statuses

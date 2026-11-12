@@ -69,6 +69,6 @@ Bumps propagate as patch floor through `depends_on` edges — a `wire` or
 on every push that bumps something (tag-only — manifests keep the last stable
 version). The production deploy (`production-deploy.yml` promote) creates the
 stable bump — changelog + `chore(release):` commit + `*-vX.Y.Z` tags — then
-deploys the bump commit. Tag pushes ride `RELEASE_TOKEN` (never
-`GITHUB_TOKEN`); ad-hoc `alpha`/`nightly`/single-component cuts go through
+deploys the bump commit. Tag pushes ride the release App
+(`RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, never `GITHUB_TOKEN`); ad-hoc `alpha`/`nightly`/single-component cuts go through
 `release.yml` `workflow_dispatch`. Details: `docs/VERSIONING.md`.
