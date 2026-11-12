@@ -132,6 +132,29 @@ export type UserPublic = {
   two_factor_enroll_required: boolean;
   /** GitHub-parity: include private contributions on the own profile view. */
   show_private_contributions: boolean;
+  /** Enabled per-user experiment flag keys (WI-0001). */
+  experiments: string[];
+};
+
+export type ExperimentStatus = "experimental" | "beta";
+
+export type ExperimentPublic = {
+  key: string;
+  title: string;
+  description: string;
+  status: ExperimentStatus;
+  since_version: string;
+  /** Whether the calling user has this flag on (anonymous → always false). */
+  enabled: boolean;
+};
+
+export type ExperimentsListResponse = {
+  experiments: ExperimentPublic[];
+};
+
+export type ExperimentSetRequest = {
+  key: string;
+  enabled: boolean;
 };
 
 export type BootstrapStatus = {
@@ -5891,6 +5914,11 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<UserFollowListResponse>(opts, "user.followers.list", input),
       followingList: (input: UserFollowListRequest) =>
         rpcCall<UserFollowListResponse>(opts, "user.following.list", input),
+    },
+    experiments: {
+      list: () => rpcCall<ExperimentsListResponse>(opts, "experiments.list", {}),
+      set: (input: ExperimentSetRequest) =>
+        rpcCall<UserPublic>(opts, "experiments.set", input),
     },
     search: {
       global: (input: GlobalSearchRequest) =>

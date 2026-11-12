@@ -10,6 +10,7 @@ pub mod authored_commits;
 pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
+pub mod experiments;
 pub mod follows;
 pub mod git_settings;
 
@@ -1017,6 +1018,24 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<String>, String> {
         stars::list_starred_repo_ids(self.require_pool()?, user_id, offset, limit).await
+    }
+
+    /// Enabled experiment flag keys for `user_id` (WI-0001). Registry order
+    /// is applied by callers; absence of a row means the flag is off.
+    pub async fn list_user_experiments(&self, user_id: &str) -> Result<Vec<String>, String> {
+        experiments::list_user_experiments(self.require_pool()?, user_id).await
+    }
+
+    /// Enable or disable one experiment flag for `user_id` (WI-0001).
+    /// Idempotent: enabling an enabled flag / disabling a disabled flag is a
+    /// no-op.
+    pub async fn set_user_experiment(
+        &self,
+        user_id: &str,
+        flag_key: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        experiments::set_user_experiment(self.require_pool()?, user_id, flag_key, enabled).await
     }
 
     /// Pinned repo ids for `user_id`, display order (COL-04 profile pins).

@@ -5,6 +5,7 @@
 
 mod contributions;
 mod dispatch;
+mod experiments;
 mod follows;
 mod list_starred;
 mod lookup;
@@ -15,6 +16,8 @@ pub use dispatch::dispatch;
 
 /// Procedures this crate owns — aggregated by the shell's `PROCEDURES`.
 pub const PROCEDURES: &[&str] = &[
+    "experiments.list",
+    "experiments.set",
     "user.follow",
     "user.followers.list",
     "user.following.list",

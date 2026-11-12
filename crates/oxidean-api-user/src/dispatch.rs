@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{contributions, follows, list_starred, lookup, pinned, profile};
+use crate::{contributions, experiments, follows, list_starred, lookup, pinned, profile};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -18,6 +18,8 @@ macro_rules! arm {
 
 pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option<RpcResponse> {
     match procedure {
+        "experiments.list" => arm!(experiments::list(ctx)),
+        "experiments.set" => arm!(experiments::set(ctx, input)),
         "user.get_profile" => arm!(profile::get_profile(ctx)),
         "user.getPublicProfile" => arm!(profile::get_public_profile(ctx, input)),
         "user.getContributions" => arm!(contributions::get_contributions(ctx, input)),
