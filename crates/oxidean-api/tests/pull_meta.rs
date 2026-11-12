@@ -355,7 +355,7 @@ async fn pull_files_whitespace_and_context_opts() {
     )
     .await;
     assert_eq!(files_plain["ok"], true, "{files_plain}");
-    assert!(files_plain["data"]["files"].as_array().unwrap().len() >= 1);
+    assert!(!files_plain["data"]["files"].as_array().unwrap().is_empty());
 
     // NOTE.md is a pure addition — whitespace flag can't remove it, but the
     // request must still succeed (the opts are plumbed through, not ignored).

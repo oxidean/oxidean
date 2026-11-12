@@ -13,7 +13,7 @@ import { AppLink } from "@/components/ui/app-link";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-export type PullV2Tab = "overview" | "commits" | "checks" | "changes";
+type PullV2Tab = "overview" | "commits" | "checks" | "changes";
 
 /** Sub-path after `/pull/N` → tab. `changes/<sha>` is the files tab too. */
 export function pullV2TabFromSplat(splat: string): PullV2Tab {

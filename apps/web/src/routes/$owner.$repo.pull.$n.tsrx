@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { authSessionQueryOptions } from "@/lib/session-queries";
+import { useExperiment } from "@/lib/use-experiment";
 import { fetchPullGet, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
@@ -131,7 +132,7 @@ function PullDetailPageContent() @{
   // pr-new-ui gate (WI-0001): the flag rides auth.me — hold the detail view
   // while the session resolves so flag-on users don't see a legacy flash.
   const meQ = useQuery(authSessionQueryOptions());
-  const prNewUi = meQ.data?.experiments?.includes("pr-new-ui") ?? false;
+  const prNewUi = useExperiment("pr-new-ui");
   const pull = pullQ.data;
   // GIT-20: archived repos hide all pull write affordances (merge/comment/review).
   const canWrite = loader?.kind === "ready" && !!loader.repo.can_write && !loader.repo.archived;

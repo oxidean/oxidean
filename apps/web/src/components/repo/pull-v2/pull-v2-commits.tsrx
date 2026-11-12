@@ -33,7 +33,7 @@ type CommitGroup = {
  * Group commits under GitHub-style "Commits on <date>" headers — keyed on
  * the author date's UTC day (deterministic across timezones).
  */
-export function groupCommitsByDate(commits: PullCommitSummary[]): CommitGroup[] {
+function groupCommitsByDate(commits: PullCommitSummary[]): CommitGroup[] {
   const groups = new Map<string, CommitGroup>();
   for (const c of commits) {
     const t = Date.parse(c.authored_at);

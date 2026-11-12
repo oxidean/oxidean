@@ -35,12 +35,12 @@ export function fileAnchorId(path: string): string {
   return `pull-v2-file-${(h >>> 0).toString(36)}`;
 }
 
-export function pathBasename(path: string): string {
+function pathBasename(path: string): string {
   const i = path.lastIndexOf("/");
   return i < 0 ? path : path.slice(i + 1);
 }
 
-export function pathDirname(path: string): string {
+function pathDirname(path: string): string {
   const i = path.lastIndexOf("/");
   return i < 0 ? "" : path.slice(0, i);
 }

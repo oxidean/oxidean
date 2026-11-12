@@ -1,3 +1,7 @@
+// The RPC dispatch graph compiles to very large async futures; nightly
+// rustc's recursion-depth lint overflows evaluating them (issue #159228).
+#![recursion_limit = "256"]
+
 use oxidean_api::auth::seed;
 use oxidean_api::build_cors;
 use oxidean_db::Database;

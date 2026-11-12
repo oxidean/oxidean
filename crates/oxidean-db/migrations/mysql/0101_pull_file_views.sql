@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS pull_file_views (
   pull_id   CHAR(36)    NOT NULL,
   user_id   CHAR(36)    NOT NULL,
-  path      VARCHAR(255) NOT NULL,
+  path      VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   head_sha  VARCHAR(64) NOT NULL,
   viewed_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (pull_id, user_id, path),
