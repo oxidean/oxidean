@@ -46,7 +46,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE = new RegExp(
-  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?(?:(?:[^\\S\\n])|[.,;:!?…])*$`,
+  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)ai)?([^a-z0-9]|$)`,
   "im",
 );
 // A robot emoji is only a signature when it carries attribution context:
