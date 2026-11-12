@@ -18,14 +18,14 @@ const AI_COAUTHOR_LINE = /^\s*co-?authored-by:/i;
 // Unambiguous machine signals anywhere in the trailer: [bot] tags,
 // bot@ addresses, *-ai-integration logins, AI-vendor domains.
 const AI_COAUTHOR_VENDOR =
-  /\[bot\]|(^|[<.\s_-])bot@|ai-integration|noreply@(anthropic|openai)\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code)\.(com|ai|dev|io)>/i;
+  /\[bot\]|(^|[<.\s_-])bot@|ai-integration|noreply@(anthropic|openai)\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code)\.(com|ai|dev|io)([ \t>]|$)/i;
 // A bare vendor identity as the display name — "Co-authored-by:
 // Claude <noreply@anthropic.com>" hits the domain rule above; this
 // catches no-email and generic-mailbox forms. Human names that merely
 // CONTAIN a vendor token ("Claude Martin <claude.martin@…>") stay
 // legal per .cursor/rules/no-ai-attribution.mdc.
 const AI_COAUTHOR_NAME =
-  /^(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-)([ \t-]ai)?$/i;
+  /^(claude|cursor|copilot|chatgpt|codex|gemini|devin|openai|anthropic|codeium|windsurf|swe-|github[^\S\n]+copilot|(claude|gemini)[^\S\n]+(opus|sonnet|pro|ultra))([ \t-]ai)?$/i;
 // "Generated with <tool>", "Made with: X", "Authored via X" — the tool
 // names that sign output, plus the trailer forms regardless of vendor.
 const GENERATOR_FOOTER =

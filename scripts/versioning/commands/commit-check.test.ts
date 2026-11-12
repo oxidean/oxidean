@@ -134,6 +134,30 @@ describe("attribution scan", () => {
     expect(r.exitCode).toBe(0);
   });
 
+  test("multiword vendor display name fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nCo-authored-by: GitHub Copilot\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
+  test("model-tier vendor display name fails", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nCo-authored-by: Claude Sonnet\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
+  test("vendor domain without closing bracket fails", () => {
+    const r = checkMessages(registry, [
+      {
+        subject: "feat(core): x",
+        body: "\nCo-authored-by: x <bot@anthropic.com\n",
+      },
+    ]);
+    expect(r.exitCode).toBe(1);
+  });
+
   test("via-line with ' AI' suffix on any vendor fails", () => {
     const r = checkMessages(registry, [
       { subject: "feat(core): x", body: "\nvia Claude AI\n" },
