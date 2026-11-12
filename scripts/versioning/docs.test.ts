@@ -32,7 +32,7 @@ describe("docs/VERSIONING.md (canonical reference)", () => {
       "WIRE-CHANGELOG.md", // wire changelog
       "release-plan", // release mechanics
       "release-tags",
-      "RELEASE_TOKEN", // maintainer secret (BR7.5)
+      "RELEASE_APP_ID", // release App credential (BR7.5)
       "nightly", // prerelease lanes
       "chore(release):", // reserved convention
     ];

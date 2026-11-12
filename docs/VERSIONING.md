@@ -149,7 +149,7 @@ channel**. There are no release PRs and no manual tag pushes.
 - **Beta (automatic)**: `.github/workflows/release-beta.yml` runs on every
   push to `main` (plus a weekly catch-up cron and manual dispatch). When the
   plan finds bumpable work it creates annotated `<component>-v<ver>-beta.N`
-  tags at the pushed commit and pushes them via `RELEASE_TOKEN`. Tag-only —
+  tags at the pushed commit and pushes them as the release GitHub App. Tag-only —
   manifests on `main` always carry the last stable version; per-beta notes
   live in the tag annotations / GitHub Releases.
 - **Stable (production deploy)**: `production-deploy.yml` `promote` resolves
@@ -193,13 +193,12 @@ existing components:
   and image pins were stamped by `bump`) and pushes it to
   `oci://ghcr.io/<owner>/charts/oxidean`.
 
-Tag pushes must use the **`RELEASE_TOKEN`** secret (a maintainer PAT) —
-the default `GITHUB_TOKEN` does not re-trigger workflows, so tag pushes
-made with it would silently skip every release lane. The tag-push lanes
-fail loudly if `RELEASE_TOKEN` is unset. The production-deploy stable cut
-is the one lane that also pushes a *commit* to `main`, so it authenticates
-as the release GitHub App (short-lived installation token minted in the
-job) — App-token pushes trigger workflows exactly like PAT pushes.
+Tag pushes must authenticate as the **release GitHub App**
+(`RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, short-lived installation
+token minted per job) — the default `GITHUB_TOKEN` does not re-trigger
+workflows, so tag pushes made with it would silently skip every release
+lane. Every tag-push lane fails loudly if the App credentials are unset.
+App-token pushes trigger workflows exactly like PAT pushes did.
 
 On a `*-v*.*.*` tag push, `.github/workflows/release.yml` turns the
 annotated tag body into a GitHub Release; `ox-v*` tags take the binary
@@ -226,7 +225,7 @@ notes still cover only the commits since the latest tag of any channel.
 - `beta`: automated on `main` via `release-beta.yml`.
 - `alpha`/`nightly` (and ad-hoc per-component cuts on any channel):
   `release.yml` `workflow_dispatch` with `{component, channel}` — computes
-  the plan, writes changelogs, bumps, tags, and pushes via `RELEASE_TOKEN`.
+  the plan, writes changelogs, bumps, tags, and pushes as the release App.
 
 ### Local inspection
 
