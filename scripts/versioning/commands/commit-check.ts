@@ -17,6 +17,8 @@ export const usage =
 export interface CommitCheckDeps {
   /** Injectable range enumeration for tests — defaults to `git log`. */
   logRange?: (rootDir: string, range: string) => { sha: string; subject: string; body: string }[];
+  /** Injectable comment-prefix resolver for tests — defaults to `git config`. */
+  commentPrefix?: () => string;
 }
 
 function gitLogRange(rootDir: string, range: string) {
@@ -103,8 +105,22 @@ const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | -
   --scan-file <path>  attribution-marker scan only (PR body; no grammar)
 `;
 
-/** `git commit -v` scissors line: "# ------------------------ >8 ----..." */
-const SCISSORS_RE = /^[ \t]*[#;][ \t]+-{20,}[ \t]>8[ \t]-{20,}[ \t]*$/;
+/** Resolve the active git comment prefix: core.commentString wins over
+ * core.commentChar (which keeps only its first byte); empty|auto → '#'. */
+function resolveCommentPrefix(rootDir: string): string {
+  const cfg = (key: string): string => {
+    const proc = Bun.spawnSync(["git", "config", "--get", key], {
+      cwd: rootDir,
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    return proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+  };
+  const s = cfg("core.commentString");
+  if (s) return s;
+  const c = cfg("core.commentChar");
+  return !c || c === "auto" ? "#" : c[0];
+}
 
 /** CLI body — parse argv, run the check, print, return exit code. */
 export function commitCheckCommand(
@@ -149,17 +165,26 @@ export function commitCheckCommand(
       case "--file": {
         const raw = readFileSync(value, "utf-8");
         // `git commit -v` appends the staged diff below the scissors
-        // line — everything past it is not message text. Comment lines
+        // line — everything past it is not message text. The marker is
+        // the active comment prefix plus git's fixed dashes/>8/dashes
+        // tail; only an exact whole-line match cuts (a line merely
+        // starting with it is message text, not a cut). Comment lines
         // before it stay in the scanned body: a marker hidden in one
         // must fail here exactly as it would in CI.
+        const prefix = (deps.commentPrefix ?? (() => resolveCommentPrefix(rootDir)))();
+        const marker = `${prefix} ------------------------ >8 ------------------------`;
         const rawLines = raw.split("\n");
-        const cut = rawLines.findIndex((l) => SCISSORS_RE.test(l));
-        const text = cut === -1 ? raw : rawLines.slice(0, cut).join("\n");
-        const nl = text.indexOf("\n");
+        const cut = rawLines.findIndex((l) => l === marker);
+        const precut = cut === -1 ? rawLines : rawLines.slice(0, cut);
+        // Grammar sees the cleaned message — comment and blank lines
+        // are not the subject. Attribution scans the whole precut.
+        const si = precut.findIndex((l) => l.trim() !== "" && !l.startsWith(prefix));
         messages = [
           {
-            subject: nl === -1 ? text : text.slice(0, nl),
-            body: nl === -1 ? undefined : text.slice(nl + 1),
+            subject: si === -1 ? "" : precut[si],
+            // every non-subject precut line is body — comments before
+            // the subject are scanned too.
+            body: precut.filter((_, i) => i !== si).join("\n"),
             source: "file",
           },
         ];
