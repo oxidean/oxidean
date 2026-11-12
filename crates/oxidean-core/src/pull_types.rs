@@ -301,6 +301,9 @@ pub struct PullCommentPublic {
     pub commit_sha: Option<String>,
     pub outdated: bool,
     pub resolved: bool,
+    /// Review this comment was submitted under (pending-review linkage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -389,6 +392,10 @@ pub struct SubmitPullReviewRequest {
     pub state: String,
     #[serde(default)]
     pub body: Option<String>,
+    /// Pending review comments to link to the new review — must exist on
+    /// this pull and be authored by the submitter.
+    #[serde(default)]
+    pub comment_ids: Vec<String>,
 }
 
 /// `pull.labels.set` — replace the pull's labels (Write+; ids must be in the

@@ -157,6 +157,7 @@ fn comment_row_to_public(
         commit_sha: row.commit_sha.clone(),
         outdated: row.outdated,
         resolved: row.resolved,
+        review_id: row.review_id.clone(),
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }

@@ -281,6 +281,61 @@ async fn pull_file_views_round_trip() {
 }
 
 #[tokio::test]
+async fn pull_review_submit_links_pending_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("pull_review_link.db").display()
+    );
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let (cookie, _uid) = seed_pr(&app, &db, &repos).await;
+
+    let comment = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"nit","path":"NOTE.md","side":"RIGHT","line":1}}"#,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+    let comment_id = comment["data"]["id"].as_str().unwrap();
+
+    // Author cannot approve their own PR, so submit a "commented" review.
+    let review = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"pown","name":"core","number":1,"state":"commented","comment_ids":["{comment_id}"]}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(review["ok"], true, "{review}");
+    let review_id = review["data"]["id"].as_str().unwrap();
+
+    let list = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.comments.list","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    let comments = list["data"]["comments"].as_array().unwrap();
+    assert_eq!(comments[0]["review_id"], review_id);
+
+    // A comment owned by nobody on this pull is rejected.
+    let bad = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.reviews.submit","input":{"owner":"pown","name":"core","number":1,"state":"commented","comment_ids":["missing"]}}"#,
+    )
+    .await;
+    assert_eq!(bad["ok"], false);
+    assert_eq!(bad["error"]["code"], "rpc.bad_input");
+}
+
+#[tokio::test]
 async fn pull_file_views_require_session() {
     let dir = tempfile::tempdir().unwrap();
     let repos = dir.path().join("repos");

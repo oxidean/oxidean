@@ -2979,3 +2979,71 @@ pub async fn list_pull_file_views(
         .map_err(|e| format!("list pull file views failed: {e}")),
     }
 }
+
+/// Attach pull comments to a review (`pull_comments.review_id`), scoped to
+/// the pull and the review author — pending-review submission (WI-0001).
+pub async fn link_pull_comments_to_review(
+    pool: &DbPool,
+    pull_id: &str,
+    review_id: &str,
+    author_id: &str,
+    comment_ids: &[String],
+) -> Result<(), String> {
+    if comment_ids.is_empty() {
+        return Ok(());
+    }
+    match pool {
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE pull_comments SET review_id = $2 \
+             WHERE pull_id = $1 AND author_id = $3 AND id = ANY($4)",
+        )
+        .bind(pull_id)
+        .bind(review_id)
+        .bind(author_id)
+        .bind(comment_ids)
+        .execute(p)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("link pull comments to review failed: {e}")),
+        DbPool::MySql(p) => {
+            let in_list = crate::dialect::in_placeholders(
+                crate::dialect::Dialect::MySql,
+                4,
+                comment_ids.len(),
+            );
+            let q_str = format!(
+                "UPDATE pull_comments SET review_id = ?2 \
+                 WHERE pull_id = ?1 AND author_id = ?3 AND id IN ({in_list})"
+            );
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str))
+                .bind(pull_id)
+                .bind(review_id)
+                .bind(author_id);
+            let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
+            q.execute(p)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("link pull comments to review failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            let in_list = crate::dialect::in_placeholders(
+                crate::dialect::Dialect::Sqlite,
+                4,
+                comment_ids.len(),
+            );
+            let q_str = format!(
+                "UPDATE pull_comments SET review_id = ?2 \
+                 WHERE pull_id = ?1 AND author_id = ?3 AND id IN ({in_list})"
+            );
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str))
+                .bind(pull_id)
+                .bind(review_id)
+                .bind(author_id);
+            let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
+            q.execute(p)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("link pull comments to review failed: {e}"))
+        }
+    }
+}

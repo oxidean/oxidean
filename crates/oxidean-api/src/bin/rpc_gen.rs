@@ -4733,6 +4733,7 @@ export type PullCommentPublic = {
   commit_sha?: string | null;
   outdated: boolean;
   resolved: boolean;
+  review_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -4834,6 +4835,7 @@ export type SubmitPullReviewRequest = {
   number: number;
   state: string;
   body?: string | null;
+  comment_ids?: string[];
 };
 
 export type DismissPullReviewRequest = {

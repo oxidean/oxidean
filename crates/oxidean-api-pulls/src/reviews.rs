@@ -98,6 +98,30 @@ pub async fn reviews_submit(
             "pull request authors cannot approve or request changes on their own pull",
         ));
     }
+    // Pending-review linkage: every supplied comment must exist on this pull
+    // and be authored by the submitter.
+    let mut seen = std::collections::HashSet::new();
+    let mut comment_ids = Vec::new();
+    for cid in &req.comment_ids {
+        let cid = cid.trim();
+        if cid.is_empty() || !seen.insert(cid.to_string()) {
+            continue;
+        }
+        let comment = ctx
+            .db
+            .find_pull_comment_by_id(cid)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| AppError::new("rpc.bad_input", "review comment was not found"))?;
+        if comment.pull_id != pull.id || comment.author_id != user.id {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "review comments must belong to this pull and the submitter",
+            ));
+        }
+        comment_ids.push(cid.to_string());
+    }
+
     let id = Uuid::new_v4().to_string();
     let row = ctx
         .db
@@ -109,6 +133,10 @@ pub async fn reviews_submit(
             &body,
             Some(pull.head_sha.as_str()),
         )
+        .await
+        .map_err(db_err)?;
+    ctx.db
+        .link_pull_comments_to_review(&pull.id, &row.id, &user.id, &comment_ids)
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);

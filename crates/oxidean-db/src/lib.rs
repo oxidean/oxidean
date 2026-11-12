@@ -1659,6 +1659,24 @@ impl Database {
         pulls::list_pull_file_views(self.require_pool()?, pull_id, user_id).await
     }
 
+    /// Attach pull comments to a review — pending-review submission (WI-0001).
+    pub async fn link_pull_comments_to_review(
+        &self,
+        pull_id: &str,
+        review_id: &str,
+        author_id: &str,
+        comment_ids: &[String],
+    ) -> Result<(), String> {
+        pulls::link_pull_comments_to_review(
+            self.require_pool()?,
+            pull_id,
+            review_id,
+            author_id,
+            comment_ids,
+        )
+        .await
+    }
+
     /// Subset of `pull_ids` carrying a label matching `label` (id or name).
     pub async fn pull_ids_with_label(
         &self,
