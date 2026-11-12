@@ -304,6 +304,9 @@ pub struct PullCommentPublic {
     /// Review this comment was submitted under (pending-review linkage).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_id: Option<String>,
+    /// Server-persisted review draft — only visible to the author until a
+    /// submitted review links it.
+    pub pending: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -324,6 +327,10 @@ pub struct CreatePullCommentRequest {
     pub start_line: Option<i64>,
     #[serde(default)]
     pub commit_sha: Option<String>,
+    /// Persist as a pending review draft instead of a submitted comment —
+    /// only the author sees it until `pull.reviews.submit` links it.
+    #[serde(default)]
+    pub pending: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -444,6 +451,19 @@ pub struct PullFilesRequest {
     /// Unified context lines around each hunk (`git diff -U<n>`, clamped 0..=20).
     #[serde(default)]
     pub context: Option<u32>,
+    /// Scope the diff to a single commit (its first parent..sha).
+    #[serde(default)]
+    pub sha: Option<String>,
+    /// Scope the diff to a commit range — requires `head_sha`.
+    #[serde(default)]
+    pub base_sha: Option<String>,
+    /// Range end — requires `base_sha`.
+    #[serde(default)]
+    pub head_sha: Option<String>,
+    /// Diff the caller's latest submitted review commit against the pull head
+    /// ("changes since your last review"). Requires a session.
+    #[serde(default)]
+    pub since_review: Option<bool>,
 }
 
 /// `pull.files.listViewed` — paths the calling user already marked viewed.

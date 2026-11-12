@@ -158,6 +158,7 @@ fn comment_row_to_public(
         outdated: row.outdated,
         resolved: row.resolved,
         review_id: row.review_id.clone(),
+        pending: row.pending,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }
@@ -184,7 +185,12 @@ pub async fn comments_list(
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    let rows = ctx.db.list_pull_comments(&pull.id).await.map_err(db_err)?;
+    let viewer = ctx.session.as_ref().map(|s| s.user_id.as_str());
+    let rows = ctx
+        .db
+        .list_pull_comments(&pull.id, viewer)
+        .await
+        .map_err(db_err)?;
     let usernames = load_comment_usernames(ctx, &rows).await?;
     let comments = rows
         .iter()
@@ -234,6 +240,18 @@ pub async fn comments_create(
             "general comments cannot include line anchors",
         ));
     }
+    if req.start_line.is_some() && req.line.is_none() {
+        return Err(AppError::new("rpc.bad_input", "start_line requires line"));
+    }
+    if let (Some(start), Some(end)) = (req.start_line, req.line) {
+        if start > end {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "start_line must not exceed line",
+            ));
+        }
+    }
+    let pending = req.pending.unwrap_or(false);
 
     let commit_sha = req
         .commit_sha
@@ -262,49 +280,53 @@ pub async fn comments_create(
             req.line,
             req.start_line,
             commit_sha.as_deref(),
+            pending,
         )
         .await
         .map_err(db_err)?;
-    let subject = notify::subject_for_pull(&pull);
-    let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
-    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    // One watch-level lookup serves both fanouts below.
-    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_activity_with_watch(
-        &ctx.db,
-        &user.id,
-        participants.clone(),
-        "pr_comment",
-        &subject,
-        &watch,
-    )
-    .await;
-    let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
-    let mention_only: Vec<_> = mentions
-        .into_iter()
-        .filter(|m| !participant_set.contains(m))
-        .collect();
-    notify::fanout_suppress_ignored_with_watch(
-        &ctx.db,
-        &user.id,
-        mention_only,
-        "pr_mention",
-        &subject,
-        &watch,
-    )
-    .await;
-    emit_comment_webhook(
-        ctx,
-        &accessible,
-        &pull,
-        &row,
-        "created",
-        None,
-        &user.username,
-        &user.username,
-        &user.id,
-    )
-    .await;
+    // Drafts notify nobody — the review submission fans out once instead.
+    if !pending {
+        let subject = notify::subject_for_pull(&pull);
+        let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
+        let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+        // One watch-level lookup serves both fanouts below.
+        let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+        notify::fanout_activity_with_watch(
+            &ctx.db,
+            &user.id,
+            participants.clone(),
+            "pr_comment",
+            &subject,
+            &watch,
+        )
+        .await;
+        let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
+        let mention_only: Vec<_> = mentions
+            .into_iter()
+            .filter(|m| !participant_set.contains(m))
+            .collect();
+        notify::fanout_suppress_ignored_with_watch(
+            &ctx.db,
+            &user.id,
+            mention_only,
+            "pr_mention",
+            &subject,
+            &watch,
+        )
+        .await;
+        emit_comment_webhook(
+            ctx,
+            &accessible,
+            &pull,
+            &row,
+            "created",
+            None,
+            &user.username,
+            &user.username,
+            &user.id,
+        )
+        .await;
+    }
     comment_to_public(ctx, &row).await
 }
 

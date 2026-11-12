@@ -43,6 +43,9 @@ fn parse_closing_issue_numbers(text: &str) -> Vec<i64> {
     out
 }
 
+/// Well-known empty-tree object — the diff base for root-commit scopes.
+const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 /// `pull.files` — Read+ unified diff base...head (PR-02).
 pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesResponse, AppError> {
     let req: oxidean_core::PullFilesRequest = serde_json::from_value(input)
@@ -83,12 +86,62 @@ pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesRe
             .fetch_ref_from(&path, &head_path, &row.head_sha)
             .await;
     }
+    // Scoped diff resolution (per-commit / range / since-last-review). The
+    // default is the pull's full base...head; exactly one scope form applies.
+    let sha = req.sha.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let base_sha = req
+        .base_sha
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let head_sha = req
+        .head_sha
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let since_review = req.since_review.unwrap_or(false);
+    let (base, head): (String, String) = match (sha, base_sha, head_sha, since_review) {
+        (Some(s), None, None, false) => {
+            // Root commits have no parent — diff against the empty tree.
+            let parent = ctx
+                .git
+                .rev_parse(&path, &format!("{s}^"))
+                .await
+                .unwrap_or_else(|_| EMPTY_TREE_SHA.to_string());
+            (parent, s.to_string())
+        }
+        (None, Some(b), Some(h), false) => (b.to_string(), h.to_string()),
+        (None, None, None, true) => {
+            let Some(session) = &ctx.session else {
+                return Err(AppError::new("auth.unauthenticated", "not authenticated"));
+            };
+            let reviewed = ctx
+                .db
+                .latest_review_commit_sha(&row.id, &session.user_id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| {
+                    AppError::new(
+                        "pull.no_prior_review",
+                        "no submitted review to diff against",
+                    )
+                })?;
+            (reviewed, row.head_sha.clone())
+        }
+        (None, None, None, false) => (row.base_sha.clone(), row.head_sha.clone()),
+        _ => {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "scope accepts exactly one of sha, base_sha+head_sha, or since_review",
+            ));
+        }
+    };
     let diff = ctx
         .git
         .diff_opts(
             &path,
-            &row.base_sha,
-            &row.head_sha,
+            &base,
+            &head,
             &oxidean_git::DiffOpts {
                 ignore_whitespace: req.w.unwrap_or(false),
                 context_lines: req.context.map(|n| n.min(20)),

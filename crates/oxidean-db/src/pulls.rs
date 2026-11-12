@@ -1305,6 +1305,9 @@ pub struct PullCommentRow {
     pub outdated: bool,
     pub resolved: bool,
     pub review_id: Option<String>,
+    /// Server-persisted review draft — visible only to the author until a
+    /// submitted review links it (clears the flag).
+    pub pending: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1345,6 +1348,7 @@ macro_rules! map_pull_comment {
             review_id: row
                 .try_get("review_id")
                 .map_err(|e| format!("pull comment: {e}"))?,
+            pending: flag_col!(row, "pending"),
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("pull comment: {e}"))?,
@@ -1357,21 +1361,21 @@ macro_rules! map_pull_comment {
 
 const PC_SELECT_PG: &str =
     "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
-       outdated, resolved, review_id,
+       outdated, resolved, review_id, pending,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM pull_comments";
 
 const PC_SELECT_MYSQL: &str =
     "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
-       outdated, resolved, review_id,
+       outdated, resolved, review_id, pending,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM pull_comments";
 
 const PC_SELECT_SQLITE: &str =
     "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
-       outdated, resolved, review_id,
+       outdated, resolved, review_id, pending,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM pull_comments";
@@ -1388,13 +1392,14 @@ pub async fn insert_pull_comment(
     line: Option<i64>,
     start_line: Option<i64>,
     commit_sha: Option<&str>,
+    pending: bool,
 ) -> Result<PullCommentRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
                 "INSERT INTO pull_comments
- (id, pull_id, author_id, body, path, side, line, start_line, commit_sha)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+ (id, pull_id, author_id, body, path, side, line, start_line, commit_sha, pending)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
             )
             .bind(id)
             .bind(pull_id)
@@ -1405,6 +1410,7 @@ pub async fn insert_pull_comment(
             .bind(line)
             .bind(start_line)
             .bind(commit_sha)
+            .bind(pending)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull comment failed: {e}"))?;
@@ -1412,8 +1418,8 @@ pub async fn insert_pull_comment(
         DbPool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO pull_comments
- (id, pull_id, author_id, body, path, side, line, start_line, commit_sha)
- VALUES (?,?,?,?,?,?,?,?,?)",
+ (id, pull_id, author_id, body, path, side, line, start_line, commit_sha, pending)
+ VALUES (?,?,?,?,?,?,?,?,?,?)",
             )
             .bind(id)
             .bind(pull_id)
@@ -1424,6 +1430,7 @@ pub async fn insert_pull_comment(
             .bind(line)
             .bind(start_line)
             .bind(commit_sha)
+            .bind(pending)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull comment failed: {e}"))?;
@@ -1431,8 +1438,8 @@ pub async fn insert_pull_comment(
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "INSERT INTO pull_comments
- (id, pull_id, author_id, body, path, side, line, start_line, commit_sha)
- VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+ (id, pull_id, author_id, body, path, side, line, start_line, commit_sha, pending)
+ VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             )
             .bind(id)
             .bind(pull_id)
@@ -1443,6 +1450,7 @@ pub async fn insert_pull_comment(
             .bind(line)
             .bind(start_line)
             .bind(commit_sha)
+            .bind(pending)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull comment failed: {e}"))?;
@@ -1497,15 +1505,23 @@ pub async fn find_pull_comment_by_id(
     }
 }
 
+/// `viewer_id` gates pending drafts — only the author sees their pending
+/// comments; everyone else (and anonymous viewers) sees submitted ones only.
 pub async fn list_pull_comments(
     pool: &DbPool,
     pull_id: &str,
+    viewer_id: Option<&str>,
 ) -> Result<Vec<PullCommentRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let q = format!("{PC_SELECT_PG} WHERE pull_id = $1 ORDER BY created_at ASC, id ASC");
+            let q = format!(
+                "{PC_SELECT_PG} WHERE pull_id = $1 \
+                 AND (pending = FALSE OR author_id = $2) \
+                 ORDER BY created_at ASC, id ASC"
+            );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
+                .bind(viewer_id)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list pull comments failed: {e}"))?;
@@ -1516,9 +1532,14 @@ pub async fn list_pull_comments(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let q = format!("{PC_SELECT_MYSQL} WHERE pull_id = ? ORDER BY created_at ASC, id ASC");
+            let q = format!(
+                "{PC_SELECT_MYSQL} WHERE pull_id = ? \
+                 AND (pending = 0 OR author_id = ?) \
+                 ORDER BY created_at ASC, id ASC"
+            );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
+                .bind(viewer_id)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list pull comments failed: {e}"))?;
@@ -1529,10 +1550,14 @@ pub async fn list_pull_comments(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let q =
-                format!("{PC_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY created_at ASC, id ASC");
+            let q = format!(
+                "{PC_SELECT_SQLITE} WHERE pull_id = ?1 \
+                 AND (pending = 0 OR author_id = ?2) \
+                 ORDER BY created_at ASC, id ASC"
+            );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
+                .bind(viewer_id)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list pull comments failed: {e}"))?;
@@ -2994,7 +3019,7 @@ pub async fn link_pull_comments_to_review(
     }
     match pool {
         DbPool::Postgres(p) => sqlx::query(
-            "UPDATE pull_comments SET review_id = $1 \
+            "UPDATE pull_comments SET review_id = $1, pending = FALSE \
              WHERE pull_id = $2 AND author_id = $3 AND review_id IS NULL \
              AND id = ANY($4)",
         )
@@ -3013,7 +3038,7 @@ pub async fn link_pull_comments_to_review(
                 comment_ids.len(),
             );
             let q_str = format!(
-                "UPDATE pull_comments SET review_id = ? \
+                "UPDATE pull_comments SET review_id = ?, pending = 0 \
                  WHERE pull_id = ? AND author_id = ? AND review_id IS NULL \
                  AND id IN ({in_list})"
             );
@@ -3034,7 +3059,7 @@ pub async fn link_pull_comments_to_review(
                 comment_ids.len(),
             );
             let q_str = format!(
-                "UPDATE pull_comments SET review_id = ?1 \
+                "UPDATE pull_comments SET review_id = ?1, pending = 0 \
                  WHERE pull_id = ?2 AND author_id = ?3 AND review_id IS NULL \
                  AND id IN ({in_list})"
             );
@@ -3048,5 +3073,52 @@ pub async fn link_pull_comments_to_review(
                 .map(|_| ())
                 .map_err(|e| format!("link pull comments to review failed: {e}"))
         }
+    }
+}
+
+/// Latest non-dismissed review commit SHA for (pull, author) — backs
+/// `pull.files` `since_review` ("changes since your last review").
+pub async fn latest_review_commit_sha(
+    pool: &DbPool,
+    pull_id: &str,
+    author_id: &str,
+) -> Result<Option<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT commit_sha FROM pull_reviews \
+             WHERE pull_id = $1 AND author_id = $2 \
+             AND state <> 'dismissed' AND commit_sha IS NOT NULL \
+             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+        )
+        .bind(pull_id)
+        .bind(author_id)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.flatten())
+        .map_err(|e| format!("latest review sha failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT commit_sha FROM pull_reviews \
+             WHERE pull_id = ? AND author_id = ? \
+             AND state <> 'dismissed' AND commit_sha IS NOT NULL \
+             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+        )
+        .bind(pull_id)
+        .bind(author_id)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.flatten())
+        .map_err(|e| format!("latest review sha failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT commit_sha FROM pull_reviews \
+             WHERE pull_id = ?1 AND author_id = ?2 \
+             AND state <> 'dismissed' AND commit_sha IS NOT NULL \
+             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+        )
+        .bind(pull_id)
+        .bind(author_id)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.flatten())
+        .map_err(|e| format!("latest review sha failed: {e}")),
     }
 }

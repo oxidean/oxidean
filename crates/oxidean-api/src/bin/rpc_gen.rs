@@ -4734,6 +4734,8 @@ export type PullCommentPublic = {
   outdated: boolean;
   resolved: boolean;
   review_id?: string | null;
+  /** Server-persisted review draft — author-only until a review links it. */
+  pending: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -4748,6 +4750,8 @@ export type CreatePullCommentRequest = {
   line?: number | null;
   start_line?: number | null;
   commit_sha?: string | null;
+  /** Persist as a pending review draft instead of a submitted comment. */
+  pending?: boolean | null;
 };
 
 export type PullCommentsListResponse = {
@@ -4996,6 +5000,14 @@ export type PullFilesRequest = {
   w?: boolean | null;
   /** Unified context lines (clamped 0..=20). */
   context?: number | null;
+  /** Scope the diff to a single commit (its first parent..sha). */
+  sha?: string | null;
+  /** Range diff start — requires `head_sha`. */
+  base_sha?: string | null;
+  /** Range diff end — requires `base_sha`. */
+  head_sha?: string | null;
+  /** Diff caller's latest submitted review commit against the pull head. */
+  since_review?: boolean | null;
 };
 
 export type PullFilesSetViewedRequest = {

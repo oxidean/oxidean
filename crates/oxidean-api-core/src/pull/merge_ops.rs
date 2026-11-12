@@ -69,7 +69,12 @@ pub async fn evaluate_merge_gate(
         }
         approving_reviewer_ids.push(r.author_id.clone());
     }
-    let comments = ctx.db.list_pull_comments(&row.id).await.map_err(db_err)?;
+    // Pending drafts never gate merges — only submitted comments count.
+    let comments = ctx
+        .db
+        .list_pull_comments(&row.id, None)
+        .await
+        .map_err(db_err)?;
     let unresolved = comments
         .iter()
         .filter(|c| c.path.is_some() && !c.resolved)

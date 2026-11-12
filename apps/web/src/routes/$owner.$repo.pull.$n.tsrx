@@ -216,7 +216,13 @@ function PullDetailPageContent() @{
             isAuthor={isAuthor}
             currentUserId={account.user?.id ?? ""}
             tab={pullV2TabFromSplat(splat)}
-            changesSha={splat.startsWith("changes/") ? splat.slice(8) : undefined}
+            changesSha={
+              splat.startsWith("changes/")
+                ? splat.slice(8)
+                : splat.startsWith("files/")
+                  ? splat.slice(6)
+                  : undefined
+            }
           />;
         } @else {
           <div className="space-y-4" key={`${owner}/${repoName}/${number}` as string}>

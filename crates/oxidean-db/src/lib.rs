@@ -1501,6 +1501,7 @@ impl Database {
         line: Option<i64>,
         start_line: Option<i64>,
         commit_sha: Option<&str>,
+        pending: bool,
     ) -> Result<PullCommentRow, String> {
         pulls::insert_pull_comment(
             self.require_pool()?,
@@ -1513,6 +1514,7 @@ impl Database {
             line,
             start_line,
             commit_sha,
+            pending,
         )
         .await
     }
@@ -1524,8 +1526,21 @@ impl Database {
         pulls::find_pull_comment_by_id(self.require_pool()?, id).await
     }
 
-    pub async fn list_pull_comments(&self, pull_id: &str) -> Result<Vec<PullCommentRow>, String> {
-        pulls::list_pull_comments(self.require_pool()?, pull_id).await
+    pub async fn list_pull_comments(
+        &self,
+        pull_id: &str,
+        viewer_id: Option<&str>,
+    ) -> Result<Vec<PullCommentRow>, String> {
+        pulls::list_pull_comments(self.require_pool()?, pull_id, viewer_id).await
+    }
+
+    /// Latest non-dismissed review commit SHA for (pull, author).
+    pub async fn latest_review_commit_sha(
+        &self,
+        pull_id: &str,
+        author_id: &str,
+    ) -> Result<Option<String>, String> {
+        pulls::latest_review_commit_sha(self.require_pool()?, pull_id, author_id).await
     }
 
     /// Distinct comment author ids — participant fan-out (no body transfer).
