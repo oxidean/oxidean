@@ -4978,6 +4978,16 @@ export type SetPullAssigneesRequest = {
   userIds: string[];
 };
 
+export type PullFilesRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  /** Hide whitespace-only differences (`git diff -w`). */
+  w?: boolean | null;
+  /** Unified context lines (clamped 0..=20). */
+  context?: number | null;
+};
+
 export type PullFilesSetViewedRequest = {
   owner: string;
   name: string;
@@ -6852,7 +6862,7 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullPublic>(opts, "pull.pin", input),
       unpin: (input: PullRefRequest) =>
         rpcCall<PullPublic>(opts, "pull.unpin", input),
-      files: (input: PullRefRequest) =>
+      files: (input: PullFilesRequest) =>
         rpcCall<PullFilesResponse>(opts, "pull.files", input),
       filesViewed: {
         set: (input: PullFilesSetViewedRequest) =>

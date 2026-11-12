@@ -2473,6 +2473,17 @@ impl GitBackend for CliGitBackend {
     }
 
     async fn diff(&self, repo: &Path, base: &str, head: &str) -> Result<DiffResult, GitError> {
+        self.diff_opts(repo, base, head, &crate::backend::DiffOpts::default())
+            .await
+    }
+
+    async fn diff_opts(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        opts: &crate::backend::DiffOpts,
+    ) -> Result<DiffResult, GitError> {
         let base = validate_treeish(base)?;
         let head = validate_treeish(head)?;
         let repo_s = repo_str(repo)?;
@@ -2499,8 +2510,18 @@ impl GitBackend for CliGitBackend {
         }
 
         let range = format!("{base}...{head}");
+        let mut args = vec!["-C", repo_s, "diff", "--find-renames", "--patch"];
+        let context_arg;
+        if opts.ignore_whitespace {
+            args.push("--ignore-all-space");
+        }
+        if let Some(n) = opts.context_lines {
+            context_arg = format!("-U{n}");
+            args.push(&context_arg);
+        }
+        args.push(&range);
         let output = Command::new("git")
-            .args(["-C", repo_s, "diff", "--find-renames", "--patch", &range])
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

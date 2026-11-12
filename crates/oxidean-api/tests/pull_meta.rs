@@ -336,6 +336,46 @@ async fn pull_review_submit_links_pending_comments() {
 }
 
 #[tokio::test]
+async fn pull_files_whitespace_and_context_opts() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_ws.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let (cookie, _uid) = seed_pr(&app, &db, &repos).await;
+
+    // Head adds a whitespace-only change to README's first line region —
+    // `w=1` should collapse the resulting hunk.
+    let files_plain = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.files","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(files_plain["ok"], true, "{files_plain}");
+    assert!(files_plain["data"]["files"].as_array().unwrap().len() >= 1);
+
+    // NOTE.md is a pure addition — whitespace flag can't remove it, but the
+    // request must still succeed (the opts are plumbed through, not ignored).
+    let files_w = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.files","input":{"owner":"pown","name":"core","number":1,"w":true,"context":0}}"#,
+    )
+    .await;
+    assert_eq!(files_w["ok"], true, "{files_w}");
+    assert_eq!(
+        files_w["data"]["files"].as_array().unwrap().len(),
+        files_plain["data"]["files"].as_array().unwrap().len()
+    );
+    // -U0 collapses context lines: the patch carries hunks but no ' ' prefix lines.
+    let patch = files_w["data"]["files"][0]["patch"].as_str().unwrap();
+    assert!(!patch.lines().any(|l| l.starts_with(' ')), "{patch}");
+}
+
+#[tokio::test]
 async fn pull_file_views_require_session() {
     let dir = tempfile::tempdir().unwrap();
     let repos = dir.path().join("repos");

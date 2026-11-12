@@ -431,6 +431,21 @@ pub struct PullFilesSetViewedRequest {
     pub viewed: bool,
 }
 
+/// `pull.files` — extends `PullRefRequest` with diff display options
+/// (WI-0001 diff settings; both optional, `w` mirrors GitHub's flag).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    /// Hide whitespace-only differences (`git diff -w`).
+    #[serde(default)]
+    pub w: Option<bool>,
+    /// Unified context lines around each hunk (`git diff -U<n>`, clamped 0..=20).
+    #[serde(default)]
+    pub context: Option<u32>,
+}
+
 /// `pull.files.listViewed` — paths the calling user already marked viewed.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullFilesViewedRequest {

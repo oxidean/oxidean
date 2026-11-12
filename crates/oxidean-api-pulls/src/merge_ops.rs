@@ -45,7 +45,7 @@ fn parse_closing_issue_numbers(text: &str) -> Vec<i64> {
 
 /// `pull.files` — Read+ unified diff base...head (PR-02).
 pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesResponse, AppError> {
-    let req: PullRefRequest = serde_json::from_value(input)
+    let req: oxidean_core::PullFilesRequest = serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.files input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -85,7 +85,15 @@ pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesRe
     }
     let diff = ctx
         .git
-        .diff(&path, &row.base_sha, &row.head_sha)
+        .diff_opts(
+            &path,
+            &row.base_sha,
+            &row.head_sha,
+            &oxidean_git::DiffOpts {
+                ignore_whitespace: req.w.unwrap_or(false),
+                context_lines: req.context.map(|n| n.min(20)),
+            },
+        )
         .await
         .map_err(|e| AppError::new("pull.diff_failed", format!("diff failed: {e}")))?;
     Ok(PullFilesResponse {
