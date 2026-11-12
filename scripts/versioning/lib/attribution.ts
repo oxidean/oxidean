@@ -37,7 +37,7 @@ const AI_COAUTHOR_VENDOR = new RegExp(
 // here, never in a single rule, or the rules drift apart. In RegExp
 // templates, `\\S`/`\\n` render as `\S`/`\n`.
 const AI_COAUTHOR_NAME = new RegExp(
-  `^\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n-]?ai))?$`,
+  `^\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)?ai)?$`,
   "i",
 );
 // "Generated with <tool>", "Made with: X", "Authored via X" — the tool
@@ -53,7 +53,7 @@ const GENERATOR_TRAILER =
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
 const VIA_LINE = new RegExp(
-  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n-]?ai))?([^a-z0-9]|$)`,
+  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)?ai)?([^a-z0-9]|$)`,
   "im",
 );
 // A robot emoji is only a signature when it carries attribution context:
