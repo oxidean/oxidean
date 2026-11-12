@@ -25,7 +25,7 @@ const VENDOR =
 // token inside a bare email (no <display name>) — bot forms like
 // "Co-authored-by: 175728472+Copilot@users.noreply.github.com".
 const AI_COAUTHOR_VENDOR = new RegExp(
-  `\\[bot\\]|(^|[<.\\s_+-])bot@|ai-integration|noreply@(anthropic|openai)\\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code|cursor|gemini|chatgpt|codex|copilot|google)\\.(com|ai|dev|io)([^\\S\\n>]|>|$)|:[^\\S\\n]*[^<\\s]*(${VENDOR})[^<\\s]*@`,
+  `\\[bot\\]|(^|[<.\\s_+-])bot@|ai-integration|noreply@(anthropic|openai)\\.|@(anthropic|openai|cognition|devin|codeium|windsurf|claude-code|cursor|gemini|chatgpt|codex|copilot)\\.(com|ai|dev|io)([^\\S\\n>]|>|$)|:[^\\S\\n]*[^<\\s]*(${VENDOR})[^<\\s]*@|[a-z0-9._+-]*(ai[-_.](agent|assistant)|(agent|assistant)[-_.]ai)[a-z0-9._+-]*@`,
   "i",
 );
 // A bare vendor identity as the display name — "Co-authored-by:
@@ -52,8 +52,11 @@ const GENERATOR_TRAILER =
   /^[^\S\n]*(generated|made|authored)[- ](with|by|via)[^\S\n]*:/im;
 // standalone "via <tool>" / "by <tool>" lines — the footer regex
 // needs a leading verb, so a lone via-line slips past it.
+// "via"/"by" are attribution verbs — trailing context still flags.
+// "with"/"using" open ordinary sentences too, so they only count as a
+// signature when the tool name closes out the line.
 const VIA_LINE = new RegExp(
-  `^[^\\S\\n]*(via|by|using|with)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)?ai)?([^a-z0-9]|$)`,
+  `^[^\\S\\n]*(via|by)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)?ai)?([^a-z0-9]|$)|^[^\\S\\n]*(with|using)[^\\S\\n]+\\[?(${VENDOR})\\]?(\\([^)]*\\))?((?:[^\\S\\n]|-)?ai)?[\\s.!,;:()]*$`,
   "im",
 );
 // A robot emoji is only a signature when it carries attribution context:
@@ -69,9 +72,10 @@ const AI_SELF_ATTRIBUTION = new RegExp(
   `\\b(as an ai|i generated this|authored by \\[?(${VENDOR}))\\b`,
   "i",
 );
-// Vendor-stamped HTML comments smuggled into the message.
+// HTML comments carrying attribution vocabulary — a bare vendor
+// mention (<!-- cursor position -->) is prose, not a marker.
 const ATTRIBUTION_HTML_COMMENT = new RegExp(
-  `<!--[^>\\n]*(${VENDOR}|generated|🤖)`,
+  `<!--[^>\\n]*(generated|made|created|authored|written|produced|co-?authored|attributed|🤖)[^>\\n]*`,
   "i",
 );
 // Zero-width / invisible markers: U+200B..U+200D, U+2060, U+FEFF.

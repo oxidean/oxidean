@@ -270,6 +270,17 @@ describe("attribution scan", () => {
     expect(r.failures[0].error).toContain("attribution: attribution via-line");
   });
 
+  test("with/using only flag as line-closing signatures", () => {
+    const r = checkMessages(registry, [
+      { subject: "feat(core): x", body: "\nwith Copilot\n" },
+      { subject: "feat(core): y", body: "\nUsing Copilot.\n" },
+      { subject: "feat(core): z", body: "\nWith Cursor support enabled, ok\n" },
+      { subject: "feat(core): w", body: "\nUsing Gemini API, clients stream\n" },
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.failures).toHaveLength(2);
+  });
+
   test("prose containing a vendor word stays clean", () => {
     const r = checkMessages(registry, [
       {
