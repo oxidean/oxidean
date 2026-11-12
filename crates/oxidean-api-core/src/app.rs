@@ -88,9 +88,6 @@ pub struct AppState {
     /// or the objects dir refuses (`warn!` at boot); procedures then answer
     /// `vcs.disabled`, the same wire shape an unenabled repo produces.
     pub vcs: Option<crate::vcs::SharedVcs>,
-    /// Oxpilot runtime — always installed; flag-off state lives inside the
-    /// slot (`disabled_reason`), never as an absent handle.
-    pub oxpilot: crate::oxpilot::SharedOxpilot,
     /// The procedure dispatcher edge code resolves through — REST (`/api/v1`),
     /// MCP, and in-process callers run `ctx.rpc_dispatch(ctx, req)`. The
     /// shell installs its aggregated multi-crate dispatch in
@@ -254,7 +251,6 @@ impl AppState {
             search_max_matches,
             search_max_files,
             vcs,
-            oxpilot: crate::oxpilot::OxpilotRuntime::new(),
             rpc_dispatch: crate::rpc::core_dispatch(),
         }
     }
@@ -335,15 +331,6 @@ impl AppState {
         self.git = git;
         // Rebuild the VCS slot so interop rides the injected backend too.
         self.vcs = build_vcs_slot(&self.db, &self.git, &self.repos_dir);
-        self
-    }
-
-    /// Test/dev seam — install a prebuilt oxpilot runtime (the
-    /// `OxpilotRuntime::from_slot` counterpart), mirroring the `with_*`
-    /// builder convention. Shell assembly keeps using `state.oxpilot`'s
-    /// own install seams.
-    pub fn with_oxpilot(mut self, oxpilot: crate::oxpilot::SharedOxpilot) -> Self {
-        self.oxpilot = oxpilot;
         self
     }
 
@@ -579,7 +566,6 @@ pub fn build_rpc_ctx_with_session(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
         vcs: state.vcs.clone(),
-        oxpilot: Some(state.oxpilot.clone()),
         rpc_dispatch: state.rpc_dispatch.clone(),
     }
 }
@@ -754,7 +740,6 @@ pub async fn build_rpc_ctx(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
         vcs: state.vcs.clone(),
-        oxpilot: Some(state.oxpilot.clone()),
         rpc_dispatch: state.rpc_dispatch.clone(),
     })
 }

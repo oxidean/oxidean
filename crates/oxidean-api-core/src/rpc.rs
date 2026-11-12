@@ -159,14 +159,6 @@ pub struct RpcCtx {
     /// or the objects dir refused at boot; `vcs.*` procedures then answer
     /// `vcs.disabled` (same wire shape as an unenabled repo).
     pub vcs: Option<crate::vcs::SharedVcs>,
-    /// Oxpilot runtime slot — `Some` whenever the edge builds the ctx from
-    /// `AppState`; `None` only in tests that never touch `oxpilot.*`.
-    pub oxpilot: Option<crate::oxpilot::SharedOxpilot>,
-    /// The dispatcher this request resolves through — copied from
-    /// `AppState.rpc_dispatch` when the edge builds the ctx (issue #162).
-    /// Every transport (REST, MCP, feeds, edge routes) calls the assembled
-    /// dispatch through this handle so domain-crate fan-out is identical
-    /// on every path.
     pub rpc_dispatch: RpcDispatch,
 }
 

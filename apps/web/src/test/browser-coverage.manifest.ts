@@ -76,7 +76,6 @@ const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
 const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
 const OAUTH_SCOPES_BROWSER = "apps/web/src/routes/oauth-consent.browser.test.tsx";
-const OXPILOT_BROWSER = "apps/web/src/routes/oxpilot.browser.test.tsx";
 
 export const browserCoverageManifest: BrowserCoverageEntry[] = [
   // --- primitives ---
@@ -517,16 +516,6 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
-    surface: "routes/admin/oxpilot.tsrx",
-    coverage: [
-      {
-        kind: "browser",
-        test: "apps/web/src/routes/admin/oxpilot.browser.test.tsx",
-        subject: "admin-oxpilot-page",
-      },
-    ],
-  },
-  {
     surface: "routes/$owner.settings.index.tsrx",
     coverage: [
       {
@@ -595,28 +584,6 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "browser",
         test: OAUTH_SCOPES_BROWSER,
         subject: "oauth-device-approve",
-      },
-    ],
-  },
-
-  // --- /oxpilot (U8 — repo Select lives in the new-session dialog) ---
-  {
-    surface: "components/oxpilot/new-session-dialog.tsrx",
-    coverage: [
-      {
-        kind: "browser",
-        test: OXPILOT_BROWSER,
-        subject: "new-session-dialog",
-      },
-    ],
-  },
-  {
-    surface: "components/oxpilot/connect-dialog.tsrx",
-    coverage: [
-      {
-        kind: "browser",
-        test: OXPILOT_BROWSER,
-        subject: "connect-dialog",
       },
     ],
   },
