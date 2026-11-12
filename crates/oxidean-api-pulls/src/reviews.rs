@@ -125,6 +125,14 @@ pub async fn reviews_submit(
                 "review comment is already attached to a review",
             ));
         }
+        // Only pending drafts join a review — submitted comments stay
+        // standalone (GitHub never re-groups published comments).
+        if !comment.pending {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "review comments must be pending drafts",
+            ));
+        }
         comment_ids.push(cid.to_string());
     }
 

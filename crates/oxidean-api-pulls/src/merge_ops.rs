@@ -85,6 +85,20 @@ pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesRe
             .git
             .fetch_ref_from(&path, &head_path, &row.head_sha)
             .await;
+        // A scoped diff may name head-side objects not reachable from the
+        // pull head (fork side-branch tips); fetch them explicitly. Base-repo
+        // commits that don't exist on the fork fail here harmlessly — the
+        // diff below resolves them locally.
+        for scoped in [
+            req.sha.as_deref(),
+            req.base_sha.as_deref(),
+            req.head_sha.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let _ = ctx.git.fetch_ref_from(&path, &head_path, scoped).await;
+        }
     }
     // Scoped diff resolution (per-commit / range / since-last-review). The
     // default is the pull's full base...head; exactly one scope form applies.
@@ -102,12 +116,17 @@ pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesRe
     let since_review = req.since_review.unwrap_or(false);
     let (base, head): (String, String) = match (sha, base_sha, head_sha, since_review) {
         (Some(s), None, None, false) => {
-            // Root commits have no parent — diff against the empty tree.
+            // Root commits have no parent — diff against the empty tree
+            // (diff_opts peels non-commit tips via ^{tree}).
             let parent = ctx
                 .git
-                .rev_parse(&path, &format!("{s}^"))
+                .cat_commit(&path, s)
                 .await
-                .unwrap_or_else(|_| EMPTY_TREE_SHA.to_string());
+                .map_err(|e| AppError::new("pull.diff_failed", format!("diff failed: {e}")))?
+                .parents
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| EMPTY_TREE_SHA.to_string());
             (parent, s.to_string())
         }
         (None, Some(b), Some(h), false) => (b.to_string(), h.to_string()),

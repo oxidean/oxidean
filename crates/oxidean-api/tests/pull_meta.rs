@@ -297,7 +297,7 @@ async fn pull_review_submit_links_pending_comments() {
     let comment = rpc_json(
         &app,
         &cookie,
-        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"nit","path":"NOTE.md","side":"RIGHT","line":1}}"#,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"nit","path":"NOTE.md","side":"RIGHT","line":1,"pending":true}}"#,
     )
     .await;
     assert_eq!(comment["ok"], true, "{comment}");
@@ -333,6 +333,25 @@ async fn pull_review_submit_links_pending_comments() {
     .await;
     assert_eq!(bad["ok"], false);
     assert_eq!(bad["error"]["code"], "rpc.bad_input");
+
+    // Already-submitted comments cannot be swept into a review.
+    let posted = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"posted","path":"NOTE.md","side":"RIGHT","line":1}}"#,
+    )
+    .await;
+    let posted_id = posted["data"]["id"].as_str().unwrap();
+    let not_pending = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"pown","name":"core","number":1,"state":"commented","comment_ids":["{posted_id}"]}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(not_pending["ok"], false, "{not_pending}");
+    assert_eq!(not_pending["error"]["code"], "rpc.bad_input");
 }
 
 #[tokio::test]
@@ -425,6 +444,11 @@ async fn pull_comments_pending_drafts_visibility_and_submit() {
         .await
         .unwrap();
     let cookie2 = session_cookie(&login2);
+    let login2_body: serde_json::Value =
+        serde_json::from_slice(&login2.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let uid2 = login2_body["data"]["id"].as_str().unwrap().to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&uid2, &now).await.expect("verify");
 
     let draft = rpc_json(
         &app,
@@ -518,6 +542,24 @@ async fn pull_comments_pending_drafts_visibility_and_submit() {
     )
     .await;
     assert_eq!(del["ok"], true, "{del}");
+
+    // Read-only users can comment but cannot stash drafts — submission is
+    // Write+-gated, so a pending flag would orphan permanently.
+    let other_pending = rpc_json(
+        &app,
+        &cookie2,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"outsider draft","pending":true}}"#,
+    )
+    .await;
+    assert_eq!(other_pending["ok"], false, "{other_pending}");
+    assert_eq!(other_pending["error"]["code"], "repo.not_found");
+    let other_posted = rpc_json(
+        &app,
+        &cookie2,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"outsider take"}}"#,
+    )
+    .await;
+    assert_eq!(other_posted["ok"], true, "{other_posted}");
 }
 
 #[tokio::test]
@@ -560,6 +602,28 @@ async fn pull_comments_start_line_ranges() {
     assert_eq!(ok["ok"], true, "{ok}");
     assert_eq!(ok["data"]["start_line"], 1);
     assert_eq!(ok["data"]["line"], 3);
+
+    // File-level anchor: path alone (GitHub's "comment on this file").
+    let file = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"file note","path":"NOTE.md"}}"#,
+    )
+    .await;
+    assert_eq!(file["ok"], true, "{file}");
+    assert_eq!(file["data"]["path"], "NOTE.md");
+    assert!(file["data"]["line"].is_null());
+    assert!(file["data"]["side"].is_null());
+
+    // A side without a line is not a valid anchor.
+    let stray_side = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"pown","name":"core","number":1,"body":"x","path":"NOTE.md","side":"RIGHT"}}"#,
+    )
+    .await;
+    assert_eq!(stray_side["ok"], false);
+    assert_eq!(stray_side["error"]["code"], "rpc.bad_input");
 }
 
 #[tokio::test]
@@ -601,6 +665,27 @@ async fn pull_files_scoped_diffs() {
     assert_eq!(single["ok"], true, "{single}");
     let single_files = single["data"]["files"].as_array().unwrap();
     assert!(single_files.iter().any(|f| f["path"] == "NOTE.md"));
+
+    // The oldest listed commit is the repo root — it has no parent, so its
+    // scope diffs against the empty tree and still resolves.
+    let root = commits["data"]["commits"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["sha"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let root_diff = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.files","input":{{"owner":"pown","name":"core","number":1,"sha":"{root}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(root_diff["ok"], true, "{root_diff}");
+    assert!(!root_diff["data"]["files"].as_array().unwrap().is_empty());
 
     // Range scope: pull base..head equals the full diff.
     let pull = rpc_json(

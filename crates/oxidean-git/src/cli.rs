@@ -2488,28 +2488,47 @@ impl GitBackend for CliGitBackend {
         let head = validate_treeish(head)?;
         let repo_s = repo_str(repo)?;
 
-        // Resolve both ends; identical trees → empty (not 500).
+        // Resolve both ends; identical trees → empty (not 500). Tips peel to
+        // `^{commit}` first; non-commit trees (the empty-tree base of a
+        // root-commit diff) peel to `^{tree}` and switch the range to
+        // `base..head` — `...` needs a merge base, which only exists
+        // between commits.
+        let mut commits_only = true;
         for tip in [base, head] {
-            let rev = Command::new("git")
-                .args([
-                    "-C",
-                    repo_s,
-                    "rev-parse",
-                    "--verify",
-                    &format!("{tip}^{{commit}}"),
-                ])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-                .await
-                .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
-            if !rev.status.success() {
+            let mut resolved = false;
+            for peel in ["{commit}", "{tree}"] {
+                let rev = Command::new("git")
+                    .args([
+                        "-C",
+                        repo_s,
+                        "rev-parse",
+                        "--verify",
+                        &format!("{tip}^{peel}"),
+                    ])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await
+                    .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+                if rev.status.success() {
+                    resolved = true;
+                    if peel == "{tree}" {
+                        commits_only = false;
+                    }
+                    break;
+                }
+            }
+            if !resolved {
                 return Err(GitError::NotFound(format!("ref {tip}")));
             }
         }
 
-        let range = format!("{base}...{head}");
+        let range = if commits_only {
+            format!("{base}...{head}")
+        } else {
+            format!("{base}..{head}")
+        };
         let mut args = vec!["-C", repo_s, "diff", "--find-renames", "--patch"];
         let context_arg;
         if opts.ignore_whitespace {
