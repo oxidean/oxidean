@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { IssueAssigneePublic, LabelPublic, PullPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { X } from "@octanejs/lucide";
+import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -428,6 +429,17 @@ export function PullV2Rail(props: PullV2RailProps) @{
         <li>{`${commentCount} comment${commentCount === 1 ? "" : "s"}` as string}</li>
         <li>{`${reviewCount} review${reviewCount === 1 ? "" : "s"}` as string}</li>
       </ul>
+      <AppLink
+        href={`/${props.owner}/${props.repoName}/activity` as string}
+        className="mt-1.5 inline-block text-[13px] text-primary no-underline hover:underline"
+        data-testid="pull-v2-activity-link"
+      >
+        View repository activity
+      </AppLink>
     </section>
+    {/* GitHub parity gap, intentionally absent: Milestone / Projects /
+        Development / Deployments rail sections have no pull-scoped RPCs
+        (pull.update carries no milestone, no pull-project linkage exists,
+        deployments aren't PR-scoped). Add here when the domain lands. */}
   </div>;
 }
