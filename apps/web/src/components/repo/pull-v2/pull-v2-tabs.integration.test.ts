@@ -198,15 +198,7 @@ describe("PullV2Changes", () => {
 
     fireEvent.click(screen.getByTestId("pull-v2-review-submit"));
 
-    await waitFor(() => {
-      expect(reviewsSubmitMock).toHaveBeenCalledWith({
-        owner: "ada",
-        name: "hello",
-        number: 42,
-        state: "commented",
-        body: null,
-      });
-    });
+    // Pending comments post first; their ids ride the review submit.
     await waitFor(() => {
       expect(commentsCreateMock).toHaveBeenCalledWith({
         owner: "ada",
@@ -217,6 +209,16 @@ describe("PullV2Changes", () => {
         side: "RIGHT",
         line: 1,
         commit_sha: "deadbeef0123",
+      });
+    });
+    await waitFor(() => {
+      expect(reviewsSubmitMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        number: 42,
+        state: "commented",
+        body: null,
+        comment_ids: ["c1"],
       });
     });
     // Pending list cleared after submit.
