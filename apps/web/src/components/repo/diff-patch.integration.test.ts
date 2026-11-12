@@ -1,8 +1,27 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { highlightDiffLines } from "@/lib/highlight-diff";
 import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
 import { DiffPatch } from "./diff-patch";
+
+function pullComment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "c1",
+    pull_id: "p1",
+    author_id: "u1",
+    author_username: "ada",
+    body: "note",
+    path: "a.ts",
+    side: "RIGHT",
+    line: 2,
+    pending: false,
+    resolved: false,
+    outdated: false,
+    created_at: "2026-03-04T10:00:00Z",
+    updated_at: "2026-03-04T10:00:00Z",
+    ...overrides,
+  };
+}
 
 afterEach(cleanup);
 
@@ -220,5 +239,171 @@ describe("DiffPatch — issue #110 mobile budgets", () => {
     expect(add?.textContent).toContain("first");
     expect(add?.textContent).not.toContain("second");
     expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+  });
+});
+
+describe("DiffPatch — #262 inline comments", () => {
+  const PATCH = ["@@ -1,3 +1,3 @@", " keep", "-old", "+new", " tail"].join("\n");
+
+  it("stays read-only when onSubmitComment is not provided", async () => {
+    render(DiffPatch, { props: { path: "a.ts", status: "modified", patch: PATCH } });
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+    });
+    expect(document.querySelector('[data-testid="pull-line-comment-add"]')).toBeNull();
+    expect(document.querySelector("[data-diff-gutter]")).toBeNull();
+  });
+
+  it("+ comment opens a single-line draft and submits the anchor", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: PATCH,
+        canInteract: true,
+        onSubmitComment: onSubmit,
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="pull-line-comment-add"]')).toBeTruthy();
+    });
+    // The "+" on the +new row (new-side line 2) anchors RIGHT/2; the del row
+    // has a same-named button first in DOM order — take the second.
+    const addBtn = screen.getAllByRole("button", { name: "Comment on line 2" })[1]!;
+    fireEvent.click(addBtn);
+    const box = document.querySelector('[data-testid="pull-line-draft"]');
+    expect(box).toBeTruthy();
+    fireEvent.input(box!.querySelector("textarea")!, { target: { value: "nit" } });
+    fireEvent.click(screen.getByTestId("pull-line-draft-add"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ side: "RIGHT", line: 2, body: "nit" }),
+      );
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="pull-line-draft"]')).toBeNull();
+    });
+  });
+
+  it("gutter drag selects a contiguous range and reports startLine", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: PATCH,
+        canInteract: true,
+        onSubmitComment: onSubmit,
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll("[data-diff-row]").length).toBeGreaterThan(0);
+    });
+    const rows = [...document.querySelectorAll("[data-diff-row]")];
+    // Downward drag on the gutter: ctx " keep" (row 1, RIGHT/1) →
+    // ctx " tail" (row 4, RIGHT/3).
+    const first = rows[1] as HTMLElement;
+    const last = rows[4] as HTMLElement;
+    first
+      .querySelector("[data-diff-gutter]")!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    last.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    const box = await screen.findByTestId("pull-line-draft");
+    expect(box.textContent).toContain("lines 1–3");
+    fireEvent.input(box.querySelector("textarea")!, { target: { value: "range note" } });
+    fireEvent.click(screen.getByTestId("pull-line-draft-add"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ side: "RIGHT", startLine: 1, line: 3 }),
+      );
+    });
+  });
+
+  it("upward drag normalizes to [start..end]", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: PATCH,
+        canInteract: true,
+        onSubmitComment: onSubmit,
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll("[data-diff-row]").length).toBeGreaterThan(0);
+    });
+    const rows = [...document.querySelectorAll("[data-diff-row]")];
+    const top = rows[1] as HTMLElement;
+    const bottom = rows[4] as HTMLElement;
+    bottom
+      .querySelector("[data-diff-gutter]")!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    top.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    const box = await screen.findByTestId("pull-line-draft");
+    expect(box.textContent).toContain("lines 1–3");
+    fireEvent.input(box.querySelector("textarea")!, { target: { value: "up" } });
+    fireEvent.click(screen.getByTestId("pull-line-draft-add"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ side: "RIGHT", startLine: 1, line: 3 }),
+      );
+    });
+  });
+
+  it("Escape cancels an in-progress drag without opening a draft", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: PATCH,
+        canInteract: true,
+        onSubmitComment: onSubmit,
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll("[data-diff-row]").length).toBeGreaterThan(0);
+    });
+    const rows = [...document.querySelectorAll("[data-diff-row]")];
+    (rows[1] as HTMLElement)
+      .querySelector("[data-diff-gutter]")!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    (rows[3] as HTMLElement).dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(document.querySelector('[data-testid="pull-line-draft"]')).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("renders submitted + pending comments with a discard action", async () => {
+    const onDiscard = vi.fn();
+    render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: PATCH,
+        comments: [
+          pullComment({ id: "sub1", body: "looks good" }),
+          pullComment({ id: "pc7", body: "draft", pending: true }),
+          pullComment({ id: "rng", body: "range", start_line: 1, line: 3 }),
+        ],
+        canInteract: true,
+        onSubmitComment: vi.fn(async () => true),
+        onDiscardComment: onDiscard,
+      },
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-testid="pull-line-comment"]').length).toBe(2);
+    });
+    expect(document.querySelectorAll('[data-testid="pull-pending-comment"]').length).toBe(1);
+    // Header count includes everything.
+    expect(screen.getByTestId("pull-file-comment-count").textContent).toContain("3");
+    fireEvent.click(screen.getByTestId("pull-pending-discard"));
+    expect(onDiscard).toHaveBeenCalledWith("pc7");
   });
 });

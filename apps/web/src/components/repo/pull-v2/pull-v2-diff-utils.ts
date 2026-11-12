@@ -1,30 +1,95 @@
-import type { PullDiffFile } from "@oxidean/api-client";
+import type { PullCommentPublic, PullDiffFile } from "@oxidean/api-client";
 
 /**
  * pr-new-ui (WI-0001 S4–S7): pure helpers for the "Files changed" tab —
- * file-tree building, anchor ids, and the local pending-review comment
- * model. No hooks live here (hook helpers must stay in `.tsrx`).
+ * file-tree building, anchor ids, scoped-diff parsing, and line-anchor math
+ * shared with the legacy diff viewers. No hooks live here (hook helpers
+ * must stay in `.tsrx`).
  */
 
-/** A comment collected locally, submitted with the next review. */
-export type PendingLineComment = {
-  /** Local id (monotonic counter), not the server comment id. */
-  id: number;
-  path: string;
-  /** Row index inside the file's parsed diff rows — display anchor. */
-  row: number;
-  side: "LEFT" | "RIGHT";
-  line: number;
-  body: string;
-};
+/** Diff scope resolved from the `/changes[/<scope>]` splat + local state. */
+export type ChangesScope =
+  | { kind: "none" }
+  | { kind: "sha"; sha: string }
+  | { kind: "range"; base: string; head: string }
+  /** Client-only selection (no URL) — diffs the caller's last review..head. */
+  | { kind: "since" };
 
-/** Where an inline draft box is open. */
+/** `<sha>` or `<base>..<head>` → scope; `since` is applied by the caller. */
+export function parseChangesScope(changesSha?: string | null): ChangesScope {
+  if (!changesSha) return { kind: "none" };
+  const i = changesSha.indexOf("..");
+  if (i >= 0) {
+    const base = changesSha.slice(0, i);
+    const head = changesSha.slice(i + 2);
+    if (base && head) return { kind: "range", base, head };
+    return { kind: "none" };
+  }
+  return { kind: "sha", sha: changesSha };
+}
+
+/** Query-key discriminator for the scoped `pull.files` call. */
+export function changesScopeKey(scope: ChangesScope): string {
+  switch (scope.kind) {
+    case "sha":
+      return `sha:${scope.sha}`;
+    case "range":
+      return `range:${scope.base}..${scope.head}`;
+    case "since":
+      return "since";
+    default:
+      return "all";
+  }
+}
+
+/** Head sha a new comment anchors to under the current diff scope. */
+export function scopeAnchorSha(scope: ChangesScope, headSha?: string | null): string | null {
+  if (scope.kind === "sha") return scope.sha;
+  if (scope.kind === "range") return scope.head;
+  return headSha ?? null;
+}
+
+/** Where an inline draft box is open. Null fields = file-level comment. */
 export type DraftTarget = {
   path: string;
-  row: number;
-  side: "LEFT" | "RIGHT";
-  line: number;
+  /** Diff row the composer docks under — `null` docks under the file header. */
+  row: number | null;
+  side: "LEFT" | "RIGHT" | null;
+  line: number | null;
+  /** Range start (`start_line`) when the draft came from a gutter drag. */
+  startLine?: number | null;
 };
+
+/** Line number a `side` anchors to on a parsed diff row, else `null`. */
+export function anchorLineForSide(
+  kind: string,
+  oldNo: number | null,
+  newNo: number | null,
+  side: "LEFT" | "RIGHT",
+): number | null {
+  if (side === "LEFT") {
+    return (kind === "del" || kind === "ctx") && oldNo != null ? oldNo : null;
+  }
+  return (kind === "add" || kind === "ctx") && newNo != null ? newNo : null;
+}
+
+/** "commented on lines X–Y" for range comments; `null` for single-line. */
+export function commentRangeLabel(c: PullCommentPublic): string | null {
+  if (c.start_line == null || c.line == null) return null;
+  return `commented on lines ${c.start_line}–${c.line}`;
+}
+
+/** True when the comment's [start_line..line] range covers this row. */
+export function commentCoversRow(
+  c: PullCommentPublic,
+  kind: string,
+  oldNo: number | null,
+  newNo: number | null,
+): boolean {
+  if (c.start_line == null || c.line == null || !c.side) return false;
+  const n = anchorLineForSide(kind, oldNo, newNo, c.side === "LEFT" ? "LEFT" : "RIGHT");
+  return n != null && n >= c.start_line && n <= c.line;
+}
 
 /** `#pull-v2-file-<hash>` anchor id for a diff file block. */
 export function fileAnchorId(path: string): string {

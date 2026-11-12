@@ -8,9 +8,17 @@ import {
   FilePlus2,
   FileX,
   Folder,
+  ListFilter,
   MessageSquare,
 } from "@octanejs/lucide";
 import { useMemo, useState } from "octane";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 import { cn } from "@/lib/utils";
 import { buildFileTree, fileAnchorId, fileStatusMeta, flattenFileTree } from "./pull-v2-diff-utils";
@@ -23,6 +31,8 @@ type PullV2FileTreeProps = {
   commentCounts: ReadonlyMap<string, number>;
   /** Signed-in viewers only — viewed marks require a verified session. */
   canInteract: boolean;
+  /** Viewed checkboxes allowed — hidden on scoped (sha/range/since) diffs. */
+  showViewed: boolean;
   onToggleViewed: (path: string, viewed: boolean) => void;
 };
 
@@ -52,7 +62,25 @@ function FileStatusIcon(props: { status: string }) @{
  * per-file "viewed" checkbox (S5).
  */
 export function PullV2FileTree(props: PullV2FileTreeProps) @{
-  const tree = useMemo(() => buildFileTree(props.files), [props.files]);
+  // Tree-local filter (filename substring + status toggles) — narrows tree
+  // rows only; the diff column still follows the toolbar filter.
+  const [nameFilter, setNameFilter] = useState("");
+  const [hiddenStatuses, setHiddenStatuses] = useState<ReadonlySet<string>>(() => new Set());
+  const statuses = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of props.files) s.add(f.status || "modified");
+    return [...s].sort();
+  }, [props.files]);
+  const nameNeedle = nameFilter.trim().toLowerCase();
+  const treeFiles = useMemo(
+    () =>
+      props.files.filter((f) => {
+        if (hiddenStatuses.has(f.status || "modified")) return false;
+        return !nameNeedle || f.path.toLowerCase().includes(nameNeedle);
+      }),
+    [props.files, hiddenStatuses, nameNeedle],
+  );
+  const tree = useMemo(() => buildFileTree(treeFiles), [treeFiles]);
   const stats = useMemo(
     () =>
       new Map<string, readonly [number, number]>(
@@ -62,6 +90,16 @@ export function PullV2FileTree(props: PullV2FileTreeProps) @{
   );
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const rows = flattenFileTree(tree, collapsed);
+  const filterActive = nameNeedle.length > 0 || hiddenStatuses.size > 0;
+
+  function toggleStatus(status: string, checked: boolean) {
+    setHiddenStatuses((prev) => {
+      const next = new Set(prev);
+      if (checked) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  }
 
   function toggleDir(path: string) {
     setCollapsed((prev) => {
@@ -80,6 +118,49 @@ export function PullV2FileTree(props: PullV2FileTreeProps) @{
   }
 
   <nav className="py-1" aria-label="Changed files" data-testid="pull-v2-file-tree">
+    <div className="flex items-center gap-1 px-2 py-0.5">
+      <span className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Files
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={
+            cn(
+              "inline-flex size-6 items-center justify-center rounded-sm",
+              filterActive
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            ) as string
+          }
+          aria-label="Filter file tree"
+          data-testid="pull-v2-tree-filter"
+        >
+          <ListFilter aria-hidden size={13} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="min-w-56" align="start">
+          <div className="px-2 py-1.5">
+            <input
+              type="search"
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-[12px] outline-none focus-visible:border-ring"
+              placeholder="Filter by filename"
+              value={nameFilter}
+              data-testid="pull-v2-tree-filter-name"
+              onInput={(e) => setNameFilter((e.currentTarget as HTMLInputElement).value)}
+            />
+          </div>
+          <DropdownMenuSeparator />
+          @for (const s of statuses; key s) {
+            <DropdownMenuCheckboxItem
+              checked={!hiddenStatuses.has(s)}
+              onCheckedChange={(v) => toggleStatus(s, v)}
+              data-testid={`pull-v2-tree-filter-status-${s}`}
+            >
+              {s as string}
+            </DropdownMenuCheckboxItem>;
+          }
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
     @for (const row of rows; key row.key) {
       @if (row.kind === "dir") {
         <button
@@ -145,7 +226,7 @@ export function PullV2FileTree(props: PullV2FileTreeProps) @{
               </span>;
             }
           </a>
-          @if (props.canInteract) {
+          @if (props.canInteract && props.showViewed) {
             <button
               type="button"
               role="checkbox"

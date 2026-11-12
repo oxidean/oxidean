@@ -1,7 +1,21 @@
 import type { PullCommentPublic, PullDiffFile } from "@oxidean/api-client";
-import { Check, ChevronDown, ChevronRight, MessageSquarePlus } from "@octanejs/lucide";
-import { useId, useMemo, useState } from "octane";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Ellipsis,
+  MessageSquare,
+  MessageSquarePlus,
+} from "@octanejs/lucide";
+import { useEffect, useId, useMemo, useRef, useState } from "octane";
 import { DiffLargeGate } from "@/components/repo/diff-file-header";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLinkItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { DIFF_LARGE_PATCH_CHARS } from "@/lib/diff-budget";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
@@ -10,11 +24,13 @@ import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import {
+  anchorLineForSide,
+  commentCoversRow,
+  commentRangeLabel,
   diffLineClass,
   fileAnchorId,
   fileStatusMeta,
   type DraftTarget,
-  type PendingLineComment,
 } from "./pull-v2-diff-utils";
 
 type KeyedRow = HighlightedDiffLine & {
@@ -24,6 +40,15 @@ type KeyedRow = HighlightedDiffLine & {
 };
 
 type LineAnchor = { side: "LEFT" | "RIGHT"; line: number };
+
+/** In-progress gutter drag (mouse down on a line-number cell). */
+type DragSelection = {
+  side: "LEFT" | "RIGHT";
+  startLine: number;
+  startRow: number;
+  endLine: number;
+  endRow: number;
+};
 
 /** Unified-view anchor for a row: dels anchor LEFT, ctx/adds anchor RIGHT. */
 function unifiedAnchor(row: KeyedRow): LineAnchor | null {
@@ -49,6 +74,12 @@ function splitAnchors(row: KeyedRow): { left: LineAnchor | null; right: LineAnch
   return { left, right };
 }
 
+/** Row anchor pinned to one side — the side stays fixed for a whole drag. */
+function anchorForSide(row: KeyedRow, side: "LEFT" | "RIGHT"): LineAnchor | null {
+  const line = anchorLineForSide(row.kind, row.oldNo, row.newNo, side);
+  return line == null ? null : { side, line };
+}
+
 function prefixClass(kind: string): string {
   if (kind === "add") return "text-[var(--diff-add-fg)]";
   if (kind === "del") return "text-[var(--diff-del-fg)]";
@@ -58,164 +89,210 @@ function prefixClass(kind: string): string {
 /**
  * "+ comment" gutter button (WI-0001 S6). Lines that cannot be anchored
  * (hunk/meta/note rows carry no line number) render a disabled button.
+ * A plain click opens a single-line draft; press-and-drag on the gutter
+ * selects a range instead (handled by the parent row).
  */
 function LineCommentButton(props: {
   anchor: LineAnchor | null;
   canInteract: boolean;
   onAdd: (anchor: LineAnchor) => void;
 }) @{
-  <span className="w-6 shrink-0 select-none pl-1">
-    @if (props.anchor && props.canInteract) {
-      <button
-        type="button"
-        className="inline-flex size-4 items-center justify-center rounded-[3px] bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-        aria-label={`Comment on line ${props.anchor.line}`}
-        data-testid="pull-v2-line-comment-add"
-        onClick={() => props.anchor && props.onAdd(props.anchor)}
-      >
-        <MessageSquarePlus aria-hidden size={10} />
-      </button>;
-    } @else {
-      <button
-        type="button"
-        disabled
-        aria-hidden="true"
-        className="inline-flex size-4 items-center justify-center opacity-0"
-        tabIndex={-1}
-      >
-        <MessageSquarePlus size={10} />
-      </button>;
-    }
-  </span>;
+  @if (props.anchor && props.canInteract) {
+    <button
+      type="button"
+      className="inline-flex size-4 items-center justify-center rounded-[3px] bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+      aria-label={`Comment on line ${props.anchor.line}`}
+      data-testid="pull-v2-line-comment-add"
+      onClick={() => props.anchor && props.onAdd(props.anchor)}
+    >
+      <MessageSquarePlus aria-hidden size={10} />
+    </button>;
+  } @else {
+    <button
+      type="button"
+      disabled
+      aria-hidden="true"
+      className="inline-flex size-4 items-center justify-center opacity-0"
+      tabIndex={-1}
+    >
+      <MessageSquarePlus size={10} />
+    </button>;
+  }
 }
 
-/** Inline draft box under the row being commented on. */
+/**
+ * Inline draft box under the row being commented on. "Add review comment"
+ * persists a pending review draft; "Add single comment" posts immediately —
+ * the GitHub review-vs-single-comment split (#263, pending drafts).
+ */
 function LineDraftBox(props: {
   body: string;
+  busy: boolean;
+  error: string | null;
+  /** Range comment header (`start_line..line`) when the draft came from a drag. */
+  rangeLabel: string | null;
   onBody: (next: string) => void;
-  onSubmit: () => void;
+  onSubmit: (pending: boolean) => void;
   onCancel: () => void;
 }) @{
   <div className="border-t border-border/50 bg-muted/20 px-8 py-2" data-testid="pull-v2-line-draft">
+    @if (props.rangeLabel) {
+      <p className="mb-1 text-[12px] text-muted-foreground">{props.rangeLabel as string}</p>;
+    }
     <Textarea
       rows={3}
       className="font-sans text-[13px]"
       placeholder="Leave a review comment"
       value={props.body}
+      disabled={props.busy}
       onInput={(e) => props.onBody((e.currentTarget as HTMLTextAreaElement).value)}
     />
-    <div className="mt-2 flex gap-2">
+    <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
         className="rounded-md bg-primary px-2 py-1 text-[13px] font-medium text-primary-foreground disabled:opacity-60"
-        disabled={!props.body.trim()}
+        disabled={props.busy || !props.body.trim()}
         data-testid="pull-v2-line-draft-add"
-        onClick={() => props.onSubmit()}
+        onClick={() => props.onSubmit(true)}
       >
         Add review comment
       </button>
       <button
         type="button"
+        className="rounded-md border border-border px-2 py-1 text-[13px] text-foreground hover:bg-muted disabled:opacity-60"
+        disabled={props.busy || !props.body.trim()}
+        data-testid="pull-v2-line-draft-add-single"
+        onClick={() => props.onSubmit(false)}
+      >
+        Add single comment
+      </button>
+      <button
+        type="button"
         className="rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted"
+        disabled={props.busy}
+        data-testid="pull-v2-line-draft-cancel"
         onClick={() => props.onCancel()}
       >
         Cancel
       </button>
     </div>
-  </div>;
-}
-
-/** Locally-pending review comment shown under its line (S6). */
-function PendingNote(props: {
-  comment: PendingLineComment;
-  onDiscard: (id: number) => void;
-}) @{
-  <div
-    className="border-t border-primary/20 bg-primary/5 px-8 py-1.5 text-[13px]"
-    data-testid="pull-v2-pending-comment"
-  >
-    <div className="flex items-center gap-2">
-      <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-        Pending
-      </span>
-      <span className="font-mono text-[11px] text-muted-foreground">
-        {`${props.comment.side === "LEFT" ? "L" : "R"}${props.comment.line}` as string}
-      </span>
-      <button
-        type="button"
-        className="ml-auto text-[12px] text-muted-foreground underline-offset-2 hover:underline"
-        onClick={() => props.onDiscard(props.comment.id)}
-      >
-        Discard
-      </button>
-    </div>
-    <p className="mt-1 whitespace-pre-wrap text-foreground">{props.comment.body as string}</p>
-  </div>;
-}
-
-/** Already-submitted review comment rendered under its line. */
-function SubmittedNote(props: { comment: PullCommentPublic }) @{
-  <div className="border-t border-border/50 bg-muted/20 px-8 py-1.5 text-[13px]">
-    <div className="flex items-center gap-2">
-      <span className="font-semibold text-foreground">
-        {`@${props.comment.author_username}` as string}
-      </span>
-      <span className="text-[12px] text-muted-foreground">
-        {formatRelative(props.comment.created_at) as string}
-      </span>
-      @if (props.comment.resolved) {
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Resolved
-        </span>;
-      }
-      @if (props.comment.outdated) {
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Outdated
-        </span>;
-      }
-    </div>
-    <p className="mt-1 whitespace-pre-wrap text-foreground">{props.comment.body as string}</p>
+    @if (props.error) {
+      <p role="alert" className="mt-2 text-[12px] text-destructive">
+        {props.error as string}
+      </p>;
+    }
   </div>;
 }
 
 /**
- * Draft box + pending + submitted notes rendered under a diff row.
- * A component (not a JSX-returning helper) — `@if`/`@for` directives are
- * only legal inside `@{ }` bodies.
+ * A review comment rendered under its anchor line — server-persisted pending
+ * drafts render like submitted comments plus a "Pending" badge + Discard.
+ */
+function CommentNote(props: {
+  comment: PullCommentPublic;
+  canInteract: boolean;
+  onDiscard: ((id: string) => void) | null;
+}) @{
+  const c = props.comment;
+  const rangeLabel = commentRangeLabel(c);
+  <div
+    className={
+      cn(
+        "border-t px-8 py-1.5 text-[13px]",
+        c.pending ? "border-primary/20 bg-primary/5" : "border-border/50 bg-muted/20",
+      ) as string
+    }
+    data-testid={c.pending ? "pull-v2-pending-comment" : "pull-v2-line-comment"}
+  >
+    <div className="flex items-center gap-2">
+      <span className="font-semibold text-foreground">{`@${c.author_username}` as string}</span>
+      <span className="text-[12px] text-muted-foreground">
+        {formatRelative(c.created_at) as string}
+      </span>
+      @if (c.pending) {
+        <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
+          Pending
+        </span>;
+      }
+      @if (rangeLabel) {
+        <span className="text-[12px] text-muted-foreground">{rangeLabel as string}</span>;
+      }
+      @if (c.resolved) {
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          Resolved
+        </span>;
+      }
+      @if (c.outdated) {
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          Outdated
+        </span>;
+      }
+      @if (c.pending && props.canInteract && props.onDiscard) {
+        <button
+          type="button"
+          className="ml-auto text-[12px] text-muted-foreground underline-offset-2 hover:underline"
+          data-testid="pull-v2-pending-discard"
+          onClick={() => props.onDiscard?.(c.id)}
+        >
+          Discard
+        </button>;
+      }
+    </div>
+    <p className="mt-1 whitespace-pre-wrap text-foreground">{c.body as string}</p>
+  </div>;
+}
+
+/**
+ * Draft box + anchored comments rendered under a diff row (or under the file
+ * header for `row: null` file-level notes). `minimizeComments` hides the
+ * threads but never the open draft.
  */
 function RowNotes(props: {
   draft: DraftTarget | null;
   draftBody: string;
-  pending: PendingLineComment[];
-  submitted: PullCommentPublic[];
+  draftBusy: boolean;
+  draftError: string | null;
+  comments: PullCommentPublic[];
+  canInteract: boolean;
+  minimizeComments: boolean;
   onDraftBody: (body: string) => void;
-  onSubmitDraft: () => void;
+  onSubmitDraft: (pending: boolean) => void;
   onCancelDraft: () => void;
-  onDiscardPending: (id: number) => void;
+  onDiscardPending: (id: string) => void;
 }) @{
   <>
     @if (props.draft) {
       <LineDraftBox
         body={props.draftBody}
+        busy={props.draftBusy}
+        error={props.draftError}
+        rangeLabel={
+          props.draft.startLine != null && props.draft.line != null
+            ? `Commenting on lines ${props.draft.startLine}–${props.draft.line}`
+            : null
+        }
         onBody={props.onDraftBody}
         onSubmit={props.onSubmitDraft}
         onCancel={props.onCancelDraft}
       />;
     }
-    @for (const pc of props.pending; key pc.id) {
-      <PendingNote comment={pc} onDiscard={props.onDiscardPending} />;
-    }
-    @for (const sc of props.submitted; key sc.id) {
-      <SubmittedNote comment={sc} />;
+    @if (!props.minimizeComments) {
+      @for (const c of props.comments; key c.id) {
+        <CommentNote
+          comment={c}
+          canInteract={props.canInteract}
+          onDiscard={c.pending ? props.onDiscardPending : null}
+        />;
+      }
     }
   </>;
 }
 
 /**
- * Per-file diff block for the v2 changes tab (WI-0001 S4–S6): same lazy
- * highlight + large-diff gate + collapse behavior as the shared DiffPatch,
- * plus a viewed checkbox in the header and a "+ comment" affordance on any
- * anchorable line feeding the local pending-review list.
+ * Per-file diff block for the v2 changes tab (WI-0001 S4–S6, #261–#263):
+ * lazy highlight + large-diff gate + collapse, viewed marks (unscoped views
+ * only), "+ comment"/gutter-drag line anchors writing server-side pending
+ * drafts, range comments, file-level comments, and the per-file menu.
  */
 export function PullV2DiffFile(props: {
   file: PullDiffFile;
@@ -224,18 +301,25 @@ export function PullV2DiffFile(props: {
   compact: boolean;
   expanded: boolean;
   viewed: boolean;
+  /** Viewed checkbox/marks allowed — false on scoped (sha/range/since) views. */
+  marksEnabled: boolean;
   canInteract: boolean;
-  pending: PendingLineComment[];
+  minimizeComments: boolean;
+  /** Server-side pending drafts anchored to this file. */
+  pending: PullCommentPublic[];
   submitted: PullCommentPublic[];
   draft: DraftTarget | null;
   draftBody: string;
+  draftBusy: boolean;
+  draftError: string | null;
+  viewFileHref: string;
   onToggleExpand: () => void;
   onToggleViewed: (viewed: boolean) => void;
   onDraftBody: (body: string) => void;
   onStartDraft: (target: DraftTarget) => void;
-  onSubmitDraft: () => void;
+  onSubmitDraft: (pending: boolean) => void;
   onCancelDraft: () => void;
-  onDiscardPending: (id: number) => void;
+  onDiscardPending: (id: string) => void;
 }) @{
   const large = props.file.patch.length > DIFF_LARGE_PATCH_CHARS;
   const bodyId = useId();
@@ -250,6 +334,7 @@ export function PullV2DiffFile(props: {
   });
   const [adds, dels] = useMemo(() => diffPatchStatCounts(props.file.patch), [props.file.patch]);
   const meta = fileStatusMeta(props.file.status);
+  const [dragSel, setDragSel, getDragSel] = useState<DragSelection | null>(null);
 
   // Old/new line numbers from hunk headers — same gutter math as DiffPatch.
   const keyed = useMemo(() => {
@@ -276,19 +361,14 @@ export function PullV2DiffFile(props: {
     });
   }, [rows]);
 
-  const pendingByRow = useMemo(() => {
-    const m = new Map<number, PendingLineComment[]>();
-    for (const c of props.pending) {
-      const list = m.get(c.row) ?? [];
-      list.push(c);
-      m.set(c.row, list);
-    }
-    return m;
-  }, [props.pending]);
+  const allComments = useMemo(
+    () => [...props.submitted, ...props.pending],
+    [props.submitted, props.pending],
+  );
 
-  const submittedByRow = useMemo(() => {
+  const commentsByRow = useMemo(() => {
     const m = new Map<number, PullCommentPublic[]>();
-    for (const c of props.submitted) {
+    for (const c of allComments) {
       if (c.line == null) continue;
       for (const r of keyed) {
         const match =
@@ -304,7 +384,120 @@ export function PullV2DiffFile(props: {
       }
     }
     return m;
-  }, [keyed, props.submitted]);
+  }, [keyed, allComments]);
+
+  // Rows covered by a committed [start_line..line] range — persistently
+  // accent the gutter so the range reads without opening the thread.
+  const coveredRows = useMemo(() => {
+    const s = new Set<number>();
+    if (props.minimizeComments) return s;
+    for (const c of allComments) {
+      if (c.start_line == null) continue;
+      for (const r of keyed) {
+        if (commentCoversRow(c, r.kind, r.oldNo, r.newNo)) s.add(r.index);
+      }
+    }
+    return s;
+  }, [keyed, allComments, props.minimizeComments]);
+
+  const fileComments = useMemo(() => allComments.filter((c) => c.line == null), [allComments]);
+  const commentCount = props.pending.length + props.submitted.length;
+
+  // #262 — gutter drag: press on a line-number cell anchors the range and
+  // registers the document listeners synchronously (a same-burst mouseup
+  // would miss a useEffect-installed listener); hovering rows extends the
+  // range, mouseup opens the composer, Escape / window blur cancels.
+  const dragCleanup = useRef<(() => void) | null>(null);
+
+  function dropDragListeners() {
+    dragCleanup.current?.();
+    dragCleanup.current = null;
+  }
+
+  function cancelDrag() {
+    dropDragListeners();
+    setDragSel(null);
+  }
+
+  function beginDrag(e: MouseEvent, anchor: LineAnchor | null, rowIndex: number) {
+    if (!anchor || !props.canInteract || e.button !== 0) return;
+    e.preventDefault();
+    dropDragListeners();
+    setDragSel({
+      side: anchor.side,
+      startLine: anchor.line,
+      startRow: rowIndex,
+      endLine: anchor.line,
+      endRow: rowIndex,
+    });
+    const onUp = () => finishDrag();
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") cancelDrag();
+    };
+    const onBlur = () => cancelDrag();
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", onBlur);
+    dragCleanup.current = () => {
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }
+
+  useEffect(() => () => dropDragListeners(), []);
+
+  function hoverRow(row: KeyedRow) {
+    const d = getDragSel();
+    if (!d) return;
+    const a = anchorForSide(row, d.side);
+    if (!a || (a.line === d.endLine && row.index === d.endRow)) return;
+    setDragSel({ ...d, endLine: a.line, endRow: row.index });
+  }
+
+  function finishDrag() {
+    const d = getDragSel();
+    dropDragListeners();
+    setDragSel(null);
+    if (!d || d.endRow === d.startRow) return;
+    const line = Math.max(d.startLine, d.endLine);
+    const startLine = Math.min(d.startLine, d.endLine);
+    props.onStartDraft({
+      path: props.file.path,
+      row: Math.max(d.startRow, d.endRow),
+      side: d.side,
+      line,
+      startLine,
+    });
+  }
+
+  function inDragRange(row: KeyedRow): boolean {
+    if (!dragSel) return false;
+    const lo = Math.min(dragSel.startRow, dragSel.endRow);
+    const hi = Math.max(dragSel.startRow, dragSel.endRow);
+    if (row.index < lo || row.index > hi) return false;
+    return anchorForSide(row, dragSel.side) != null;
+  }
+
+  function startLineDraft(anchor: LineAnchor, rowIndex: number) {
+    props.onStartDraft({
+      path: props.file.path,
+      row: rowIndex,
+      side: anchor.side,
+      line: anchor.line,
+      startLine: null,
+    });
+  }
+
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(props.file.path);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  }
+
+  const viewed = props.marksEnabled && props.viewed;
 
   <section
     id={fileAnchorId(props.file.path)}
@@ -312,7 +505,8 @@ export function PullV2DiffFile(props: {
     className={
       cn(
         "scroll-mt-32 overflow-hidden rounded-md border border-border bg-card",
-        props.viewed && "opacity-75",
+        viewed && "opacity-75",
+        dragSel && "select-none",
       ) as string
     }
     data-testid="pull-v2-diff-file"
@@ -344,7 +538,37 @@ export function PullV2DiffFile(props: {
           <span className="text-destructive">{`−${dels}` as string}</span>
         </span>;
       }
+      @if (commentCount > 0) {
+        <span
+          className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground"
+          title={`${commentCount} comments`}
+          data-testid="pull-v2-file-comment-count"
+        >
+          <MessageSquare aria-hidden size={10} />
+          {commentCount as number}
+        </span>;
+      }
       @if (props.canInteract) {
+        <button
+          type="button"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={`Comment on ${props.file.path}`}
+          title="Comment on this file"
+          data-testid="pull-v2-file-comment"
+          onClick={() =>
+            props.onStartDraft({
+              path: props.file.path,
+              row: null,
+              side: null,
+              line: null,
+              startLine: null,
+            })
+          }
+        >
+          <MessageSquarePlus aria-hidden size={13} />
+        </button>;
+      }
+      @if (props.canInteract && props.marksEnabled) {
         <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground">
           <span
             className={
@@ -369,7 +593,41 @@ export function PullV2DiffFile(props: {
           />
         </label>;
       }
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={`More options for ${props.file.path}`}
+          data-testid="pull-v2-file-menu"
+        >
+          <Ellipsis aria-hidden size={14} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="min-w-40">
+          <DropdownMenuItem data-testid="pull-v2-file-menu-copy" onClick={() => void copyPath()}>
+            Copy path
+          </DropdownMenuItem>
+          <DropdownMenuLinkItem href={props.viewFileHref} data-testid="pull-v2-file-menu-view">
+            View file
+          </DropdownMenuLinkItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
+    @if (props.draft?.row === null || fileComments.length > 0) {
+      <div className="border-b border-border/50" data-testid="pull-v2-file-comments">
+        <RowNotes
+          draft={props.draft?.row === null ? props.draft : null}
+          draftBody={props.draftBody}
+          draftBusy={props.draftBusy}
+          draftError={props.draftError}
+          comments={fileComments}
+          canInteract={props.canInteract}
+          minimizeComments={props.minimizeComments}
+          onDraftBody={props.onDraftBody}
+          onSubmitDraft={props.onSubmitDraft}
+          onCancelDraft={props.onCancelDraft}
+          onDiscardPending={props.onDiscardPending}
+        />
+      </div>;
+    }
     <div id={bodyId}>
       @if (gated) {
         <DiffLargeGate
@@ -401,36 +659,71 @@ export function PullV2DiffFile(props: {
                 aria-label={`Diff for ${props.file.path}`}
               >
                 @for (const line of keyed; key line.index) {
-                  <div className="group" data-diff-kind={line.kind as string}>
+                  <div
+                    className="group"
+                    data-diff-row={line.index as number}
+                    onMouseOver={() => hoverRow(line)}
+                  >
                     <div
-                      className={cn(
-                        "flex",
-                        diffLineClass(line.kind) as string,
-                        props.compact ? "py-0" : "py-0.5",
-                      )}
+                      className={
+                        cn(
+                          "flex",
+                          diffLineClass(line.kind) as string,
+                          props.compact ? "py-0" : "py-0.5",
+                          inDragRange(line) &&
+                            "outline-1 -outline-offset-1 outline-primary/60",
+                          coveredRows.has(line.index) &&
+                            "shadow-[inset_2px_0_0_0_var(--primary)]",
+                        ) as string
+                      }
+                      data-diff-kind={line.kind as string}
                       role="row"
                     >
-                      <LineCommentButton
-                        anchor={unifiedAnchor(line)}
-                        canInteract={props.canInteract}
-                        onAdd={(a) =>
-                          props.onStartDraft({
-                            path: props.file.path,
-                            row: line.index,
-                            side: a.side,
-                            line: a.line,
-                          })
+                      <span
+                        className="w-6 shrink-0 select-none pl-1"
+                        data-diff-gutter
+                        data-side={(unifiedAnchor(line)?.side ?? "") as string}
+                        onMouseDown={(e) =>
+                          beginDrag(e, unifiedAnchor(line), line.index)
                         }
-                      />
+                      >
+                        <LineCommentButton
+                          anchor={unifiedAnchor(line)}
+                          canInteract={props.canInteract}
+                          onAdd={(a) => startLineDraft(a, line.index)}
+                        />
+                      </span>
                       <span
                         aria-hidden="true"
-                        className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+                        className={
+                          cn(
+                            "w-10 shrink-0 select-none pr-2 text-right",
+                            inDragRange(line) || coveredRows.has(line.index)
+                              ? "bg-primary/10 text-primary"
+                              : "text-muted-foreground/60",
+                          ) as string
+                        }
+                        data-diff-gutter
+                        onMouseDown={(e) =>
+                          beginDrag(e, unifiedAnchor(line), line.index)
+                        }
                       >
                         {(line.oldNo ?? "") as number | string}
                       </span>
                       <span
                         aria-hidden="true"
-                        className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
+                        className={
+                          cn(
+                            "w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right",
+                            inDragRange(line) || coveredRows.has(line.index)
+                              ? "bg-primary/10 text-primary"
+                              : "text-muted-foreground/60",
+                          ) as string
+                        }
+                        data-diff-gutter
+                        onMouseDown={(e) =>
+                          beginDrag(e, unifiedAnchor(line), line.index)
+                        }
                       >
                         {(line.newNo ?? "") as number | string}
                       </span>
@@ -460,8 +753,11 @@ export function PullV2DiffFile(props: {
                     <RowNotes
                       draft={props.draft?.row === line.index ? props.draft : null}
                       draftBody={props.draftBody}
-                      pending={pendingByRow.get(line.index) ?? []}
-                      submitted={submittedByRow.get(line.index) ?? []}
+                      draftBusy={props.draftBusy}
+                      draftError={props.draftError}
+                      comments={commentsByRow.get(line.index) ?? []}
+                      canInteract={props.canInteract}
+                      minimizeComments={props.minimizeComments}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}
                       onCancelDraft={props.onCancelDraft}
@@ -483,30 +779,55 @@ export function PullV2DiffFile(props: {
                 aria-label={`Diff for ${props.file.path}`}
               >
                 @for (const line of keyed; key line.index) {
-                  <div className="group" data-diff-kind={line.kind as string}>
+                  <div
+                    className="group"
+                    data-diff-row={line.index as number}
+                    onMouseOver={() => hoverRow(line)}
+                  >
                     <div
-                      className={cn(
-                        "grid grid-cols-2 border-b border-border/40",
-                        diffLineClass(line.kind) as string,
-                      )}
+                      className={
+                        cn(
+                          "grid grid-cols-2 border-b border-border/40",
+                          diffLineClass(line.kind) as string,
+                          inDragRange(line) &&
+                            "outline-1 -outline-offset-1 outline-primary/60",
+                          coveredRows.has(line.index) &&
+                            "shadow-[inset_2px_0_0_0_var(--primary)]",
+                        ) as string
+                      }
+                      data-diff-kind={line.kind as string}
                       role="row"
                     >
                       <div className="flex border-r border-border/50 text-muted-foreground">
-                        <LineCommentButton
-                          anchor={splitAnchors(line).left}
-                          canInteract={props.canInteract}
-                          onAdd={(a) =>
-                            props.onStartDraft({
-                              path: props.file.path,
-                              row: line.index,
-                              side: a.side,
-                              line: a.line,
-                            })
+                        <span
+                          className="w-6 shrink-0 select-none pl-1"
+                          data-diff-gutter
+                          data-side="LEFT"
+                          onMouseDown={(e) =>
+                            beginDrag(e, splitAnchors(line).left, line.index)
                           }
-                        />
+                        >
+                          <LineCommentButton
+                            anchor={splitAnchors(line).left}
+                            canInteract={props.canInteract}
+                            onAdd={(a) => startLineDraft(a, line.index)}
+                          />
+                        </span>
                         <span
                           aria-hidden="true"
-                          className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+                          className={
+                            cn(
+                              "w-10 shrink-0 select-none pr-2 text-right",
+                              inDragRange(line) || coveredRows.has(line.index)
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground/60",
+                            ) as string
+                          }
+                          data-diff-gutter
+                          data-side="LEFT"
+                          onMouseDown={(e) =>
+                            beginDrag(e, splitAnchors(line).left, line.index)
+                          }
                         >
                           {(line.oldNo ?? "") as number | string}
                         </span>
@@ -522,21 +843,35 @@ export function PullV2DiffFile(props: {
                         }
                       </div>
                       <div className="flex text-muted-foreground">
-                        <LineCommentButton
-                          anchor={splitAnchors(line).right}
-                          canInteract={props.canInteract}
-                          onAdd={(a) =>
-                            props.onStartDraft({
-                              path: props.file.path,
-                              row: line.index,
-                              side: a.side,
-                              line: a.line,
-                            })
+                        <span
+                          className="w-6 shrink-0 select-none pl-1"
+                          data-diff-gutter
+                          data-side="RIGHT"
+                          onMouseDown={(e) =>
+                            beginDrag(e, splitAnchors(line).right, line.index)
                           }
-                        />
+                        >
+                          <LineCommentButton
+                            anchor={splitAnchors(line).right}
+                            canInteract={props.canInteract}
+                            onAdd={(a) => startLineDraft(a, line.index)}
+                          />
+                        </span>
                         <span
                           aria-hidden="true"
-                          className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+                          className={
+                            cn(
+                              "w-10 shrink-0 select-none pr-2 text-right",
+                              inDragRange(line) || coveredRows.has(line.index)
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground/60",
+                            ) as string
+                          }
+                          data-diff-gutter
+                          data-side="RIGHT"
+                          onMouseDown={(e) =>
+                            beginDrag(e, splitAnchors(line).right, line.index)
+                          }
                         >
                           {(line.newNo ?? "") as number | string}
                         </span>
@@ -555,8 +890,11 @@ export function PullV2DiffFile(props: {
                     <RowNotes
                       draft={props.draft?.row === line.index ? props.draft : null}
                       draftBody={props.draftBody}
-                      pending={pendingByRow.get(line.index) ?? []}
-                      submitted={submittedByRow.get(line.index) ?? []}
+                      draftBusy={props.draftBusy}
+                      draftError={props.draftError}
+                      comments={commentsByRow.get(line.index) ?? []}
+                      canInteract={props.canInteract}
+                      minimizeComments={props.minimizeComments}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}
                       onCancelDraft={props.onCancelDraft}

@@ -181,6 +181,41 @@ describe("PullV2Changes", () => {
   });
 
   it("collects a line comment into the pending review and submits it", async () => {
+    // Drafts persist server-side immediately (pending: true): the comment is
+    // created up front, then reviews.submit links its id. The comments list
+    // refetches after each mutation, so steer the mock through the flow.
+    const pendingComment = {
+      id: "c1",
+      pull_id: "p1",
+      author_id: "u2",
+      author_username: "ada",
+      body: "nit: rename this",
+      path: "src/a.ts",
+      side: "RIGHT",
+      line: 1,
+      start_line: null,
+      commit_sha: "deadbeef0123",
+      pending: true,
+      resolved: false,
+      outdated: false,
+      created_at: "2026-03-04T10:00:00Z",
+      updated_at: "2026-03-04T10:00:00Z",
+    };
+    commentsCreateMock.mockImplementation(async () => {
+      commentsListMock.mockResolvedValue({
+        ok: true,
+        data: { comments: [pendingComment] },
+      });
+      return { ok: true, data: pendingComment };
+    });
+    reviewsSubmitMock.mockImplementation(async () => {
+      commentsListMock.mockResolvedValue({
+        ok: true,
+        data: { comments: [{ ...pendingComment, pending: false, review_id: "r1" }] },
+      });
+      return { ok: true, data: { id: "r1" } };
+    });
+
     renderChanges();
     await screen.findByTestId("pull-v2-file-tree");
 
@@ -193,12 +228,7 @@ describe("PullV2Changes", () => {
     fireEvent.input(textarea, { target: { value: "nit: rename this" } });
     fireEvent.click(screen.getByTestId("pull-v2-line-draft-add"));
 
-    // Pending badge shows in-file.
-    expect(await screen.findByTestId("pull-v2-pending-comment")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("pull-v2-review-submit"));
-
-    // Pending comments post first; their ids ride the review submit.
+    // The draft posts immediately as a pending review comment…
     await waitFor(() => {
       expect(commentsCreateMock).toHaveBeenCalledWith({
         owner: "ada",
@@ -208,9 +238,20 @@ describe("PullV2Changes", () => {
         path: "src/a.ts",
         side: "RIGHT",
         line: 1,
+        start_line: null,
         commit_sha: "deadbeef0123",
+        pending: true,
       });
     });
+    // …and its badge shows in-file after the list refetch.
+    expect(await screen.findByTestId("pull-v2-pending-comment")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pull-v2-review-submit")).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByTestId("pull-v2-review-submit"));
+
+    // Submit links the existing pending ids — it must not re-create them.
     await waitFor(() => {
       expect(reviewsSubmitMock).toHaveBeenCalledWith({
         owner: "ada",
@@ -221,6 +262,7 @@ describe("PullV2Changes", () => {
         comment_ids: ["c1"],
       });
     });
+    expect(commentsCreateMock).toHaveBeenCalledTimes(1);
     // Pending list cleared after submit.
     await waitFor(() => {
       expect(screen.queryByTestId("pull-v2-pending-comment")).toBeNull();
