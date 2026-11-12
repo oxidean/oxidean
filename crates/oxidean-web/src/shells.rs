@@ -227,6 +227,13 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[L("settings"), L("experiments")],
+        file: "settings/experiments/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[L("settings"), L("applications")],
         file: "settings/applications/index.html",
         title: None,

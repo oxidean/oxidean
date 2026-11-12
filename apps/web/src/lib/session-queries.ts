@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from "@octanejs/tanstack-query";
 import type {
   AuthSettingsPublic,
   BootstrapStatus,
+  ExperimentsListResponse,
   OrgMineEntry,
   ProviderConfigPublic,
   RepoPublic,
@@ -140,6 +141,28 @@ export function repoListMineQueryOptions() {
         throw new Error(`${res.error.code}: ${res.error.message}`);
       }
       return res.data.repos;
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export const experimentsListQueryKey = ["experiments", "list"] as const;
+
+/**
+ * Experiment registry + the signed-in user's enrollment (`experiments.list`,
+ * WI-0001). Anonymous callers get the same payload with every flag off, so
+ * this never needs an auth soft-read — errors are genuine failures.
+ */
+export function experimentsListQueryOptions() {
+  return queryOptions({
+    queryKey: experimentsListQueryKey,
+    queryFn: async (): Promise<ExperimentsListResponse> => {
+      const res = await apiClient.experiments.list();
+      if (!res.ok) {
+        throw new Error(`${res.error.code}: ${res.error.message}`);
+      }
+      return res.data;
     },
     retry: false,
     staleTime: 30_000,
