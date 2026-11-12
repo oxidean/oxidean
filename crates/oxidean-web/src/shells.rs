@@ -520,7 +520,14 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
-        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), L("changes"), P("sha")],
+        pattern: &[
+            P("owner"),
+            P("repo"),
+            L("pull"),
+            P("n"),
+            L("changes"),
+            P("sha"),
+        ],
         file: "_/_/pull/_/index.html",
         title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
         protected: false,
