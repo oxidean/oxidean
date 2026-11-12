@@ -587,4 +587,35 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       },
     ],
   },
+  // --- WI-0001 pr-new-ui ---
+  {
+    surface: "components/repo/pull-v2/pull-v2-changes.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-changes.browser.test.tsx",
+        subject: "pull-v2-changes",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2-review-bar.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-review-bar.browser.test.tsx",
+        subject: "pull-v2-review-bar",
+      },
+    ],
+  },
+  {
+    surface: "routes/settings/experiments.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/settings/experiments.browser.test.tsx",
+        subject: "experiment-toggle-pr-new-ui",
+      },
+    ],
+  },
 ];
