@@ -17,6 +17,9 @@ on:
     # pull_request jobs fail to acquire runners (empty steps / runner_id 0).
     branches: [main, 'cursor/**']
   pull_request:
+    # edited re-fires the gate on title/body changes — otherwise a
+    # post-green metadata edit could land attribution unchecked.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 concurrency:
@@ -155,6 +158,54 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bun scripts/versioning/cli.ts commit-check --pr-title "$PR_TITLE"
+      - name: scan PR body for attribution markers
+        # Bot-authored bodies (dependabot, renovate) are platform-
+        # generated boilerplate — GitHub injects zero-width spaces into
+        # @-mentions for anti-ping, which this scan exists to catch.
+        # Not a human attribution surface; commits/title still lint.
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" > pr-body.txt
+          # CodeRabbit owns the release-notes block it injects into the
+          # description — exempt that managed section, scan the rest.
+          # Count only the full HTML markers: a plain-text mention of
+          # the phrase is not a block. Unbalanced pairs still fail —
+          # a stray start marker could hide attribution after it.
+          open_m='<!-- This is an auto-generated comment: release notes by coderabbit.ai -->'
+          close_m='<!-- end of auto-generated comment: release notes by coderabbit.ai -->'
+          # -oF counts occurrences, not matching lines — same-line
+          # pairs would read as one open and one close to -c.
+          opens=$(grep -oF "$open_m" pr-body.txt | wc -l || :)
+          closes=$(grep -oF "$close_m" pr-body.txt | wc -l || :)
+          if [ "$opens" != "$closes" ]; then
+            echo "commit-check: unbalanced CodeRabbit release-notes markers in PR body" >&2
+            exit 1
+          fi
+          # ordered, non-nesting extraction: drop each start→end pair
+          # (markers included), keep every other byte — same-line text
+          # around markers and unmatched/out-of-order markers verbatim.
+          awk -v S="$open_m" -v E="$close_m" '
+            { buf = buf $0 "\n" }
+            END {
+              out = ""; rest = buf
+              while ((i = index(rest, S)) > 0) {
+                tail = substr(rest, i + length(S))
+                j = index(tail, E)
+                if (j == 0) break
+                out = out substr(rest, 1, i - 1)
+                rest = substr(tail, j + length(E))
+              }
+              printf "%s", out rest
+            }' pr-body.txt > pr-body-clean.txt
+          # equal counts but wrong order leave markers behind in the
+          # cleaned body — a stray open/close is not a managed block.
+          if grep -qF "$open_m" pr-body-clean.txt || grep -qF "$close_m" pr-body-clean.txt; then
+            echo "commit-check: misordered CodeRabbit release-notes markers in PR body" >&2
+            exit 1
+          fi
+          bun scripts/versioning/cli.ts commit-check --scan-file pr-body-clean.txt
       - name: registry completeness
         run: bun scripts/versioning/cli.ts check
 

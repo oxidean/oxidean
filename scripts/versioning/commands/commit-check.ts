@@ -7,14 +7,18 @@
 import { readFileSync } from "node:fs";
 import { loadRegistry, type RegistryConfig } from "../lib/registry.ts";
 import { parseCommit, type CommitMessage } from "../lib/commit.ts";
+import { scanAttribution } from "../lib/attribution.ts";
 
 export const usage =
-  "commit-check (--message|--file|--range|--pr-title) <v>\n" +
-  "                                lint commit message(s) against the grammar";
+  "commit-check (--message|--file|--range|--pr-title|--scan-file) <v>\n" +
+  "                                lint commit message(s) against the grammar;\n" +
+  "                                --scan-file lints attribution markers only";
 
 export interface CommitCheckDeps {
   /** Injectable range enumeration for tests — defaults to `git log`. */
   logRange?: (rootDir: string, range: string) => { sha: string; subject: string; body: string }[];
+  /** Injectable comment-prefix resolver for tests — defaults to `git config`. */
+  commentPrefix?: () => string;
 }
 
 function gitLogRange(rootDir: string, range: string) {
@@ -76,23 +80,47 @@ export function checkMessages(
   for (const msg of messages) {
     const parsed = parseCommit(msg, registry);
     const label = msg.sha ? `commit ${msg.sha.slice(0, 10)}` : "commit";
-    if (!parsed.valid) {
-      failures.push({ sha: msg.sha, error: parsed.error! });
-      lines.push(`${label}: ${parsed.error}`);
-    } else {
-      lines.push(`${label}: ok${parsed.exempt ? " (exempt)" : ""}`);
-    }
+    const problems: string[] = [];
+    if (!parsed.valid) problems.push(parsed.error!);
+    // Attribution scans the whole message (subject + body + footers),
+    // not just the grammar surface — trailers and hidden markers live
+    // below the subject line.
+    const text =
+      msg.body === undefined ? msg.subject : `${msg.subject}\n${msg.body}`;
+    for (const v of scanAttribution(text)) problems.push(`attribution: ${v}`);
+    for (const p of problems) failures.push({ sha: msg.sha, error: p });
+    lines.push(
+      `${label}: ${problems.length ? problems.join("; ") : `ok${parsed.exempt ? " (exempt)" : ""}`}`,
+    );
     warnings.push(...parsed.warnings.map((w) => `${label}: ${w}`));
   }
   return { exitCode: failures.length > 0 ? 1 : 0, lines, failures, warnings };
 }
 
-const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | --range <a..b> | --pr-title <t>)
+const USAGE = `usage: versioning commit-check (--message <m> | --file <path> | --range <a..b> | --pr-title <t> | --scan-file <path>)
   --message <m>   lint a literal commit message (subject + body)
   --file <path>   lint the message in a commit-msg file (git hook)
   --range <a..b>  lint every commit in a git range (CI)
   --pr-title <t>  lint a PR title (same grammar)
+  --scan-file <path>  attribution-marker scan only (PR body; no grammar)
 `;
+
+/** Resolve the active git comment prefix: core.commentString wins over
+ * core.commentChar (which keeps only its first byte); empty|auto → '#'. */
+function resolveCommentPrefix(rootDir: string): string {
+  const cfg = (key: string): string => {
+    const proc = Bun.spawnSync(["git", "config", "--get", key], {
+      cwd: rootDir,
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    return proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+  };
+  const s = cfg("core.commentString");
+  if (s) return s;
+  const c = cfg("core.commentChar");
+  return !c || c === "auto" ? "#" : c[0];
+}
 
 /** CLI body — parse argv, run the check, print, return exit code. */
 export function commitCheckCommand(
@@ -102,9 +130,21 @@ export function commitCheckCommand(
 ): number {
   const mode = argv[0];
   const value = argv[1];
-  if (!mode || argv.length !== 2 || !["--message", "--file", "--range", "--pr-title"].includes(mode)) {
+  if (!mode || argv.length !== 2 || !["--message", "--file", "--range", "--pr-title", "--scan-file"].includes(mode)) {
     process.stderr.write(USAGE);
     return 2;
+  }
+
+  if (mode === "--scan-file") {
+    try {
+      const violations = scanAttribution(readFileSync(value, "utf-8"));
+      for (const v of violations) process.stderr.write(`commit-check: ${v}\n`);
+      if (violations.length === 0) process.stdout.write("commit-check: ok\n");
+      return violations.length === 0 ? 0 : 1;
+    } catch (err) {
+      process.stderr.write(`commit-check: ${err instanceof Error ? err.message : String(err)}\n`);
+      return 2;
+    }
   }
 
   let messages: CommitMessage[];
@@ -123,12 +163,28 @@ export function commitCheckCommand(
         break;
       }
       case "--file": {
-        const text = readFileSync(value, "utf-8");
-        const nl = text.indexOf("\n");
+        const raw = readFileSync(value, "utf-8");
+        // `git commit -v` appends the staged diff below the scissors
+        // line — everything past it is not message text. The marker is
+        // the active comment prefix plus git's fixed dashes/>8/dashes
+        // tail; only an exact whole-line match cuts (a line merely
+        // starting with it is message text, not a cut). Comment lines
+        // before it stay in the scanned body: a marker hidden in one
+        // must fail here exactly as it would in CI.
+        const prefix = (deps.commentPrefix ?? (() => resolveCommentPrefix(rootDir)))();
+        const marker = `${prefix} ------------------------ >8 ------------------------`;
+        const rawLines = raw.split("\n").map((l) => l.replace(/\r$/, ""));
+        const cut = rawLines.findIndex((l) => l === marker);
+        const precut = cut === -1 ? rawLines : rawLines.slice(0, cut);
+        // Grammar sees the cleaned message — comment and blank lines
+        // are not the subject. Attribution scans the whole precut.
+        const si = precut.findIndex((l) => l.trim() !== "" && !l.startsWith(prefix));
         messages = [
           {
-            subject: nl === -1 ? text : text.slice(0, nl),
-            body: nl === -1 ? undefined : text.slice(nl + 1),
+            subject: si === -1 ? "" : precut[si],
+            // every non-subject precut line is body — comments before
+            // the subject are scanned too.
+            body: precut.filter((_, i) => i !== si).join("\n"),
             source: "file",
           },
         ];
@@ -136,7 +192,14 @@ export function commitCheckCommand(
       }
       case "--range": {
         const enumerate = deps.logRange ?? gitLogRange;
-        messages = enumerate(rootDir, value).map((c) => ({
+        const commits = enumerate(rootDir, value);
+        // An empty-but-valid range (typo'd or post-force-push SHA) must
+        // fail loudly — silently linting zero commits is a false pass.
+        if (commits.length === 0) {
+          process.stderr.write(`commit-check: empty range ${value}\n`);
+          return 1;
+        }
+        messages = commits.map((c) => ({
           sha: c.sha,
           subject: c.subject,
           body: c.body,
@@ -155,18 +218,9 @@ export function commitCheckCommand(
     for (const f of result.failures) process.stderr.write(`${f.error}\n`);
     return 2;
   }
-  // Per-commit report lines on stdout, warnings on stderr (BR1.8-style split).
-  for (const msg of messages) {
-    const parsed = parseCommit(msg, { allowed_types: [], reserved_scopes: [], entries: [] });
-    void parsed;
-  }
-  for (const msg of messages) {
-    const label = msg.sha ? `commit ${msg.sha.slice(0, 10)}` : "commit";
-    const failed = result.failures.find((f) => f.sha === msg.sha);
-    process.stdout.write(
-      failed ? `${label}: ${failed.error}\n` : `${label}: ok\n`,
-    );
-  }
+  // Per-commit report lines on stdout (all problems joined per commit),
+  // warnings on stderr (BR1.8-style split).
+  for (const line of result.lines) process.stdout.write(`${line}\n`);
   for (const w of result.warnings) process.stderr.write(`${w}\n`);
   return result.exitCode;
 }

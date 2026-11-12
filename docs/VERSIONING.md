@@ -124,7 +124,12 @@ make commit-check    # lints HEAD~10..HEAD
 ```
 
 CI enforces the same grammar in the `commit-lint` job on
-`.github/workflows/ci.yml` (PR branch range + PR title).
+`.github/workflows/ci.yml` (PR branch range + PR title), plus the
+no-AI-attribution scan (`.cursor/rules/no-ai-attribution.mdc`) on commit
+messages, the PR title, and the PR body (`--scan-file`; bot-authored PR
+bodies are exempt — platform boilerplate, not an authorial surface —
+and CodeRabbit's managed release-notes block is stripped before the
+scan; unbalanced or misordered markers fail the job).
 
 ## Changelogs
 

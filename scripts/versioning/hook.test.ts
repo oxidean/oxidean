@@ -119,6 +119,11 @@ describe("ci.yml commit-lint job", () => {
     expect(job).toContain("github.event_name == 'pull_request'");
   });
 
+  test("scans the PR body for attribution, exempting bot authors", () => {
+    expect(job).toContain("commit-check --scan-file");
+    expect(job).toContain("pull_request.user.type != 'Bot'");
+  });
+
   test("runs the registry completeness check", () => {
     expect(job).toContain("cli.ts check");
   });
