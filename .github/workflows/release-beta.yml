@@ -4,7 +4,7 @@
 # This
 # lane is bookkeeping: on each push it computes the beta BumpPlan and, when
 # anything bumped, creates annotated `<component>-v<semver>-beta.N` tags at the
-# pushed SHA and pushes them via RELEASE_TOKEN (GITHUB_TOKEN tag pushes do
+# pushed SHA and pushes them as the release App (GITHUB_TOKEN tag pushes do
 # not re-trigger workflows — FR3.4).
 #
 # Tag-only: manifests on main always carry the last stable version. Pushed
@@ -40,16 +40,56 @@ jobs:
   beta-tags:
     name: cut beta tags
     runs-on: ubuntu-latest
-    # Forks have no RELEASE_TOKEN and should never cut releases.
+    # Forks have no release App credentials and should never cut releases.
     if: github.repository == 'oxidean/oxidean'
     steps:
+      # Tag pushes must come from the release App so the push event re-triggers
+      # the tag lanes — the same mint production-deploy.yml uses (FR3.4). The
+      # legacy RELEASE_TOKEN PAT is gone; App installation tokens cascade.
+      - name: Release App credentials are configured
+        env:
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${RELEASE_APP_ID:-}" ] || [ -z "${RELEASE_APP_PRIVATE_KEY:-}" ]; then
+            echo "::error::RELEASE_APP_ID (variable) and RELEASE_APP_PRIVATE_KEY (secret) must be set — beta tags push as the release App (FR3.4)"
+            exit 1
+          fi
+
+      - name: Mint release App token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ steps.release-token.outputs.token }}
           # Tag the pushed/selected SHA, not wherever main happens to be when
           # this serialized job starts.
           ref: ${{ github.sha }}
+
+      - name: Commit as the release App
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_SLUG: ${{ steps.release-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          # Annotated tags need a committer identity — attribute them to the
+          # App's bot user. Falls back to the generic Actions bot if the
+          # lookup fails (identity only; the push credential is unaffected).
+          bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id 2>/dev/null || true)"
+          if [ -n "$bot_id" ]; then
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          fi
+
       - uses: oven-sh/setup-bun@v2
       - name: install workspace deps
         run: bun install --frozen-lockfile
@@ -66,20 +106,12 @@ jobs:
       - name: nothing to release
         if: steps.plan.outputs.bumped == '0'
         run: echo "beta plan is empty — no prerelease cut"
-      - name: tag + push beta cuts via RELEASE_TOKEN
+      - name: tag + push beta cuts as the release App
         if: steps.plan.outputs.bumped != '0'
-        env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${RELEASE_TOKEN:-}" ]; then
-            echo "::error::RELEASE_TOKEN secret is not set — tag pushes need a maintainer credential (FR3.4)"
-            exit 1
-          fi
-          # Annotated tags need a committer identity — this job makes no commits,
-          # so nothing else configures one.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Tag pushes ride the App-token credentials persisted by checkout;
+          # committer identity was configured above.
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --channel beta
           # One atomic push — per-tag loops race GitHub's ref backend and come
