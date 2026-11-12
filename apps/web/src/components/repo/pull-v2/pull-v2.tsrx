@@ -15,11 +15,12 @@ import { cn } from "@/lib/utils";
 
 type PullV2Tab = "overview" | "commits" | "checks" | "changes";
 
-/** Sub-path after `/pull/N` → tab. `changes/<sha>` is the files tab too. */
+/** Sub-path after `/pull/N` → tab. `changes/<sha>` is the files tab too;
+ * `files` is the client-side alias for the server `/files` → `/changes` 302. */
 export function pullV2TabFromSplat(splat: string): PullV2Tab {
   if (splat === "commits") return "commits";
   if (splat === "checks") return "checks";
-  if (splat === "changes" || splat.startsWith("changes/")) return "changes";
+  if (splat === "changes" || splat.startsWith("changes/") || splat === "files") return "changes";
   return "overview";
 }
 

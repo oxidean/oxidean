@@ -62,6 +62,8 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   const [view, setView] = useState<"unified" | "split">("unified");
   const [wrap, setWrap] = useState(false);
   const [compact, setCompact] = useState(false);
+  const [hideWhitespace, setHideWhitespace] = useState(false);
+  const [contextLines, setContextLines] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -74,12 +76,22 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   const seqRef = useRef(0);
 
   const filesQ = useQuery({
-    queryKey: ["pull", "files", props.owner, props.repoName, props.number] as const,
+    queryKey: [
+      "pull",
+      "files",
+      props.owner,
+      props.repoName,
+      props.number,
+      hideWhitespace,
+      contextLines,
+    ] as const,
     queryFn: async () => {
       const res = await apiClient.pull.files({
         owner: props.owner,
         name: props.repoName,
         number: props.number,
+        w: hideWhitespace || undefined,
+        context: contextLines ?? undefined,
       });
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
@@ -97,6 +109,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
+    enabled: props.canInteract,
     retry: false,
   });
 
@@ -116,9 +129,14 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   const files: PullDiffFile[] = filesQ.data?.files ?? [];
   const comments: PullCommentPublic[] = commentsQ.data?.comments ?? [];
 
-  // S5 — hydrate local viewed state once the server list lands.
+  // S5 — hydrate local viewed state once the server list lands (first
+  // response only — a later refetch must not clobber a fresh toggle).
+  const viewedHydrated = useRef(false);
   useEffect(() => {
-    if (viewedQ.data) setViewedList(viewedQ.data.viewed_paths ?? []);
+    if (viewedQ.data && !viewedHydrated.current) {
+      viewedHydrated.current = true;
+      setViewedList(viewedQ.data.viewed_paths ?? []);
+    }
   }, [viewedQ.data]);
 
   const viewedSet = useMemo(() => new Set(viewedList), [viewedList]);
@@ -165,6 +183,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   }
 
   async function toggleViewed(path: string, viewed: boolean) {
+    if (!props.canInteract) return;
     const prev = viewedList;
     setViewedList(viewed ? [...prev, path] : prev.filter((p) => p !== path));
     const res = await apiClient.pull.filesViewed.set({
@@ -203,23 +222,14 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   async function submitReview(state: "commented" | "approved" | "changes_requested", body: string) {
     setReviewBusy(true);
     setReviewError(null);
-    const res = await apiClient.pull.reviews.submit({
-      owner: props.owner,
-      name: props.repoName,
-      number: props.number,
-      state,
-      body: body.trim() ? body : null,
-    });
-    if (!res.ok) {
-      setReviewBusy(false);
-      setReviewError(res.error.message || "Review failed");
-      return;
-    }
-    // Pending line comments post after the review — sequential so a failure
-    // keeps the remaining list intact for a retry (S6). Anchors land on the
-    // viewed commit: the scoped `<sha>` when the URL carries one, else head.
+    // Pending line comments post first so their ids ride the review submit —
+    // a mid-loop failure leaves `pending` intact for retry and never commits
+    // a review missing its comments (S6). Anchors land on the viewed commit:
+    // the scoped `<sha>` when the URL carries one, else head.
     const anchorSha = props.changesSha ?? props.headSha ?? null;
-    for (const c of pending) {
+    const commentIds: string[] = [];
+    for (let i = 0; i < pending.length; i++) {
+      const c = pending[i];
       const cr = await apiClient.pull.comments.create({
         owner: props.owner,
         name: props.repoName,
@@ -231,10 +241,28 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
         commit_sha: anchorSha,
       });
       if (!cr.ok) {
+        setPending(pending.slice(i));
         setReviewBusy(false);
         setReviewError(cr.error.message || "Could not post a pending comment");
         return;
       }
+      commentIds.push(cr.data.id);
+    }
+    const res = await apiClient.pull.reviews.submit({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+      state,
+      body: body.trim() ? body : null,
+      comment_ids: commentIds,
+    });
+    if (!res.ok) {
+      // Comments already posted stay posted; dropping them from `pending`
+      // avoids re-creating them (the link step validates fresh ids).
+      setPending([]);
+      setReviewBusy(false);
+      setReviewError(res.error.message || "Review failed");
+      return;
     }
     setPending([]);
     setDraft(null);
@@ -280,6 +308,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
             files={filtered}
             viewed={viewedSet}
             commentCounts={commentCounts}
+            canInteract={props.canInteract}
             onToggleViewed={(path, v) => void toggleViewed(path, v)}
           />
         </aside>;
@@ -391,6 +420,28 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
               >
                 Compact density
               </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={hideWhitespace}
+                onCheckedChange={(v) => setHideWhitespace(v)}
+                data-testid="pull-v2-hide-whitespace"
+              >
+                Hide whitespace changes
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              @for (const n of [0, 3, 10, 20]; key n) {
+                <DropdownMenuItem
+                  data-testid={`pull-v2-context-${n}`}
+                  onClick={() => setContextLines(n === 3 ? null : n)}
+                >
+                  <Check
+                    aria-hidden
+                    size={13}
+                    className={(contextLines ?? 3) === n ? "" : "invisible"}
+                  />
+                  {`Context: ${n} lines` as string}
+                </DropdownMenuItem>;
+              }
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

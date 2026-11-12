@@ -2994,11 +2994,12 @@ pub async fn link_pull_comments_to_review(
     }
     match pool {
         DbPool::Postgres(p) => sqlx::query(
-            "UPDATE pull_comments SET review_id = $2 \
-             WHERE pull_id = $1 AND author_id = $3 AND id = ANY($4)",
+            "UPDATE pull_comments SET review_id = $1 \
+             WHERE pull_id = $2 AND author_id = $3 AND review_id IS NULL \
+             AND id = ANY($4)",
         )
-        .bind(pull_id)
         .bind(review_id)
+        .bind(pull_id)
         .bind(author_id)
         .bind(comment_ids)
         .execute(p)
@@ -3012,12 +3013,13 @@ pub async fn link_pull_comments_to_review(
                 comment_ids.len(),
             );
             let q_str = format!(
-                "UPDATE pull_comments SET review_id = ?2 \
-                 WHERE pull_id = ?1 AND author_id = ?3 AND id IN ({in_list})"
+                "UPDATE pull_comments SET review_id = ? \
+                 WHERE pull_id = ? AND author_id = ? AND review_id IS NULL \
+                 AND id IN ({in_list})"
             );
             let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str))
-                .bind(pull_id)
                 .bind(review_id)
+                .bind(pull_id)
                 .bind(author_id);
             let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
             q.execute(p)
@@ -3032,12 +3034,13 @@ pub async fn link_pull_comments_to_review(
                 comment_ids.len(),
             );
             let q_str = format!(
-                "UPDATE pull_comments SET review_id = ?2 \
-                 WHERE pull_id = ?1 AND author_id = ?3 AND id IN ({in_list})"
+                "UPDATE pull_comments SET review_id = ?1 \
+                 WHERE pull_id = ?2 AND author_id = ?3 AND review_id IS NULL \
+                 AND id IN ({in_list})"
             );
             let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str))
-                .bind(pull_id)
                 .bind(review_id)
+                .bind(pull_id)
                 .bind(author_id);
             let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
             q.execute(p)

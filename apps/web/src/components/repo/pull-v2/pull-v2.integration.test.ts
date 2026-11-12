@@ -67,6 +67,7 @@ describe("pullV2TabFromSplat", () => {
     ["checks", "checks"],
     ["changes", "changes"],
     ["changes/abc123", "changes"],
+    ["files", "changes"],
     ["bogus", "overview"],
   ])("maps %s → %s", (splat, expected) => {
     expect(pullV2TabFromSplat(splat)).toBe(expected);

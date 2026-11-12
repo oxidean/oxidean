@@ -25,6 +25,8 @@ fn db_err(e: String) -> AppError {
     }
 }
 
+// Self-preference: a session suffices — mirrors `user.update_profile`, which
+// is also session-only rather than `require_verified`.
 fn require_session(
     ctx: &RpcCtx,
 ) -> Result<&oxidean_api_core::auth::session::ResolvedSession, AppError> {

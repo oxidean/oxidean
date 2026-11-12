@@ -119,6 +119,12 @@ pub async fn reviews_submit(
                 "review comments must belong to this pull and the submitter",
             ));
         }
+        if comment.review_id.is_some() {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "review comment is already attached to a review",
+            ));
+        }
         comment_ids.push(cid.to_string());
     }
 

@@ -21,6 +21,8 @@ type PullV2FileTreeProps = {
   viewed: ReadonlySet<string>;
   /** Submitted + pending comment count per path. */
   commentCounts: ReadonlyMap<string, number>;
+  /** Signed-in viewers only — viewed marks require a verified session. */
+  canInteract: boolean;
   onToggleViewed: (path: string, viewed: boolean) => void;
 };
 
@@ -143,22 +145,28 @@ export function PullV2FileTree(props: PullV2FileTreeProps) @{
               </span>;
             }
           </a>
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={props.viewed.has(row.path)}
-            className={cn(
-              "inline-flex size-4 shrink-0 items-center justify-center rounded-sm border",
-              props.viewed.has(row.path)
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-input bg-card text-transparent hover:border-muted-foreground",
-            )}
-            title={props.viewed.has(row.path) ? "Mark as not viewed" : "Mark as viewed"}
-            data-testid="pull-v2-tree-viewed"
-            onClick={() => props.onToggleViewed(row.path, !props.viewed.has(row.path))}
-          >
-            <Check aria-hidden size={11} />
-          </button>
+          @if (props.canInteract) {
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={props.viewed.has(row.path)}
+              className={cn(
+                "inline-flex size-4 shrink-0 items-center justify-center rounded-sm border",
+                props.viewed.has(row.path)
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-input bg-card text-transparent hover:border-muted-foreground",
+              )}
+              title={
+                props.viewed.has(row.path) ? "Mark as not viewed" : "Mark as viewed"
+              }
+              data-testid="pull-v2-tree-viewed"
+              onClick={() =>
+                props.onToggleViewed(row.path, !props.viewed.has(row.path))
+              }
+            >
+              <Check aria-hidden size={11} />
+            </button>;
+          }
         </div>;
       }
     }

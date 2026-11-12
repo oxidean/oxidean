@@ -344,29 +344,31 @@ export function PullV2DiffFile(props: {
           <span className="text-destructive">{`−${dels}` as string}</span>
         </span>;
       }
-      <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground">
-        <span
-          className={
-            cn(
-              "inline-flex size-4 items-center justify-center rounded-sm border",
-              props.viewed
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-input bg-card text-transparent",
-            ) as string
-          }
-          aria-hidden="true"
-        >
-          <Check size={11} />
-        </span>
-        Viewed
-        <input
-          type="checkbox"
-          className="sr-only"
-          checked={props.viewed}
-          data-testid="pull-v2-file-viewed"
-          onChange={() => props.onToggleViewed(!props.viewed)}
-        />
-      </label>
+      @if (props.canInteract) {
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span
+            className={
+              cn(
+                "inline-flex size-4 items-center justify-center rounded-sm border",
+                props.viewed
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-input bg-card text-transparent",
+              ) as string
+            }
+            aria-hidden="true"
+          >
+            <Check size={11} />
+          </span>
+          Viewed
+          <input
+            type="checkbox"
+            className="sr-only"
+            checked={props.viewed}
+            data-testid="pull-v2-file-viewed"
+            onChange={() => props.onToggleViewed(!props.viewed)}
+          />
+        </label>;
+      }
     </div>
     <div id={bodyId}>
       @if (gated) {
