@@ -5,11 +5,10 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
 } from "@octanejs/lucide";
-import { PullChecks } from "@/components/repo/pull-checks";
-import { PullCommits } from "@/components/repo/pull-commits";
-import { PullConversation } from "@/components/repo/pull-conversation";
-import { PullFiles } from "@/components/repo/pull-files";
-import { PullReviews } from "@/components/repo/pull-reviews";
+import { PullV2Changes } from "@/components/repo/pull-v2/pull-v2-changes";
+import { PullV2Checks } from "@/components/repo/pull-v2/pull-v2-checks";
+import { PullV2Commits } from "@/components/repo/pull-v2/pull-v2-commits";
+import { PullV2Overview } from "@/components/repo/pull-v2/pull-v2-overview";
 import { AppLink } from "@/components/ui/app-link";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -74,8 +73,8 @@ const TABS: { id: PullV2Tab; label: string; path: (base: string) => string }[] =
 
 /**
  * pr-new-ui (WI-0001): GitHub-style pull chrome — sticky mini-header +
- * URL-backed tab nav. Tab bodies still delegate to the v1 components in this
- * stage; plan stages 4-10 replace each surface in place.
+ * URL-backed tab nav. Tab bodies delegate to the pull-v2 surfaces
+ * (stages 4–10); the legacy v1 components stay untouched for flag-off users.
  */
 export function PullDetailV2(props: PullDetailV2Props) @{
   const base = `/${props.owner}/${props.repoName}/pull/${props.number}`;
@@ -123,37 +122,38 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     </div>
 
     @if (props.tab === "overview") {
-      <div className="space-y-6">
-        <PullConversation
-          owner={props.owner}
-          repoName={props.repoName}
-          number={props.number}
-          canWrite={props.canWrite}
-          canInteract={props.canInteract}
-          currentUserId={props.currentUserId}
-          body={(props.pull.body || "") as string}
-        />
-        <PullReviews
-          owner={props.owner}
-          repoName={props.repoName}
-          number={props.number}
-          canWrite={props.canWrite}
-          isAuthor={props.isAuthor}
-        />
-      </div>;
+      <PullV2Overview
+        owner={props.owner}
+        repoName={props.repoName}
+        number={props.number}
+        repo={props.repo}
+        pull={props.pull}
+        canWrite={props.canWrite}
+        canInteract={props.canInteract}
+        isAuthor={props.isAuthor}
+        currentUserId={props.currentUserId}
+      />;
     }
     @if (props.tab === "commits") {
-      <PullCommits owner={props.owner} repoName={props.repoName} number={props.number} />;
+      <PullV2Commits owner={props.owner} repoName={props.repoName} number={props.number} />;
     }
     @if (props.tab === "checks") {
-      <PullChecks owner={props.owner} repoName={props.repoName} sha={props.pull.head_sha} />;
+      <PullV2Checks
+        owner={props.owner}
+        repoName={props.repoName}
+        sha={props.pull.head_sha}
+      />;
     }
     @if (props.tab === "changes") {
-      <PullFiles
+      <PullV2Changes
         owner={props.owner}
         repoName={props.repoName}
         number={props.number}
         canInteract={props.canInteract}
+        isAuthor={props.isAuthor}
+        currentUserId={props.currentUserId}
+        changesSha={props.changesSha}
+        headSha={props.pull.head_sha}
       />;
     }
   </div>;
