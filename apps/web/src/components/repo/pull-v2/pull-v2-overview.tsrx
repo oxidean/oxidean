@@ -12,6 +12,7 @@ import { useRef, useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
 import { MarkdownBody } from "@/components/repo/markdown-body";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
+import { ComposerExtras } from "./pull-v2-composer-extras";
 import { PullV2MergeCard } from "./pull-v2-merge-card";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
@@ -466,6 +467,7 @@ function OverviewComposer(props: {
       >
         <List aria-hidden size={14} />
       </button>
+      <ComposerExtras value={draft} onValueChange={setDraft} disabled={props.busy} />
     </div>
     <Textarea
       ref={taRef}

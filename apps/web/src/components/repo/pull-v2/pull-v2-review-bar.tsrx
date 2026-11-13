@@ -5,6 +5,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ComposerExtras } from "./pull-v2-composer-extras";
 
 function pendingAnchorLabel(c: PullCommentPublic): string {
   if (!c.path) return "General comment";
@@ -83,15 +84,23 @@ export function PullV2ReviewBar(props: {
         }
       </ul>;
     }
-    <Textarea
-      rows={2}
-      className="mt-2 text-[13px]"
-      placeholder="Leave a review summary (optional)"
-      value={body}
-      disabled={props.busy}
-      data-testid="pull-v2-review-body"
-      onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)}
-    />
+    <div className="mt-2 flex items-start gap-2">
+      <Textarea
+        rows={2}
+        className="min-w-0 flex-1 text-[13px]"
+        placeholder="Leave a review summary (optional)"
+        value={body}
+        disabled={props.busy}
+        data-testid="pull-v2-review-body"
+        onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)}
+      />
+      <ComposerExtras
+        value={body}
+        onValueChange={setBody}
+        disabled={props.busy}
+        testidPrefix="pull-v2-review"
+      />
+    </div>
     <RadioGroup
       className="mt-2 flex flex-row flex-wrap gap-x-4 gap-y-1"
       aria-label="Review decision"

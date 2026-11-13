@@ -23,6 +23,7 @@ import { useLazyDiffRows } from "@/lib/lazy-diff-rows.tsrx";
 import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
+import { ComposerExtras } from "./pull-v2-composer-extras";
 import {
   anchorLineForSide,
   commentCoversRow,
@@ -179,6 +180,12 @@ function LineDraftBox(props: {
       >
         Cancel
       </button>
+      <ComposerExtras
+        value={props.body}
+        onValueChange={props.onBody}
+        disabled={props.busy}
+        testidPrefix="pull-v2-line-draft"
+      />
     </div>
     @if (props.error) {
       <p role="alert" className="mt-2 text-[12px] text-destructive">

@@ -3,6 +3,7 @@ import type { IssueAssigneePublic, LabelPublic, PullPublic } from "@oxidean/api-
 import { useEffect, useState } from "octane";
 import { CircleSlash, GitPullRequest, GitPullRequestDraft, Settings, X } from "@octanejs/lucide";
 import { AppLink } from "@/components/ui/app-link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -436,22 +437,320 @@ function RailLabels(props: PullV2RailProps) @{
   </section>;
 }
 
-/** Inert rail section for domains with no pull-scoped RPC yet — keeps the
- * GitHub rail layout ("None yet" row + disabled gear) instead of dropping
- * the section. */
-function RailEmptySection(props: { title: string; empty: string; testid: string }) @{
-  <section data-testid={props.testid as string}>
-    <div className="flex items-center justify-between gap-2">
-      <h3 className="text-[13px] font-semibold text-foreground">{props.title as string}</h3>
-      <span
-        className="inline-flex size-5 items-center justify-center text-muted-foreground/40"
-        title={`${props.title} isn't configurable yet`}
-        aria-hidden
-      >
-        <Settings size={13} />
-      </span>
+/** Projects section — pull.projects.list; read-only links to each board. */
+function RailProjects(props: PullV2RailProps) @{
+  const linksQ = useQuery({
+    queryKey: ["pull", "projects", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.projects.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.links;
+    },
+  });
+  const links = linksQ.data ?? [];
+
+  <section aria-labelledby="pull-v2-projects-heading" data-testid="pull-v2-rail-projects">
+    <h3 id="pull-v2-projects-heading" className="text-[13px] font-semibold text-foreground">
+      Projects
+    </h3>
+    <div className="mt-1.5">
+      @if (links.length === 0) {
+        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      } @else {
+        <ul className="flex flex-col gap-1">
+          @for (const link of links; key link.card_id) {
+            <li className="text-[13px]">
+              <AppLink
+                href={link.project_url as string}
+                className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                data-testid="pull-v2-rail-project-link"
+              >
+                {link.project_title as string}
+              </AppLink>
+              <span className="text-muted-foreground">
+                {` · ${link.column_name}` as string}
+              </span>
+              @if (link.project_state === "closed") {
+                <span className="text-muted-foreground"> (closed)</span>;
+              }
+            </li>;
+          }
+        </ul>;
+      }
     </div>
-    <p className="mt-1.5 text-[13px] text-muted-foreground">{props.empty as string}</p>
+  </section>;
+}
+
+/** Milestone section — pull.milestone.set; open-milestone catalog via
+ * milestone.list (same query key the issue sidebar uses). */
+function RailMilestone(props: PullV2RailProps) @{
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<number | null>(
+    () => props.pull.milestone?.number ?? null,
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setSelected(props.pull.milestone?.number ?? null);
+  }, [props.pull.id, props.pull.updated_at]);
+
+  const catalogQ = useQuery({
+    queryKey: ["milestone", "list", props.owner, props.repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.milestone.list({
+        owner: props.owner,
+        name: props.repoName,
+        state: "open",
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.milestones;
+    },
+    enabled: props.canWrite && pickerOpen,
+  });
+
+  const current = props.pull.milestone ?? null;
+  const catalog = catalogQ.data ?? [];
+  // Keep a closed current milestone selectable so the picker doesn't
+  // silently drop it from the options.
+  const options =
+    current && !catalog.some((m) => m.number === current.number) ? [current, ...catalog] : catalog;
+  const dirty = selected !== (current?.number ?? null);
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    const res = await apiClient.pull.milestone.set({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+      milestone: selected,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not update milestone.");
+      return;
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+    });
+  }
+
+  <section aria-labelledby="pull-v2-milestone-heading" data-testid="pull-v2-rail-milestone">
+    <div className="flex items-center justify-between gap-2">
+      <h3 id="pull-v2-milestone-heading" className="text-[13px] font-semibold text-foreground">
+        Milestone
+      </h3>
+      @if (props.canWrite) {
+        <RailGear
+          label="Edit milestone"
+          open={pickerOpen}
+          onToggle={() => setPickerOpen(!pickerOpen)}
+          testid="pull-v2-milestone-gear"
+        />;
+      }
+    </div>
+    <div className="mt-1.5">
+      @if (!current) {
+        <p className="text-[13px] text-muted-foreground">No milestone</p>;
+      } @else {
+        <>
+          <p className="text-[13px]">
+            <AppLink
+              href={`/${props.owner}/${props.repoName}/issues/milestones` as string}
+              className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+              data-testid="pull-v2-rail-milestone-link"
+            >
+              {current.title as string}
+            </AppLink>
+            <span className="text-muted-foreground">{` #${current.number}` as string}</span>
+          </p>
+          @if (
+            current.open_issues != null ||
+            current.closed_issues != null
+          ) {
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              {
+                `${current.open_issues ?? 0} open · ${current.closed_issues ?? 0} closed` as string
+              }
+            </p>;
+          }
+        </>;
+      }
+    </div>
+    @if (props.canWrite && pickerOpen) {
+      <div className="mt-2 flex flex-col gap-1.5" data-testid="pull-v2-milestone-picker">
+        @if (catalogQ.isPending) {
+          <p className="text-[12px] text-muted-foreground">Loading milestones…</p>;
+        } @else {
+          <>
+            <select
+              aria-label="Milestone"
+              className="h-8 rounded-md border border-border bg-background px-2 text-[13px] text-foreground"
+              value={selected === null ? "" : String(selected)}
+              disabled={busy}
+              data-testid="pull-v2-milestone-select"
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                setSelected(v === "" ? null : Number(v));
+              }}
+            >
+              <option value="">No milestone</option>
+              @for (const m of options; key m.id) {
+                <option value={String(m.number) as string}>
+                  {`${m.title} (${m.open_issues ?? 0} open)` as string}
+                </option>;
+              }
+            </select>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy || !dirty}
+              data-testid="pull-v2-milestone-save"
+              onClick={() => void save()}
+            >
+              Save milestone
+            </Button>
+          </>;
+        }
+      </div>;
+    }
+    <p className={cn("mt-1 text-[12px] text-destructive", !error && "hidden")} role="alert">
+      {error as string}
+    </p>
+  </section>;
+}
+
+/** Development section — issues closed by title/body keywords
+ * (pull.development.list). */
+function RailDevelopment(props: PullV2RailProps) @{
+  const devQ = useQuery({
+    queryKey: ["pull", "development", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.development.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.items;
+    },
+  });
+  const items = devQ.data ?? [];
+
+  <section aria-labelledby="pull-v2-development-heading" data-testid="pull-v2-rail-development">
+    <h3 id="pull-v2-development-heading" className="text-[13px] font-semibold text-foreground">
+      Development
+    </h3>
+    <div className="mt-1.5">
+      @if (items.length === 0) {
+        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      } @else {
+        <ul className="flex flex-col gap-1">
+          @for (const item of items; key `${item.issue.id}-${item.relation}`) {
+            <li className="text-[13px]">
+              <span className="text-muted-foreground">
+                {`${item.relation} ` as string}
+              </span>
+              <AppLink
+                href={
+                  `/${props.owner}/${props.repoName}/issues/${item.issue.number}` as string
+                }
+                className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                data-testid="pull-v2-rail-development-link"
+              >
+                {`#${item.issue.number} ${item.issue.title}` as string}
+              </AppLink>
+            </li>;
+          }
+        </ul>;
+      }
+    </div>
+  </section>;
+}
+
+function deploymentBadgeVariant(
+  state: string | null | undefined,
+  fallback: string,
+): "success" | "destructive" | "primary" | "default" {
+  const s = state ?? fallback;
+  if (s === "success") return "success";
+  if (s === "failure" || s === "error" || s === "cancelled") return "destructive";
+  if (s === "inactive") return "default";
+  return "primary";
+}
+
+/** Deployments section — pull.deployments.list (latest status per env). */
+function RailDeployments(props: PullV2RailProps) @{
+  const depsQ = useQuery({
+    queryKey: ["pull", "deployments", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.deployments.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.deployments;
+    },
+  });
+  const deployments = depsQ.data ?? [];
+
+  <section aria-labelledby="pull-v2-deployments-heading" data-testid="pull-v2-rail-deployments">
+    <h3 id="pull-v2-deployments-heading" className="text-[13px] font-semibold text-foreground">
+      Deployments
+    </h3>
+    <div className="mt-1.5">
+      @if (deployments.length === 0) {
+        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      } @else {
+        <ul className="flex flex-col gap-1.5">
+          @for (const d of deployments; key d.id) {
+            <li className="text-[13px]">
+              <div className="flex items-center gap-1.5">
+                @if (d.url) {
+                  {
+                    /* raw-anchor-ok: deployment url is external (cloud
+                    console, service endpoint) — not an app route. */
+                  }
+                  <a
+                    href={d.url as string}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                    data-testid="pull-v2-rail-deployment-link"
+                  >
+                    {d.environment as string}
+                  </a>;
+                } @else {
+                  <AppLink
+                    href={`/${props.owner}/${props.repoName}/actions` as string}
+                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                    data-testid="pull-v2-rail-deployment-link"
+                  >
+                    {d.environment as string}
+                  </AppLink>;
+                }
+                <Badge variant={deploymentBadgeVariant(d.state, d.job_status)}>
+                  {(d.state ?? d.job_status) as string}
+                </Badge>
+              </div>
+              @if (d.description) {
+                <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                  {d.description as string}
+                </p>;
+              }
+            </li>;
+          }
+        </ul>;
+      }
+    </div>
   </section>;
 }
 
@@ -551,9 +850,9 @@ function RailActions(props: PullV2RailProps) @{
 /**
  * "Status and details" right rail for the v2 overview (WI-0001 S8),
  * ordered like GitHub's new UI: activity summary first, then the
- * reviewers / assignees / labels pickers, then the not-yet-backed
- * sections (Projects / Milestone / Development / Deployments) as empty
- * rows, participants, and the draft/close footer actions.
+ * reviewers / assignees / labels pickers, then Projects / Milestone /
+ * Development / Deployments, participants, and the draft/close footer
+ * actions.
  */
 export function PullV2Rail(props: PullV2RailProps) @{
   const reviewsQ = useQuery({
@@ -625,13 +924,10 @@ export function PullV2Rail(props: PullV2RailProps) @{
     <RailReviewers {...props} />
     <RailAssignees {...props} />
     <RailLabels {...props} />
-    {/* Sections GitHub renders even when empty; no pull-scoped RPCs exist
-        for these domains yet (pull.update has no milestone field, no
-        pull-project linkage, deployments aren't PR-scoped). */}
-    <RailEmptySection title="Projects" empty="None yet" testid="pull-v2-rail-projects" />
-    <RailEmptySection title="Milestone" empty="No milestone" testid="pull-v2-rail-milestone" />
-    <RailEmptySection title="Development" empty="None yet" testid="pull-v2-rail-development" />
-    <RailEmptySection title="Deployments" empty="None yet" testid="pull-v2-rail-deployments" />
+    <RailProjects {...props} />
+    <RailMilestone {...props} />
+    <RailDevelopment {...props} />
+    <RailDeployments {...props} />
     <section data-testid="pull-v2-rail-participants">
       <h3 className="text-[13px] font-semibold text-foreground">
         {
