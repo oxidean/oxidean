@@ -578,11 +578,16 @@ pub struct SetPullMilestoneRequest {
 }
 
 /// One row of the PR rail "Development" section — an issue this pull's
-/// body/title references with a closing keyword (`closes`/`fixes`/`resolves`).
+/// body/title references with a closing keyword (`close`/`fix`/`resolve`
+/// and their inflections), optionally qualified as `owner/repo#N`.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullDevelopmentItem {
-    /// `closes` | `fixes` | `resolves` — the keyword matched.
+    /// Closing keyword matched in the pull title/body.
     pub relation: String,
+    /// Owner slug of the repository containing `issue`.
+    pub repo_owner: String,
+    /// Repository name containing `issue`.
+    pub repo_name: String,
     pub issue: crate::IssuePublic,
 }
 

@@ -3,12 +3,23 @@ import type { SavedReplyPublic } from "@oxidean/api-client";
 import { Bookmark, Loader, Paperclip, Plus, Trash2 } from "@octanejs/lucide";
 import { useRef, useState } from "octane";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +77,9 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftBody, setDraftBody] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const repliesQ = useQuery({
@@ -102,22 +116,26 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
     await queryClient.invalidateQueries({ queryKey: ["savedReplies", "list"] });
   }
 
+  function openCreateDialog() {
+    setDraftName("");
+    setDraftBody("");
+    setError("");
+    setCreateOpen(true);
+  }
+
   async function createReply() {
-    const name = window.prompt("Saved reply name");
-    if (!name?.trim()) return;
-    const body = window.prompt("Saved reply body (markdown)");
-    if (!body?.trim()) return;
+    const name = draftName.trim();
+    const body = draftBody.trim();
+    if (!name || !body) return;
     setBusy(true);
     setError("");
     try {
-      const res = await apiClient.savedReplies.create({
-        name: name.trim(),
-        body: body.trim(),
-      });
+      const res = await apiClient.savedReplies.create({ name, body });
       if (!res.ok) {
         setError(res.error.message || "Could not save the reply.");
         return;
       }
+      setCreateOpen(false);
       await invalidateReplies();
     } catch {
       setError(NETWORK_ERROR);
@@ -255,7 +273,7 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
         <DropdownMenuItem
           data-testid={`${prefix}-reply-new` as string}
           disabled={props.disabled || busy || authFailed}
-          onClick={() => void createReply()}
+          onClick={openCreateDialog}
         >
           <Plus aria-hidden size={13} />
           New saved reply
@@ -292,5 +310,72 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
     >
       {error as string}
     </span>
+    <Dialog
+      open={createOpen}
+      onOpenChange={(open) => {
+        if (busy) return;
+        setCreateOpen(open);
+        if (!open) setError("");
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-lg"
+        data-testid={`${prefix}-reply-create-dialog` as string}
+      >
+        <DialogHeader>
+          <DialogTitle>New saved reply</DialogTitle>
+          <DialogDescription>
+            Saved replies insert markdown into any comment composer.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor={`${prefix}-reply-name` as string}>Name</Label>
+            <Input
+              id={`${prefix}-reply-name` as string}
+              value={draftName}
+              onInput={(e) => setDraftName((e.currentTarget as HTMLInputElement).value)}
+              placeholder="e.g. Repro steps"
+              data-testid={`${prefix}-reply-name-input` as string}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor={`${prefix}-reply-body` as string}>Body (markdown)</Label>
+            <Textarea
+              id={`${prefix}-reply-body` as string}
+              value={draftBody}
+              onInput={(e) => setDraftBody((e.currentTarget as HTMLTextAreaElement).value)}
+              placeholder={"Line one\n\n- detail\n- detail" as string}
+              className="min-h-28 font-mono text-[13px]"
+              data-testid={`${prefix}-reply-body-input` as string}
+            />
+          </div>
+          @if (error) {
+            <p role="alert" className="text-[13px] text-destructive">
+              {error as string}
+            </p>;
+          }
+        </div>
+        <DialogFooter>
+          <button
+            type="button"
+            className="rounded-md px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-muted"
+            disabled={busy}
+            onClick={() => setCreateOpen(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            disabled={busy || !draftName.trim() || !draftBody.trim()}
+            data-testid={`${prefix}-reply-create-save` as string}
+            onClick={() => void createReply()}
+          >
+            {busy ? "Saving…" : "Save reply"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }

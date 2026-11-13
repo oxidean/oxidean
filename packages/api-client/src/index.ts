@@ -4698,8 +4698,12 @@ export type SetPullMilestoneRequest = {
 };
 
 export type PullDevelopmentItem = {
-  /** `closes` | `fixes` | `resolves` — the keyword matched. */
+  /** Closing keyword matched in the pull title/body. */
   relation: string;
+  /** Owner slug of the repository containing `issue`. */
+  repo_owner: string;
+  /** Repository name containing `issue`. */
+  repo_name: string;
   issue: IssuePublic;
 };
 

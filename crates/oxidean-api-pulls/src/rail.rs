@@ -59,49 +59,45 @@ pub async fn milestone_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<Pul
     to_public(ctx, &refreshed).await
 }
 
-/// Closing-keyword refs in `text` — `(relation, issue_number)` pairs in
-/// first-seen order. GitHub's Development section scans the PR title and
-/// body for `closes|fixes|resolves #N`.
-fn closing_refs(text: &str) -> Vec<(String, i64)> {
-    let lower = text.to_lowercase();
-    let keywords = ["closes #", "fixes #", "resolves #"];
-    let mut hits: Vec<(usize, usize, String, i64)> = Vec::new();
-    for kw in keywords {
-        let relation = kw.trim_end_matches(" #").to_string();
-        let mut start = 0;
-        while let Some(pos) = lower[start..].find(kw) {
-            let abs = start + pos;
-            let after = abs + kw.len();
-            let digits: String = lower[after..]
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
-            if let Ok(n) = digits.parse::<i64>() {
-                if n > 0 {
-                    hits.push((abs, after + digits.len(), relation.clone(), n));
-                }
-            }
-            // Advance past the keyword plus any digits; on a non-digit (or
-            // end of text) step over exactly one char so `start` stays on a
-            // char boundary and can't run past the end.
-            start = if digits.is_empty() {
-                lower[after..]
-                    .chars()
-                    .next()
-                    .map_or(lower.len(), |c| after + c.len_utf8())
-            } else {
-                after + digits.len()
+use crate::closing_refs::closing_refs;
+
+/// Resolve one closing ref to its target repo + issue row. Qualified
+/// `owner/repo#N` refs honor the same read ACL as `pull.development.list`;
+/// inaccessible or missing targets are skipped like absent issues.
+async fn resolve_development_ref(
+    ctx: &RpcCtx,
+    base: &oxidean_api_core::repo::AccessibleRepo,
+    base_owner: &str,
+    relation: &'static str,
+    repo: Option<&(String, String)>,
+    number: i64,
+) -> Result<Option<(String, String, String, oxidean_db::IssueRow)>, AppError> {
+    let (repo_id, owner, name) = match repo {
+        Some((owner_slug, repo_name)) => {
+            let target =
+                oxidean_api_core::repo::resolve_repo_for_read(ctx, owner_slug, repo_name).await;
+            let target = match target {
+                Ok(t) => t,
+                Err(e) if e.code == "repo.not_found" => return Ok(None),
+                Err(e) => return Err(e),
             };
+            (target.row.id, target.owner_username, target.row.name)
         }
-    }
-    hits.sort_by_key(|h| h.0);
-    let mut out: Vec<(String, i64)> = Vec::new();
-    for (_, _, rel, n) in hits {
-        if !out.iter().any(|(_, m)| *m == n) {
-            out.push((rel, n));
-        }
-    }
-    out
+        None => (
+            base.row.id.clone(),
+            base_owner.to_string(),
+            base.row.name.clone(),
+        ),
+    };
+    let Some(issue) = ctx
+        .db
+        .find_issue_by_repo_number(&repo_id, number)
+        .await
+        .map_err(db_err)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some((relation.to_string(), owner, name, issue)))
 }
 
 /// `pull.development.list` — Read+; issues the pull's title/body closes.
@@ -122,30 +118,52 @@ pub async fn development_list(
     let mut refs = closing_refs(&pull.title);
     refs.extend(closing_refs(&pull.body));
     let mut seen = std::collections::HashSet::new();
-    refs.retain(|(_, n)| seen.insert(*n));
+    refs.retain(|r| {
+        seen.insert((
+            r.repo
+                .as_ref()
+                .map(|(o, n)| (o.to_lowercase(), n.to_lowercase())),
+            r.number,
+        ))
+    });
     // Bound the per-ref lookups — a body stuffed with refs must not turn one
     // rail view into hundreds of queries.
     refs.truncate(MAX_DEVELOPMENT_REFS);
 
     let mut relations = Vec::with_capacity(refs.len());
+    let mut owners = Vec::with_capacity(refs.len());
+    let mut names = Vec::with_capacity(refs.len());
     let mut rows = Vec::with_capacity(refs.len());
-    for (relation, number) in refs {
-        let Some(issue) = ctx
-            .db
-            .find_issue_by_repo_number(&accessible.row.id, number)
-            .await
-            .map_err(db_err)?
+    for r in refs {
+        let Some((relation, owner, name, issue)) = resolve_development_ref(
+            ctx,
+            &accessible,
+            &accessible.owner_username,
+            r.relation,
+            r.repo.as_ref(),
+            r.number,
+        )
+        .await?
         else {
             continue;
         };
         relations.push(relation);
+        owners.push(owner);
+        names.push(name);
         rows.push(issue);
     }
     let publics = oxidean_api_core::issue::to_public_many(ctx, &rows).await?;
     let items = relations
         .into_iter()
+        .zip(owners)
+        .zip(names)
         .zip(publics)
-        .map(|(relation, issue)| PullDevelopmentItem { relation, issue })
+        .map(|(((relation, owner), name), issue)| PullDevelopmentItem {
+            relation,
+            repo_owner: owner,
+            repo_name: name,
+            issue,
+        })
         .collect();
     Ok(PullDevelopmentListResponse { items })
 }
@@ -241,43 +259,29 @@ pub async fn deployments_list(
 
 #[cfg(test)]
 mod tests {
-    use super::closing_refs;
+    use crate::closing_refs::closing_refs;
+
+    fn refs(text: &str) -> Vec<(Option<crate::closing_refs::RepoSlug>, i64, &'static str)> {
+        closing_refs(text)
+            .into_iter()
+            .map(|r| (r.repo, r.number, r.relation))
+            .collect()
+    }
 
     #[test]
     fn closing_refs_parses_keywords() {
         assert_eq!(
-            closing_refs("closes #12 and fixes #7"),
-            vec![("closes".to_string(), 12), ("fixes".to_string(), 7)]
+            refs("closes #12 and fixes #7"),
+            vec![(None, 12, "closes"), (None, 7, "fixes")]
         );
+        assert_eq!(refs("close #3"), vec![(None, 3, "close")]);
     }
 
     #[test]
-    fn closing_refs_dedupes_and_ignores_zero() {
+    fn closing_refs_parses_qualified_refs() {
         assert_eq!(
-            closing_refs("closes #3 resolves #3 closes #0"),
-            vec![("closes".to_string(), 3)]
-        );
-    }
-
-    #[test]
-    fn closing_refs_never_panics_on_trailing_or_multibyte() {
-        // Regression: `start = after + 1` could land past the end or inside a
-        // multibyte char and panic the slice index.
-        for text in [
-            "closes #",
-            "fixes #é",
-            "resolves #\u{1f600}",
-            "closes",
-            "closes #abc",
-            "text closes #12 trailing closes #",
-        ] {
-            let _ = closing_refs(text);
-        }
-        assert_eq!(closing_refs("closes #"), Vec::new());
-        assert_eq!(closing_refs("fixes #é"), Vec::new());
-        assert_eq!(
-            closing_refs("closes #12 trailing closes #"),
-            vec![("closes".to_string(), 12)]
+            refs("closes owner/repo#9"),
+            vec![(Some(("owner".into(), "repo".into())), 9, "closes")]
         );
     }
 }

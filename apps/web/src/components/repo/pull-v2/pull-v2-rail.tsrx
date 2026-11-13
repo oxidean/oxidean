@@ -695,7 +695,7 @@ function RailDevelopment(props: PullV2RailProps) @{
                   </span>
                   <AppLink
                     href={
-                      `/${props.owner}/${props.repoName}/issues/${item.issue.number}` as string
+                      `/${item.repo_owner}/${item.repo_name}/issues/${item.issue.number}` as string
                     }
                     className="font-medium text-foreground no-underline hover:text-primary hover:underline"
                     data-testid="pull-v2-rail-development-link"

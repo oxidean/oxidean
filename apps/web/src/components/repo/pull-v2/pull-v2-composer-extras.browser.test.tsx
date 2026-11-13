@@ -137,6 +137,64 @@ describe("pull-v2 composer extras browser DOM", () => {
     }
   });
 
+  it("creates a saved reply through the multiline dialog", async () => {
+    const tracker = trackDomErrors();
+    try {
+      createMock.mockResolvedValue({
+        ok: true,
+        data: {
+          id: "r2",
+          name: "Repro steps",
+          body: "line one\n\n- detail",
+          created_at: "2026-03-04T10:00:00Z",
+          updated_at: "2026-03-04T10:00:00Z",
+        },
+      });
+      await mountWithQueryClient(ComposerExtras, { value: "", onValueChange: vi.fn() });
+
+      await clickTestId("pull-v2-saved-replies");
+      await waitForTestId("pull-v2-reply-new");
+      await clickTestId("pull-v2-reply-new");
+      // DialogPortal is keepMounted — the popup stays in the DOM and toggles
+      // `hidden`, so assert visibility rather than attachment.
+      await vi.waitFor(() => {
+        const dlg = document.querySelector(
+          '[data-testid="pull-v2-reply-create-dialog"]',
+        ) as HTMLElement | null;
+        expect(dlg).not.toBeNull();
+        expect(dlg?.hidden).toBe(false);
+      });
+
+      const setField = (testId: string, value: string) => {
+        const el = document.querySelector(`[data-testid="${testId}"]`);
+        if (!el) throw new Error(`field ${testId} missing. ${debugBody()}`);
+        (el as HTMLInputElement | HTMLTextAreaElement).value = value;
+        el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      };
+      await act(async () => {
+        setField("pull-v2-reply-name-input", "Repro steps");
+        setField("pull-v2-reply-body-input", "line one\n\n- detail");
+      });
+
+      await clickTestId("pull-v2-reply-create-save");
+      await vi.waitFor(() => {
+        expect(createMock).toHaveBeenCalledWith({
+          name: "Repro steps",
+          body: "line one\n\n- detail",
+        });
+      });
+      await vi.waitFor(() => {
+        const dlg = document.querySelector(
+          '[data-testid="pull-v2-reply-create-dialog"]',
+        ) as HTMLElement | null;
+        expect(dlg === null || dlg.hidden).toBe(true);
+      });
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  });
+
   it("shows a sign-in hint instead of the picker when saved replies are unauthenticated", async () => {
     const tracker = trackDomErrors();
     try {

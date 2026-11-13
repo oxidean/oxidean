@@ -7,6 +7,7 @@
 //! merge-gate machinery stay in `oxidean_api_core::pull` — `repo::files`'s
 //! create-PR flow and `merge_queue` lean on them cross-domain.
 
+mod closing_refs;
 pub mod comments;
 pub mod lifecycle;
 pub mod merge_ops;

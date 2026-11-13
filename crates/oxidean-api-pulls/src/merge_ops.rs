@@ -1,6 +1,7 @@
 //! `pull.files` / `pull.commits` / `pull.merge` / `repo.mergeSettings.*`
 //! handlers. Merge-gate evaluation lives in `oxidean_api_core::pull::merge_ops` (#162).
 
+use crate::closing_refs::closing_refs;
 use oxidean_api_core::auth::gate::require_verified;
 use oxidean_api_core::git::bare_repo_path;
 use oxidean_api_core::notify;
@@ -15,33 +16,6 @@ use oxidean_core::{
     PullCommitsResponse, PullDiffFile, PullFilesResponse, PullRefRequest, RepoGetRequest,
     RepoMergeSettings, UpdateRepoMergeSettingsRequest,
 };
-
-fn parse_closing_issue_numbers(text: &str) -> Vec<i64> {
-    let lower = text.to_lowercase();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < lower.len() {
-        let rest = &lower[i..];
-        let hit = rest
-            .find("fixes #")
-            .or_else(|| rest.find("closes #"))
-            .or_else(|| rest.find("resolves #"));
-        let Some(pos) = hit else { break };
-        let hash_rel = rest[pos..].find('#').unwrap();
-        let after_hash = i + pos + hash_rel + 1;
-        let digits: String = lower[after_hash..]
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        if let Ok(n) = digits.parse::<i64>() {
-            if n > 0 && !out.contains(&n) {
-                out.push(n);
-            }
-        }
-        i = after_hash + digits.len().max(1);
-    }
-    out
-}
 
 /// Well-known empty-tree object — the diff base for root-commit scopes.
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -481,14 +455,31 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     }
 
     if row.base_ref == accessible.row.default_branch {
-        let mut nums = parse_closing_issue_numbers(&row.body);
-        nums.extend(parse_closing_issue_numbers(&full_message));
-        nums.sort_unstable();
-        nums.dedup();
-        for n in nums {
+        let mut refs = closing_refs(&row.body);
+        refs.extend(closing_refs(&full_message));
+        let mut seen = std::collections::HashSet::new();
+        refs.retain(|r| {
+            seen.insert((
+                r.repo
+                    .as_ref()
+                    .map(|(o, n)| (o.to_lowercase(), n.to_lowercase())),
+                r.number,
+            ))
+        });
+        for r in refs {
+            let same_repo = match &r.repo {
+                None => true,
+                Some((owner, name)) => {
+                    owner.eq_ignore_ascii_case(&accessible.owner_username)
+                        && name.eq_ignore_ascii_case(&accessible.row.name)
+                }
+            };
+            if !same_repo {
+                continue;
+            }
             if let Ok(Some(issue)) = ctx
                 .db
-                .find_issue_by_repo_number(&accessible.row.id, n)
+                .find_issue_by_repo_number(&accessible.row.id, r.number)
                 .await
             {
                 if issue.state == "open" {

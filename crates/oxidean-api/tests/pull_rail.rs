@@ -257,6 +257,61 @@ async fn pull_development_list_finds_closing_refs() {
     assert_eq!(items.len(), 1, "{dev}");
     assert_eq!(items[0]["relation"], "closes");
     assert_eq!(items[0]["issue"]["number"], issue_number);
+    assert_eq!(items[0]["repo_owner"], "pown");
+    assert_eq!(items[0]["repo_name"], "core");
+}
+
+#[tokio::test]
+async fn pull_development_list_covers_keyword_inflections_and_qualified_refs() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_dev_kw.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let (cookie, _pull_id) = seed_pr(&app, &db, &repos).await;
+
+    let issue = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"issue.create","input":{"owner":"pown","name":"core","title":"Bug","body":""}}"#,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    let n = issue["data"]["number"].as_i64().unwrap();
+
+    // Inflected keywords + repo-qualified ref all resolve; bogus forms don't.
+    let upd = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.update","input":{{"owner":"pown","name":"core","number":1,"body":"close #{n} fixed pown/core#{n} resolved #99999 notakeyword #{n}x"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(upd["ok"], true, "{upd}");
+
+    let dev = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.development.list","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(dev["ok"], true, "{dev}");
+    let items = dev["data"]["items"].as_array().unwrap();
+    // `close #n`, `fixed pown/core#n`, `resolved #99999` (missing issue →
+    // skipped); `#{n}x` must not match.
+    let relations: Vec<&str> = items
+        .iter()
+        .map(|i| i["relation"].as_str().unwrap())
+        .collect();
+    assert_eq!(relations, vec!["close", "fixed"], "{dev}");
+    for item in items {
+        assert_eq!(item["repo_owner"], "pown");
+        assert_eq!(item["repo_name"], "core");
+        assert_eq!(item["issue"]["number"], n);
+    }
 }
 
 #[tokio::test]
