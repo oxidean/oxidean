@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { IssueAssigneePublic, LabelPublic, PullPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
-import { X } from "@octanejs/lucide";
+import { CircleSlash, GitPullRequest, GitPullRequestDraft, X } from "@octanejs/lucide";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -382,9 +382,115 @@ function RailLabels(props: PullV2RailProps) @{
   </section>;
 }
 
+/** Inert rail section for domains with no pull-scoped RPC yet — keeps the
+ * GitHub rail layout ("None yet" row) instead of dropping the section. */
+function RailEmptySection(props: { title: string; empty: string; testid: string }) @{
+  <section data-testid={props.testid as string}>
+    <h3 className="text-[13px] font-semibold text-foreground">{props.title as string}</h3>
+    <p className="mt-1.5 text-[13px] text-muted-foreground">{props.empty as string}</p>
+  </section>;
+}
+
+/** Footer actions — convert-to-draft / ready / close via existing RPCs. */
+function RailActions(props: PullV2RailProps) @{
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const open = props.pull.state === "open";
+
+  async function invalidate() {
+    await queryClient.invalidateQueries({
+      queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+    });
+  }
+
+  async function setDraft(draft: boolean) {
+    setBusy(true);
+    setError("");
+    const res = await apiClient.pull.update({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+      draft,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not update the pull request.");
+      return;
+    }
+    await invalidate();
+  }
+
+  async function close() {
+    setBusy(true);
+    setError("");
+    const res = await apiClient.pull.close({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not close the pull request.");
+      return;
+    }
+    await invalidate();
+  }
+
+  <div
+    className="flex flex-col gap-1.5 border-t border-border pt-3"
+    data-testid="pull-v2-rail-actions"
+  >
+    @if (open && props.canWrite) {
+      <>
+        @if (props.pull.draft) {
+          <button
+            type="button"
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-left text-[13px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            data-testid="pull-v2-rail-ready"
+            onClick={() => void setDraft(false)}
+          >
+            <GitPullRequest aria-hidden size={13} />
+            Ready for review
+          </button>;
+        } @else {
+          <button
+            type="button"
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-left text-[13px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            data-testid="pull-v2-rail-convert-draft"
+            onClick={() => void setDraft(true)}
+          >
+            <GitPullRequestDraft aria-hidden size={13} />
+            Convert to draft
+          </button>;
+        }
+        <button
+          type="button"
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 text-left text-[13px] text-muted-foreground hover:text-destructive disabled:opacity-50"
+          data-testid="pull-v2-rail-close"
+          onClick={() => void close()}
+        >
+          <CircleSlash aria-hidden size={13} />
+          Close pull request
+        </button>
+      </>;
+    }
+    <p className={cn("text-[12px] text-destructive", !error && "hidden")} role="alert">
+      {error as string}
+    </p>
+    ;
+  </div>;
+}
+
 /**
- * "Status and details" right rail for the v2 overview (WI-0001 S8):
- * reviewers / assignees / labels pickers plus a plain activity summary.
+ * "Status and details" right rail for the v2 overview (WI-0001 S8),
+ * ordered like GitHub's new UI: activity summary first, then the
+ * reviewers / assignees / labels pickers, then the not-yet-backed
+ * sections (Projects / Milestone / Development / Deployments) as empty
+ * rows, participants, and the draft/close footer actions.
  */
 export function PullV2Rail(props: PullV2RailProps) @{
   const reviewsQ = useQuery({
@@ -415,31 +521,70 @@ export function PullV2Rail(props: PullV2RailProps) @{
   const reviewCount = reviewsQ.data?.reviews.length ?? 0;
   const commitCount = commitsQ.data?.commits.length ?? 0;
   const commentCount = props.pull.comment_count ?? 0;
+  const authorInitial = (props.pull.author_username || "?").slice(0, 1).toUpperCase();
 
   <div className="space-y-5" data-testid="pull-v2-rail">
-    <RailReviewers {...props} />
-    <RailAssignees {...props} />
-    <RailLabels {...props} />
     <section aria-labelledby="pull-v2-activity-heading" data-testid="pull-v2-rail-activity">
       <h3 id="pull-v2-activity-heading" className="text-[13px] font-semibold text-foreground">
         Activity
       </h3>
+      <p className="mt-0.5 text-[12px] text-muted-foreground">
+        since this pull request was created
+      </p>
       <ul className="mt-1.5 space-y-0.5 text-[13px] text-muted-foreground">
-        <li>{`${commitCount} commit${commitCount === 1 ? "" : "s"}` as string}</li>
-        <li>{`${commentCount} comment${commentCount === 1 ? "" : "s"}` as string}</li>
-        <li>{`${reviewCount} review${reviewCount === 1 ? "" : "s"}` as string}</li>
+        <li className="flex items-center justify-between gap-2">
+          <span>Commits</span>
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none">
+            {commitCount as number}
+          </span>
+        </li>
+        <li className="flex items-center justify-between gap-2">
+          <span>Comments</span>
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none">
+            {commentCount as number}
+          </span>
+        </li>
+        <li className="flex items-center justify-between gap-2">
+          <span>Reviews</span>
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none">
+            {reviewCount as number}
+          </span>
+        </li>
       </ul>
       <AppLink
         href={`/${props.owner}/${props.repoName}/activity` as string}
         className="mt-1.5 inline-block text-[13px] text-primary no-underline hover:underline"
         data-testid="pull-v2-activity-link"
       >
-        View repository activity
+        View all activity
       </AppLink>
     </section>
-    {/* GitHub parity gap, intentionally absent: Milestone / Projects /
-        Development / Deployments rail sections have no pull-scoped RPCs
-        (pull.update carries no milestone, no pull-project linkage exists,
-        deployments aren't PR-scoped). Add here when the domain lands. */}
+    <RailReviewers {...props} />
+    <RailAssignees {...props} />
+    <RailLabels {...props} />
+    {/* Sections GitHub renders even when empty; no pull-scoped RPCs exist
+        for these domains yet (pull.update has no milestone field, no
+        pull-project linkage, deployments aren't PR-scoped). */}
+    <RailEmptySection title="Projects" empty="None yet" testid="pull-v2-rail-projects" />
+    <RailEmptySection title="Milestone" empty="No milestone" testid="pull-v2-rail-milestone" />
+    <RailEmptySection title="Development" empty="None yet" testid="pull-v2-rail-development" />
+    <RailEmptySection title="Deployments" empty="None yet" testid="pull-v2-rail-deployments" />
+    <section data-testid="pull-v2-rail-participants">
+      <h3 className="text-[13px] font-semibold text-foreground">
+        {
+          `${props.pull.author_username ? 1 : 0} participant${props.pull.author_username ? "" : "s"}` as string
+        }
+      </h3>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <span
+          className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground"
+          aria-hidden
+        >
+          {authorInitial as string}
+        </span>
+        <span className="text-[13px] text-foreground">{props.pull.author_username as string}</span>
+      </div>
+    </section>
+    <RailActions {...props} />
   </div>;
 }

@@ -409,6 +409,21 @@ export function PullV2DiffFile(props: {
     return s;
   }, [keyed, allComments, props.minimizeComments]);
 
+  // Rows the open draft covers — GitHub keeps the selected band lit while
+  // the composer is open; `finishDrag` clears `dragSel`, so re-derive the
+  // range from the draft target (single-line drafts cover just `line`).
+  const draftRows = useMemo(() => {
+    const s = new Set<number>();
+    const d = props.draft;
+    if (!d || d.line == null || !d.side) return s;
+    const lo = d.startLine ?? d.line;
+    for (const r of keyed) {
+      const a = anchorForSide(r, d.side);
+      if (a && a.line >= lo && a.line <= d.line) s.add(r.index);
+    }
+    return s;
+  }, [keyed, props.draft]);
+
   const fileComments = useMemo(() => allComments.filter((c) => c.line == null), [allComments]);
   const commentCount = props.pending.length + props.submitted.length;
 
@@ -486,6 +501,11 @@ export function PullV2DiffFile(props: {
     const hi = Math.max(dragSel.startRow, dragSel.endRow);
     if (row.index < lo || row.index > hi) return false;
     return anchorForSide(row, dragSel.side) != null;
+  }
+
+  /** Rows lit as selected — in-flight drag ∪ open-draft range. */
+  function inSelRange(row: KeyedRow): boolean {
+    return inDragRange(row) || draftRows.has(row.index);
   }
 
   function startLineDraft(anchor: LineAnchor, rowIndex: number) {
@@ -680,7 +700,7 @@ export function PullV2DiffFile(props: {
                           "flex",
                           diffLineClass(line.kind) as string,
                           props.compact ? "py-0" : "py-0.5",
-                          inDragRange(line) &&
+                          inSelRange(line) &&
                             "outline-1 -outline-offset-1 outline-primary/60",
                           coveredRows.has(line.index) &&
                             "shadow-[inset_2px_0_0_0_var(--primary)]",
@@ -708,7 +728,7 @@ export function PullV2DiffFile(props: {
                         className={
                           cn(
                             "w-10 shrink-0 select-none pr-2 text-right",
-                            inDragRange(line) || coveredRows.has(line.index)
+                            inSelRange(line) || coveredRows.has(line.index)
                               ? "bg-primary/10 text-primary"
                               : "text-muted-foreground/60",
                           ) as string
@@ -725,7 +745,7 @@ export function PullV2DiffFile(props: {
                         className={
                           cn(
                             "w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right",
-                            inDragRange(line) || coveredRows.has(line.index)
+                            inSelRange(line) || coveredRows.has(line.index)
                               ? "bg-primary/10 text-primary"
                               : "text-muted-foreground/60",
                           ) as string
@@ -800,7 +820,7 @@ export function PullV2DiffFile(props: {
                         cn(
                           "grid grid-cols-2 border-b border-border/40",
                           diffLineClass(line.kind) as string,
-                          inDragRange(line) &&
+                          inSelRange(line) &&
                             "outline-1 -outline-offset-1 outline-primary/60",
                           coveredRows.has(line.index) &&
                             "shadow-[inset_2px_0_0_0_var(--primary)]",
@@ -829,7 +849,7 @@ export function PullV2DiffFile(props: {
                           className={
                             cn(
                               "w-10 shrink-0 select-none pr-2 text-right",
-                              inDragRange(line) || coveredRows.has(line.index)
+                              inSelRange(line) || coveredRows.has(line.index)
                                 ? "bg-primary/10 text-primary"
                                 : "text-muted-foreground/60",
                             ) as string
@@ -873,7 +893,7 @@ export function PullV2DiffFile(props: {
                           className={
                             cn(
                               "w-10 shrink-0 select-none pr-2 text-right",
-                              inDragRange(line) || coveredRows.has(line.index)
+                              inSelRange(line) || coveredRows.has(line.index)
                                 ? "bg-primary/10 text-primary"
                                 : "text-muted-foreground/60",
                             ) as string

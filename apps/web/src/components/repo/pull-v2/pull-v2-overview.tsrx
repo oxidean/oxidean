@@ -31,6 +31,8 @@ type PullV2OverviewProps = {
   canInteract: boolean;
   isAuthor: boolean;
   currentUserId: string;
+  /** Mini-header sidebar toggle — hidden rail collapses the layout to one column. */
+  railOpen?: boolean;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -599,7 +601,7 @@ function PullV2Conversation(props: {
 
   <div className="space-y-4" data-testid="pull-v2-conversation">
     <div className="rounded-md border border-border p-3">
-      <p className="mb-2 text-sm font-medium text-muted-foreground">Description</p>
+      <p className="mb-2 text-sm font-medium text-muted-foreground">Summary</p>
       <CommentBody body={props.body} owner={props.owner} repoName={props.repoName} />
     </div>
 
@@ -733,14 +735,20 @@ export function PullV2Overview(props: PullV2OverviewProps) @{
         body={(props.pull.body || "") as string}
       />
     </div>
-    <aside className="hidden w-72 shrink-0 lg:block" aria-label="Status and details">
-      <PullV2Rail
-        owner={props.owner}
-        repoName={props.repoName}
-        number={props.number}
-        pull={props.pull}
-        canWrite={props.canWrite}
-      />
-    </aside>
+    @if (props.railOpen !== false) {
+      <aside
+        className="hidden w-72 shrink-0 lg:block"
+        aria-label="Status and details"
+        data-testid="pull-v2-rail-wrap"
+      >
+        <PullV2Rail
+          owner={props.owner}
+          repoName={props.repoName}
+          number={props.number}
+          pull={props.pull}
+          canWrite={props.canWrite}
+        />
+      </aside>;
+    }
   </div>;
 }

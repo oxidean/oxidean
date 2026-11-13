@@ -15,6 +15,8 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   MessageSquare,
+  PanelRight,
+  PanelRightClose,
   Pencil,
 } from "@octanejs/lucide";
 import { useEffect, useMemo, useState } from "octane";
@@ -179,6 +181,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
 
   const [copied, setCopied] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [titleBusy, setTitleBusy] = useState(false);
@@ -296,7 +299,6 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   }, [searchStr]);
 
   const comments: PullCommentPublic[] = commentsQ.data?.comments ?? [];
-  const pendingReviewCount = comments.filter((c) => c.pending).length;
 
   const suites: CheckSuitePublic[] = suitesQ.data?.suites ?? [];
   const checkCount = suitesQ.data ? suites.reduce((n, s) => n + s.check_runs_count, 0) : undefined;
@@ -453,20 +455,28 @@ export function PullDetailV2(props: PullDetailV2Props) @{
         {pullStateBadge(pullState, props.pull.draft)}
         <div className="ml-auto flex items-center gap-1">
           @if (mergeChip) {
-            <span data-testid="pull-v2-merge-state">
+            <AppLink
+              href={base as string}
+              className="no-underline"
+              title="Merge status — view the merge card on Overview"
+              data-testid="pull-v2-merge-state"
+            >
               <Badge
                 variant={mergeChip.variant === "amber" ? "outline" : mergeChip.variant}
                 className={
-                  mergeChip.variant === "amber"
-                    ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                    : undefined
+                  cn(
+                    "cursor-pointer",
+                    mergeChip.variant === "amber"
+                      ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                      : "",
+                  ) as string
                 }
               >
                 {mergeChip.label as string}
               </Badge>
-            </span>;
+            </AppLink>;
           }
-          @if (pendingReviewCount > 0) {
+          @if (props.canInteract && pullState === "open") {
             <AppLink
               href={`${base}/changes` as string}
               className={cn(buttonVariants({ size: "sm" }), "h-7 px-2 text-[12px]") as string}
@@ -504,6 +514,27 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             onClick={() => setPanel(!panelOpen)}
           >
             <MessageSquare aria-hidden size={15} />
+          </button>
+          <button
+            type="button"
+            className={
+              cn(
+                "inline-flex size-7 items-center justify-center rounded-sm",
+                railOpen
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              ) as string
+            }
+            aria-label="Toggle sidebar"
+            aria-expanded={railOpen}
+            data-testid="pull-v2-rail-toggle"
+            onClick={() => setRailOpen(!railOpen)}
+          >
+            @if (railOpen) {
+              <PanelRightClose aria-hidden size={15} />;
+            } @else {
+              <PanelRight aria-hidden size={15} />;
+            }
           </button>
         </div>
       </div>
@@ -578,6 +609,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             canInteract={props.canInteract}
             isAuthor={props.isAuthor}
             currentUserId={props.currentUserId}
+            railOpen={railOpen}
           />;
         }
         @if (props.tab === "commits") {

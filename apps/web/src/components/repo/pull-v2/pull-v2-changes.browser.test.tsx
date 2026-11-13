@@ -463,4 +463,51 @@ describe("pull-v2 diff-file + file-tree mounts", () => {
       tracker.dispose();
     }
   });
+
+  it("keeps the open draft's line range highlighted", async () => {
+    const tracker = trackDomErrors();
+    try {
+      await mountWithQueryClient(PullV2DiffFile, {
+        file: FILES.files[0],
+        view: "unified",
+        wrap: false,
+        compact: false,
+        expanded: true,
+        viewed: false,
+        marksEnabled: true,
+        canInteract: true,
+        canWrite: true,
+        minimizeComments: false,
+        pending: [],
+        submitted: [],
+        draft: {
+          path: "src/main.rs",
+          row: 2,
+          side: "RIGHT",
+          line: 3,
+          startLine: 1,
+        },
+        draftBody: "",
+        draftBusy: false,
+        draftError: null,
+        viewFileHref: "/acme/core/blob/main/src/main.rs",
+        onToggleExpand: vi.fn(),
+        onToggleViewed: vi.fn(),
+        onDraftBody: vi.fn(),
+        onStartDraft: vi.fn(),
+        onSubmitDraft: vi.fn(),
+        onCancelDraft: vi.fn(),
+        onDiscardPending: vi.fn(),
+      });
+      await settle();
+      const lit = [...document.querySelectorAll("[data-diff-row]")].filter((r) =>
+        (r.firstElementChild?.className ?? "").includes("outline-primary"),
+      );
+      // All three content rows anchor RIGHT-side lines 1–3.
+      expect(lit.length).toBe(3);
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  });
 });
