@@ -141,6 +141,7 @@ async fn serve() {
         state.repos_dir.clone(),
         state.lfs_dir.clone(),
         state.packages_dir.clone(),
+        state.uploads_dir.clone(),
         job_cfg,
         state.vcs.clone(),
     );

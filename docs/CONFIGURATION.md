@@ -44,7 +44,7 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_OIDC_ALLOW_INSECURE` | Optional | unset / false | When `1`/`true`/`yes` **and** `OXIDEAN_ENV` is `development`, `dev`, or `compose`, allows http/loopback issuers for local mocks. Never honored in production-like envs. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Compose | `oxidean` | Postgres container credentials; must match `DATABASE_URL` for the default stack. |
 | `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` / `MYSQL_ROOT_PASSWORD` | MySQL profile | `oxidean` | MySQL container credentials (`docker-compose.mysql.yml`). |
-| `MYSQL_DATABASE_URL` | MySQL profile | `mysql://oxidean:oxidean@mysql:3306/oxidean` | Overrides API `DATABASE_URL` when using the MySQL Compose overlay. |
+| `MYSQL_DATABASE_URL` | MySQL profile | `mysql://oxidean:***@mysql:3306/oxidean` | Overrides API `DATABASE_URL` when using the MySQL Compose overlay. |
 | `OXIDEAN_SQLITE_HOST_DIR` | SQLite overlay | `./var` | Host path bind-mounted to `/app/var` for SQLite file storage. |
 | `OXIDEAN_REPOS_DIR` | Optional | `var/repos` | Root for bare git repositories (`{owner}/{name}.git`). Compose binds `./var/repos:/var/repos`; with API CWD `/` the default resolves to `/var/repos` without overriding the env var. |
 | `OXIDEAN_GIT_REPO_QUOTA_BYTES` | Optional | `10737418240` (10 GiB) | Default per-repo git object size quota (bare repo disk usage). `0` or negative = unlimited. `admin.git.updateSettings` overrides; repo admins can set a per-repo override in Settings (GIT-25). |
@@ -66,6 +66,10 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_VCS_REPO_QUOTA_BYTES` | Optional | `10737418240` (10 GiB) | Per-repo logical VCS object quota; `0` disables. |
 | `OXIDEAN_VCS_GC_INTERVAL_SECS` | Optional | `3600` (1h) | Periodic VCS object-store GC. Set `0` to disable. |
 | `OXIDEAN_VCS_GC_GRACE_SECS` | Optional | `86400` (24h) | Grace period before unreferenced objects delete (also the `.gc-lock` staleness bound). |
+| `OXIDEAN_COMMENT_ATTACHMENT_MAX_BYTES_PER_USER` | Optional | `268435456` (256 MiB) | Stored-byte quota for comment-attachment uploads per user; `0` disables. |
+| `OXIDEAN_COMMENT_ATTACHMENT_MAX_COUNT_PER_USER` | Optional | `100` | Attachment-count quota per user; `0` disables. |
+| `OXIDEAN_COMMENT_ATTACHMENT_ORPHAN_GRACE_SECS` | Optional | `604800` (7d) | Grace before an unreferenced comment attachment may be collected. |
+| `OXIDEAN_COMMENT_ATTACHMENTS_GC_INTERVAL_SECS` | Optional | `86400` (24h) | Comment-attachment orphan GC interval; `0` disables. |
 | `OXIDEAN_CLI_DIST_DIR` | Optional | `/usr/local/share/oxidean-cli` | Directory of `ox-{target-triple}` binaries the API serves at `/cli/bin/*` for `curl /cli/install.sh | sh` and `ox self-update`. Release image ships the server's own platform; drop extra targets into this dir. See [CLI.md](CLI.md). |
 | `OXIDEAN_CLI_DIST_URL` | Optional — self-host: Docker **build-arg**; Oxidean Cloud: **runtime env** | empty | Base URL of a flat artifact set (`ox-targets.txt` + `ox-{triple}` + `.sha256` + `SOURCE_COMMIT`, optional `latest.json`). As a **build-arg** it is fetched at image build time into `OXIDEAN_CLI_DIST_DIR`; as a **runtime env var** the api container's entrypoint fetches it at boot into a URL-keyed volume cache and exports `OXIDEAN_CLI_DIST_DIR`. Empty (default) = host-only — the image serves the same commit's `ox`. Cloud deploy tooling pins this product's `ox-v*` tag release URL matching the deployed commit (runtime var, so images stay immutable across ox releases); preview/PR envs stay host-only so they serve the built commit. Self-hosts point the build-arg at their own feed. Binary/digest/`SOURCE_COMMIT` fetch is fail-closed; `latest.json` is best-effort. See [CLI.md](CLI.md). |
 | `OXIDEAN_SOURCE_COMMIT` | Optional (Docker **build-arg**) | empty | Git SHA written to `SOURCE_COMMIT` on host-only builds → `/cli/latest` `dist_commit`. `images.yml` passes it on image builds; self-hosts pass `OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`. |
@@ -223,7 +227,7 @@ Bare `/{owner}/{repo}` (no `.git` suffix) stays on the web UI. Self-hosted rever
 
 **CGI / disk:** Smart HTTP spawns `git-http-backend` with `GIT_PROJECT_ROOT` = `OXIDEAN_REPOS_DIR`. No extra env vars are required for CGI beyond the existing repos root and a system `git` ≥ 2.5 with `git-http-backend` on the exec path (API image installs distro git).
 
-**PAT prefixes (redacted examples only):** classic `oxidean_pat_REDACTED`, fine-grained `oxidean_fg_REDACTED`. Mint via Settings → Tokens (RPC `pat.*` with session cookie). PATs authenticate Smart HTTP over HTTPS via HTTP Basic (password = token), the package registries, and typed `/api/rpc` via `Authorization: Bearer <pat>` when no session cookie is sent — the scope model is in [API.md](API.md#pat-bearer-authentication).
+**PAT prefixes (redacted examples only):** classic `oxidean_pat_REDACTED`, fine-grained `oxidean_fg_REDACTED`. Mint via Settings → Tokens (RPC `pat.*` with session cookie). PATs authenticate Smart HTTP over HTTPS via HTTP Basic (password = token), the package registries, and typed `/api/rpc` via `Authorization: Bearer *** when no session cookie is sent — the scope model is in [API.md](API.md#pat-bearer-authentication).
 
 **PAT expiration policy:** all minting paths — `pat.createClassic`, `pat.createFineGrained`, and the OAuth device grant (`ox auth login --web`) — resolve `expires_at` through one policy. Env defaults are the floor; sys-admins override per instance under **Admin → Auth settings** or `admin.pat.updateSettings` (`clear_overrides` reverts). `pat.policy` exposes the effective values to any client.
 
@@ -293,9 +297,9 @@ There is no separate application `config.json` / TOML. Configuration is:
 Minimal local `.env` for default Compose:
 
 ```bash
-DATABASE_URL=postgres://oxidean:oxidean@postgres:5432/oxidean
+DATABASE_URL=postgres://oxidean:***@postgres:5432/oxidean
 POSTGRES_USER=oxidean
-POSTGRES_PASSWORD=oxidean
+POSTGRES_PASSWORD=***
 POSTGRES_DB=oxidean
 OXIDEAN_AUTO_MIGRATE=true
 OXIDEAN_ENV=compose
@@ -341,7 +345,7 @@ Or wipe `users` / `sessions` and re-bootstrap with `OXIDEAN_ADMIN_*` or the `/se
 | `OXIDEAN_ALLOW_SIGNUP` | `false` (only `true`/`1` opens signup at seed) | `crates/oxidean-api-core/src/auth/seed.rs` / bootstrap |
 | `OXIDEAN_MAIL_FROM` | `Oxidean <noreply@localhost>` | `crates/oxidean-api-core/src/email/mod.rs` |
 | Resend API base | `https://api.resend.com` | `crates/oxidean-api-core/src/email/resend.rs` |
-| Compose `DATABASE_URL` | `postgres://oxidean:oxidean@postgres:5432/oxidean` | `docker-compose.yml` |
+| Compose `DATABASE_URL` | `postgres://oxidean:***@postgres:5432/oxidean` | `docker-compose.yml` |
 | Compose `OXIDEAN_ENV` | `compose` | `docker-compose.yml` |
 | Compose CORS | `http://localhost,http://127.0.0.1` | `docker-compose.yml` |
 | Dialect | Inferred from `DATABASE_URL` scheme | `crates/oxidean-db/src/dialect.rs` |
@@ -375,8 +379,8 @@ Email sender selection when building from ENV: Resend key → SMTP URL → log s
 
 | Dialect | Sample URL | Bring-up |
 |---------|------------|----------|
-| PostgreSQL | `postgres://oxidean:oxidean@postgres:5432/oxidean` | `make up` |
-| MySQL | `mysql://oxidean:oxidean@mysql:3306/oxidean` | `make up-mysql` |
+| PostgreSQL | `postgres://oxidean:***@postgres:5432/oxidean` | `make up` |
+| MySQL | `mysql://oxidean:***@mysql:3306/oxidean` | `make up-mysql` |
 | SQLite | `sqlite:./var/oxidean.db` (Compose: `sqlite:/app/var/oxidean.db`) | `make up-sqlite` |
 
 Host-local Postgres (API outside Compose): point `DATABASE_URL` at `localhost:5432` and set `OXIDEAN_CORS_ORIGINS=http://localhost:3000` with `OXIDEAN_ENV=development`.

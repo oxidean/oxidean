@@ -8,14 +8,14 @@
 //! `GET /uploads/comment-attachments/{id}` serves it publicly: raster
 //! images inline, everything else `Content-Disposition: attachment`.
 
-use std::path::{Path, PathBuf};
-
 use axum::extract::{Path as AxumPath, Request};
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use oxidean_api_core::comment_attachments::{self, CommentAttachmentMeta};
+use oxidean_api_core::pat::bearer::authorize_pat_for_comment_attachment;
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::app::resolve_session_user_id;
@@ -25,6 +25,9 @@ use crate::app::AppState;
 pub const COMMENT_ATTACHMENT_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 const INLINE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// Serialize quota check + write so concurrent uploads cannot race past it.
+static COMMENT_ATTACHMENT_UPLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
     (
@@ -37,10 +40,6 @@ fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
         .into_response()
 }
 
-fn attachments_dir(uploads_dir: &Path) -> PathBuf {
-    uploads_dir.join("comment-attachments")
-}
-
 #[derive(Deserialize)]
 pub struct UploadQuery {
     /// Original filename — stored for `Content-Disposition` on download.
@@ -50,19 +49,6 @@ pub struct UploadQuery {
     pub content_type: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct AttachmentMeta {
-    name: String,
-    content_type: String,
-    size: u64,
-    uploader_id: String,
-    created_at: String,
-}
-
-fn meta_path(dir: &Path, id: &str) -> PathBuf {
-    dir.join(format!("{id}.json"))
-}
-
 /// `POST /api/uploads/comment-attachments?name=&content_type=` — raw body.
 pub async fn upload_attachment(
     State(state): State<AppState>,
@@ -70,13 +56,18 @@ pub async fn upload_attachment(
     Query(query): Query<UploadQuery>,
     req: Request,
 ) -> Response {
-    let Some((user_id, _pat)) = resolve_session_user_id(&state, &headers).await else {
+    let Some((user_id, pat)) = resolve_session_user_id(&state, &headers).await else {
         return err_response(
             StatusCode::UNAUTHORIZED,
             "auth.unauthenticated",
             "not authenticated",
         );
     };
+    if let Some(pat) = pat.as_ref() {
+        if let Err(e) = authorize_pat_for_comment_attachment(pat) {
+            return err_response(StatusCode::FORBIDDEN, e.code.as_str(), e.message.as_str());
+        }
+    }
     let bytes = match axum::body::to_bytes(req.into_body(), COMMENT_ATTACHMENT_MAX_BYTES).await {
         Ok(b) => b,
         Err(_) => {
@@ -111,7 +102,8 @@ pub async fn upload_attachment(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    let dir = attachments_dir(&state.uploads_dir);
+    let _upload_guard = COMMENT_ATTACHMENT_UPLOAD_LOCK.lock().await;
+    let dir = comment_attachments::attachments_dir(&state.uploads_dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::error!(error = %e, "comment-attachments dir create failed");
         return err_response(
@@ -120,8 +112,15 @@ pub async fn upload_attachment(
             "could not store attachment",
         );
     }
+    if let Err(e) = comment_attachments::check_upload_quota(&dir, &user_id, bytes.len() as u64) {
+        return err_response(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "upload.quota_exceeded",
+            e.as_str(),
+        );
+    }
     let id = Uuid::new_v4().to_string();
-    let data_path = dir.join(&id);
+    let data_path = comment_attachments::data_path(&dir, &id);
     if let Err(e) = std::fs::write(&data_path, &bytes) {
         tracing::error!(error = %e, "comment-attachment write failed");
         return err_response(
@@ -130,7 +129,7 @@ pub async fn upload_attachment(
             "could not store attachment",
         );
     }
-    let meta = AttachmentMeta {
+    let meta = CommentAttachmentMeta {
         name,
         content_type: content_type.clone(),
         size: bytes.len() as u64,
@@ -138,7 +137,7 @@ pub async fn upload_attachment(
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     if let Err(e) = std::fs::write(
-        meta_path(&dir, &id),
+        comment_attachments::meta_path(&dir, &id),
         serde_json::to_vec(&meta).unwrap_or_default(),
     ) {
         tracing::error!(error = %e, "comment-attachment meta write failed");
@@ -174,15 +173,16 @@ pub async fn serve_attachment(
     if Uuid::parse_str(&id).is_err() {
         return err_response(StatusCode::NOT_FOUND, "upload.not_found", "not found");
     }
-    let dir = attachments_dir(&state.uploads_dir);
-    let data_path = dir.join(&id);
+    let dir = comment_attachments::attachments_dir(&state.uploads_dir);
+    let data_path = comment_attachments::data_path(&dir, &id);
     let Ok(bytes) = tokio::fs::read(&data_path).await else {
         return err_response(StatusCode::NOT_FOUND, "upload.not_found", "not found");
     };
-    let meta: Option<AttachmentMeta> = tokio::fs::read(meta_path(&dir, &id))
-        .await
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok());
+    let meta: Option<CommentAttachmentMeta> =
+        tokio::fs::read(comment_attachments::meta_path(&dir, &id))
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
 
     let content_type = meta
         .as_ref()

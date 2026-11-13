@@ -64,6 +64,7 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub mod checks;
+pub mod comment_attachments;
 pub mod contribution_days;
 pub mod contributions;
 pub mod deployments;
@@ -1080,6 +1081,12 @@ impl Database {
     /// Delete scoped to the owner — returns whether a row was removed.
     pub async fn delete_saved_reply(&self, user_id: &str, id: &str) -> Result<bool, String> {
         saved_replies::delete_saved_reply(self.require_pool()?, user_id, id).await
+    }
+
+    /// Bodies containing `/uploads/comment-attachments/` markers — the GC
+    /// reference set for filesystem-backed comment attachments.
+    pub async fn comment_attachment_reference_bodies(&self) -> Result<Vec<String>, String> {
+        comment_attachments::bodies_containing_comment_attachment_refs(self.require_pool()?).await
     }
 
     /// Pinned repo ids for `user_id`, display order (COL-04 profile pins).

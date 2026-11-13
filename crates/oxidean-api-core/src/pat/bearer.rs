@@ -803,6 +803,52 @@ pub async fn authorize_pat_on_repo(
     }
 }
 
+/// PAT gate for `POST /api/uploads/comment-attachments` — the route has no
+/// repository target, so classic tokens need the repo umbrella (or
+/// `public_repo`) and fine-grained tokens need a covered repo selection plus
+/// write on a comment-bearing domain.
+pub fn authorize_pat_for_comment_attachment(pat: &PatIdentity) -> Result<(), AppError> {
+    const PROCEDURE: &str = "comment.attachments.upload";
+    match pat.kind {
+        PatKind::Classic => {
+            if has_scope(&pat.scopes, ClassicPatScope::Repo)
+                || has_scope(&pat.scopes, ClassicPatScope::PublicRepo)
+            {
+                Ok(())
+            } else {
+                Err(pat_scope_err(
+                    PROCEDURE,
+                    "insufficient scope — comment attachments require \"repo\" or \"public_repo\"",
+                ))
+            }
+        }
+        PatKind::FineGrained => {
+            let covered = match pat.repo_access {
+                Some(FgRepoAccess::Selected) => !pat.repository_ids.is_empty(),
+                Some(FgRepoAccess::All) => true,
+                None => false,
+            };
+            let comment_write = [
+                pat.perms.issues,
+                pat.perms.pull_requests,
+                pat.perms.discussions,
+                pat.perms.releases,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|level| level.meets(FgPermLevel::Write));
+            if covered && comment_write {
+                Ok(())
+            } else {
+                Err(pat_scope_err(
+                    PROCEDURE,
+                    "fine-grained token needs a covered repository and write on issues, pull requests, discussions, or releases",
+                ))
+            }
+        }
+    }
+}
+
 /// Dispatch-time PAT scope gate — `ctx.pat.is_some()` → classify + authorize.
 /// Cookie-authenticated contexts return `Ok` immediately.
 pub async fn authorize_rpc(
