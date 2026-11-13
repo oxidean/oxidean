@@ -481,7 +481,6 @@ function RailActions(props: PullV2RailProps) @{
     <p className={cn("text-[12px] text-destructive", !error && "hidden")} role="alert">
       {error as string}
     </p>
-    ;
   </div>;
 }
 
