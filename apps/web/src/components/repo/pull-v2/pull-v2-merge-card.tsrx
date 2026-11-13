@@ -489,12 +489,12 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
 
     {/* GitHub's compact readiness signals — Checks / Comments / Approvals. */}
     <div
-      className="grid grid-cols-1 divide-y divide-border border-y border-border text-[13px] sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+      className="grid grid-cols-1 divide-y divide-border border-y border-border text-[13px]"
       data-testid="pull-v2-merge-signals"
     >
       <AppLink
         href={`/${props.owner}/${props.repoName}/pull/${props.number}/checks` as string}
-        className="flex flex-col gap-1.5 px-3 py-2.5 no-underline transition-colors hover:bg-muted/40"
+        className="flex flex-col gap-1.5 px-3 py-3 no-underline transition-colors hover:bg-muted/40"
         data-testid="pull-v2-checks-row"
       >
         <span className="flex items-center gap-1.5">
@@ -510,7 +510,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
           testid="pull-v2-checks-bar"
         />
       </AppLink>
-      <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="pull-v2-comments-row">
+      <div className="flex flex-col gap-1.5 px-3 py-3" data-testid="pull-v2-comments-row">
         <span className="flex items-center gap-1.5">
           <span className="font-medium text-foreground">Comments</span>
           @if (openComments > 0) {
@@ -534,7 +534,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
           testid="pull-v2-comments-bar"
         />
       </div>
-      <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="pull-v2-approvals-row">
+      <div className="flex flex-col gap-1.5 px-3 py-3" data-testid="pull-v2-approvals-row">
         <span className="flex items-center gap-1.5">
           <span className="font-medium text-foreground">Approvals</span>
           @if (approvalDetail) {

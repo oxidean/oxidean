@@ -652,7 +652,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   <div className="space-y-4">
     {/* Row 1 — mini-header: #N, truncated title, copy, status + pane actions.
         Sticks to the top like GitHub's pull mini-header. */}
-    <div className="sticky top-0 z-20 -mx-4 border-b border-border bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
+    <div className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
       <div className="flex flex-wrap items-center gap-2 py-2 text-[14px]">
         <span className="font-mono text-muted-foreground">#{props.number as number}</span>
         <h2 className="min-w-0 max-w-[55%] truncate font-[family-name:var(--font-display)] font-semibold">
@@ -968,7 +968,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
 
     {/* Row 5 — tab nav (sticky under the mini-header on scroll). */}
     <nav
-      className="sticky top-10 z-10 -mx-4 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6"
+      className="sticky top-10 z-10 flex gap-1 overflow-x-auto border-b border-border bg-background/95 backdrop-blur"
       aria-label="Pull request sections"
     >
       @for (const t of TABS; key t.id) {
@@ -1001,8 +1001,8 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     {/* Row 6 — tab body + details rail (overview) + docked pane. GitHub keeps
         the status/details sidebar on the overview and docks Overview /
         Activity / Comments / Merge status beside it via `?panel=`. */}
-    <div className="flex items-start gap-6">
-      <div className="min-w-0 flex-1 space-y-4">
+    <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-10 lg:gap-8">
+      <div className="min-w-0 space-y-4 md:flex-1">
         @if (props.tab === "overview") {
           <PullV2Overview
             owner={props.owner}
@@ -1049,7 +1049,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
 
       @if (props.tab === "overview") {
         <aside
-          className="sticky top-24 hidden max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto lg:block"
+          className="w-full overflow-y-auto md:sticky md:top-24 md:max-h-[calc(100vh-8rem)] md:w-64 md:shrink-0 lg:w-80"
           aria-label="Pull request details"
           data-testid="pull-v2-details-rail"
         >

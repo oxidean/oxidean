@@ -386,8 +386,9 @@ describe("PullV2Overview conversation", () => {
     const approvals = screen.getByTestId("pull-v2-approvals-row");
     const summary = await screen.findByTestId("pull-v2-summary");
 
-    expect(signals.className).toContain("sm:grid-cols-3");
-    expect(signals.className).toContain("sm:divide-x");
+    expect(signals.className).toContain("grid-cols-1");
+    expect(signals.className).toContain("divide-y");
+    expect(signals.className).not.toContain("sm:grid-cols-3");
     expect(signals.contains(checks)).toBe(true);
     expect(signals.contains(comments)).toBe(true);
     expect(signals.contains(approvals)).toBe(true);
