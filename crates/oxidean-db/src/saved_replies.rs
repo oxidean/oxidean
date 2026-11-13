@@ -18,7 +18,18 @@ pub struct SavedReplyRow {
     pub updated_at: String,
 }
 
-const SAVED_REPLY_COLS: &str = "id, user_id, name, body, created_at, updated_at";
+// Timestamp columns are TIMESTAMPTZ (pg) / DATETIME (mysql) / TEXT (sqlite) —
+// sqlx cannot decode them into String, so each dialect projects formatted
+// text like audit_events/users/notifications do.
+const COLS_PG: &str = "id, user_id, name, body,
+    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at";
+const COLS_MYSQL: &str = "id, user_id, name, body,
+    DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+    DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at";
+const COLS_SQLITE: &str = "id, user_id, name, body,
+    strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
+    strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at";
 
 macro_rules! map_reply {
     ($row:expr) => {{
@@ -54,7 +65,7 @@ pub async fn list_saved_replies(
     match pool {
         DbPool::Postgres(p) => {
             let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = $1 ORDER BY updated_at DESC"
+                "SELECT {COLS_PG} FROM saved_replies WHERE user_id = $1 ORDER BY updated_at DESC"
             );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
@@ -65,7 +76,7 @@ pub async fn list_saved_replies(
         }
         DbPool::MySql(p) => {
             let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = ? ORDER BY updated_at DESC"
+                "SELECT {COLS_MYSQL} FROM saved_replies WHERE user_id = ? ORDER BY updated_at DESC"
             );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
@@ -76,7 +87,7 @@ pub async fn list_saved_replies(
         }
         DbPool::Sqlite(p) => {
             let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = ?1 ORDER BY updated_at DESC"
+                "SELECT {COLS_SQLITE} FROM saved_replies WHERE user_id = ?1 ORDER BY updated_at DESC"
             );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
@@ -97,9 +108,7 @@ pub async fn find_saved_reply(
 ) -> Result<Option<SavedReplyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = $1 AND id = $2"
-            );
+            let sql = format!("SELECT {COLS_PG} FROM saved_replies WHERE user_id = $1 AND id = $2");
             let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
                 .bind(id)
@@ -109,9 +118,8 @@ pub async fn find_saved_reply(
             row.map(|r| Ok(map_reply!(&r))).transpose()
         }
         DbPool::MySql(p) => {
-            let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = ? AND id = ?"
-            );
+            let sql =
+                format!("SELECT {COLS_MYSQL} FROM saved_replies WHERE user_id = ? AND id = ?");
             let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
                 .bind(id)
@@ -121,9 +129,8 @@ pub async fn find_saved_reply(
             row.map(|r| Ok(map_reply!(&r))).transpose()
         }
         DbPool::Sqlite(p) => {
-            let sql = format!(
-                "SELECT {SAVED_REPLY_COLS} FROM saved_replies WHERE user_id = ?1 AND id = ?2"
-            );
+            let sql =
+                format!("SELECT {COLS_SQLITE} FROM saved_replies WHERE user_id = ?1 AND id = ?2");
             let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(user_id)
                 .bind(id)

@@ -15,6 +15,9 @@ fn milestone_not_found() -> AppError {
     AppError::new("milestone.not_found", "Milestone not found")
 }
 
+/// Upper bound on closing refs resolved per `pull.development.list` call.
+const MAX_DEVELOPMENT_REFS: usize = 50;
+
 async fn load_milestone_in_repo(
     ctx: &RpcCtx,
     repo_id: &str,
@@ -78,7 +81,17 @@ fn closing_refs(text: &str) -> Vec<(String, i64)> {
                     hits.push((abs, after + digits.len(), relation.clone(), n));
                 }
             }
-            start = after + digits.len().max(1);
+            // Advance past the keyword plus any digits; on a non-digit (or
+            // end of text) step over exactly one char so `start` stays on a
+            // char boundary and can't run past the end.
+            start = if digits.is_empty() {
+                lower[after..]
+                    .chars()
+                    .next()
+                    .map_or(lower.len(), |c| after + c.len_utf8())
+            } else {
+                after + digits.len()
+            };
         }
     }
     hits.sort_by_key(|h| h.0);
@@ -110,8 +123,12 @@ pub async fn development_list(
     refs.extend(closing_refs(&pull.body));
     let mut seen = std::collections::HashSet::new();
     refs.retain(|(_, n)| seen.insert(*n));
+    // Bound the per-ref lookups — a body stuffed with refs must not turn one
+    // rail view into hundreds of queries.
+    refs.truncate(MAX_DEVELOPMENT_REFS);
 
-    let mut items = Vec::new();
+    let mut relations = Vec::with_capacity(refs.len());
+    let mut rows = Vec::with_capacity(refs.len());
     for (relation, number) in refs {
         let Some(issue) = ctx
             .db
@@ -121,11 +138,15 @@ pub async fn development_list(
         else {
             continue;
         };
-        items.push(PullDevelopmentItem {
-            relation,
-            issue: oxidean_api_core::issue::to_public(ctx, &issue).await?,
-        });
+        relations.push(relation);
+        rows.push(issue);
     }
+    let publics = oxidean_api_core::issue::to_public_many(ctx, &rows).await?;
+    let items = relations
+        .into_iter()
+        .zip(publics)
+        .map(|(relation, issue)| PullDevelopmentItem { relation, issue })
+        .collect();
     Ok(PullDevelopmentListResponse { items })
 }
 
@@ -216,4 +237,47 @@ pub async fn deployments_list(
             })
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closing_refs;
+
+    #[test]
+    fn closing_refs_parses_keywords() {
+        assert_eq!(
+            closing_refs("closes #12 and fixes #7"),
+            vec![("closes".to_string(), 12), ("fixes".to_string(), 7)]
+        );
+    }
+
+    #[test]
+    fn closing_refs_dedupes_and_ignores_zero() {
+        assert_eq!(
+            closing_refs("closes #3 resolves #3 closes #0"),
+            vec![("closes".to_string(), 3)]
+        );
+    }
+
+    #[test]
+    fn closing_refs_never_panics_on_trailing_or_multibyte() {
+        // Regression: `start = after + 1` could land past the end or inside a
+        // multibyte char and panic the slice index.
+        for text in [
+            "closes #",
+            "fixes #é",
+            "resolves #\u{1f600}",
+            "closes",
+            "closes #abc",
+            "text closes #12 trailing closes #",
+        ] {
+            let _ = closing_refs(text);
+        }
+        assert_eq!(closing_refs("closes #"), Vec::new());
+        assert_eq!(closing_refs("fixes #é"), Vec::new());
+        assert_eq!(
+            closing_refs("closes #12 trailing closes #"),
+            vec![("closes".to_string(), 12)]
+        );
+    }
 }

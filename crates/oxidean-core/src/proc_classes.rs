@@ -179,7 +179,11 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         // Own-identity reads. `pat.self`/`pat.policy`/`pat.catalog` are
         // introspection surfaces — any valid credential may call them.
         "auth.me" | "user.get_profile" | "user.lookup" | "pat.self" | "pat.policy"
-        | "pat.catalog" => Identity,
+        | "pat.catalog"
+        | "savedReplies.list"
+        | "savedReplies.create"
+        | "savedReplies.update"
+        | "savedReplies.delete" => Identity,
 
         // Contents/metadata reads (`{owner,name}` repo target where present;
         // account-scoped reads like repo.listMine have no target — classic
@@ -282,7 +286,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.branchStatus"
         | "merge_queue.list"
         | "merge_queue.get"
-        | "merge_queue.groups" => PullsRead,
+        | "merge_queue.groups"
+        | "pull.development.list"
+        | "pull.projects.list"
+        | "pull.deployments.list" => PullsRead,
 
         "pull.create"
         | "pull.update"
@@ -301,7 +308,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.pin"
         | "pull.unpin"
         | "merge_queue.enqueue"
-        | "merge_queue.dequeue" => PullsWrite,
+        | "merge_queue.dequeue"
+        | "pull.milestone.set" => PullsWrite,
 
         "repo.actions.listRuns"
         | "repo.actions.getRun"

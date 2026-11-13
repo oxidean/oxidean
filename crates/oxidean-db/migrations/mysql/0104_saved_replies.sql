@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS saved_replies (
   id         CHAR(36)    PRIMARY KEY,
   user_id    CHAR(36)    NOT NULL,
   name       VARCHAR(255) NOT NULL,
-  body       TEXT        NOT NULL,
+  body       MEDIUMTEXT  NOT NULL,
   created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_saved_replies_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
