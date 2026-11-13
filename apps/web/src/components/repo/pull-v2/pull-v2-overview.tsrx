@@ -812,6 +812,7 @@ export function PullV2Overview(props: PullV2OverviewProps) @{
       mergedAt={props.pull.merged_at ?? null}
       mergedBy={props.pull.merged_by ?? null}
       closedAt={props.pull.closed_at ?? null}
+      headOwner={props.pull.head_owner}
     />
     <PullV2Conversation
       owner={props.owner}

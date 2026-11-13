@@ -35,6 +35,8 @@ type PullV2MergeCardProps = {
   mergedAt?: string | null;
   mergedBy?: string | null;
   closedAt?: string | null;
+  /** Head repo owner — fork heads can't be deleted on the base repo. */
+  headOwner?: string;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -110,6 +112,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
   const [method, setMethod] = useState<MergeMethod>("merge");
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [updatingBranch, setUpdatingBranch] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [blockers, setBlockers] = useState<string[]>([]);
@@ -210,7 +213,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
   const comments = (commentsQ.data?.comments ?? []).filter((c) => !c.pending);
   const anchored = comments.filter((c) => !!c.path);
   const resolvedThreads = anchored.filter((c) => c.resolved).length;
-  const openComments = comments.length - resolvedThreads;
+  const openComments = anchored.length - resolvedThreads;
   const approvals = (reviewsQ.data?.reviews ?? []).filter(
     (r) => r.state === "approved" && !r.dismissed_at,
   ).length;
@@ -237,6 +240,33 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
         queryKey: ["mergeQueue", "get", props.owner, props.repoName, props.number],
       }),
     ]);
+  }
+
+  async function updateBranch() {
+    if (updatingBranch) return;
+    setUpdatingBranch(true);
+    setError(null);
+    try {
+      const res = await apiClient.pull.updateBranch({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) {
+        setError(res.error.message || NETWORK_ERROR);
+        return;
+      }
+      void queryClient.invalidateQueries({
+        queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pull", "branchStatus", props.owner, props.repoName, props.number],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : NETWORK_ERROR);
+    } finally {
+      setUpdatingBranch(false);
+    }
   }
 
   async function merge() {
@@ -542,6 +572,17 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
               {
                 `Branch is ${behindBy} commit${behindBy === 1 ? "" : "s"} behind the base` as string
               }
+              @if (props.canWrite) {
+                <button
+                  type="button"
+                  className="ml-1 rounded-md border border-border px-1.5 py-0.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
+                  disabled={updatingBranch}
+                  data-testid="pull-v2-update-branch"
+                  onClick={updateBranch}
+                >
+                  {updatingBranch ? "Updating…" : "Update branch"}
+                </button>;
+              }
             </li>;
           }
         </ul>
@@ -640,18 +681,22 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
                         </button>;
                       }
                     </div>
-                    <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={deleteBranch}
-                        onChange={(e) =>
-                          setDeleteBranch(
-                            (e.target as HTMLInputElement).checked,
-                          )
-                        }
-                      />
-                      Delete head branch after merge
-                    </label>
+                    @if (
+                      (props.headOwner ?? props.owner) === props.owner
+                    ) {
+                      <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={deleteBranch}
+                          onChange={(e) =>
+                            setDeleteBranch(
+                              (e.target as HTMLInputElement).checked,
+                            )
+                          }
+                        />
+                        Delete head branch after merge
+                      </label>;
+                    }
                     <Button
                       type="button"
                       size="sm"

@@ -13,6 +13,8 @@ type PullV2RailProps = {
   number: number;
   pull: PullPublic;
   canWrite: boolean;
+  /** Author-or-write — draft/close footer actions (can_edit_pull). */
+  canEdit?: boolean;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -503,7 +505,7 @@ function RailActions(props: PullV2RailProps) @{
     className="flex flex-col gap-1.5 border-t border-border pt-3"
     data-testid="pull-v2-rail-actions"
   >
-    @if (open && props.canWrite) {
+    @if (open && (props.canEdit ?? props.canWrite)) {
       <>
         @if (props.pull.draft) {
           <button

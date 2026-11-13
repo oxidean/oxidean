@@ -320,6 +320,10 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   const searchStr = useSearchString();
   const base = `/${props.owner}/${props.repoName}/pull/${props.number}`;
   const pullState = (props.pull.state as string) ?? "open";
+  // can_edit_pull permits the author too — title/base/body edits and
+  // close/reopen/draft affordances follow canEdit; write-gated RPCs
+  // (reviewers, labels, assignees, merge, review submit) stay on canWrite.
+  const canEdit = props.canWrite || props.isAuthor;
   const headRef =
     props.pull.head_owner === props.owner && props.pull.head_name === props.repoName
       ? props.pull.head_ref
@@ -574,14 +578,25 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       apiClient.pull.reopen({ owner: props.owner, name: props.repoName, number: props.number }),
     );
   const retargetBase = (base_ref: string) =>
-    void stateAction(() =>
-      apiClient.pull.update({
+    void stateAction(async () => {
+      const res = await apiClient.pull.update({
         owner: props.owner,
         name: props.repoName,
         number: props.number,
         base_ref,
-      }),
-    );
+      });
+      if (res.ok) {
+        // Base change rewrites the diff + marks line comments outdated —
+        // refresh everything pull-scoped, not just pull.get.
+        const keys = ["commits", "files", "comments", "reviews", "branchStatus"] as const;
+        for (const k of keys) {
+          void queryClient.invalidateQueries({
+            queryKey: ["pull", k, props.owner, props.repoName, props.number],
+          });
+        }
+      }
+      return res;
+    });
 
   const refsQ = useQuery({
     queryKey: ["repo", "refs", props.owner, props.repoName] as const,
@@ -657,7 +672,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
         <div className="ml-auto flex items-center gap-1">
           @if (mergeChip) {
             <AppLink
-              href={base as string}
+              href={`${base}?panel=merge` as string}
               className="no-underline"
               title="Merge status — view the merge card on Overview"
               data-testid="pull-v2-merge-state"
@@ -744,7 +759,10 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     {/* Row 2 — pane toolbar: GitHub's "Description ▾" selector + edit + close
         sits above the right pane. Preview/code/notifications controls have no
         backend domain here and stay out rather than rendering dead buttons. */}
-    <div className="flex items-center justify-end gap-1" data-testid="pull-v2-pane-toolbar">
+    <div
+      className="hidden items-center justify-end gap-1 lg:flex"
+      data-testid="pull-v2-pane-toolbar"
+    >
       <DropdownMenu>
         <DropdownMenuTrigger
           className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 text-[13px] text-foreground hover:bg-muted"
@@ -768,7 +786,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
           }
         </DropdownMenuContent>
       </DropdownMenu>
-      @if (props.canWrite && pullState === "open") {
+      @if (canEdit && pullState === "open") {
         <button
           type="button"
           className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -862,7 +880,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       <StatePillMenu
         state={pullState}
         draft={props.pull.draft}
-        canWrite={props.canWrite}
+        canWrite={canEdit}
         busy={stateBusy}
         onConvert={convertDraft}
         onClose={closePull}
@@ -884,7 +902,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       </span>
       <span className="inline-flex flex-wrap items-center gap-1.5">
         @if (
-          props.canWrite &&
+          canEdit &&
           pullState === "open" &&
           baseChoices.length > 0
         ) {
@@ -1038,6 +1056,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
               number={props.number}
               pull={props.pull}
               canWrite={props.canWrite}
+              canEdit={canEdit}
             />;
           }
           @if (pane === "comments") {
@@ -1074,6 +1093,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
               mergedAt={props.pull.merged_at ?? null}
               mergedBy={props.pull.merged_by ?? null}
               closedAt={props.pull.closed_at ?? null}
+              headOwner={props.pull.head_owner}
             />;
           }
         </aside>;

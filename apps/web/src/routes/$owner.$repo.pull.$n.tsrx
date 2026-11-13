@@ -66,19 +66,16 @@ async function loadPullDetail(
   return { kind: "ready", repo: got.data, pull: pull.data };
 }
 
-function repoPullNQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+function repoPullNQueryOptions(params: Record<string, string | undefined>, _searchStr = "") {
   return queryOptions({
+    // Keyed on what the loader actually reads — _splat/searchStr churn must not
+    // drop the loader to undefined (that flashes the legacy subtree on tab nav).
     queryKey: [
       "repo-page",
       "/$owner/$repo/pull/$n",
       params.owner ?? "",
       params.repo ?? "",
-      params._splat ?? "",
       params.n ?? "",
-      params.sha ?? "",
-      params.tag ?? "",
-      params.run ?? "",
-      searchStr,
     ],
     queryFn: async (): Promise<PullDetailLoaderData> => {
       const owner = String((params as { owner?: string }).owner ?? "");

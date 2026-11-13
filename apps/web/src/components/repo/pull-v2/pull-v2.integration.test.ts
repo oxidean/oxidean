@@ -469,9 +469,13 @@ describe("PullDetailV2 chrome", () => {
     expect(updateMock).not.toHaveBeenCalled();
   });
 
-  it("hides the title pencil for closed pulls or read-only viewers", () => {
-    renderV2("overview", { canWrite: false });
+  it("hides the title pencil for closed pulls or non-author read-only viewers", () => {
+    renderV2("overview", { canWrite: false, isAuthor: false });
     expect(screen.queryByTestId("pull-v2-title-edit")).toBeNull();
+    cleanup();
+    // Authors keep edit rights on their own PR (can_edit_pull).
+    renderV2("overview", { canWrite: false, isAuthor: true });
+    expect(screen.queryByTestId("pull-v2-title-edit")).not.toBeNull();
     cleanup();
     renderV2("overview", { pull: { ...PULL, state: "closed" } });
     expect(screen.queryByTestId("pull-v2-title-edit")).toBeNull();
