@@ -143,6 +143,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "settings/experiments.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/experiments.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "login.two-factor.tsrx",
     coverage: [
       {

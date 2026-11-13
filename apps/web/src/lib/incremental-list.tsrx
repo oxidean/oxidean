@@ -20,6 +20,8 @@ export function useIncrementalList(
   remaining: number;
   sentinelRef: { current: HTMLDivElement | null };
   showMore: () => void;
+  /** Grow the revealed window so `index` (0-based) is mounted — jump-to-item. */
+  reveal: (index: number) => void;
 } {
   const [paging, setPaging] = useState(() => ({ key: resetKey, count: pageSize }));
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -37,6 +39,14 @@ export function useIncrementalList(
       key: resetKey,
       count: (s.key === resetKey ? s.count : pageSize) + pageSize,
     }));
+  }
+
+  function reveal(index: number) {
+    setPaging((s) => {
+      const cur = s.key === resetKey ? s.count : pageSize;
+      const next = Math.min(Math.max(cur, index + 1), total);
+      return next === cur ? s : { key: resetKey, count: next };
+    });
   }
 
   // Keep the latch synced to the collection identity (also drops the stale
@@ -63,5 +73,5 @@ export function useIncrementalList(
     return () => io.disconnect();
   }, [remaining, pageSize]);
 
-  return { count: shown, remaining, sentinelRef, showMore };
+  return { count: shown, remaining, sentinelRef, showMore, reveal };
 }

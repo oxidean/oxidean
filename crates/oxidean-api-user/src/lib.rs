@@ -5,16 +5,24 @@
 
 mod contributions;
 mod dispatch;
+mod experiments;
 mod follows;
 mod list_starred;
 mod lookup;
 mod pinned;
 mod profile;
+mod saved_replies;
 
 pub use dispatch::dispatch;
 
 /// Procedures this crate owns — aggregated by the shell's `PROCEDURES`.
 pub const PROCEDURES: &[&str] = &[
+    "experiments.list",
+    "experiments.set",
+    "savedReplies.list",
+    "savedReplies.create",
+    "savedReplies.update",
+    "savedReplies.delete",
     "user.follow",
     "user.followers.list",
     "user.following.list",

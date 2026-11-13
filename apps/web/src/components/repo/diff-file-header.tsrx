@@ -1,10 +1,11 @@
 import { useMemo } from "octane";
-import { ChevronDown, ChevronRight } from "@octanejs/lucide";
+import { ChevronDown, ChevronRight, MessageSquare } from "@octanejs/lucide";
 import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 
 /**
  * Collapsible diff-file header (issue #110): chevron toggle + path + status +
- * `+a/−d` stats — shared by the unified and split diff views.
+ * `+a/−d` stats — shared by the unified and split diff views. `commentCount`
+ * keeps the review-comment count visible even on collapsed files (#262).
  */
 export function DiffFileHeader(props: {
   path: string;
@@ -14,6 +15,8 @@ export function DiffFileHeader(props: {
   onToggle: () => void;
   /** id of the collapsible diff-body region (`aria-controls`). */
   controlsId: string;
+  /** Inline comments anchored to this file — badge hidden at zero. */
+  commentCount?: number;
 }) @{
   // O(patch size) scan — memoize so header re-renders don't re-scan a gated
   // 1 MiB patch on every parent update / toggle.
@@ -38,6 +41,16 @@ export function DiffFileHeader(props: {
       {props.path as string}{" "}
       <span className="text-muted-foreground">({props.status as string})</span>
     </h3>
+    @if ((props.commentCount ?? 0) > 0) {
+      <span
+        className="inline-flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground"
+        title={`${props.commentCount} comment${props.commentCount === 1 ? "" : "s"}`}
+        data-testid="pull-file-comment-count"
+      >
+        <MessageSquare aria-hidden size={12} />
+        {props.commentCount as number}
+      </span>;
+    }
     @if (adds + dels > 0) {
       <span className="shrink-0 tabular-nums text-[13px]">
         <span className="text-success">{`+${adds}` as string}</span>{" "}

@@ -4,6 +4,7 @@ pub mod action_badge;
 pub mod auth_callbacks;
 pub mod avatar;
 pub mod cli_dist;
+pub mod comment_assets;
 pub mod feeds;
 pub mod git_lfs;
 pub mod git_smart_http;

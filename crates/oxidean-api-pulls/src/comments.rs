@@ -15,6 +15,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_api_core::webhook::dispatch;
 
 use oxidean_api_core::pull::{db_err, load_pull_in_repo, validate_body};
+use oxidean_api_core::repo::Capability;
 
 fn comment_not_found() -> AppError {
     AppError::new("pull.comment_not_found", "Comment not found")
@@ -157,6 +158,8 @@ fn comment_row_to_public(
         commit_sha: row.commit_sha.clone(),
         outdated: row.outdated,
         resolved: row.resolved,
+        review_id: row.review_id.clone(),
+        pending: row.pending,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }
@@ -183,7 +186,12 @@ pub async fn comments_list(
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    let rows = ctx.db.list_pull_comments(&pull.id).await.map_err(db_err)?;
+    let viewer = ctx.session.as_ref().map(|s| s.user_id.as_str());
+    let rows = ctx
+        .db
+        .list_pull_comments(&pull.id, viewer)
+        .await
+        .map_err(db_err)?;
     let usernames = load_comment_usernames(ctx, &rows).await?;
     let comments = rows
         .iter()
@@ -192,7 +200,8 @@ pub async fn comments_list(
     Ok(PullCommentsListResponse { comments })
 }
 
-/// `pull.comments.create` — Read+ verified general or line-anchored.
+/// `pull.comments.create` — Read+ verified; general, file-level (path only),
+/// or line-anchored. `pending: true` stashes a review draft (Write+).
 pub async fn comments_create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -221,17 +230,46 @@ pub async fn comments_create(
             return Err(AppError::new("rpc.bad_input", "side must be LEFT or RIGHT"));
         }
     }
-    if path.is_some() && (side.is_none() || req.line.is_none()) {
-        return Err(AppError::new(
-            "rpc.bad_input",
-            "line comments require path, side, and line",
-        ));
-    }
+    // Anchor shapes: general (no path), file-level (path only — GitHub's
+    // "comment on this file"), and line-anchored (path + side + line, with
+    // optional start_line for a range).
     if path.is_none() && (side.is_some() || req.line.is_some() || req.start_line.is_some()) {
         return Err(AppError::new(
             "rpc.bad_input",
             "general comments cannot include line anchors",
         ));
+    }
+    if req.start_line.is_some() && req.line.is_none() {
+        return Err(AppError::new("rpc.bad_input", "start_line requires line"));
+    }
+    if req.line.is_some() && side.is_none() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "line comments require path, side, and line",
+        ));
+    }
+    if req.line.is_none() && side.is_some() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "side requires a line anchor",
+        ));
+    }
+    if let (Some(start), Some(end)) = (req.start_line, req.line) {
+        if start > end {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "start_line must not exceed line",
+            ));
+        }
+    }
+    if req.line.is_some_and(|l| l < 1) || req.start_line.is_some_and(|l| l < 1) {
+        return Err(AppError::new("rpc.bad_input", "line numbers start at 1"));
+    }
+    let pending = req.pending.unwrap_or(false);
+    // Drafts only resolve through pull.reviews.submit (Write+) — a Read-only
+    // author could never publish them, so reject rather than store orphans.
+    if pending && !oxidean_api_core::repo::meets(accessible.capability, Capability::Write) {
+        return Err(oxidean_api_core::repo::not_found());
     }
 
     let commit_sha = req
@@ -261,49 +299,53 @@ pub async fn comments_create(
             req.line,
             req.start_line,
             commit_sha.as_deref(),
+            pending,
         )
         .await
         .map_err(db_err)?;
-    let subject = notify::subject_for_pull(&pull);
-    let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
-    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    // One watch-level lookup serves both fanouts below.
-    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_activity_with_watch(
-        &ctx.db,
-        &user.id,
-        participants.clone(),
-        "pr_comment",
-        &subject,
-        &watch,
-    )
-    .await;
-    let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
-    let mention_only: Vec<_> = mentions
-        .into_iter()
-        .filter(|m| !participant_set.contains(m))
-        .collect();
-    notify::fanout_suppress_ignored_with_watch(
-        &ctx.db,
-        &user.id,
-        mention_only,
-        "pr_mention",
-        &subject,
-        &watch,
-    )
-    .await;
-    emit_comment_webhook(
-        ctx,
-        &accessible,
-        &pull,
-        &row,
-        "created",
-        None,
-        &user.username,
-        &user.username,
-        &user.id,
-    )
-    .await;
+    // Drafts notify nobody — the review submission fans out once instead.
+    if !pending {
+        let subject = notify::subject_for_pull(&pull);
+        let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
+        let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+        // One watch-level lookup serves both fanouts below.
+        let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+        notify::fanout_activity_with_watch(
+            &ctx.db,
+            &user.id,
+            participants.clone(),
+            "pr_comment",
+            &subject,
+            &watch,
+        )
+        .await;
+        let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
+        let mention_only: Vec<_> = mentions
+            .into_iter()
+            .filter(|m| !participant_set.contains(m))
+            .collect();
+        notify::fanout_suppress_ignored_with_watch(
+            &ctx.db,
+            &user.id,
+            mention_only,
+            "pr_mention",
+            &subject,
+            &watch,
+        )
+        .await;
+        emit_comment_webhook(
+            ctx,
+            &accessible,
+            &pull,
+            &row,
+            "created",
+            None,
+            &user.username,
+            &user.username,
+            &user.id,
+        )
+        .await;
+    }
     comment_to_public(ctx, &row).await
 }
 
@@ -348,18 +390,21 @@ pub async fn comments_update(
         .update_pull_comment_body(&row.id, &new_body)
         .await
         .map_err(db_err)?;
-    emit_comment_webhook(
-        ctx,
-        &accessible,
-        &pull,
-        &updated,
-        "edited",
-        Some(row.body.as_str()),
-        &user.username,
-        &user.username,
-        &user.id,
-    )
-    .await;
+    // Drafts emit nothing — the review submission fans out once.
+    if !updated.pending {
+        emit_comment_webhook(
+            ctx,
+            &accessible,
+            &pull,
+            &updated,
+            "edited",
+            Some(row.body.as_str()),
+            &user.username,
+            &user.username,
+            &user.id,
+        )
+        .await;
+    }
     comment_to_public(ctx, &updated).await
 }
 
@@ -395,26 +440,29 @@ pub async fn comments_delete(
         return Err(oxidean_api_core::repo::not_found());
     }
     ctx.db.delete_pull_comment(&row.id).await.map_err(db_err)?;
-    let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
-        Ok(Some(u)) => u.username,
-        Ok(None) => String::new(),
-        Err(e) => {
-            tracing::warn!(error = %e, "pull comment delete: author lookup failed");
-            String::new()
-        }
-    };
-    emit_comment_webhook(
-        ctx,
-        &accessible,
-        &pull,
-        &row,
-        "deleted",
-        None,
-        &author_login,
-        &user.username,
-        &user.id,
-    )
-    .await;
+    // Drafts emit nothing — they were never visible to other participants.
+    if !row.pending {
+        let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
+            Ok(Some(u)) => u.username,
+            Ok(None) => String::new(),
+            Err(e) => {
+                tracing::warn!(error = %e, "pull comment delete: author lookup failed");
+                String::new()
+            }
+        };
+        emit_comment_webhook(
+            ctx,
+            &accessible,
+            &pull,
+            &row,
+            "deleted",
+            None,
+            &author_login,
+            &user.username,
+            &user.id,
+        )
+        .await;
+    }
     Ok(DeletePullCommentResponse { ok: true })
 }
 

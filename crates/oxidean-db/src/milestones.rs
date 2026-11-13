@@ -83,8 +83,8 @@ const MILESTONE_SELECT_PG: &str = "SELECT m.id, m.repo_id, m.number, m.title, m.
             ELSE to_char(m.closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS closed_at,
        to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at,
-       (SELECT COUNT(*)::bigint FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') AS open_issues,
-       (SELECT COUNT(*)::bigint FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') AS closed_issues
+       (SELECT COUNT(*)::bigint FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') + (SELECT COUNT(*)::bigint FROM pull_requests p WHERE p.milestone_id = m.id AND p.state = 'open') AS open_issues,
+       (SELECT COUNT(*)::bigint FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') + (SELECT COUNT(*)::bigint FROM pull_requests p WHERE p.milestone_id = m.id AND p.state IN ('closed', 'merged')) AS closed_issues
 FROM milestones m";
 
 const MILESTONE_SELECT_MYSQL: &str = "SELECT m.id, m.repo_id, m.number, m.title, m.description, m.state,
@@ -93,8 +93,8 @@ const MILESTONE_SELECT_MYSQL: &str = "SELECT m.id, m.repo_id, m.number, m.title,
        DATE_FORMAT(m.closed_at, '%Y-%m-%dT%H:%i:%sZ') AS closed_at,
        DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(m.updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at,
-       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') AS open_issues,
-       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') AS closed_issues
+       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') + (SELECT COUNT(*) FROM pull_requests p WHERE p.milestone_id = m.id AND p.state = 'open') AS open_issues,
+       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') + (SELECT COUNT(*) FROM pull_requests p WHERE p.milestone_id = m.id AND p.state IN ('closed', 'merged')) AS closed_issues
 FROM milestones m";
 
 const MILESTONE_SELECT_SQLITE: &str = "SELECT m.id, m.repo_id, m.number, m.title, m.description, m.state,
@@ -104,8 +104,8 @@ const MILESTONE_SELECT_SQLITE: &str = "SELECT m.id, m.repo_id, m.number, m.title
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.closed_at) END AS closed_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', m.updated_at) AS updated_at,
-       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') AS open_issues,
-       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') AS closed_issues
+       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'open') + (SELECT COUNT(*) FROM pull_requests p WHERE p.milestone_id = m.id AND p.state = 'open') AS open_issues,
+       (SELECT COUNT(*) FROM issues i WHERE i.milestone_id = m.id AND i.state = 'closed') + (SELECT COUNT(*) FROM pull_requests p WHERE p.milestone_id = m.id AND p.state IN ('closed', 'merged')) AS closed_issues
 FROM milestones m";
 
 /// Allocate the next per-repo milestone number (monotonic; never reclaims).

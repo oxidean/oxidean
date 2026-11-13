@@ -95,6 +95,11 @@ pub struct UserPublic {
     /// see private rows).
     #[serde(default = "show_private_contributions_default")]
     pub show_private_contributions: bool,
+    /// Enabled experiment flag keys (WI-0001) — validated keys from
+    /// `crate::experiments::EXPERIMENTS`. Empty for users with no rows and
+    /// always empty for anonymous callers' views of other users.
+    #[serde(default)]
+    pub experiments: Vec<String>,
 }
 
 fn show_private_contributions_default() -> bool {

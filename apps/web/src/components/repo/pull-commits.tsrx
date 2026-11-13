@@ -18,7 +18,19 @@ type PullCommitsProps = {
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
+/**
+ * The pull page owns tab state and has no tab-prop channel — flip "Files
+ * changed" through its own DOM button so the commit-scoped URL (loaded via
+ * the same click) shows the diff instead of leaving the user on Commits.
+ * The tab buttons carry `data-tab` ids — never match on their label text.
+ */
+function openFilesTab() {
+  const btn = document.querySelector('[role="tablist"] [data-tab="files"]');
+  (btn as HTMLButtonElement | null)?.click();
+}
+
 export function PullCommits(props: PullCommitsProps) @{
+  const base = `/${props.owner}/${props.repoName}/pull/${props.number}`;
   const commitsQ = useQuery({
     queryKey: ["pull", "commits", props.owner, props.repoName, props.number] as const,
     queryFn: async () => {
@@ -70,6 +82,14 @@ export function PullCommits(props: PullCommitsProps) @{
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {c.subject as string}
                 </span>
+                <AppLink
+                  href={`${base}/changes/${c.sha}` as string}
+                  className="text-[12px] text-primary no-underline hover:underline"
+                  data-testid="pull-commits-changes"
+                  onClick={() => openFilesTab()}
+                >
+                  changes
+                </AppLink>
                 <CommitVerifiedBadge
                   status={c.signature_status}
                   kind={c.signature_kind}

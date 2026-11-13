@@ -1,7 +1,8 @@
+import type { PullCommentPublic } from "@oxidean/api-client";
 import { DIFF_FILES_PAGE_SIZE } from "@/lib/diff-budget";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
 import { useIncrementalList } from "@/lib/incremental-list.tsrx";
-import { DiffPatch } from "@/components/repo/diff-patch";
+import { DiffPatch, type DiffCommentTarget } from "@/components/repo/diff-patch";
 
 type DiffFileEntry = {
   path: string;
@@ -14,10 +15,20 @@ type DiffFileEntry = {
  * {@link DIFF_FILES_PAGE_SIZE} file blocks, then appends the next batch when
  * the tail sentinel nears the viewport or the user presses "Load more files".
  * Keeps initial DOM bounded on commits / compares touching many files.
+ *
+ * The comment props are pass-through for {@link DiffPatch} (#262) — commit /
+ * compare pages omit them and keep the read-only diff.
  */
 export function DiffFileList(props: {
   files: ReadonlyArray<DiffFileEntry>;
   highlightedByPath?: Record<string, HighlightedDiffLine[]>;
+  /** PR review comments keyed by path — rendered inline when given. */
+  commentsByPath?: Record<string, PullCommentPublic[]>;
+  canInteract?: boolean;
+  onSubmitComment?: (
+    target: DiffCommentTarget & { path: string; body: string },
+  ) => Promise<boolean>;
+  onDiscardComment?: (id: string) => void;
 }) @{
   const list = useIncrementalList(props.files.length, DIFF_FILES_PAGE_SIZE, props.files);
   const shown = props.files.slice(0, list.count);
@@ -29,6 +40,14 @@ export function DiffFileList(props: {
         status={f.status as string}
         patch={f.patch as string}
         initialRows={props.highlightedByPath?.[f.path] ?? null}
+        comments={props.commentsByPath?.[f.path]}
+        canInteract={props.canInteract ?? false}
+        onSubmitComment={
+          props.onSubmitComment
+            ? (t) => props.onSubmitComment!({ ...t, path: f.path })
+            : undefined
+        }
+        onDiscardComment={props.onDiscardComment}
       />;
     }
     @if (list.remaining > 0) {

@@ -132,6 +132,64 @@ export type UserPublic = {
   two_factor_enroll_required: boolean;
   /** GitHub-parity: include private contributions on the own profile view. */
   show_private_contributions: boolean;
+  /** Enabled per-user experiment flag keys (WI-0001). */
+  experiments: string[];
+};
+
+export type ExperimentStatus = "experimental" | "beta";
+
+export type ExperimentPublic = {
+  key: string;
+  title: string;
+  description: string;
+  status: ExperimentStatus;
+  since_version: string;
+  /** Whether the calling user has this flag on (anonymous → always false). */
+  enabled: boolean;
+};
+
+export type ExperimentsListResponse = {
+  experiments: ExperimentPublic[];
+};
+
+export type ExperimentSetRequest = {
+  key: string;
+  enabled: boolean;
+};
+
+export type SavedReplyPublic = {
+  id: string;
+  /** Picker label (GitHub `name`). */
+  name: string;
+  /** Markdown body inserted into a composer. */
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SavedRepliesListResponse = {
+  replies: SavedReplyPublic[];
+};
+
+export type SavedReplyCreateRequest = {
+  /** Picker label — 1..=80 chars after trim. */
+  name: string;
+  /** Markdown body — non-empty after trim. */
+  body: string;
+};
+
+export type SavedReplyUpdateRequest = {
+  id: string;
+  name?: string | null;
+  body?: string | null;
+};
+
+export type SavedReplyRefRequest = {
+  id: string;
+};
+
+export type SavedReplyDeleteResponse = {
+  ok: boolean;
 };
 
 export type BootstrapStatus = {
@@ -4596,7 +4654,9 @@ export type PullPublic = {
   updated_at: string;
   comment_count?: number;
   assignees?: IssueAssigneePublic[];
+  labels?: LabelPublic[];
   pinned?: boolean;
+  milestone?: MilestonePublic | null;
 };
 
 export type CreatePullRequest = {
@@ -4636,6 +4696,51 @@ export type PullListResponse = {
   offset: number;
   limit: number;
   pinned?: PullPublic[];
+};
+
+export type SetPullMilestoneRequest = {
+  owner: string;
+  name: string;
+  /** Pull `#N`. */
+  number: number;
+  /** Milestone `#N`; `null` clears the pull's milestone. */
+  milestone?: number | null;
+};
+
+export type PullDevelopmentItem = {
+  /** Closing keyword matched in the pull title/body. */
+  relation: string;
+  /** Owner slug of the repository containing `issue`. */
+  repo_owner: string;
+  /** Repository name containing `issue`. */
+  repo_name: string;
+  issue: IssuePublic;
+};
+
+export type PullDevelopmentListResponse = {
+  items: PullDevelopmentItem[];
+};
+
+export type PullProjectLink = {
+  /** Linked card row id (for future move/archive affordances). */
+  card_id: string;
+  /** Board column the card sits in. */
+  column_name: string;
+  /** Board per-repo `#N`. */
+  project_number: number;
+  project_title: string;
+  /** `open` | `closed`. */
+  project_state: string;
+  /** `/{owner}/{repo}/projects/{number}` web route. */
+  project_url: string;
+};
+
+export type PullProjectsListResponse = {
+  links: PullProjectLink[];
+};
+
+export type PullDeploymentsListResponse = {
+  deployments: ActionDeploymentPublic[];
 };
 
 export type UpdatePullRequest = {
@@ -4709,6 +4814,9 @@ export type PullCommentPublic = {
   commit_sha?: string | null;
   outdated: boolean;
   resolved: boolean;
+  review_id?: string | null;
+  /** Server-persisted review draft — author-only until a review links it. */
+  pending: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -4723,6 +4831,8 @@ export type CreatePullCommentRequest = {
   line?: number | null;
   start_line?: number | null;
   commit_sha?: string | null;
+  /** Persist as a pending review draft instead of a submitted comment. */
+  pending?: boolean | null;
 };
 
 export type PullCommentsListResponse = {
@@ -4810,6 +4920,7 @@ export type SubmitPullReviewRequest = {
   number: number;
   state: string;
   body?: string | null;
+  comment_ids?: string[];
 };
 
 export type DismissPullReviewRequest = {
@@ -4946,6 +5057,50 @@ export type SetIssueAssigneesRequest = {
   name: string;
   number: number;
   userIds: string[];
+};
+
+export type SetPullLabelsRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  labelIds: string[];
+};
+
+export type SetPullAssigneesRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  userIds: string[];
+};
+
+export type PullFilesRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  /** Hide whitespace-only differences (`git diff -w`). */
+  w?: boolean | null;
+  /** Unified context lines (clamped 0..=20). */
+  context?: number | null;
+  /** Scope the diff to a single commit (its first parent..sha). */
+  sha?: string | null;
+  /** Range diff start — requires `head_sha`. */
+  base_sha?: string | null;
+  /** Range diff end — requires `base_sha`. */
+  head_sha?: string | null;
+  /** Diff caller's latest submitted review commit against the pull head. */
+  since_review?: boolean | null;
+};
+
+export type PullFilesSetViewedRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  path: string;
+  viewed: boolean;
+};
+
+export type PullFilesViewedResponse = {
+  viewed_paths: string[];
 };
 
 export type AssigneeCandidatesRequest = {
@@ -5892,6 +6047,20 @@ export function createClient(opts: CreateClientOptions) {
       followingList: (input: UserFollowListRequest) =>
         rpcCall<UserFollowListResponse>(opts, "user.following.list", input),
     },
+    experiments: {
+      list: () => rpcCall<ExperimentsListResponse>(opts, "experiments.list", {}),
+      set: (input: ExperimentSetRequest) =>
+        rpcCall<UserPublic>(opts, "experiments.set", input),
+    },
+    savedReplies: {
+      list: () => rpcCall<SavedRepliesListResponse>(opts, "savedReplies.list", {}),
+      create: (input: SavedReplyCreateRequest) =>
+        rpcCall<SavedReplyPublic>(opts, "savedReplies.create", input),
+      update: (input: SavedReplyUpdateRequest) =>
+        rpcCall<SavedReplyPublic>(opts, "savedReplies.update", input),
+      delete: (input: SavedReplyRefRequest) =>
+        rpcCall<SavedReplyDeleteResponse>(opts, "savedReplies.delete", input),
+    },
     search: {
       global: (input: GlobalSearchRequest) =>
         rpcCall<GlobalSearchResponse>(opts, "search.global", input),
@@ -6805,8 +6974,38 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullPublic>(opts, "pull.pin", input),
       unpin: (input: PullRefRequest) =>
         rpcCall<PullPublic>(opts, "pull.unpin", input),
-      files: (input: PullRefRequest) =>
+      files: (input: PullFilesRequest) =>
         rpcCall<PullFilesResponse>(opts, "pull.files", input),
+      filesViewed: {
+        set: (input: PullFilesSetViewedRequest) =>
+          rpcCall<PullFilesViewedResponse>(opts, "pull.files.setViewed", input),
+        list: (input: PullRefRequest) =>
+          rpcCall<PullFilesViewedResponse>(opts, "pull.files.listViewed", input),
+      },
+      labels: {
+        set: (input: SetPullLabelsRequest) =>
+          rpcCall<PullPublic>(opts, "pull.labels.set", input),
+      },
+      assignees: {
+        set: (input: SetPullAssigneesRequest) =>
+          rpcCall<PullPublic>(opts, "pull.assignees.set", input),
+      },
+      milestone: {
+        set: (input: SetPullMilestoneRequest) =>
+          rpcCall<PullPublic>(opts, "pull.milestone.set", input),
+      },
+      development: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullDevelopmentListResponse>(opts, "pull.development.list", input),
+      },
+      projects: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullProjectsListResponse>(opts, "pull.projects.list", input),
+      },
+      deployments: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullDeploymentsListResponse>(opts, "pull.deployments.list", input),
+      },
       commits: (input: PullRefRequest) =>
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),
       merge: (input: MergePullRequest) =>

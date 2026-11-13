@@ -21,6 +21,8 @@ pub struct JobConfig {
     pub lfs_gc_interval: Duration,
     /// Default 24h. Set `OXIDEAN_PACKAGES_GC_INTERVAL_SECS=0` to disable.
     pub packages_gc_interval: Duration,
+    /// Default 24h. Set `OXIDEAN_COMMENT_ATTACHMENTS_GC_INTERVAL_SECS=0` to disable.
+    pub comment_attachments_gc_interval: Duration,
     /// Default 30s. Set `OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS=0` to disable the
     /// `on.schedule` cron sweeper.
     pub actions_schedule_sweep: Duration,
@@ -38,6 +40,8 @@ impl JobConfig {
             super::lfs_gc::DEFAULT_GC_INTERVAL_SECS,
         );
         let packages_gc_secs = parse_u64_env("OXIDEAN_PACKAGES_GC_INTERVAL_SECS", 86_400);
+        let comment_attachments_gc_secs =
+            parse_u64_env("OXIDEAN_COMMENT_ATTACHMENTS_GC_INTERVAL_SECS", 86_400);
         let actions_schedule_secs = parse_u64_env("OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS", 30);
         let actions_log_secs = parse_u64_env("OXIDEAN_ACTIONS_LOG_SWEEP_SECS", 3_600);
         Self {
@@ -45,6 +49,7 @@ impl JobConfig {
             gc_interval: Duration::from_secs(gc_secs),
             lfs_gc_interval: Duration::from_secs(lfs_gc_secs),
             packages_gc_interval: Duration::from_secs(packages_gc_secs),
+            comment_attachments_gc_interval: Duration::from_secs(comment_attachments_gc_secs),
             actions_schedule_sweep: Duration::from_secs(actions_schedule_secs),
             actions_log_sweep: Duration::from_secs(actions_log_secs),
         }
@@ -59,12 +64,14 @@ fn parse_u64_env(key: &str, default: u64) -> u64 {
 }
 
 /// Spawn in-process orphan reconcile + scheduled gc + LFS GC + package blob GC + VCS object GC + webhook delivery loops.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_background_jobs(
     db: Database,
     git: Arc<dyn GitBackend>,
     repos_dir: PathBuf,
     lfs_dir: PathBuf,
     packages_dir: PathBuf,
+    uploads_dir: PathBuf,
     config: JobConfig,
     vcs: Option<crate::vcs::SharedVcs>,
 ) {
@@ -300,6 +307,47 @@ pub fn spawn_background_jobs(
         );
     } else {
         tracing::info!("lfs gc job disabled (interval 0)");
+    }
+
+    if config.comment_attachments_gc_interval.as_secs() > 0 {
+        let db_a = db.clone();
+        let uploads_a = uploads_dir;
+        let period = config.comment_attachments_gc_interval;
+        let grace = crate::comment_attachments::orphan_grace_from_env();
+        tokio::spawn(async move {
+            let mut ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                match crate::comment_attachments::gc_orphan_comment_attachments(
+                    &db_a, &uploads_a, grace,
+                )
+                .await
+                {
+                    Ok(stats) => {
+                        if stats.removed > 0 || stats.errors > 0 {
+                            tracing::info!(
+                                scanned = stats.scanned,
+                                removed = stats.removed,
+                                kept_referenced = stats.kept_referenced,
+                                kept_recent = stats.kept_recent,
+                                errors = stats.errors,
+                                "comment attachment GC completed"
+                            );
+                        } else {
+                            tracing::debug!("comment attachment GC: nothing to do");
+                        }
+                    }
+                    Err(e) => tracing::error!(error = %e, "comment attachment GC failed"),
+                }
+            }
+        });
+        tracing::info!(
+            secs = config.comment_attachments_gc_interval.as_secs(),
+            "comment attachment GC job scheduled"
+        );
+    } else {
+        tracing::info!("comment attachment GC job disabled (interval 0)");
     }
 
     if config.packages_gc_interval.as_secs() > 0 {

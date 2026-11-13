@@ -4052,6 +4052,7 @@ dependencies = [
  "oxidean-api-core",
  "oxidean-core",
  "oxidean-db",
+ "oxidean-git",
  "serde_json",
  "tracing",
  "uuid",
@@ -4123,6 +4124,7 @@ dependencies = [
  "oxidean-db",
  "serde_json",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -7,9 +7,12 @@
 //! merge-gate machinery stay in `oxidean_api_core::pull` — `repo::files`'s
 //! create-PR flow and `merge_queue` lean on them cross-domain.
 
+mod closing_refs;
 pub mod comments;
 pub mod lifecycle;
 pub mod merge_ops;
+pub mod meta;
+pub mod rail;
 pub mod reviews;
 pub mod update_branch;
 
@@ -28,6 +31,14 @@ pub const PROCEDURES: &[&str] = &[
     "pull.pin",
     "pull.unpin",
     "pull.files",
+    "pull.files.setViewed",
+    "pull.files.listViewed",
+    "pull.labels.set",
+    "pull.assignees.set",
+    "pull.milestone.set",
+    "pull.development.list",
+    "pull.projects.list",
+    "pull.deployments.list",
     "pull.commits",
     "pull.comments.list",
     "pull.comments.create",

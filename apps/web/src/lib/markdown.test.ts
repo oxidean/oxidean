@@ -24,4 +24,19 @@ describe("renderGfm", () => {
     expect(html).toMatch(/<table/i);
     expect(html).not.toMatch(/onerror/i);
   });
+
+  it("renders remote and linked images (badges) with lazy-loading attrs", async () => {
+    const html = await renderGfm(
+      "[![badge](https://img.shields.io/badge/x-y-green)](https://example.com)\n\n![shot](https://example.com/i.png)",
+    );
+    expect(html).toMatch(/<a href="https:\/\/example\.com"><img /);
+    expect(html).toMatch(/src="https:\/\/img\.shields\.io\/badge\/x-y-green"/);
+    expect(html).toMatch(/loading="lazy"/);
+    expect(html).toMatch(/decoding="async"/);
+  });
+
+  it("still strips unsafe image sources", async () => {
+    const html = await renderGfm("![x](javascript:alert(1)) ![d](data:image/png;base64,AA)");
+    expect(html).not.toMatch(/<img[^>]*src=/i);
+  });
 });

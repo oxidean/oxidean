@@ -79,6 +79,7 @@ async fn factory_reset_pulls_wipes_pull_domain() {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect("comment");

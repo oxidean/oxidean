@@ -328,6 +328,15 @@ pub struct DiffResult {
     pub truncated: bool,
 }
 
+/// Optional knobs for a unified diff (WI-0001 diff settings).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffOpts {
+    /// `git diff -w` — hide whitespace-only differences.
+    pub ignore_whitespace: bool,
+    /// `git diff -U<n>` context lines around each hunk.
+    pub context_lines: Option<u32>,
+}
+
 /// One `git grep -n` hit (Phase 16 / GIT-18 / D-SRCH-06).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GrepHit {
@@ -630,6 +639,20 @@ pub trait GitBackend: Send + Sync {
         gpg_home: Option<&Path>,
     ) -> Result<Vec<CommitSummary>, GitError>;
 
+    /// Paged `git log base..head` — commits reachable from `head` but not
+    /// `base` (the PR commit set). Same paging and signature verification as
+    /// [`log`](Self::log); an unresolvable endpoint yields `Ok(vec![])`.
+    async fn log_range(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        skip: u32,
+        limit: u32,
+        allowed_signers: Option<&Path>,
+        gpg_home: Option<&Path>,
+    ) -> Result<Vec<CommitSummary>, GitError>;
+
     /// Commit metadata + per-file unified patches (`git show`).
     async fn show_commit(
         &self,
@@ -641,6 +664,18 @@ pub trait GitBackend: Send + Sync {
 
     /// Unified diff `base...head`. Identical trees → `empty: true` (not an error).
     async fn diff(&self, repo: &Path, base: &str, head: &str) -> Result<DiffResult, GitError>;
+
+    /// `diff` with whitespace/context options (WI-0001). Default ignores the
+    /// options so existing backends keep working.
+    async fn diff_opts(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        _opts: &DiffOpts,
+    ) -> Result<DiffResult, GitError> {
+        self.diff(repo, base, head).await
+    }
 
     /// Per-line blame for a text file (`git blame --line-porcelain`).
     async fn blame(&self, repo: &Path, refname: &str, path: &str) -> Result<BlameFile, GitError>;

@@ -13,6 +13,7 @@ pub mod app;
 pub mod audit;
 pub mod auth;
 pub mod check;
+pub mod comment_attachments;
 pub mod crypto;
 pub mod discussion;
 pub mod egress;

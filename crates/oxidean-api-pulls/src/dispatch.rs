@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{comments, lifecycle, merge_ops, reviews, update_branch};
+use crate::{comments, lifecycle, merge_ops, meta, rail, reviews, update_branch};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -29,6 +29,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "pull.pin" => arm!(lifecycle::pin(ctx, input)),
         "pull.unpin" => arm!(lifecycle::unpin(ctx, input)),
         "pull.files" => arm!(merge_ops::files(ctx, input)),
+        "pull.files.setViewed" => arm!(meta::files_set_viewed(ctx, input)),
+        "pull.files.listViewed" => arm!(meta::files_list_viewed(ctx, input)),
+        "pull.labels.set" => arm!(meta::labels_set(ctx, input)),
+        "pull.assignees.set" => arm!(meta::assignees_set(ctx, input)),
+        "pull.milestone.set" => arm!(rail::milestone_set(ctx, input)),
+        "pull.development.list" => arm!(rail::development_list(ctx, input)),
+        "pull.projects.list" => arm!(rail::projects_list(ctx, input)),
+        "pull.deployments.list" => arm!(rail::deployments_list(ctx, input)),
         "pull.commits" => arm!(merge_ops::commits(ctx, input)),
         "pull.comments.list" => arm!(comments::comments_list(ctx, input)),
         "pull.comments.create" => arm!(comments::comments_create(ctx, input)),

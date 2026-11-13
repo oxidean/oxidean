@@ -300,6 +300,7 @@ async fn dialect_pulls_batch_enrichment() {
         None,
         None,
         None,
+        false,
     )
     .await
     .expect("insert pull comment");

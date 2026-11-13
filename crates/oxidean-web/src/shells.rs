@@ -227,6 +227,13 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[L("settings"), L("experiments")],
+        file: "settings/experiments/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[L("settings"), L("applications")],
         file: "settings/applications/index.html",
         title: None,
@@ -483,6 +490,60 @@ static SHELLS: &[Shell] = &[
     },
     Shell {
         pattern: &[P("owner"), P("repo"), L("pull"), P("n")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    // pr-new-ui (WI-0001) tab URLs — the same stub page serves every tab;
+    // the client reads the sub-path. `files` is the legacy alias GitHub's
+    // new experience renamed to `changes`: answer a real 302.
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), L("commits")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), L("checks")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), L("changes")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[
+            P("owner"),
+            P("repo"),
+            L("pull"),
+            P("n"),
+            L("changes"),
+            P("sha"),
+        ],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), L("files")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: Some("/{owner}/{repo}/pull/{n}/changes"),
+    },
+    // Catch-all for any other pull sub-path — the named tabs above win on
+    // literal count; unknown tails land on the page's default view.
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n"), S("rest")],
         file: "_/_/pull/_/index.html",
         title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
         protected: false,

@@ -10,7 +10,8 @@ pub mod refs;
 use std::path::Path;
 
 use oxidean_core::{
-    AppError, CreatePullRequest, IssueAssigneePublic, MergeMethod, PullPublic, PullState,
+    AppError, CreatePullRequest, IssueAssigneePublic, LabelPublic, MergeMethod, PullPublic,
+    PullState,
 };
 use oxidean_db::{Database, PullRow};
 use oxidean_git::{CliGitBackend, GitBackend};
@@ -576,6 +577,9 @@ pub struct PullEnrichment {
     head_repos: std::collections::HashMap<String, oxidean_db::RepositoryRow>,
     org_slugs: std::collections::HashMap<String, String>,
     assignees: std::collections::HashMap<String, Vec<oxidean_db::pulls::PullAssigneeRow>>,
+    labels: std::collections::HashMap<String, Vec<LabelPublic>>,
+    /// `milestones.id` → public row for linked pulls.
+    milestones: std::collections::HashMap<String, oxidean_core::MilestonePublic>,
 }
 
 pub async fn load_pull_enrichment(
@@ -589,23 +593,34 @@ pub async fn load_pull_enrichment(
             head_repos: HashMap::new(),
             org_slugs: HashMap::new(),
             assignees: HashMap::new(),
+            labels: HashMap::new(),
+            milestones: HashMap::new(),
         });
     }
     let pull_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let milestone_ids: Vec<String> = {
+        let mut v: Vec<String> = rows.iter().filter_map(|r| r.milestone_id.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
     let head_repo_ids: Vec<String> = {
         let mut v: Vec<String> = rows.iter().map(|r| r.head_repo_id.clone()).collect();
         v.sort();
         v.dedup();
         v
     };
-    let (head_repos, assignee_pairs) = tokio::try_join!(
+    let (head_repos, assignee_pairs, label_pairs, milestone_rows) = tokio::try_join!(
         ctx.db.find_repositories_by_ids(&head_repo_ids),
         ctx.db.list_pull_assignees_for_pulls(&pull_ids),
+        ctx.db.list_pull_labels_for_pulls(&pull_ids),
+        ctx.db.list_milestones_by_ids(&milestone_ids),
     )
     .map_err(db_err)?;
 
     // Authors + user-type head owners share one users lookup; org owners get their own.
     let mut user_ids: Vec<String> = rows.iter().map(|r| r.author_id.clone()).collect();
+    user_ids.extend(milestone_rows.iter().filter_map(|m| m.creator_id.clone()));
     let mut org_ids: Vec<String> = Vec::new();
     for repo in &head_repos {
         match repo.owner_type.as_str() {
@@ -627,11 +642,38 @@ pub async fn load_pull_enrichment(
     for (pull_id, a) in assignee_pairs {
         assignees.entry(pull_id).or_default().push(a);
     }
+    let mut labels: HashMap<String, Vec<LabelPublic>> = HashMap::new();
+    for (pull_id, row) in label_pairs {
+        labels
+            .entry(pull_id)
+            .or_default()
+            .push(crate::label::to_public(
+                &row,
+                row.repo_id.is_none() && row.org_id.is_some(),
+            ));
+    }
+    let milestones: HashMap<String, oxidean_core::MilestonePublic> = milestone_rows
+        .iter()
+        .map(|m| {
+            (
+                m.id.clone(),
+                crate::milestone::milestone_to_public(
+                    m,
+                    m.creator_id
+                        .as_ref()
+                        .and_then(|id| users.iter().find(|u| &u.id == id))
+                        .map(|u| u.username.clone()),
+                ),
+            )
+        })
+        .collect();
     Ok(PullEnrichment {
         usernames: users.into_iter().map(|u| (u.id, u.username)).collect(),
         head_repos: head_repos.into_iter().map(|r| (r.id.clone(), r)).collect(),
         org_slugs: orgs.into_iter().map(|o| (o.id, o.slug)).collect(),
         assignees,
+        labels,
+        milestones,
     })
 }
 
@@ -714,7 +756,14 @@ pub fn pull_row_to_public(row: &PullRow, enr: &PullEnrichment) -> Result<PullPub
         updated_at: row.updated_at.clone(),
         comment_count: row.comment_count,
         assignees,
+        labels: enr.labels.get(&row.id).cloned().unwrap_or_default(),
         pinned: row.pinned_position.is_some(),
+        milestone: row
+            .milestone_id
+            .as_ref()
+            .and_then(|id| enr.milestones.get(id))
+            .cloned()
+            .map(Box::new),
     })
 }
 

@@ -19,11 +19,14 @@ import { PullFiles } from "@/components/repo/pull-files";
 import { PullMergePanel } from "@/components/repo/pull-merge-panel";
 import { PullUpdateBranch } from "@/components/repo/pull-update-branch";
 import { PullReviews } from "@/components/repo/pull-reviews";
+import { PullDetailV2, pullV2TabFromSplat } from "@/components/repo/pull-v2/pull-v2";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { authSessionQueryOptions } from "@/lib/session-queries";
+import { useExperiment } from "@/lib/use-experiment";
 import { fetchPullGet, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
@@ -63,19 +66,16 @@ async function loadPullDetail(
   return { kind: "ready", repo: got.data, pull: pull.data };
 }
 
-function repoPullNQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+function repoPullNQueryOptions(params: Record<string, string | undefined>, _searchStr = "") {
   return queryOptions({
+    // Keyed on what the loader actually reads — _splat/searchStr churn must not
+    // drop the loader to undefined (that flashes the legacy subtree on tab nav).
     queryKey: [
       "repo-page",
       "/$owner/$repo/pull/$n",
       params.owner ?? "",
       params.repo ?? "",
-      params._splat ?? "",
       params.n ?? "",
-      params.sha ?? "",
-      params.tag ?? "",
-      params.run ?? "",
-      searchStr,
     ],
     queryFn: async (): Promise<PullDetailLoaderData> => {
       const owner = String((params as { owner?: string }).owner ?? "");
@@ -96,14 +96,17 @@ function repoPullNQueryOptions(params: Record<string, string | undefined>, searc
 function PullDetailPageContent() @{
   const pathname = usePathname();
   const searchStr = useSearchString();
-  const params = (matchPath("/$owner/$repo/pull/$n", pathname) ?? {}) as {
+  // Splat binds the pr-new-ui sub-path ("commits" | "checks" | "changes[/<sha>]").
+  const params = (matchPath("/$owner/$repo/pull/$n/$", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
     n?: string;
+    _splat?: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const number = Number(params.n ?? 0);
+  const splat = params._splat ?? "";
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"conversation" | "commits" | "checks" | "files">("conversation");
   const [busy, setBusy] = useState(false);
@@ -123,6 +126,10 @@ function PullDetailPageContent() @{
   });
 
   const account = useChromeAccountState();
+  // pr-new-ui gate (WI-0001): the flag rides auth.me — hold the detail view
+  // while the session resolves so flag-on users don't see a legacy flash.
+  const meQ = useQuery(authSessionQueryOptions());
+  const prNewUi = useExperiment("pr-new-ui");
   const pull = pullQ.data;
   // GIT-20: archived repos hide all pull write affordances (merge/comment/review).
   const canWrite = loader?.kind === "ready" && !!loader.repo.can_write && !loader.repo.archived;
@@ -188,193 +195,221 @@ function PullDetailPageContent() @{
     } @else if (loader?.kind === "error") {
       <p className="text-destructive">{loader.message as string}</p>;
     } @else {
-      @if (!pull) {
+      @if (!pull || meQ.isPending) {
         <p className="text-muted-foreground">Loading…</p>;
       } @else {
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
-            <div className="min-w-0">
-              <h2 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-tight">
-                {pull.title as string}{" "}
-                <span className="font-normal text-muted-foreground">#{pull.number as number}</span>
-              </h2>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                @if (pull.state === "merged") {
-                  <Badge variant="merged">
-                    <GitMerge aria-hidden size={12} />
-                    Merged
-                  </Badge>;
-                } @else if (pull.state === "closed") {
-                  <Badge variant="closed">
-                    <GitPullRequestClosed aria-hidden size={12} />
-                    Closed
-                  </Badge>;
-                } @else {
-                  @if (pull.draft) {
-                    <Badge variant="draft">
-                      <GitPullRequestDraft aria-hidden size={12} />
-                      Draft
+        @if (prNewUi && loader?.kind === "ready") {
+          <PullDetailV2
+            owner={owner}
+            repoName={repoName}
+            number={number}
+            repo={loader.repo}
+            pull={pull}
+            canWrite={canWrite}
+            canInteract={canInteract}
+            isAuthor={isAuthor}
+            currentUserId={account.user?.id ?? ""}
+            tab={pullV2TabFromSplat(splat)}
+            changesSha={
+              splat.startsWith("changes/")
+                ? splat.slice(8)
+                : splat.startsWith("files/")
+                  ? splat.slice(6)
+                  : undefined
+            }
+          />;
+        } @else {
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+              <div className="min-w-0">
+                <h2 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-tight">
+                  {pull.title as string}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    #{pull.number as number}
+                  </span>
+                </h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  @if (pull.state === "merged") {
+                    <Badge variant="merged">
+                      <GitMerge aria-hidden size={12} />
+                      Merged
+                    </Badge>;
+                  } @else if (pull.state === "closed") {
+                    <Badge variant="closed">
+                      <GitPullRequestClosed aria-hidden size={12} />
+                      Closed
                     </Badge>;
                   } @else {
-                    <Badge variant="open">
-                      <GitPullRequest aria-hidden size={12} />
-                      Open
-                    </Badge>;
-                  }
-                }
-                <span>
-                  <span className="font-medium text-foreground">
-                    {pull.author_username as string}
-                  </span>{" "}
-                  wants to merge{" "}
-                  <span className="font-mono">
-                    {
-                      (pull.head_owner === owner && pull.head_name === repoName
-                        ? pull.head_ref
-                        : `${pull.head_owner}:${pull.head_ref}`) as string
+                    @if (pull.draft) {
+                      <Badge variant="draft">
+                        <GitPullRequestDraft aria-hidden size={12} />
+                        Draft
+                      </Badge>;
+                    } @else {
+                      <Badge variant="open">
+                        <GitPullRequest aria-hidden size={12} />
+                        Open
+                      </Badge>;
                     }
-                  </span>{" "}
-                  into <span className="font-mono">{pull.base_ref as string}</span>
-                </span>
+                  }
+                  <span>
+                    <span className="font-medium text-foreground">
+                      {pull.author_username as string}
+                    </span>{" "}
+                    wants to merge{" "}
+                    <span className="font-mono">
+                      {
+                        (pull.head_owner === owner && pull.head_name === repoName
+                          ? pull.head_ref
+                          : `${pull.head_owner}:${pull.head_ref}`) as string
+                      }
+                    </span>{" "}
+                    into <span className="font-mono">{pull.base_ref as string}</span>
+                  </span>
+                </div>
               </div>
+              @if (canWrite || isAuthor) {
+                <div className="flex shrink-0 gap-2">
+                  @if (pull.state === "open") {
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void closePull()}
+                    >
+                      Close pull request
+                    </Button>;
+                  }
+                  @if (pull.state === "closed") {
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void reopenPull()}
+                    >
+                      Reopen pull request
+                    </Button>;
+                  }
+                  @if (canWrite) {
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      data-testid="pull-pin-toggle"
+                      onClick={() => void togglePin()}
+                    >
+                      {(pull.pinned ? "Unpin" : "Pin") as string}
+                    </Button>;
+                  }
+                </div>;
+              }
             </div>
-            @if (canWrite || isAuthor) {
-              <div className="flex shrink-0 gap-2">
-                @if (pull.state === "open") {
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => void closePull()}
-                  >
-                    Close pull request
-                  </Button>;
-                }
-                @if (pull.state === "closed") {
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => void reopenPull()}
-                  >
-                    Reopen pull request
-                  </Button>;
-                }
-                @if (canWrite) {
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    data-testid="pull-pin-toggle"
-                    onClick={() => void togglePin()}
-                  >
-                    {(pull.pinned ? "Unpin" : "Pin") as string}
-                  </Button>;
-                }
-              </div>;
+            @if (error) {
+              <p className="text-sm text-destructive">{error as string}</p>;
             }
-          </div>
-          @if (error) {
-            <p className="text-sm text-destructive">{error as string}</p>;
-          }
-          <PullUpdateBranch
-            owner={owner}
-            repoName={repoName}
-            number={number}
-            pullState={(pull.state as string) ?? "open"}
-            baseRef={(pull.base_ref as string) ?? ""}
-          />
-          <PullMergePanel
-            owner={owner}
-            repoName={repoName}
-            number={number}
-            canWrite={canWrite}
-            pullState={(pull.state as string) ?? "open"}
-          />
-          <div className="flex gap-3 border-b border-border" role="tablist">
-            <button
-              type="button"
-              className={
-                (tab === "conversation"
-                  ? "border-b-2 border-primary pb-2 text-sm font-semibold"
-                  : "pb-2 text-sm text-muted-foreground") as string
-              }
-              onClick={() => setTab("conversation")}
-            >
-              Conversation
-            </button>
-            <button
-              type="button"
-              className={
-                (tab === "commits"
-                  ? "border-b-2 border-primary pb-2 text-sm font-semibold"
-                  : "pb-2 text-sm text-muted-foreground") as string
-              }
-              onClick={() => setTab("commits")}
-            >
-              Commits
-            </button>
-            <button
-              type="button"
-              className={
-                (tab === "checks"
-                  ? "border-b-2 border-primary pb-2 text-sm font-semibold"
-                  : "pb-2 text-sm text-muted-foreground") as string
-              }
-              onClick={() => setTab("checks")}
-            >
-              Checks
-            </button>
-            <button
-              type="button"
-              className={
-                (tab === "files"
-                  ? "border-b-2 border-primary pb-2 text-sm font-semibold"
-                  : "pb-2 text-sm text-muted-foreground") as string
-              }
-              onClick={() => setTab("files")}
-            >
-              Files changed
-            </button>
-          </div>
-          @if (tab === "conversation") {
-            <div className="space-y-6">
-              <PullConversation
-                owner={owner}
-                repoName={repoName}
-                number={number}
-                canWrite={canWrite}
-                canInteract={canInteract}
-                currentUserId={account.user?.id ?? ""}
-                body={(pull.body || "") as string}
-              />
-              <PullReviews
-                owner={owner}
-                repoName={repoName}
-                number={number}
-                canWrite={canWrite}
-                isAuthor={isAuthor}
-              />
-            </div>;
-          }
-          @if (tab === "commits") {
-            <PullCommits owner={owner} repoName={repoName} number={number} />;
-          }
-          @if (tab === "checks") {
-            <PullChecks owner={owner} repoName={repoName} sha={pull.head_sha} />;
-          }
-          @if (tab === "files") {
-            <PullFiles
+            <PullUpdateBranch
               owner={owner}
               repoName={repoName}
               number={number}
-              canInteract={canInteract}
-            />;
-          }
-        </div>;
+              pullState={(pull.state as string) ?? "open"}
+              baseRef={(pull.base_ref as string) ?? ""}
+            />
+            <PullMergePanel
+              owner={owner}
+              repoName={repoName}
+              number={number}
+              canWrite={canWrite}
+              pullState={(pull.state as string) ?? "open"}
+            />
+            <div className="flex gap-3 border-b border-border" role="tablist">
+              <button
+                type="button"
+                className={
+                  (tab === "conversation"
+                    ? "border-b-2 border-primary pb-2 text-sm font-semibold"
+                    : "pb-2 text-sm text-muted-foreground") as string
+                }
+                data-tab="conversation"
+                onClick={() => setTab("conversation")}
+              >
+                Conversation
+              </button>
+              <button
+                type="button"
+                className={
+                  (tab === "commits"
+                    ? "border-b-2 border-primary pb-2 text-sm font-semibold"
+                    : "pb-2 text-sm text-muted-foreground") as string
+                }
+                data-tab="commits"
+                onClick={() => setTab("commits")}
+              >
+                Commits
+              </button>
+              <button
+                type="button"
+                className={
+                  (tab === "checks"
+                    ? "border-b-2 border-primary pb-2 text-sm font-semibold"
+                    : "pb-2 text-sm text-muted-foreground") as string
+                }
+                data-tab="checks"
+                onClick={() => setTab("checks")}
+              >
+                Checks
+              </button>
+              <button
+                type="button"
+                className={
+                  (tab === "files"
+                    ? "border-b-2 border-primary pb-2 text-sm font-semibold"
+                    : "pb-2 text-sm text-muted-foreground") as string
+                }
+                data-tab="files"
+                onClick={() => setTab("files")}
+              >
+                Files changed
+              </button>
+            </div>
+            @if (tab === "conversation") {
+              <div className="space-y-6">
+                <PullConversation
+                  owner={owner}
+                  repoName={repoName}
+                  number={number}
+                  canWrite={canWrite}
+                  canInteract={canInteract}
+                  currentUserId={account.user?.id ?? ""}
+                  body={(pull.body || "") as string}
+                />
+                <PullReviews
+                  owner={owner}
+                  repoName={repoName}
+                  number={number}
+                  canWrite={canWrite}
+                  isAuthor={isAuthor}
+                />
+              </div>;
+            }
+            @if (tab === "commits") {
+              <PullCommits owner={owner} repoName={repoName} number={number} />;
+            }
+            @if (tab === "checks") {
+              <PullChecks owner={owner} repoName={repoName} sha={pull.head_sha} />;
+            }
+            @if (tab === "files") {
+              <PullFiles
+                owner={owner}
+                repoName={repoName}
+                number={number}
+                canInteract={canInteract}
+              />;
+            }
+          </div>;
+        }
       }
     }
   }

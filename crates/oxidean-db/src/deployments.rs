@@ -824,3 +824,84 @@ pub async fn list_active_deployments_for_environment(
         }
     }
 }
+
+/// Deployments associated with a pull request — matches the head SHA or a
+/// ref pointing at the head branch (`ref`, `refs/heads/<ref>`, or the
+/// `refs/pull/<n>/head` namespace). PR-rail "Deployments" section source.
+#[allow(clippy::too_many_arguments)]
+pub async fn list_deployments_for_pull(
+    pool: &DbPool,
+    repository_id: &str,
+    head_sha: &str,
+    head_ref: &str,
+    pull_number: i64,
+    limit: i64,
+) -> Result<Vec<ActionDeploymentRow>, String> {
+    let limit = limit.clamp(1, 500);
+    let pull_ref = format!("refs/pull/{pull_number}/head");
+    let refs = [
+        head_ref.to_string(),
+        format!("refs/heads/{head_ref}"),
+        pull_ref,
+    ];
+    match pool {
+        DbPool::Postgres(p) => {
+            let sql = format!(
+                "SELECT {DEPLOYMENT_COLS_PG} FROM action_deployments d
+                 LEFT JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = $1
+                   AND (d.sha = $2 OR d.ref = ANY($3))
+                 ORDER BY d.created_at DESC, d.seq DESC LIMIT $4"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repository_id)
+                .bind(head_sha)
+                .bind(refs.as_slice())
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            rows.into_iter().map(|r| Ok(map_deployment!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let sql = format!(
+                "SELECT {DEPLOYMENT_COLS_MYSQL} FROM action_deployments d
+                 LEFT JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = ?
+                   AND (d.sha = ? OR d.ref IN (?, ?, ?))
+                 ORDER BY d.created_at DESC, d.seq DESC LIMIT ?"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repository_id)
+                .bind(head_sha)
+                .bind(&refs[0])
+                .bind(&refs[1])
+                .bind(&refs[2])
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            rows.into_iter().map(|r| Ok(map_deployment!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let sql = format!(
+                "SELECT {DEPLOYMENT_COLS_SQLITE} FROM action_deployments d
+                 LEFT JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = ?1
+                   AND (d.sha = ?2 OR d.ref IN (?3, ?4, ?5))
+                 ORDER BY d.created_at DESC, d.rowid DESC LIMIT ?6"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repository_id)
+                .bind(head_sha)
+                .bind(&refs[0])
+                .bind(&refs[1])
+                .bind(&refs[2])
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            rows.into_iter().map(|r| Ok(map_deployment!(r))).collect()
+        }
+    }
+}

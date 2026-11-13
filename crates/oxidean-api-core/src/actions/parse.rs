@@ -888,7 +888,20 @@ fn parse_environment(
             let url = map
                 .get(serde_yaml::Value::String("url".into()))
                 .and_then(|v| v.as_str())
-                .map(str::to_string);
+                .map(str::to_string)
+                .filter(|u| {
+                    // Deployment URLs render as links in the UI — only
+                    // http(s) is safe to store (`javascript:`/`data:` would
+                    // become a clickable XSS vector).
+                    let ok = {
+                        let l = u.to_ascii_lowercase();
+                        l.starts_with("http://") || l.starts_with("https://")
+                    };
+                    if !ok {
+                        warnings.push("environment url is not http(s); ignored".to_string());
+                    }
+                    ok
+                });
             if name.is_empty() {
                 warnings.push("environment mapping lacks a name".to_string());
                 None
@@ -1330,6 +1343,47 @@ jobs:
     fn invalid_yaml_returns_parse_error() {
         let err = parse_workflow_yaml(b"name: [\n").expect_err("bad yaml");
         assert!(err.message.contains("invalid workflow YAML"));
+    }
+
+    #[test]
+    fn environment_url_only_allows_http_schemes() {
+        let yaml = br#"
+name: CI
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: javascript:alert(1)
+    steps:
+      - run: echo hi
+"#;
+        let doc = parse_workflow_yaml(yaml).expect("parse");
+        assert_eq!(doc.jobs[0].environment.as_ref().unwrap().name, "prod");
+        assert_eq!(doc.jobs[0].environment.as_ref().unwrap().url, None);
+        assert!(doc
+            .warnings
+            .iter()
+            .any(|w| w.contains("environment url is not http(s)")));
+
+        let yaml_ok = br#"
+name: CI
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: https://status.example.com/deploy/1
+    steps:
+      - run: echo hi
+"#;
+        let doc = parse_workflow_yaml(yaml_ok).expect("parse");
+        assert_eq!(
+            doc.jobs[0].environment.as_ref().unwrap().url.as_deref(),
+            Some("https://status.example.com/deploy/1")
+        );
     }
 
     fn perm_of(yaml: &[u8]) -> (Option<WorkflowPermissions>, Option<WorkflowPermissions>) {

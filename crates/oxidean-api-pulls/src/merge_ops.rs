@@ -1,6 +1,7 @@
 //! `pull.files` / `pull.commits` / `pull.merge` / `repo.mergeSettings.*`
 //! handlers. Merge-gate evaluation lives in `oxidean_api_core::pull::merge_ops` (#162).
 
+use crate::closing_refs::closing_refs;
 use oxidean_api_core::auth::gate::require_verified;
 use oxidean_api_core::git::bare_repo_path;
 use oxidean_api_core::notify;
@@ -16,36 +17,12 @@ use oxidean_core::{
     RepoMergeSettings, UpdateRepoMergeSettingsRequest,
 };
 
-fn parse_closing_issue_numbers(text: &str) -> Vec<i64> {
-    let lower = text.to_lowercase();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < lower.len() {
-        let rest = &lower[i..];
-        let hit = rest
-            .find("fixes #")
-            .or_else(|| rest.find("closes #"))
-            .or_else(|| rest.find("resolves #"));
-        let Some(pos) = hit else { break };
-        let hash_rel = rest[pos..].find('#').unwrap();
-        let after_hash = i + pos + hash_rel + 1;
-        let digits: String = lower[after_hash..]
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        if let Ok(n) = digits.parse::<i64>() {
-            if n > 0 && !out.contains(&n) {
-                out.push(n);
-            }
-        }
-        i = after_hash + digits.len().max(1);
-    }
-    out
-}
+/// Well-known empty-tree object — the diff base for root-commit scopes.
+const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// `pull.files` — Read+ unified diff base...head (PR-02).
 pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesResponse, AppError> {
-    let req: PullRefRequest = serde_json::from_value(input)
+    let req: oxidean_core::PullFilesRequest = serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.files input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -82,10 +59,87 @@ pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesRe
             .git
             .fetch_ref_from(&path, &head_path, &row.head_sha)
             .await;
+        // A scoped diff may name head-side objects not reachable from the
+        // pull head (fork side-branch tips); fetch them explicitly. Base-repo
+        // commits that don't exist on the fork fail here harmlessly — the
+        // diff below resolves them locally.
+        for scoped in [
+            req.sha.as_deref(),
+            req.base_sha.as_deref(),
+            req.head_sha.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let _ = ctx.git.fetch_ref_from(&path, &head_path, scoped).await;
+        }
     }
+    // Scoped diff resolution (per-commit / range / since-last-review). The
+    // default is the pull's full base...head; exactly one scope form applies.
+    let sha = req.sha.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let base_sha = req
+        .base_sha
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let head_sha = req
+        .head_sha
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let since_review = req.since_review.unwrap_or(false);
+    let (base, head): (String, String) = match (sha, base_sha, head_sha, since_review) {
+        (Some(s), None, None, false) => {
+            // Root commits have no parent — diff against the empty tree
+            // (diff_opts peels non-commit tips via ^{tree}).
+            let parent = ctx
+                .git
+                .cat_commit(&path, s)
+                .await
+                .map_err(|e| AppError::new("pull.diff_failed", format!("diff failed: {e}")))?
+                .parents
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| EMPTY_TREE_SHA.to_string());
+            (parent, s.to_string())
+        }
+        (None, Some(b), Some(h), false) => (b.to_string(), h.to_string()),
+        (None, None, None, true) => {
+            let Some(session) = &ctx.session else {
+                return Err(AppError::new("auth.unauthenticated", "not authenticated"));
+            };
+            let reviewed = ctx
+                .db
+                .latest_review_commit_sha(&row.id, &session.user_id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| {
+                    AppError::new(
+                        "pull.no_prior_review",
+                        "no submitted review to diff against",
+                    )
+                })?;
+            (reviewed, row.head_sha.clone())
+        }
+        (None, None, None, false) => (row.base_sha.clone(), row.head_sha.clone()),
+        _ => {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "scope accepts exactly one of sha, base_sha+head_sha, or since_review",
+            ));
+        }
+    };
     let diff = ctx
         .git
-        .diff(&path, &row.base_sha, &row.head_sha)
+        .diff_opts(
+            &path,
+            &base,
+            &head,
+            &oxidean_git::DiffOpts {
+                ignore_whitespace: req.w.unwrap_or(false),
+                context_lines: req.context.map(|n| n.min(20)),
+            },
+        )
         .await
         .map_err(|e| AppError::new("pull.diff_failed", format!("diff failed: {e}")))?;
     Ok(PullFilesResponse {
@@ -116,9 +170,21 @@ pub async fn commits(
         &accessible.owner_username,
         &accessible.row.name,
     )?;
+    // Fork heads live in the head repo — pull the head objects into the base
+    // bare repo so the base..head range resolves (same as pull.files/merge).
+    oxidean_api_core::pull::ensure_head_objects_in_base(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &path,
+        &row,
+    )
+    .await?;
+    // The PR commit set is base..head — plain `git log head` would list up to
+    // 100 ancestors including commits already on the base branch.
     let summaries = ctx
         .git
-        .log(&path, &row.head_ref, 0, 100, None, None)
+        .log_range(&path, &row.base_sha, &row.head_sha, 0, 100, None, None)
         .await
         .map_err(|e| AppError::new("pull.commits_failed", format!("log failed: {e}")))?;
     let mut emails: Vec<String> = Vec::new();
@@ -139,9 +205,10 @@ pub async fn commits(
         oxidean_api_core::repo::signatures::keyring_for_resolved(&ctx.db, &emails, &resolved).await;
     let summaries = if keyring.has_any() {
         ctx.git
-            .log(
+            .log_range(
                 &path,
-                &row.head_ref,
+                &row.base_sha,
+                &row.head_sha,
                 0,
                 100,
                 keyring.allowed_signers.as_deref(),
@@ -401,14 +468,31 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     }
 
     if row.base_ref == accessible.row.default_branch {
-        let mut nums = parse_closing_issue_numbers(&row.body);
-        nums.extend(parse_closing_issue_numbers(&full_message));
-        nums.sort_unstable();
-        nums.dedup();
-        for n in nums {
+        let mut refs = closing_refs(&row.body);
+        refs.extend(closing_refs(&full_message));
+        let mut seen = std::collections::HashSet::new();
+        refs.retain(|r| {
+            seen.insert((
+                r.repo
+                    .as_ref()
+                    .map(|(o, n)| (o.to_lowercase(), n.to_lowercase())),
+                r.number,
+            ))
+        });
+        for r in refs {
+            let same_repo = match &r.repo {
+                None => true,
+                Some((owner, name)) => {
+                    owner.eq_ignore_ascii_case(&accessible.owner_username)
+                        && name.eq_ignore_ascii_case(&accessible.row.name)
+                }
+            };
+            if !same_repo {
+                continue;
+            }
             if let Ok(Some(issue)) = ctx
                 .db
-                .find_issue_by_repo_number(&accessible.row.id, n)
+                .find_issue_by_repo_number(&accessible.row.id, r.number)
                 .await
             {
                 if issue.state == "open" {

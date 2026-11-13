@@ -587,4 +587,75 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       },
     ],
   },
+  // --- WI-0001 pr-new-ui ---
+  {
+    surface: "components/repo/pull-v2/pull-v2-changes.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-changes.browser.test.tsx",
+        subject: "pull-v2-changes",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2-composer-extras.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-composer-extras.browser.test.tsx",
+        subject: "pull-v2-composer-extras",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2-review-bar.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-review-bar.browser.test.tsx",
+        subject: "pull-v2-review-bar",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2-diff-file.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-changes.browser.test.tsx",
+        subject: "pull-v2-file-menu",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2-file-tree.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-changes.browser.test.tsx",
+        subject: "pull-v2-tree-filter",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/pull-v2/pull-v2.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2.browser.test.tsx",
+        subject: "pull-v2",
+      },
+    ],
+  },
+  {
+    surface: "routes/settings/experiments.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/settings/experiments.browser.test.tsx",
+        subject: "experiment-toggle-pr-new-ui",
+      },
+    ],
+  },
 ];

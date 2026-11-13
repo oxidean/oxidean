@@ -12867,16 +12867,18 @@ paths:
               title: CreatePullCommentRequest
               type: object
               properties:
+                pending:
+                  description: |-
+                    Persist as a pending review draft instead of a submitted comment —
+                    only the author sees it until `pull.reviews.submit` links it.
+                  type: boolean
+                  default: null
+                  nullable: true
                 commit_sha:
                   type: string
                   default: null
                   nullable: true
                 start_line:
-                  type: integer
-                  format: int64
-                  default: null
-                  nullable: true
-                line:
                   type: integer
                   format: int64
                   default: null
@@ -12889,6 +12891,11 @@ paths:
                   nullable: true
                 side:
                   type: string
+                  default: null
+                  nullable: true
+                line:
+                  type: integer
+                  format: int64
                   default: null
                   nullable: true
       responses:
@@ -13062,6 +13069,14 @@ paths:
               title: SubmitPullReviewRequest
               type: object
               properties:
+                comment_ids:
+                  description: |-
+                    Pending review comments to link to the new review — must exist on
+                    this pull and be authored by the submitter.
+                  type: array
+                  items:
+                    type: string
+                  default: []
                 body:
                   type: string
                   default: null
@@ -16560,6 +16575,15 @@ components:
             contributions on the owner's own profile view (COL-12; others never
             see private rows).
           default: true
+        experiments:
+          type: array
+          items:
+            type: string
+          description: |-
+            Enabled experiment flag keys (WI-0001) — validated keys from
+            `crate::experiments::EXPERIMENTS`. Empty for users with no rows and
+            always empty for anonymous callers' views of other users.
+          default: []
       required:
       - id
       - email
@@ -17842,12 +17866,27 @@ components:
           items:
             $ref: '#/components/schemas/IssueAssigneePublic'
           default: []
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabelPublic'
+          description: Labels applied to the pull (effective repo/org label set).
+          default: []
         pinned:
           type: boolean
           description: |-
             Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
             above the open-PR list.
           default: false
+        milestone:
+          anyOf:
+          - $ref: '#/components/schemas/MilestonePublic'
+          - enum:
+            - null
+          description: |-
+            Milestone this pull belongs to (embedded object, GitHub parity with
+            issues — PRs share the repo milestone set).
+          nullable: true
       required:
       - id
       - repo_id
@@ -17998,6 +18037,15 @@ components:
           type: boolean
         resolved:
           type: boolean
+        review_id:
+          type: string
+          description: Review this comment was submitted under (pending-review linkage).
+          nullable: true
+        pending:
+          type: boolean
+          description: |-
+            Server-persisted review draft — only visible to the author until a
+            submitted review links it.
         created_at:
           type: string
         updated_at:
@@ -18010,6 +18058,7 @@ components:
       - body
       - outdated
       - resolved
+      - pending
       - created_at
       - updated_at
     DeletePullCommentResponse:

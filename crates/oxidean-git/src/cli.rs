@@ -1537,6 +1537,181 @@ fn chrono_like_iso(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
 }
 
+/// Shared `git log` page builder used by [`GitBackend::log`] and
+/// [`GitBackend::log_range`]. `rev_arg` is the final rev argument passed to
+/// `git log` (a refname or a `base..head` range); `verify` lists the
+/// commit-ish endpoints that must resolve — any failure yields an empty page.
+async fn log_page_impl(
+    repo: &Path,
+    rev_arg: &str,
+    verify: &[&str],
+    skip: u32,
+    limit: u32,
+    allowed_signers: Option<&Path>,
+    gpg_home: Option<&Path>,
+) -> Result<Vec<CommitSummary>, GitError> {
+    let repo_s = repo_str(repo)?;
+    let limit = limit.clamp(1, 100);
+    let skip_s = skip.to_string();
+    let limit_s = limit.to_string();
+
+    for v in verify {
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{v}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(Vec::new());
+        }
+    }
+
+    let mut args: Vec<String> = vec!["-C".into(), repo_s.into()];
+    let mut extra_env: Vec<(String, String)> = Vec::new();
+    push_signature_verify_config(&mut args, &mut extra_env, allowed_signers, gpg_home)?;
+    // The config prefix (-C repo, -c pairs) doubles as the argv for any
+    // later %G? verify pass — same keyring/signers configuration.
+    let verify_prefix_len = args.len();
+    args.push("log".into());
+    args.push(format!("--skip={skip_s}"));
+    args.push(format!("--max-count={limit_s}"));
+    // %G? makes git spawn a verifier subprocess per signed commit. The
+    // listing runs without it: signatures are detected from the raw
+    // objects below and only commits whose signature could actually
+    // produce a real status get a %G? pass.
+    args.push("--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce".into());
+    args.push(rev_arg.to_string());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let env_refs: Vec<(&str, &str)> = extra_env
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let stdout = run_git_stdout_env(&arg_refs, &env_refs).await?;
+    let text = String::from_utf8_lossy(&stdout);
+    let mut out = Vec::new();
+    for record in text.split('\n') {
+        let record = record.trim_end_matches('\r');
+        if record.is_empty() {
+            continue;
+        }
+        if let Some(summary) = parse_commit_summary_record(record, false) {
+            out.push(summary);
+        }
+    }
+    if out.is_empty() {
+        return Ok(out);
+    }
+    let shas: Vec<String> = out.iter().map(|s| s.sha.clone()).collect();
+    let Some(scan) = signature_scan_batch(repo_s, &shas).await else {
+        // Can't inspect the objects — whole-page %G? like before.
+        return log_page_verify(
+            &args[..verify_prefix_len],
+            &env_refs,
+            repo_s,
+            &skip_s,
+            &limit_s,
+            rev_arg,
+            None,
+        )
+        .await;
+    };
+    // Partition signed commits: OpenPGP sigs on a provably-empty
+    // keyring are deterministic 'E' candidates; everything else needs a
+    // real %G?.
+    let mut keyring_empty: Option<bool> = None;
+    let mut pgp_candidates: Vec<String> = Vec::new();
+    let mut verify_set: Vec<String> = Vec::new();
+    for s in &out {
+        let Some(e) = scan.get(&s.sha) else {
+            verify_set.push(s.sha.clone());
+            continue;
+        };
+        if !e.has_signature {
+            continue;
+        }
+        if e.kind == "gpg" {
+            if keyring_empty.is_none() {
+                keyring_empty = Some(sig_verify_impossible(repo_s, gpg_home).await);
+            }
+            if keyring_empty.unwrap_or(false) {
+                pgp_candidates.push(s.sha.clone());
+                continue;
+            }
+        }
+        verify_set.push(s.sha.clone());
+    }
+    // Verify the first PGP candidate along with the rest: a uniform
+    // failure status ("unknown"/"none") means every candidate on this
+    // keyring reports identically; a real result (e.g. a verifier that
+    // handles PGP sigs under gpg.format=ssh differently) means the
+    // others need individual %G? answers.
+    if let Some(first) = pgp_candidates.first() {
+        verify_set.push(first.clone());
+    }
+    if !verify_set.is_empty() {
+        let Some(statuses) =
+            verify_status_batch(&args[..verify_prefix_len], &env_refs, &verify_set).await
+        else {
+            return log_page_verify(
+                &args[..verify_prefix_len],
+                &env_refs,
+                repo_s,
+                &skip_s,
+                &limit_s,
+                rev_arg,
+                Some(scan),
+            )
+            .await;
+        };
+        for s in out.iter_mut() {
+            if let Some(st) = statuses.get(&s.sha) {
+                s.signature_status = st.clone();
+            }
+        }
+        let probe = pgp_candidates.first().and_then(|f| statuses.get(f));
+        if matches!(probe.map(String::as_str), Some("unknown") | Some("none")) {
+            let st = probe.unwrap().clone();
+            for sha in &pgp_candidates[1..] {
+                if let Some(s) = out.iter_mut().find(|c| &c.sha == sha) {
+                    s.signature_status = st.clone();
+                }
+            }
+        } else if pgp_candidates.len() > 1 {
+            let rest: Vec<String> = pgp_candidates[1..].to_vec();
+            let Some(rest_statuses) =
+                verify_status_batch(&args[..verify_prefix_len], &env_refs, &rest).await
+            else {
+                return log_page_verify(
+                    &args[..verify_prefix_len],
+                    &env_refs,
+                    repo_s,
+                    &skip_s,
+                    &limit_s,
+                    rev_arg,
+                    Some(scan),
+                )
+                .await;
+            };
+            for s in out.iter_mut() {
+                if let Some(st) = rest_statuses.get(&s.sha) {
+                    s.signature_status = st.clone();
+                }
+            }
+        }
+    }
+    apply_signature_kinds(repo_s, &mut out, Some(scan)).await;
+    Ok(out)
+}
+
 #[async_trait::async_trait]
 impl GitBackend for CliGitBackend {
     async fn init_bare(&self, path: &Path, initial_branch: &str) -> Result<(), GitError> {
@@ -2170,164 +2345,41 @@ impl GitBackend for CliGitBackend {
         gpg_home: Option<&Path>,
     ) -> Result<Vec<CommitSummary>, GitError> {
         let refname = validate_treeish(refname)?;
-        let repo_s = repo_str(repo)?;
-        let limit = limit.clamp(1, 100);
-        let skip_s = skip.to_string();
-        let limit_s = limit.to_string();
+        log_page_impl(
+            repo,
+            refname,
+            &[refname],
+            skip,
+            limit,
+            allowed_signers,
+            gpg_home,
+        )
+        .await
+    }
 
-        let rev = Command::new("git")
-            .args([
-                "-C",
-                repo_s,
-                "rev-parse",
-                "--verify",
-                &format!("{refname}^{{commit}}"),
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
-        if !rev.status.success() {
-            return Ok(Vec::new());
-        }
-
-        let mut args: Vec<String> = vec!["-C".into(), repo_s.into()];
-        let mut extra_env: Vec<(String, String)> = Vec::new();
-        push_signature_verify_config(&mut args, &mut extra_env, allowed_signers, gpg_home)?;
-        // The config prefix (-C repo, -c pairs) doubles as the argv for any
-        // later %G? verify pass — same keyring/signers configuration.
-        let verify_prefix_len = args.len();
-        args.push("log".into());
-        args.push(format!("--skip={skip_s}"));
-        args.push(format!("--max-count={limit_s}"));
-        // %G? makes git spawn a verifier subprocess per signed commit. The
-        // listing runs without it: signatures are detected from the raw
-        // objects below and only commits whose signature could actually
-        // produce a real status get a %G? pass.
-        args.push("--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce".into());
-        args.push(refname.to_string());
-        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        let env_refs: Vec<(&str, &str)> = extra_env
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        let stdout = run_git_stdout_env(&arg_refs, &env_refs).await?;
-        let text = String::from_utf8_lossy(&stdout);
-        let mut out = Vec::new();
-        for record in text.split('\n') {
-            let record = record.trim_end_matches('\r');
-            if record.is_empty() {
-                continue;
-            }
-            if let Some(summary) = parse_commit_summary_record(record, false) {
-                out.push(summary);
-            }
-        }
-        if out.is_empty() {
-            return Ok(out);
-        }
-        let shas: Vec<String> = out.iter().map(|s| s.sha.clone()).collect();
-        let Some(scan) = signature_scan_batch(repo_s, &shas).await else {
-            // Can't inspect the objects — whole-page %G? like before.
-            return log_page_verify(
-                &args[..verify_prefix_len],
-                &env_refs,
-                repo_s,
-                &skip_s,
-                &limit_s,
-                refname,
-                None,
-            )
-            .await;
-        };
-        // Partition signed commits: OpenPGP sigs on a provably-empty
-        // keyring are deterministic 'E' candidates; everything else needs a
-        // real %G?.
-        let mut keyring_empty: Option<bool> = None;
-        let mut pgp_candidates: Vec<String> = Vec::new();
-        let mut verify_set: Vec<String> = Vec::new();
-        for s in &out {
-            let Some(e) = scan.get(&s.sha) else {
-                verify_set.push(s.sha.clone());
-                continue;
-            };
-            if !e.has_signature {
-                continue;
-            }
-            if e.kind == "gpg" {
-                if keyring_empty.is_none() {
-                    keyring_empty = Some(sig_verify_impossible(repo_s, gpg_home).await);
-                }
-                if keyring_empty.unwrap_or(false) {
-                    pgp_candidates.push(s.sha.clone());
-                    continue;
-                }
-            }
-            verify_set.push(s.sha.clone());
-        }
-        // Verify the first PGP candidate along with the rest: a uniform
-        // failure status ("unknown"/"none") means every candidate on this
-        // keyring reports identically; a real result (e.g. a verifier that
-        // handles PGP sigs under gpg.format=ssh differently) means the
-        // others need individual %G? answers.
-        if let Some(first) = pgp_candidates.first() {
-            verify_set.push(first.clone());
-        }
-        if !verify_set.is_empty() {
-            let Some(statuses) =
-                verify_status_batch(&args[..verify_prefix_len], &env_refs, &verify_set).await
-            else {
-                return log_page_verify(
-                    &args[..verify_prefix_len],
-                    &env_refs,
-                    repo_s,
-                    &skip_s,
-                    &limit_s,
-                    refname,
-                    Some(scan),
-                )
-                .await;
-            };
-            for s in out.iter_mut() {
-                if let Some(st) = statuses.get(&s.sha) {
-                    s.signature_status = st.clone();
-                }
-            }
-            let probe = pgp_candidates.first().and_then(|f| statuses.get(f));
-            if matches!(probe.map(String::as_str), Some("unknown") | Some("none")) {
-                let st = probe.unwrap().clone();
-                for sha in &pgp_candidates[1..] {
-                    if let Some(s) = out.iter_mut().find(|c| &c.sha == sha) {
-                        s.signature_status = st.clone();
-                    }
-                }
-            } else if pgp_candidates.len() > 1 {
-                let rest: Vec<String> = pgp_candidates[1..].to_vec();
-                let Some(rest_statuses) =
-                    verify_status_batch(&args[..verify_prefix_len], &env_refs, &rest).await
-                else {
-                    return log_page_verify(
-                        &args[..verify_prefix_len],
-                        &env_refs,
-                        repo_s,
-                        &skip_s,
-                        &limit_s,
-                        refname,
-                        Some(scan),
-                    )
-                    .await;
-                };
-                for s in out.iter_mut() {
-                    if let Some(st) = rest_statuses.get(&s.sha) {
-                        s.signature_status = st.clone();
-                    }
-                }
-            }
-        }
-        apply_signature_kinds(repo_s, &mut out, Some(scan)).await;
-        Ok(out)
+    async fn log_range(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        skip: u32,
+        limit: u32,
+        allowed_signers: Option<&Path>,
+        gpg_home: Option<&Path>,
+    ) -> Result<Vec<CommitSummary>, GitError> {
+        let base = validate_treeish(base)?;
+        let head = validate_treeish(head)?;
+        let rev = format!("{base}..{head}");
+        log_page_impl(
+            repo,
+            &rev,
+            &[base, head],
+            skip,
+            limit,
+            allowed_signers,
+            gpg_home,
+        )
+        .await
     }
 
     async fn show_commit(
@@ -2473,34 +2525,74 @@ impl GitBackend for CliGitBackend {
     }
 
     async fn diff(&self, repo: &Path, base: &str, head: &str) -> Result<DiffResult, GitError> {
+        self.diff_opts(repo, base, head, &crate::backend::DiffOpts::default())
+            .await
+    }
+
+    async fn diff_opts(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        opts: &crate::backend::DiffOpts,
+    ) -> Result<DiffResult, GitError> {
         let base = validate_treeish(base)?;
         let head = validate_treeish(head)?;
         let repo_s = repo_str(repo)?;
 
-        // Resolve both ends; identical trees → empty (not 500).
+        // Resolve both ends; identical trees → empty (not 500). Tips peel to
+        // `^{commit}` first; non-commit trees (the empty-tree base of a
+        // root-commit diff) peel to `^{tree}` and switch the range to
+        // `base..head` — `...` needs a merge base, which only exists
+        // between commits.
+        let mut commits_only = true;
         for tip in [base, head] {
-            let rev = Command::new("git")
-                .args([
-                    "-C",
-                    repo_s,
-                    "rev-parse",
-                    "--verify",
-                    &format!("{tip}^{{commit}}"),
-                ])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-                .await
-                .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
-            if !rev.status.success() {
+            let mut resolved = false;
+            for peel in ["{commit}", "{tree}"] {
+                let rev = Command::new("git")
+                    .args([
+                        "-C",
+                        repo_s,
+                        "rev-parse",
+                        "--verify",
+                        &format!("{tip}^{peel}"),
+                    ])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await
+                    .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+                if rev.status.success() {
+                    resolved = true;
+                    if peel == "{tree}" {
+                        commits_only = false;
+                    }
+                    break;
+                }
+            }
+            if !resolved {
                 return Err(GitError::NotFound(format!("ref {tip}")));
             }
         }
 
-        let range = format!("{base}...{head}");
+        let range = if commits_only {
+            format!("{base}...{head}")
+        } else {
+            format!("{base}..{head}")
+        };
+        let mut args = vec!["-C", repo_s, "diff", "--find-renames", "--patch"];
+        let context_arg;
+        if opts.ignore_whitespace {
+            args.push("--ignore-all-space");
+        }
+        if let Some(n) = opts.context_lines {
+            context_arg = format!("-U{n}");
+            args.push(&context_arg);
+        }
+        args.push(&range);
         let output = Command::new("git")
-            .args(["-C", repo_s, "diff", "--find-renames", "--patch", &range])
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -4901,6 +4993,83 @@ mod tests {
             .expect("log skip");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].subject, "first commit");
+    }
+
+    #[tokio::test]
+    async fn log_range_returns_only_commits_reachable_from_head() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("range.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "base commit",
+            &[("a.txt".into(), b"one\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        let bare_s = bare.to_str().unwrap();
+        let base_sha = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        // Real ancestry: clone, branch, two commits, push (seed_commit makes
+        // unrelated root histories per call — unusable for range tests).
+        let wt = tempfile::tempdir().unwrap();
+        let wt_s = wt.path().to_str().unwrap();
+        run_git(&["clone", bare_s, wt_s]).await.unwrap();
+        run_git(&["-C", wt_s, "checkout", "-b", "feature"])
+            .await
+            .unwrap();
+        for (name, msg) in [("b.txt", "pr commit one"), ("c.txt", "pr commit two")] {
+            tokio::fs::write(wt.path().join(name), b"x\n")
+                .await
+                .unwrap();
+            run_git(&["-C", wt_s, "add", name]).await.unwrap();
+            run_git(&["-C", wt_s, "commit", "-m", msg]).await.unwrap();
+        }
+        run_git(&["-C", wt_s, "push", "origin", "HEAD:refs/heads/feature"])
+            .await
+            .unwrap();
+        let head_sha = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "feature"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+
+        let range = git
+            .log_range(&bare, &base_sha, &head_sha, 0, 10, None, None)
+            .await
+            .expect("log_range");
+        assert_eq!(range.len(), 2);
+        assert_eq!(range[0].subject, "pr commit two");
+        assert_eq!(range[1].subject, "pr commit one");
+
+        // Base..base is empty; an unresolvable endpoint yields an empty page.
+        let empty = git
+            .log_range(&bare, &base_sha, &base_sha, 0, 10, None, None)
+            .await
+            .expect("log_range empty");
+        assert!(empty.is_empty());
+        let missing = git
+            .log_range(
+                &bare,
+                &base_sha,
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                0,
+                10,
+                None,
+                None,
+            )
+            .await
+            .expect("log_range missing");
+        assert!(missing.is_empty());
     }
 
     #[tokio::test]

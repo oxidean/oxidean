@@ -123,10 +123,17 @@ pub struct PullPublic {
     pub comment_count: i64,
     #[serde(default)]
     pub assignees: Vec<crate::IssueAssigneePublic>,
+    /// Labels applied to the pull (effective repo/org label set).
+    #[serde(default)]
+    pub labels: Vec<crate::LabelPublic>,
     /// Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
     /// above the open-PR list.
     #[serde(default)]
     pub pinned: bool,
+    /// Milestone this pull belongs to (embedded object, GitHub parity with
+    /// issues — PRs share the repo milestone set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<Box<crate::MilestonePublic>>,
 }
 
 /// GitHub parity — at most three pinned pull requests per repository.
@@ -298,6 +305,12 @@ pub struct PullCommentPublic {
     pub commit_sha: Option<String>,
     pub outdated: bool,
     pub resolved: bool,
+    /// Review this comment was submitted under (pending-review linkage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_id: Option<String>,
+    /// Server-persisted review draft — only visible to the author until a
+    /// submitted review links it.
+    pub pending: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -318,6 +331,10 @@ pub struct CreatePullCommentRequest {
     pub start_line: Option<i64>,
     #[serde(default)]
     pub commit_sha: Option<String>,
+    /// Persist as a pending review draft instead of a submitted comment —
+    /// only the author sees it until `pull.reviews.submit` links it.
+    #[serde(default)]
+    pub pending: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -386,6 +403,84 @@ pub struct SubmitPullReviewRequest {
     pub state: String,
     #[serde(default)]
     pub body: Option<String>,
+    /// Pending review comments to link to the new review — must exist on
+    /// this pull and be authored by the submitter.
+    #[serde(default)]
+    pub comment_ids: Vec<String>,
+}
+
+/// `pull.labels.set` — replace the pull's labels (Write+; ids must be in the
+/// repo's effective label set, mirroring `issue.labels.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullLabelsRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "labelIds", alias = "label_ids")]
+    pub label_ids: Vec<String>,
+}
+
+/// `pull.assignees.set` — replace the pull's assignees (Write+; each user
+/// needs Read+ on the repo, mirroring `issue.assignees.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullAssigneesRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "userIds", alias = "user_ids")]
+    pub user_ids: Vec<String>,
+}
+
+/// `pull.files.setViewed` — mark one changed file viewed/unviewed for the
+/// calling user (per-user review state, WI-0001).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesSetViewedRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    pub path: String,
+    pub viewed: bool,
+}
+
+/// `pull.files` — extends `PullRefRequest` with diff display options
+/// (WI-0001 diff settings; both optional, `w` mirrors GitHub's flag).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    /// Hide whitespace-only differences (`git diff -w`).
+    #[serde(default)]
+    pub w: Option<bool>,
+    /// Unified context lines around each hunk (`git diff -U<n>`, clamped 0..=20).
+    #[serde(default)]
+    pub context: Option<u32>,
+    /// Scope the diff to a single commit (its first parent..sha).
+    #[serde(default)]
+    pub sha: Option<String>,
+    /// Scope the diff to a commit range — requires `head_sha`.
+    #[serde(default)]
+    pub base_sha: Option<String>,
+    /// Range end — requires `base_sha`.
+    #[serde(default)]
+    pub head_sha: Option<String>,
+    /// Diff the caller's latest submitted review commit against the pull head
+    /// ("changes since your last review"). Requires a session.
+    #[serde(default)]
+    pub since_review: Option<bool>,
+}
+
+/// `pull.files.listViewed` — paths the calling user already marked viewed.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesViewedRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullFilesViewedResponse {
+    pub viewed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -467,6 +562,65 @@ pub struct ForkRepoRequest {
     pub into_owner: Option<String>,
     #[serde(default)]
     pub into_name: Option<String>,
+}
+
+/// `pull.milestone.set` — Write+. `milestone` is the milestone `#N`;
+/// `null`/absent clears (mirrors `issue.milestone.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullMilestoneRequest {
+    pub owner: String,
+    pub name: String,
+    /// Pull `#N`.
+    pub number: i64,
+    /// Milestone `#N`; `null` clears the pull's milestone.
+    #[serde(default)]
+    pub milestone: Option<i64>,
+}
+
+/// One row of the PR rail "Development" section — an issue this pull's
+/// body/title references with a closing keyword (`close`/`fix`/`resolve`
+/// and their inflections), optionally qualified as `owner/repo#N`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDevelopmentItem {
+    /// Closing keyword matched in the pull title/body.
+    pub relation: String,
+    /// Owner slug of the repository containing `issue`.
+    pub repo_owner: String,
+    /// Repository name containing `issue`.
+    pub repo_name: String,
+    pub issue: crate::IssuePublic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDevelopmentListResponse {
+    pub items: Vec<PullDevelopmentItem>,
+}
+
+/// One row of the PR rail "Projects" section — a project-board card linked
+/// to this pull.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullProjectLink {
+    /// Linked card row id (for future move/archive affordances).
+    pub card_id: String,
+    /// Board column the card sits in.
+    pub column_name: String,
+    /// Board per-repo `#N`.
+    pub project_number: i64,
+    pub project_title: String,
+    /// `open` | `closed`.
+    pub project_state: String,
+    /// `/{owner}/{repo}/projects/{number}` web route.
+    pub project_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullProjectsListResponse {
+    pub links: Vec<PullProjectLink>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDeploymentsListResponse {
+    pub deployments: Vec<crate::ActionDeploymentPublic>,
 }
 
 #[cfg(test)]

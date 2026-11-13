@@ -1740,3 +1740,115 @@ pub async fn delete_project_card(pool: &DbPool, id: &str) -> Result<(), String> 
     }
     Ok(())
 }
+
+/// A project-card ↔ board join row for "which boards contain this entity"
+/// lookups (PR rail Projects section).
+#[derive(Debug, Clone)]
+pub struct ProjectCardLinkRow {
+    pub card_id: String,
+    pub column_name: String,
+    pub project_id: String,
+    pub project_number: i64,
+    pub project_title: String,
+    pub project_state: String,
+    pub archived: bool,
+}
+
+macro_rules! map_card_link {
+    ($row:expr) => {{
+        let row = $row;
+        ProjectCardLinkRow {
+            card_id: row
+                .try_get("card_id")
+                .map_err(|e| format!("card link row: {e}"))?,
+            column_name: row
+                .try_get("column_name")
+                .map_err(|e| format!("card link row: {e}"))?,
+            project_id: row
+                .try_get("project_id")
+                .map_err(|e| format!("card link row: {e}"))?,
+            project_number: row
+                .try_get::<i64, _>("project_number")
+                .or_else(|_| row.try_get::<i32, _>("project_number").map(i64::from))
+                .map_err(|e| format!("card link row: {e}"))?,
+            project_title: row
+                .try_get("project_title")
+                .map_err(|e| format!("card link row: {e}"))?,
+            project_state: row
+                .try_get("project_state")
+                .map_err(|e| format!("card link row: {e}"))?,
+            archived: row
+                .try_get::<bool, _>("archived")
+                .or_else(|_| row.try_get::<i64, _>("archived").map(|v| v != 0))
+                .map_err(|e| format!("card link row: {e}"))?,
+        }
+    }};
+}
+
+const CARD_LINK_SELECT: &str = "SELECT k.id AS card_id, c.name AS column_name,
+       p.id AS project_id, p.number AS project_number, p.title AS project_title,
+       p.state AS project_state, k.archived AS archived
+FROM project_cards k
+JOIN project_columns c ON c.id = k.column_id
+JOIN projects p ON p.id = c.project_id";
+
+/// Non-archived cards in `repo_id` linked to `content_id`
+/// (`content_type` = `issue` | `pull_request`), board order by project
+/// number — the PR rail "Projects" section's data source.
+pub async fn list_cards_for_content(
+    pool: &DbPool,
+    repo_id: &str,
+    content_type: &str,
+    content_id: &str,
+) -> Result<Vec<ProjectCardLinkRow>, String> {
+    let sql = format!(
+        "{CARD_LINK_SELECT} WHERE p.repo_id = {{p}} AND k.content_type = {{t}} \
+         AND k.content_id = {{c}} AND NOT k.archived ORDER BY p.number ASC"
+    );
+    let sql = match pool {
+        DbPool::Postgres(_) => sql
+            .replace("{p}", "$1")
+            .replace("{t}", "$2")
+            .replace("{c}", "$3"),
+        DbPool::MySql(_) => sql
+            .replace("{p}", "?")
+            .replace("{t}", "?")
+            .replace("{c}", "?"),
+        DbPool::Sqlite(_) => sql
+            .replace("{p}", "?1")
+            .replace("{t}", "?2")
+            .replace("{c}", "?3"),
+    };
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(content_type)
+                .bind(content_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list project cards for content failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_card_link!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(content_type)
+                .bind(content_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list project cards for content failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_card_link!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(content_type)
+                .bind(content_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list project cards for content failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_card_link!(r))).collect()
+        }
+    }
+}
