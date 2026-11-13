@@ -350,4 +350,139 @@ describe("PullV2Overview conversation", () => {
       expect(screen.queryAllByTestId("pull-comment").length).toBe(0);
     });
   });
+
+  it("renders compact readiness signals above the summary", async () => {
+    runsListForRefMock.mockResolvedValue({
+      ok: true,
+      data: {
+        check_runs: [
+          { id: "r1", status: "in_progress", conclusion: null },
+          { id: "r2", status: "queued", conclusion: null },
+          { id: "r3", status: "completed", conclusion: "success" },
+        ],
+      },
+    });
+    reviewsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        reviews: [
+          {
+            id: "rev1",
+            pull_id: "p1",
+            author_id: "u2",
+            author_username: "grace",
+            state: "approved",
+            body: "",
+            submitted_at: "2026-03-05T10:00:00Z",
+          },
+        ],
+      },
+    });
+    renderOverview([C2_UNRESOLVED, C3_MINE_RESOLVED]);
+
+    const signals = await screen.findByTestId("pull-v2-merge-signals");
+    const checks = screen.getByTestId("pull-v2-checks-row");
+    const comments = screen.getByTestId("pull-v2-comments-row");
+    const approvals = screen.getByTestId("pull-v2-approvals-row");
+    const summary = await screen.findByTestId("pull-v2-summary");
+
+    expect(signals.className).toContain("sm:grid-cols-3");
+    expect(signals.className).toContain("sm:divide-x");
+    expect(signals.contains(checks)).toBe(true);
+    expect(signals.contains(comments)).toBe(true);
+    expect(signals.contains(approvals)).toBe(true);
+    expect(
+      signals.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(checks.tagName).toBe("A");
+    expect(checks.getAttribute("href")).toBe("/ada/hello/pull/42/checks");
+
+    await waitFor(() => {
+      expect(checks.textContent).toContain("2 pending");
+      expect(comments.textContent).toContain("1 unresolved");
+      expect(approvals.textContent).toContain("1 approval");
+    });
+    expect(screen.getByTestId("pull-v2-checks-bar")).toBeTruthy();
+    expect(screen.getByTestId("pull-v2-comments-bar")).toBeTruthy();
+    expect(screen.getByTestId("pull-v2-approvals-bar")).toBeTruthy();
+  });
+
+  it("surfaces requested reviewers in approvals", async () => {
+    reviewRequestsListMock.mockResolvedValue({
+      ok: true,
+      data: { usernames: ["linus", "grace"] },
+    });
+    renderOverview([]);
+    await waitFor(() => {
+      expect(screen.getByTestId("pull-v2-approvals-row").textContent).toContain("2 requested");
+    });
+  });
+
+  it("surfaces changes-requested reviews in approvals", async () => {
+    reviewsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        reviews: [
+          {
+            id: "rev2",
+            pull_id: "p1",
+            author_id: "u3",
+            author_username: "linus",
+            state: "changes_requested",
+            body: "needs work",
+            submitted_at: "2026-03-06T10:00:00Z",
+          },
+        ],
+      },
+    });
+    renderOverview([]);
+    await waitFor(() => {
+      expect(screen.getByTestId("pull-v2-approvals-row").textContent).toContain(
+        "Changes requested",
+      );
+    });
+  });
+
+  it("counts only each reviewer's latest review state", async () => {
+    reviewsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        reviews: [
+          {
+            id: "rev-old",
+            pull_id: "p1",
+            author_id: "u3",
+            author_username: "linus",
+            state: "changes_requested",
+            body: "needs work",
+            submitted_at: "2026-03-01T10:00:00Z",
+          },
+          {
+            id: "rev-new",
+            pull_id: "p1",
+            author_id: "u3",
+            author_username: "linus",
+            state: "approved",
+            body: "",
+            submitted_at: "2026-03-06T10:00:00Z",
+          },
+          {
+            id: "rev-other",
+            pull_id: "p1",
+            author_id: "u2",
+            author_username: "grace",
+            state: "approved",
+            body: "",
+            submitted_at: "2026-03-05T10:00:00Z",
+          },
+        ],
+      },
+    });
+    renderOverview([]);
+    await waitFor(() => {
+      const approvals = screen.getByTestId("pull-v2-approvals-row").textContent;
+      expect(approvals).toContain("2 approvals");
+      expect(approvals).not.toContain("Changes requested");
+    });
+  });
 });

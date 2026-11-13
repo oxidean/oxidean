@@ -3,6 +3,7 @@ import type {
   CheckRunPublic,
   MergeMethod,
   MergeQueueGetResponse,
+  PullReviewPublic,
   RepoMergeSettings,
 } from "@oxidean/api-client";
 import {
@@ -48,7 +49,7 @@ function StatusBar(props: {
   testid?: string;
 }) @{
   <div
-    className="h-2 w-full overflow-hidden rounded-full"
+    className="h-1.5 w-full overflow-hidden rounded-full"
     style={
       props.empty
         ? "background: repeating-linear-gradient(135deg, var(--muted) 0px, var(--muted) 3px, transparent 3px, transparent 7px); border: 1px solid var(--border);"
@@ -184,6 +185,18 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
       return res.data;
     },
   });
+  const reviewRequestsQ = useQuery({
+    queryKey: ["pull", "reviewRequests", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.reviewRequests.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+  });
 
   const branchQ = useQuery({
     queryKey: ["pull", "branchStatus", props.owner, props.repoName, props.number] as const,
@@ -214,9 +227,34 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
   const anchored = comments.filter((c) => !!c.path);
   const resolvedThreads = anchored.filter((c) => c.resolved).length;
   const openComments = anchored.length - resolvedThreads;
-  const approvals = (reviewsQ.data?.reviews ?? []).filter(
-    (r) => r.state === "approved" && !r.dismissed_at,
-  ).length;
+  const reviews = (reviewsQ.data?.reviews ?? []).filter((r) => !r.dismissed_at);
+  const latestReviews = [
+    ...reviews
+      .reduce((acc, r) => {
+        const prev = acc.get(r.author_id);
+        if (!prev || r.submitted_at > prev.submitted_at) acc.set(r.author_id, r);
+        return acc;
+      }, new Map<string, PullReviewPublic>())
+      .values(),
+  ];
+  const approvals = latestReviews.filter((r) => r.state === "approved").length;
+  const changesRequested = latestReviews.some((r) => r.state === "changes_requested");
+  const requestedReviewers = reviewRequestsQ.data?.usernames ?? [];
+  const checkDetail =
+    failingChecks > 0
+      ? `${failingChecks} failing`
+      : pendingChecks > 0
+        ? `${pendingChecks} pending`
+        : successChecks > 0
+          ? `${successChecks} successful`
+          : "";
+  const approvalDetail = changesRequested
+    ? "Changes requested"
+    : approvals > 0
+      ? `${approvals} approval${approvals === 1 ? "" : "s"}`
+      : requestedReviewers.length > 0
+        ? `${requestedReviewers.length} requested`
+        : "";
 
   const behindBy = branchQ.data?.status === "behind" ? (branchQ.data.behind_count ?? 0) : 0;
 
@@ -449,66 +487,65 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
       }
     </div>
 
-    {/* GitHub's progress rows — Checks / Comments / Approvals. */}
-    <div className="divide-y divide-border text-[13px]">
+    {/* GitHub's compact readiness signals — Checks / Comments / Approvals. */}
+    <div
+      className="grid grid-cols-1 divide-y divide-border border-y border-border text-[13px] sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+      data-testid="pull-v2-merge-signals"
+    >
       <AppLink
         href={`/${props.owner}/${props.repoName}/pull/${props.number}/checks` as string}
-        className="flex items-center gap-2 px-3 py-2 no-underline hover:bg-muted/40"
+        className="flex flex-col gap-1.5 px-3 py-2.5 no-underline transition-colors hover:bg-muted/40"
         data-testid="pull-v2-checks-row"
       >
-        <span className="font-medium text-foreground">Checks</span>
-        @if (pendingChecks > 0) {
-          <span className="text-muted-foreground">
-            {`${pendingChecks} pending` as string}
-          </span>;
-        }
-        <span className="min-w-0 flex-1">
-          <StatusBar
-            segments={checkSegments}
-            empty={checkRuns.length === 0}
-            testid="pull-v2-checks-bar"
-          />
+        <span className="flex items-center gap-1.5">
+          <span className="font-medium text-foreground">Checks</span>
+          @if (checkDetail) {
+            <span className="text-muted-foreground">{checkDetail as string}</span>;
+          }
+          <ChevronRight aria-hidden size={14} className="ml-auto shrink-0 text-muted-foreground" />
         </span>
-        <ChevronRight aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+        <StatusBar
+          segments={checkSegments}
+          empty={checkRuns.length === 0}
+          testid="pull-v2-checks-bar"
+        />
       </AppLink>
-      <div className="flex items-center gap-2 px-3 py-2" data-testid="pull-v2-comments-row">
-        <span className="font-medium text-foreground">Comments</span>
-        @if (openComments > 0) {
-          <span className="text-muted-foreground">
-            {`${openComments} unresolved` as string}
-          </span>;
-        }
-        <span className="min-w-0 flex-1">
-          <StatusBar
-            segments={
-              anchored.length > 0
-                ? [
-                    {
-                      fraction: resolvedThreads / anchored.length,
-                      className: "bg-success",
-                    },
-                  ]
-                : []
-            }
-            empty={anchored.length === 0}
-            testid="pull-v2-comments-bar"
-          />
+      <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="pull-v2-comments-row">
+        <span className="flex items-center gap-1.5">
+          <span className="font-medium text-foreground">Comments</span>
+          @if (openComments > 0) {
+            <span className="text-muted-foreground">
+              {`${openComments} unresolved` as string}
+            </span>;
+          }
         </span>
+        <StatusBar
+          segments={
+            anchored.length > 0
+              ? [
+                  {
+                    fraction: resolvedThreads / anchored.length,
+                    className: "bg-success",
+                  },
+                ]
+              : []
+          }
+          empty={anchored.length === 0}
+          testid="pull-v2-comments-bar"
+        />
       </div>
-      <div className="flex items-center gap-2 px-3 py-2" data-testid="pull-v2-approvals-row">
-        <span className="font-medium text-foreground">Approvals</span>
-        @if (approvals > 0) {
-          <span className="text-muted-foreground">
-            {`${approvals} approval${approvals === 1 ? "" : "s"}` as string}
-          </span>;
-        }
-        <span className="min-w-0 flex-1">
-          <StatusBar
-            segments={approvals > 0 ? [{ fraction: 1, className: "bg-success" }] : []}
-            empty={approvals === 0}
-            testid="pull-v2-approvals-bar"
-          />
+      <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="pull-v2-approvals-row">
+        <span className="flex items-center gap-1.5">
+          <span className="font-medium text-foreground">Approvals</span>
+          @if (approvalDetail) {
+            <span className="text-muted-foreground">{approvalDetail as string}</span>;
+          }
         </span>
+        <StatusBar
+          segments={approvals > 0 ? [{ fraction: 1, className: "bg-success" }] : []}
+          empty={approvals === 0}
+          testid="pull-v2-approvals-bar"
+        />
       </div>
     </div>
 

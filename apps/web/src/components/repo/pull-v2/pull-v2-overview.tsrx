@@ -639,7 +639,7 @@ function PullV2Conversation(props: {
   }
 
   <div className="space-y-4" data-testid="pull-v2-conversation">
-    <div className="rounded-md border border-border p-3">
+    <div className="rounded-md border border-border p-3" data-testid="pull-v2-summary">
       <div className="mb-2 flex items-center gap-2">
         <p className="text-sm font-medium text-muted-foreground">Summary</p>
         @if (props.canWrite && !editingBody) {
