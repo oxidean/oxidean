@@ -82,7 +82,12 @@ async fn saved_replies_crud_round_trip() {
     let app = test_app(db).await;
     let cookie = seed_and_login(&app).await;
 
-    let empty = rpc_json(&app, r#"{"procedure":"savedReplies.list","input":{}}"#, Some(&cookie)).await;
+    let empty = rpc_json(
+        &app,
+        r#"{"procedure":"savedReplies.list","input":{}}"#,
+        Some(&cookie),
+    )
+    .await;
     assert_eq!(empty["ok"], true, "{empty}");
     assert_eq!(empty["data"]["replies"].as_array().unwrap().len(), 0);
 
@@ -117,7 +122,12 @@ async fn saved_replies_crud_round_trip() {
     assert_eq!(updated["data"]["body"], "Updated body");
     assert_eq!(updated["data"]["name"], "LGTM");
 
-    let list = rpc_json(&app, r#"{"procedure":"savedReplies.list","input":{}}"#, Some(&cookie)).await;
+    let list = rpc_json(
+        &app,
+        r#"{"procedure":"savedReplies.list","input":{}}"#,
+        Some(&cookie),
+    )
+    .await;
     let replies = list["data"]["replies"].as_array().unwrap();
     assert_eq!(replies.len(), 1, "{list}");
     assert_eq!(replies[0]["id"], id.as_str());
@@ -131,14 +141,22 @@ async fn saved_replies_crud_round_trip() {
     assert_eq!(deleted["ok"], true, "{deleted}");
     assert_eq!(deleted["data"]["ok"], true);
 
-    let after = rpc_json(&app, r#"{"procedure":"savedReplies.list","input":{}}"#, Some(&cookie)).await;
+    let after = rpc_json(
+        &app,
+        r#"{"procedure":"savedReplies.list","input":{}}"#,
+        Some(&cookie),
+    )
+    .await;
     assert_eq!(after["data"]["replies"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
 async fn saved_replies_require_session() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("saved-replies-anon.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("saved-replies-anon.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
