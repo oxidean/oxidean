@@ -739,7 +739,8 @@
       "warnings": [
         "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 (requires a Docker-capable runner)",
         "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d (requires a Docker-capable runner)",
-        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 (requires a Docker-capable runner)"
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 (requires a Docker-capable runner)",
+        "environment url is not http(s); ignored"
       ]
     },
     "deployments/azure-functions-app-container": {
@@ -827,40 +828,52 @@
       "warnings": []
     },
     "deployments/azure-webapps-dotnet-core": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/azure-webapps-java-jar": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/azure-webapps-java-jar-gradle": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/azure-webapps-node": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/azure-webapps-php": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/azure-webapps-python": {
-      "status": "runnable",
+      "status": "partial",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "environment url is not http(s); ignored"
+      ]
     },
     "deployments/google": {
       "status": "partial",
