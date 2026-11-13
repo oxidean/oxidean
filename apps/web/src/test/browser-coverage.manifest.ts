@@ -599,6 +599,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/pull-v2/pull-v2-composer-extras.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2-composer-extras.browser.test.tsx",
+        subject: "pull-v2-composer-extras",
+      },
+    ],
+  },
+  {
     surface: "components/repo/pull-v2/pull-v2-review-bar.tsrx",
     coverage: [
       {
