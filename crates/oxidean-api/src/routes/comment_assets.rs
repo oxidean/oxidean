@@ -196,7 +196,8 @@ pub async fn serve_attachment(
     let disposition = if inline {
         "inline".to_string()
     } else {
-        // RFC 5987 filename* for non-ASCII names; plain fallback for ASCII.
+        // Non-ASCII/quote/backslash chars are flattened to `_` — the header
+        // stays ASCII-safe without RFC 5987 encoding.
         let ascii: String = filename
             .chars()
             .map(|c| {

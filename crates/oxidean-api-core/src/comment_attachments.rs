@@ -3,7 +3,9 @@
 //! Uploads live at `{uploads_dir}/comment-attachments/{uuid}` with a
 //! `{uuid}.json` sidecar. There is no DB row — the UUID is the capability —
 //! so quota is computed from sidecar metadata and GC keeps any id still
-//! referenced by persisted markdown bodies.
+//! referenced by persisted markdown bodies. Reference scope is the DB body
+//! columns scanned by `oxidean_db::comment_attachments` — markdown living
+//! only in git (wiki pages, READMEs) does not protect an attachment.
 
 use std::collections::HashSet;
 use std::fs;
@@ -94,8 +96,12 @@ pub fn orphan_grace_from_env() -> Duration {
 /// sidecars are ignored — they cannot be attributed to this user.
 pub fn user_attachment_usage(dir: &Path, user_id: &str) -> std::io::Result<CommentAttachmentUsage> {
     let mut usage = CommentAttachmentUsage::default();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Ok(usage);
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // Missing dir = nothing stored yet; other I/O errors must fail the
+        // quota check closed rather than undercount usage.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(usage),
+        Err(e) => return Err(e),
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -197,10 +203,13 @@ pub async fn gc_orphan_comment_attachments(
     if !dir.is_dir() {
         return Ok(stats);
     }
-    let bodies = db.comment_attachment_reference_bodies().await?;
-    let referenced = referenced_attachment_ids(&bodies);
+    // A zero/near-zero grace would race in-flight uploads (data file lands
+    // before its sidecar) — keep a floor so fresh pairs always survive a pass.
+    let grace = grace.max(Duration::from_secs(60));
     let cutoff = chrono::Utc::now()
         - chrono::Duration::from_std(grace).unwrap_or_else(|_| chrono::Duration::days(3650));
+    let bodies = db.comment_attachment_reference_bodies().await?;
+    let referenced = referenced_attachment_ids(&bodies);
 
     let mut ids = HashSet::new();
     let entries =
@@ -217,6 +226,7 @@ pub async fn gc_orphan_comment_attachments(
         }
     }
 
+    let mut candidates: Vec<(String, PathBuf, PathBuf, bool, bool)> = Vec::new();
     for id in ids {
         stats.scanned += 1;
         if Uuid::parse_str(&id).is_err() {
@@ -259,6 +269,22 @@ pub async fn gc_orphan_comment_attachments(
         };
         if created > cutoff {
             stats.kept_recent += 1;
+            continue;
+        }
+        candidates.push((id, data, meta_file, meta_exists, data_exists));
+    }
+
+    if candidates.is_empty() {
+        return Ok(stats);
+    }
+
+    // Phase 2: references are re-scanned immediately before deleting — a
+    // comment/reply saved while phase 1 ran must keep its attachment.
+    let bodies = db.comment_attachment_reference_bodies().await?;
+    let referenced = referenced_attachment_ids(&bodies);
+    for (id, data, meta_file, meta_exists, data_exists) in candidates {
+        if referenced.contains(&id) {
+            stats.kept_referenced += 1;
             continue;
         }
         let mut removed_pair = true;

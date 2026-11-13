@@ -301,12 +301,14 @@ async fn pull_development_list_covers_keyword_inflections_and_qualified_refs() {
     assert_eq!(dev["ok"], true, "{dev}");
     let items = dev["data"]["items"].as_array().unwrap();
     // `close #n`, `fixed pown/core#n`, `resolved #99999` (missing issue →
-    // skipped); `#{n}x` must not match.
+    // skipped); `#{n}x` must not match. `close #n` and `fixed pown/core#n`
+    // resolve to the same issue — the rail dedups to the first relation.
+    assert_eq!(items.len(), 1, "{dev}");
     let relations: Vec<&str> = items
         .iter()
         .map(|i| i["relation"].as_str().unwrap())
         .collect();
-    assert_eq!(relations, vec!["close", "fixed"], "{dev}");
+    assert_eq!(relations, vec!["close"], "{dev}");
     for item in items {
         assert_eq!(item["repo_owner"], "pown");
         assert_eq!(item["repo_name"], "core");
@@ -397,5 +399,125 @@ async fn pull_deployments_list_empty_is_ok() {
         res["data"]["deployments"].as_array().unwrap().len(),
         0,
         "{res}"
+    );
+}
+
+#[tokio::test]
+async fn pull_development_list_pat_cannot_escape_qualified_repo_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_dev_pat.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let (cookie, _pull_id) = seed_pr(&app, &db, &repos).await;
+
+    // Second repo is private; the session owner can read it, a public_repo
+    // PAT must not leak its issues through a qualified closing ref.
+    let other = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.create","input":{"name":"other","visibility":"private","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(other["ok"], true, "{other}");
+    let issue = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"issue.create","input":{"owner":"pown","name":"other","title":"Secret","body":"hidden"}}"#,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    let other_number = issue["data"]["number"].as_i64().unwrap();
+
+    let upd = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.update","input":{{"owner":"pown","name":"core","number":1,"body":"closes pown/other#{other_number}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(upd["ok"], true, "{upd}");
+
+    // Session cookie sees the item (owner ACL).
+    let via_session = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.development.list","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(
+        via_session["data"]["items"].as_array().unwrap().len(),
+        1,
+        "{via_session}"
+    );
+
+    async fn bearer_json(app: &axum::Router, token: &str, body: &str) -> serde_json::Value {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/rpc")
+                    .header("content-type", "application/json")
+                    .header("Oxidean-RPC-Version", "1")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(body.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    let mint = |scopes: &str| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        let scopes = scopes.to_string();
+        async move {
+            let res = rpc_json(
+                &app,
+                &cookie,
+                &format!(
+                    r#"{{"procedure":"pat.createClassic","input":{{"name":"t","scopes":{scopes}}}}}"#
+                ),
+            )
+            .await;
+            assert_eq!(res["ok"], true, "{res}");
+            res["data"]["token"].as_str().unwrap().to_string()
+        }
+    };
+
+    // public_repo PAT: core is public so the procedure itself is allowed,
+    // but the qualified ref into private `other` must be filtered out.
+    let public_pat = mint(r#"["public_repo"]"#).await;
+    let via_public = bearer_json(
+        &app,
+        &public_pat,
+        r#"{"procedure":"pull.development.list","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(via_public["ok"], true, "{via_public}");
+    assert_eq!(
+        via_public["data"]["items"].as_array().unwrap().len(),
+        0,
+        "public_repo PAT must not see private-repo issues: {via_public}"
+    );
+
+    // repo PAT covers everything the owner can read — item is visible.
+    let repo_pat = mint(r#"["repo"]"#).await;
+    let via_repo = bearer_json(
+        &app,
+        &repo_pat,
+        r#"{"procedure":"pull.development.list","input":{"owner":"pown","name":"core","number":1}}"#,
+    )
+    .await;
+    assert_eq!(
+        via_repo["data"]["items"].as_array().unwrap().len(),
+        1,
+        "{via_repo}"
     );
 }

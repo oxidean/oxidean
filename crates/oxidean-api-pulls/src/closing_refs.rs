@@ -145,19 +145,16 @@ pub(crate) fn closing_refs(text: &str) -> Vec<ClosingRef> {
         idx += len;
     }
     hits.sort_by_key(|(pos, _)| *pos);
+    let mut seen = std::collections::HashSet::new();
     let mut out: Vec<ClosingRef> = Vec::new();
     for (_, hit) in hits {
-        if !out.iter().any(|seen| {
-            seen.number == hit.number
-                && seen
-                    .repo
-                    .as_ref()
-                    .map(|(o, r)| (o.to_lowercase(), r.to_lowercase()))
-                    == hit
-                        .repo
-                        .as_ref()
-                        .map(|(o, r)| (o.to_lowercase(), r.to_lowercase()))
-        }) {
+        let key = (
+            hit.repo
+                .as_ref()
+                .map(|(o, r)| (o.to_lowercase(), r.to_lowercase())),
+            hit.number,
+        );
+        if seen.insert(key) {
             out.push(hit);
         }
     }

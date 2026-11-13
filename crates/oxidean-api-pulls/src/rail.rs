@@ -81,6 +81,33 @@ async fn resolve_development_ref(
                 Err(e) if e.code == "repo.not_found" => return Ok(None),
                 Err(e) => return Err(e),
             };
+            // The dispatch-time PAT gate only covered the pull's repo — a
+            // qualified ref can name a different one, so re-authorize the
+            // token against the target with the issue-read class. PATs and
+            // job tokens that don't cover it are skipped like absent issues.
+            if let Some(pat) = ctx.pat.as_ref() {
+                let owner_ref = oxidean_api_core::repo::owner_ref_for_repo(&ctx.db, &target.row)
+                    .await
+                    .map_err(db_err)?;
+                let Some(owner_ref) = owner_ref else {
+                    return Ok(None);
+                };
+                match oxidean_api_core::pat::bearer::authorize_pat_on_repo(
+                    &ctx.db,
+                    pat,
+                    "issue.get",
+                    &target.row,
+                    &owner_ref,
+                )
+                .await
+                {
+                    Ok(()) => {}
+                    Err(e) if e.code == "repo.not_found" || e.code == "auth.pat_scope" => {
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
             (target.row.id, target.owner_username, target.row.name)
         }
         None => (
@@ -134,6 +161,9 @@ pub async fn development_list(
     let mut owners = Vec::with_capacity(refs.len());
     let mut names = Vec::with_capacity(refs.len());
     let mut rows = Vec::with_capacity(refs.len());
+    // `close #3` and `close owner/repo#3` resolve to the same issue — dedup
+    // after resolution so the rail shows one row per issue.
+    let mut resolved_seen = std::collections::HashSet::new();
     for r in refs {
         let Some((relation, owner, name, issue)) = resolve_development_ref(
             ctx,
@@ -147,6 +177,9 @@ pub async fn development_list(
         else {
             continue;
         };
+        if !resolved_seen.insert((issue.repo_id.clone(), issue.number)) {
+            continue;
+        }
         relations.push(relation);
         owners.push(owner);
         names.push(name);

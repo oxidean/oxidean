@@ -402,3 +402,82 @@ async fn quota_count_enforced() {
     std::env::remove_var("OXIDEAN_COMMENT_ATTACHMENT_MAX_COUNT_PER_USER");
     result
 }
+
+fn write_attachment_pair(
+    uploads: &std::path::Path,
+    id: &str,
+    created_at: &str,
+    meta_json: Option<&str>,
+) {
+    let dir = uploads.join("comment-attachments");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(id), b"blob").unwrap();
+    let meta = meta_json.map(str::to_string).unwrap_or_else(|| {
+        format!(
+            r#"{{"name":"a.png","content_type":"image/png","size":4,"uploader_id":"u","created_at":"{created_at}"}}"#
+        )
+    });
+    std::fs::write(dir.join(format!("{id}.json")), meta).unwrap();
+}
+
+#[tokio::test]
+async fn gc_collects_orphans_and_keeps_referenced_recent_and_malformed() {
+    let _g = SERIAL.lock().await;
+    let (dir, app, db, cookie, _uid) = app_with_user("gc").await;
+    let uploads = dir.path().join("uploads");
+
+    let old = chrono::Utc::now() - chrono::Duration::days(30);
+    let old_ts = old.to_rfc3339();
+    let referenced_id = uuid::Uuid::new_v4().to_string();
+    let orphan_id = uuid::Uuid::new_v4().to_string();
+    let recent_id = uuid::Uuid::new_v4().to_string();
+    let malformed_id = uuid::Uuid::new_v4().to_string();
+
+    // Old + referenced via a saved reply → must survive.
+    write_attachment_pair(&uploads, &referenced_id, &old_ts, None);
+    // Old + unreferenced → collected.
+    write_attachment_pair(&uploads, &orphan_id, &old_ts, None);
+    // Fresh + unreferenced → kept by grace.
+    write_attachment_pair(&uploads, &recent_id, &chrono::Utc::now().to_rfc3339(), None);
+    // Malformed sidecar → kept (ambiguous).
+    let mdir = uploads.join("comment-attachments");
+    std::fs::create_dir_all(&mdir).unwrap();
+    std::fs::write(mdir.join(&malformed_id), b"blob").unwrap();
+    std::fs::write(mdir.join(format!("{malformed_id}.json")), b"not json").unwrap();
+
+    // Persist a reference to the old attachment.
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            &format!(
+                r#"{{"procedure":"savedReplies.create","input":{{"name":"r","body":"see ![x](/uploads/comment-attachments/{referenced_id})"}}}}"#
+            ),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["ok"], true, "{v}");
+
+    let stats = oxidean_api_core::comment_attachments::gc_orphan_comment_attachments(
+        &db,
+        &uploads,
+        std::time::Duration::ZERO,
+    )
+    .await
+    .expect("gc");
+    assert_eq!(stats.removed, 1, "{stats:?}");
+    assert_eq!(stats.kept_referenced, 1, "{stats:?}");
+    assert_eq!(stats.kept_recent, 1, "{stats:?}");
+    assert_eq!(stats.errors, 1, "{stats:?}");
+
+    let dir_path = uploads.join("comment-attachments");
+    assert!(!dir_path.join(&orphan_id).exists(), "orphan data removed");
+    assert!(!dir_path.join(format!("{orphan_id}.json")).exists());
+    assert!(dir_path.join(&referenced_id).exists(), "referenced kept");
+    assert!(dir_path.join(format!("{referenced_id}.json")).exists());
+    assert!(dir_path.join(&recent_id).exists(), "recent kept");
+    assert!(dir_path.join(&malformed_id).exists(), "malformed kept");
+}
