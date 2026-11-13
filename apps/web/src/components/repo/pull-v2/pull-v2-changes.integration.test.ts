@@ -338,3 +338,28 @@ describe("PullV2Changes minimize comments (#263)", () => {
     // (pull-v2-changes.browser.test.tsx covers the portal flow).
   });
 });
+
+describe("PullV2Changes markdown comment bodies", () => {
+  it("renders links and images (badges) in inline review comments", async () => {
+    commentsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        comments: [
+          comment({
+            id: "md1",
+            body: "see [docs](https://example.com) ![badge](https://img.shields.io/badge/x-y-green)",
+          }),
+        ],
+      },
+    });
+    renderChanges();
+    const note = await screen.findByTestId("pull-v2-line-comment");
+    await waitFor(() => {
+      expect(note.querySelector("img")).not.toBeNull();
+    });
+    const img = note.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("https://img.shields.io/badge/x-y-green");
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(note.querySelector('a[href="https://example.com"]')).not.toBeNull();
+  });
+});

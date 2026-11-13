@@ -826,6 +826,8 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
                 <div className="space-y-4">
                   @for (const f of shown; key f.path) {
                     <PullV2DiffFile
+                      owner={props.owner}
+                      repoName={props.repoName}
                       file={f}
                       view={view}
                       wrap={wrap}

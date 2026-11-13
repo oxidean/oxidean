@@ -5,6 +5,7 @@ import remarkGithub from "remark-github";
 import remarkRehype from "remark-rehype";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
+import type { Element, Root } from "hast";
 
 export type RenderGfmOptions = {
   /** Default owner for bare `#N` refs (ISS-04 / D-ISS-13). */
@@ -23,6 +24,24 @@ export function isMarkdownPath(path: string): boolean {
     base.endsWith(".mkd") ||
     base === "readme"
   );
+}
+
+/**
+ * Post-sanitize pass: the GitHub sanitize schema strips `loading`/`decoding`,
+ * so re-attach them to `img` after sanitizing. Values are fixed literals —
+ * no user input reaches the attributes.
+ */
+function rehypeLazyImages() {
+  return (tree: Root) => {
+    const walk = (node: Root | Element) => {
+      if (node.type === "element" && node.tagName === "img") {
+        node.properties.loading = "lazy";
+        node.properties.decoding = "async";
+      }
+      for (const child of node.children ?? []) walk(child as Element);
+    };
+    walk(tree);
+  };
 }
 
 /**
@@ -51,6 +70,7 @@ export async function renderGfm(markdown: string, opts?: RenderGfmOptions): Prom
     })
     .use(remarkRehype)
     .use(rehypeSanitize)
+    .use(rehypeLazyImages)
     .use(rehypeStringify)
     .process(markdown);
   return String(file);

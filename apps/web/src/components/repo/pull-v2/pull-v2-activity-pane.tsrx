@@ -1,6 +1,7 @@
 import { useQuery } from "@octanejs/tanstack-query";
 import type { PullCommentPublic, PullCommitSummary, PullReviewPublic } from "@oxidean/api-client";
 import { GitCommitHorizontal, GitPullRequest, MessageSquare } from "@octanejs/lucide";
+import { MarkdownBody } from "@/components/repo/markdown-body";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import { fileAnchorId } from "./pull-v2-diff-utils";
@@ -30,7 +31,12 @@ function reviewVerb(state: string): string {
   return "reviewed";
 }
 
-function ActivityRow(props: { item: ActivityItem; onJump: (path: string) => void }) @{
+function ActivityRow(props: {
+  item: ActivityItem;
+  owner: string;
+  repoName: string;
+  onJump: (path: string) => void;
+}) @{
   const it = props.item;
 
   <li className="flex gap-2 py-2 text-[13px]" data-testid="pull-v2-activity-item">
@@ -94,6 +100,14 @@ function ActivityRow(props: { item: ActivityItem; onJump: (path: string) => void
           <p className="text-[12px] text-muted-foreground" title={it.at as string}>
             {formatRelative(it.at) as string}
           </p>
+          @if (it.review.body?.trim()) {
+            <MarkdownBody
+              markdown={it.review.body}
+              owner={props.owner}
+              repo={props.repoName}
+              className="mt-1 text-[13px]"
+            />;
+          }
         </>;
       }
     </div>
@@ -176,7 +190,12 @@ export function PullV2ActivityPane(props: PullV2ActivityPaneProps) @{
       } @else {
         <ul className="divide-y divide-border">
           @for (const it of items.slice(0, 50); key it.id) {
-            <ActivityRow item={it} onJump={props.onJump} />;
+            <ActivityRow
+              item={it}
+              owner={props.owner}
+              repoName={props.repoName}
+              onJump={props.onJump}
+            />;
           }
         </ul>;
       }

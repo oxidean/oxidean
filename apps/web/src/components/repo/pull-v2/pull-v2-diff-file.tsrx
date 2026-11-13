@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
 } from "@octanejs/lucide";
 import { useEffect, useId, useMemo, useRef, useState } from "octane";
+import { MarkdownBody } from "@/components/repo/markdown-body";
 import { DiffLargeGate } from "@/components/repo/diff-file-header";
 import {
   DropdownMenu,
@@ -201,6 +202,8 @@ function LineDraftBox(props: {
  */
 function CommentNote(props: {
   comment: PullCommentPublic;
+  owner: string;
+  repoName: string;
   canInteract: boolean;
   onDiscard: ((id: string) => void) | null;
 }) @{
@@ -249,7 +252,12 @@ function CommentNote(props: {
         </button>;
       }
     </div>
-    <p className="mt-1 whitespace-pre-wrap text-foreground">{c.body as string}</p>
+    <MarkdownBody
+      markdown={c.body}
+      owner={props.owner}
+      repo={props.repoName}
+      className="mt-1 text-[13px]"
+    />
   </div>;
 }
 
@@ -259,6 +267,8 @@ function CommentNote(props: {
  * threads but never the open draft.
  */
 function RowNotes(props: {
+  owner: string;
+  repoName: string;
   draft: DraftTarget | null;
   draftBody: string;
   draftBusy: boolean;
@@ -294,6 +304,8 @@ function RowNotes(props: {
       @for (const c of props.comments; key c.id) {
         <CommentNote
           comment={c}
+          owner={props.owner}
+          repoName={props.repoName}
           canInteract={props.canInteract}
           onDiscard={c.pending ? props.onDiscardPending : null}
         />;
@@ -309,6 +321,8 @@ function RowNotes(props: {
  * drafts, range comments, file-level comments, and the per-file menu.
  */
 export function PullV2DiffFile(props: {
+  owner: string;
+  repoName: string;
   file: PullDiffFile;
   view: "unified" | "split";
   wrap: boolean;
@@ -650,6 +664,8 @@ export function PullV2DiffFile(props: {
     @if (props.draft?.row === null || fileComments.length > 0) {
       <div className="border-b border-border/50" data-testid="pull-v2-file-comments">
         <RowNotes
+          owner={props.owner}
+          repoName={props.repoName}
           draft={props.draft?.row === null ? props.draft : null}
           draftBody={props.draftBody}
           draftBusy={props.draftBusy}
@@ -788,6 +804,8 @@ export function PullV2DiffFile(props: {
                       />
                     </div>
                     <RowNotes
+                      owner={props.owner}
+                      repoName={props.repoName}
                       draft={props.draft?.row === line.index ? props.draft : null}
                       draftBody={props.draftBody}
                       draftBusy={props.draftBusy}
@@ -926,6 +944,8 @@ export function PullV2DiffFile(props: {
                       </div>
                     </div>
                     <RowNotes
+                      owner={props.owner}
+                      repoName={props.repoName}
                       draft={props.draft?.row === line.index ? props.draft : null}
                       draftBody={props.draftBody}
                       draftBusy={props.draftBusy}

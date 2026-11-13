@@ -10,7 +10,7 @@ import {
   clickTestId,
   debugBody,
   expectNoOctaneOverlayInDocument,
-  mountComponent,
+  mountWithQueryClient,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
 
@@ -53,7 +53,7 @@ describe("pull-v2 review bar browser DOM races", () => {
     const tracker = trackDomErrors();
     try {
       const onSubmit = vi.fn();
-      await mountComponent(PullV2ReviewBar, {
+      await mountWithQueryClient(PullV2ReviewBar, {
         pending: PENDING,
         isAuthor: false,
         busy: false,
@@ -88,7 +88,7 @@ describe("pull-v2 review bar browser DOM races", () => {
   it("author gating disables approve/request-changes without remounting", async () => {
     const tracker = trackDomErrors();
     try {
-      await mountComponent(PullV2ReviewBar, {
+      await mountWithQueryClient(PullV2ReviewBar, {
         pending: [],
         isAuthor: true,
         busy: false,
@@ -109,7 +109,7 @@ describe("pull-v2 review bar browser DOM races", () => {
     const tracker = trackDomErrors();
     try {
       const onDiscard = vi.fn();
-      await mountComponent(PullV2ReviewBar, {
+      await mountWithQueryClient(PullV2ReviewBar, {
         pending: PENDING,
         isAuthor: false,
         busy: false,

@@ -111,9 +111,13 @@ function CommentHistoryDisclosure(props: {
                         `@${rev.editor_username} edited ${formatRelative(rev.created_at)}` as string
                       }
                     </p>
-                    <pre className="mt-1 whitespace-pre-wrap font-sans text-foreground">
-                      {rev.body as string}
-                    </pre>
+                    <div className="mt-1 text-[13px]">
+                      <CommentBody
+                        body={rev.body}
+                        owner={props.owner}
+                        repoName={props.repoName}
+                      />
+                    </div>
                   </li>;
                 }
               </ul>;

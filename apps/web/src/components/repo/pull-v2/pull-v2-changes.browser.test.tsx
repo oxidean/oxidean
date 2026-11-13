@@ -409,6 +409,8 @@ describe("pull-v2 diff-file + file-tree mounts", () => {
     try {
       const startDraft = vi.fn();
       await mountWithQueryClient(PullV2DiffFile, {
+        owner: "acme",
+        repoName: "core",
         file: FILES.files[0],
         view: "unified",
         wrap: false,
@@ -470,6 +472,8 @@ describe("pull-v2 diff-file + file-tree mounts", () => {
     const tracker = trackDomErrors();
     try {
       await mountWithQueryClient(PullV2DiffFile, {
+        owner: "acme",
+        repoName: "core",
         file: FILES.files[0],
         view: "unified",
         wrap: false,
