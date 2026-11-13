@@ -181,15 +181,17 @@ describe("pull-v2 changes browser DOM races", () => {
     }
   });
 
-  it("comments side panel toggles without unmounting the diff column", async () => {
+  it("comments toggle lifts panel state without unmounting the diff column", async () => {
     const tracker = trackDomErrors();
     try {
-      await mount();
+      const seen: boolean[] = [];
+      await mount({ panelOpen: false, onPanelToggle: (open: boolean) => seen.push(open) });
       await clickTestId("pull-v2-comments-toggle");
       await settle(60);
-      expect(document.querySelector('[data-testid="pull-v2-comments-panel"]')).not.toBeNull();
-      await clickTestId("pull-v2-comments-toggle");
-      await settle(60);
+      // The panel itself renders at the PullDetailV2 level now — the changes
+      // toolbar button only lifts state through onPanelToggle.
+      expect(seen).toEqual([true]);
+      expect(document.querySelector('[data-testid="pull-v2-changes"]')).not.toBeNull();
       expectNoOctaneOverlayInDocument();
     } finally {
       tracker.dispose();
