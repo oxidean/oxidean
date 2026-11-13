@@ -25,6 +25,19 @@ function swatchStyle(color: string): { backgroundColor: string } {
   return { backgroundColor: hex };
 }
 
+/** External links (deployment URLs come from workflow `environment.url` —
+ * repo-controlled text). Only http(s) may become an `href`; anything else
+ * (`javascript:`, `data:`, malformed) falls back to the in-app actions link. */
+function safeExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 function pullLabels(pull: PullPublic): LabelPublic[] {
   return pull.labels ?? [];
 }
@@ -760,13 +773,13 @@ function RailDeployments(props: PullV2RailProps) @{
               @for (const d of deployments; key d.id) {
                 <li className="text-[13px]">
                   <div className="flex items-center gap-1.5">
-                    @if (d.url) {
+                    @if (safeExternalUrl(d.url)) {
                       {
                         /* raw-anchor-ok: deployment url is external (cloud
                     console, service endpoint) — not an app route. */
                       }
                       <a
-                        href={d.url as string}
+                        href={safeExternalUrl(d.url) as string}
                         target="_blank"
                         rel="noreferrer"
                         className="font-medium text-foreground no-underline hover:text-primary hover:underline"

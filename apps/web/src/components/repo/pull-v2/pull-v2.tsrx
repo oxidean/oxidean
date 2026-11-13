@@ -43,10 +43,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
+import { navigate } from "@/lib/nav";
 import { useSearchString } from "@/lib/pathname.tsrx";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
-import { fileAnchorId } from "./pull-v2-diff-utils";
 
 type PullV2Tab = "overview" | "commits" | "checks" | "changes";
 
@@ -262,13 +262,6 @@ function diffStatTotals(files: PullDiffFile[]): { adds: number; dels: number } {
   return { adds, dels };
 }
 
-function scrollToFile(path: string) {
-  const el = document.getElementById(fileAnchorId(path));
-  if (el && typeof el.scrollIntoView === "function") {
-    el.scrollIntoView({ block: "start", behavior: "smooth" });
-  }
-}
-
 /** GitHub-style branch pill + copy-button pair for the base/head merge row. */
 function BranchChip(props: { label: string; name: string; testid: string }) @{
   const [copied, setCopied] = useState(false);
@@ -447,12 +440,16 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   });
 
   // `?panel=<pane>` deep-links a right pane (comments / activity / merge /
-  // description) on load and soft-nav.
+  // description) on load and soft-nav. Navigations that drop the param
+  // (tab links without it, scope changes) close the pane so URL and state
+  // can't desync.
   useEffect(() => {
     const p = paneFromParam(new URLSearchParams(searchStr).get("panel"));
     if (p) {
       setPane(p);
       setPaneOpen(true);
+    } else {
+      setPaneOpen(false);
     }
   }, [searchStr]);
 
@@ -483,13 +480,28 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   /** `?panel=` mirrors the open docked pane. GitHub calls the description pane
    * `overview` (`?panel=overview`); comments/activity/merge keep their ids. A
    * closed pane carries no param. */
+  function paneParamFor(p: PullPane): string {
+    return p === "description" ? "overview" : p;
+  }
+
   function syncPaneParam(nextPane = pane, open = paneOpen) {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    const param = nextPane === "description" ? "overview" : nextPane;
-    if (open) url.searchParams.set("panel", param);
+    if (open) url.searchParams.set("panel", paneParamFor(nextPane));
     else url.searchParams.delete("panel");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  const [fileJump, setFileJump] = useState<{ path: string; nonce: number } | null>(null);
+
+  /** Cross-tab file jump (activity/comments panes, file tree): route to
+   * Files changed and hand the path to the diff list, which reveals the
+   * file's page and scrolls to its anchor. */
+  function jumpToFile(path: string) {
+    if (props.tab !== "changes") {
+      navigate(`${base}/changes`);
+    }
+    setFileJump({ path, nonce: Date.now() });
   }
 
   const comments: PullCommentPublic[] = commentsQ.data?.comments ?? [];
@@ -607,7 +619,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: props.canWrite && pullState === "open",
+    enabled: canEdit && pullState === "open",
   });
   const baseChoices = (refsQ.data?.refs ?? [])
     .map((r) => r.name.replace(/^refs\/heads\//, ""))
@@ -707,7 +719,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             type="button"
             className={
               cn(
-                "inline-flex size-7 items-center justify-center rounded-sm",
+                "hidden size-7 items-center justify-center rounded-sm lg:inline-flex",
                 commentsOpen
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -724,7 +736,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             type="button"
             className={
               cn(
-                "inline-flex size-7 items-center justify-center rounded-sm",
+                "hidden size-7 items-center justify-center rounded-sm lg:inline-flex",
                 paneOpen
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -859,7 +871,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
           <h1 className="min-w-0 font-[family-name:var(--font-display)] text-[24px] font-semibold leading-tight text-foreground">
             {props.pull.title as string}
           </h1>
-          @if (props.canWrite && pullState === "open") {
+          @if (canEdit && pullState === "open") {
             <button
               type="button"
               className="mt-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -973,7 +985,11 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     >
       @for (const t of TABS; key t.id) {
         <AppLink
-          href={t.path(base) as string}
+          href={
+            (paneOpen
+              ? `${t.path(base)}?panel=${paneParamFor(pane)}`
+              : t.path(base)) as string
+          }
           className={
             cn(
               "border-b-2 px-3 pb-2 pt-1 text-sm no-underline",
@@ -1011,6 +1027,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             repo={props.repo}
             pull={props.pull}
             canWrite={props.canWrite}
+            canEdit={canEdit}
             canInteract={props.canInteract}
             isAuthor={props.isAuthor}
             currentUserId={props.currentUserId}
@@ -1043,6 +1060,8 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             headSha={props.pull.head_sha}
             panelOpen={commentsOpen}
             onPanelToggle={setCommentsOpen}
+            jumpRequest={fileJump}
+            onJumpDone={() => setFileJump(null)}
           />;
         }
       </div>
@@ -1087,7 +1106,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
                 number={props.number}
                 canInteract={props.canInteract}
                 onClose={() => setCommentsOpen(false)}
-                onJump={scrollToFile}
+                onJump={jumpToFile}
               />
             </div>;
           }
@@ -1096,7 +1115,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
               owner={props.owner}
               repoName={props.repoName}
               number={props.number}
-              onJump={scrollToFile}
+              onJump={jumpToFile}
             />;
           }
           @if (pane === "merge") {

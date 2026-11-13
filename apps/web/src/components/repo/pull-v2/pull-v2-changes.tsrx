@@ -35,6 +35,7 @@ import { blobHref } from "@/lib/repo-browse";
 import { cn } from "@/lib/utils";
 import {
   changesScopeKey,
+  fileAnchorId,
   parseChangesScope,
   scopeAnchorSha,
   type ChangesScope,
@@ -60,6 +61,10 @@ type PullV2ChangesProps = {
   /** Lifted comments-panel state — the page header toggle drives it too. */
   panelOpen?: boolean;
   onPanelToggle?: (open: boolean) => void;
+  /** Cross-tab file jump request (activity/comments panes) — reveal the
+   * target file's diff page and scroll to its anchor, then `onJumpDone`. */
+  jumpRequest?: { path: string; nonce: number } | null;
+  onJumpDone?: () => void;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -106,6 +111,9 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   const [draftError, setDraftError] = useState<string | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  // Bumped on successful review submit — remounts the review bar so a stale
+  // body/decision can't fire a duplicate review.
+  const [reviewReset, setReviewReset] = useState(0);
   // `since` is a client-only scope (no URL) — picking it from the scope menu
   // overlays whatever `changesSha` carries; URL changes clear it.
   const [sinceActive, setSinceActive] = useState(false);
@@ -256,6 +264,44 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
     `${props.owner}/${props.repoName}#${props.number}|${scopeKey}|${needle}`,
   );
   const shown = filtered.slice(0, list.count);
+
+  // File-jump plumbing: `jumpPending` holds the target path until its diff
+  // block mounts (the incremental list may still be paging it in).
+  const jumpPending = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (props.jumpRequest) jumpToFile(props.jumpRequest.path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce-keyed request
+  }, [props.jumpRequest?.nonce]);
+
+  useEffect(() => {
+    const path = jumpPending.current;
+    if (!path) return;
+    const el = document.getElementById(fileAnchorId(path));
+    if (el && typeof el.scrollIntoView === "function") {
+      jumpPending.current = null;
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+      props.onJumpDone?.();
+    }
+  }, [shown.length, props.jumpRequest]);
+
+  function jumpToFile(path: string) {
+    const idx = filtered.findIndex((f) => f.path === path);
+    if (idx < 0) {
+      props.onJumpDone?.();
+      return;
+    }
+    jumpPending.current = path;
+    if (idx >= shown.length) list.reveal(idx);
+    // Anchor already mounted → scroll on this pass; otherwise the effect
+    // above retries as `shown` grows.
+    const el = document.getElementById(fileAnchorId(path));
+    if (el && typeof el.scrollIntoView === "function") {
+      jumpPending.current = null;
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+      props.onJumpDone?.();
+    }
+  }
   const commits = commitsQ.data?.commits ?? [];
 
   function toggleDirFile(path: string) {
@@ -368,6 +414,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
     setDraft(null);
     setDraftBody("");
     setReviewBusy(false);
+    setReviewReset((n) => n + 1);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: commentsKey }),
       queryClient.invalidateQueries({
@@ -420,15 +467,25 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   function pickRangeStart(sha: string) {
     setRangeStart(sha);
     if (sha && rangeEnd && sha !== rangeEnd) {
-      navigate(`${base}/changes/${sha}..${rangeEnd}`);
+      navigateChanges(`${base}/changes/${sha}..${rangeEnd}`);
     }
   }
 
   function pickRangeEnd(sha: string) {
     setRangeEnd(sha);
     if (sha && rangeStart && sha !== rangeStart) {
-      navigate(`${base}/changes/${rangeStart}..${sha}`);
+      navigateChanges(`${base}/changes/${rangeStart}..${sha}`);
     }
+  }
+
+  /** Scope navigations stay on this tab — carry `?panel=` so an open docked
+   * pane doesn't silently close (the page-level effect mirrors the param). */
+  function navigateChanges(to: string) {
+    const panel =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("panel")
+        : null;
+    navigate(panel ? `${to}?panel=${encodeURIComponent(panel)}` : to);
   }
 
   const base = `/${props.owner}/${props.repoName}/pull/${props.number}`;
@@ -518,6 +575,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
               canInteract={props.canInteract}
               showViewed={marksEnabled}
               onToggleViewed={(path, v) => void toggleViewed(path, v)}
+              onJumpFile={jumpToFile}
             />
           </aside>
           <div
@@ -725,7 +783,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
             type="button"
             className={
               cn(
-                "inline-flex size-7 items-center justify-center rounded-sm",
+                "hidden size-7 items-center justify-center rounded-sm lg:inline-flex",
                 panelOpen()
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -885,6 +943,7 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
     @if (props.canWrite) {
       <div className="sticky bottom-0 z-10">
         <PullV2ReviewBar
+          key={reviewReset}
           pending={pendingComments}
           isAuthor={props.isAuthor}
           busy={reviewBusy}

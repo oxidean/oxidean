@@ -34,6 +34,8 @@ type PullV2FileTreeProps = {
   /** Viewed checkboxes allowed — hidden on scoped (sha/range/since) diffs. */
   showViewed: boolean;
   onToggleViewed: (path: string, viewed: boolean) => void;
+  /** Jump to a file's diff block — the parent reveals paged-out files first. */
+  onJumpFile?: (path: string) => void;
 };
 
 function FileStatusIcon(props: { status: string }) @{
@@ -111,6 +113,10 @@ export function PullV2FileTree(props: PullV2FileTreeProps) @{
   }
 
   function jump(path: string) {
+    if (props.onJumpFile) {
+      props.onJumpFile(path);
+      return;
+    }
     const el = document.getElementById(fileAnchorId(path));
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "start", behavior: "smooth" });

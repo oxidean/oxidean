@@ -151,6 +151,7 @@ function renderOverview(comments: unknown[] = [], extra: Record<string, unknown>
       repo: REPO as never,
       pull: PULL as never,
       canWrite: true,
+      canEdit: true,
       canInteract: true,
       isAuthor: true,
       currentUserId: "u9",

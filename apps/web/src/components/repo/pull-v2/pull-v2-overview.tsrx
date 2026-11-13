@@ -28,6 +28,8 @@ type PullV2OverviewProps = {
   repo: RepoPublic;
   pull: PullPublic;
   canWrite: boolean;
+  /** can_edit_pull — author may edit title/body/base even without repo write. */
+  canEdit: boolean;
   canInteract: boolean;
   isAuthor: boolean;
   currentUserId: string;
@@ -642,7 +644,7 @@ function PullV2Conversation(props: {
     <div className="rounded-md border border-border p-3" data-testid="pull-v2-summary">
       <div className="mb-2 flex items-center gap-2">
         <p className="text-sm font-medium text-muted-foreground">Summary</p>
-        @if (props.canWrite && !editingBody) {
+        @if (props.canEdit && !editingBody) {
           <button
             type="button"
             className="ml-auto inline-flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"

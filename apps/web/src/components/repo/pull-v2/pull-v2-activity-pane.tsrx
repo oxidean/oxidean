@@ -24,7 +24,10 @@ type ActivityItem = {
   review?: PullReviewPublic;
 };
 
-function reviewVerb(state: string): string {
+function reviewVerb(state: string, dismissedAt?: string | null): string {
+  // Dismissal stamps `dismissed_at` without changing `state` — a dismissed
+  // approval must not keep reading "approved these changes".
+  if (dismissedAt) return "dismissed a review";
   if (state === "approved") return "approved these changes";
   if (state === "changes_requested") return "requested changes";
   if (state === "dismissed") return "dismissed a review";
@@ -103,7 +106,7 @@ function ActivityRow(props: {
         <>
           <p className="text-foreground">
             <span className="font-medium">{it.review.author_username as string}</span>
-            {` ${reviewVerb(it.review.state)}` as string}
+            {` ${reviewVerb(it.review.state, it.review.dismissed_at)}` as string}
           </p>
           <p className="text-[12px] text-muted-foreground" title={it.at as string}>
             {formatRelative(it.at) as string}
@@ -191,21 +194,30 @@ export function PullV2ActivityPane(props: PullV2ActivityPaneProps) @{
     ) {
       <p className="text-[13px] text-muted-foreground">Loading activity…</p>;
     } @else {
-      @if (items.length === 0) {
-        <p className="text-[13px] text-muted-foreground" data-testid="pull-v2-activity-empty">
-          No activity yet.
+      @if (commitsQ.isError && commentsQ.isError && reviewsQ.isError) {
+        <p className="text-[13px] text-destructive" data-testid="pull-v2-activity-error">
+          {NETWORK_ERROR}
         </p>;
       } @else {
-        <ul className="divide-y divide-border">
-          @for (const it of items.slice(0, 50); key it.id) {
-            <ActivityRow
-              item={it}
-              owner={props.owner}
-              repoName={props.repoName}
-              onJump={props.onJump}
-            />;
-          }
-        </ul>;
+        @if (items.length === 0) {
+          <p
+            className="text-[13px] text-muted-foreground"
+            data-testid="pull-v2-activity-empty"
+          >
+            No activity yet.
+          </p>;
+        } @else {
+          <ul className="divide-y divide-border">
+            @for (const it of items.slice(0, 50); key it.id) {
+              <ActivityRow
+                item={it}
+                owner={props.owner}
+                repoName={props.repoName}
+                onJump={props.onJump}
+              />;
+            }
+          </ul>;
+        }
       }
     }
   </div>;

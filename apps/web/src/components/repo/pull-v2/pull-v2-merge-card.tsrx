@@ -294,6 +294,10 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
         setError(res.error.message || NETWORK_ERROR);
         return;
       }
+      // A successful update may have resolved the conflict — drop the stale
+      // banner/blockers; the refreshed branch status re-derives them.
+      setConflict(false);
+      setBlockers([]);
       void queryClient.invalidateQueries({
         queryKey: ["pull", "get", props.owner, props.repoName, props.number],
       });
