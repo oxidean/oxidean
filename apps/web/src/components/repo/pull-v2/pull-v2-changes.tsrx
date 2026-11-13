@@ -35,13 +35,11 @@ import { blobHref } from "@/lib/repo-browse";
 import { cn } from "@/lib/utils";
 import {
   changesScopeKey,
-  fileAnchorId,
   parseChangesScope,
   scopeAnchorSha,
   type ChangesScope,
   type DraftTarget,
 } from "./pull-v2-diff-utils";
-import { PullV2CommentsPanel } from "./pull-v2-comments-panel";
 import { PullV2DiffFile } from "./pull-v2-diff-file";
 import { PullV2FileTree } from "./pull-v2-file-tree";
 import { PullV2ReviewBar } from "./pull-v2-review-bar";
@@ -70,13 +68,6 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 const TREE_MIN_W = 200;
 const TREE_MAX_W = 480;
 const TREE_DEFAULT_W = 260;
-
-function scrollToFile(path: string) {
-  const el = document.getElementById(fileAnchorId(path));
-  if (el && typeof el.scrollIntoView === "function") {
-    el.scrollIntoView({ block: "start", behavior: "smooth" });
-  }
-}
 
 type FilesResult = {
   files: PullDiffFile[];
@@ -887,21 +878,6 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
           }
         }
       </div>
-
-      @if (panelOpen()) {
-        <aside className="sticky top-36 hidden max-h-[calc(100vh-10rem)] w-80 shrink-0 self-start overflow-hidden rounded-md border border-border bg-card lg:block">
-          <PullV2CommentsPanel
-            comments={allComments}
-            currentUserId={props.currentUserId}
-            owner={props.owner}
-            repoName={props.repoName}
-            number={props.number}
-            canInteract={props.canInteract}
-            onClose={() => setPanelOpen(false)}
-            onJump={scrollToFile}
-          />
-        </aside>;
-      }
     </div>
 
     @if (props.canWrite) {

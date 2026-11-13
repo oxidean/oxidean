@@ -1,9 +1,26 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { MergeMethod, MergeQueueGetResponse, RepoMergeSettings } from "@oxidean/api-client";
-import { CheckCircle2, CircleAlert, Loader2, MinusCircle, TriangleAlert } from "@octanejs/lucide";
+import type {
+  CheckRunPublic,
+  MergeMethod,
+  MergeQueueGetResponse,
+  RepoMergeSettings,
+} from "@oxidean/api-client";
+import {
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
+  GitMerge,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  Loader2,
+  MinusCircle,
+  TriangleAlert,
+} from "@octanejs/lucide";
 import { useState } from "octane";
+import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 
 type PullV2MergeCardProps = {
@@ -14,9 +31,48 @@ type PullV2MergeCardProps = {
   pullState: string;
   draft: boolean;
   headSha: string;
+  /** Merged/closed metadata for the state headline (PullPublic fields). */
+  mergedAt?: string | null;
+  mergedBy?: string | null;
+  closedAt?: string | null;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
+
+/** GitHub's empty/progress bar — hatched when there's nothing to measure. */
+function StatusBar(props: {
+  segments: { fraction: number; className: string }[];
+  empty?: boolean;
+  testid?: string;
+}) @{
+  <div
+    className="h-2 w-full overflow-hidden rounded-full"
+    style={
+      props.empty
+        ? "background: repeating-linear-gradient(135deg, var(--muted) 0px, var(--muted) 3px, transparent 3px, transparent 7px); border: 1px solid var(--border);"
+        : "background: var(--muted);"
+    }
+    data-testid={props.testid as string}
+    role="presentation"
+  >
+    <div className="flex h-full w-full">
+      @for (const [i, s] of props.segments.entries(); key i) {
+        <div
+          className={cn("h-full", s.className) as string}
+          style={`width: ${s.fraction * 100}%`}
+        />;
+      }
+    </div>
+  </div>;
+}
+
+function isFailingRun(r: CheckRunPublic): boolean {
+  return (
+    r.status === "completed" &&
+    !!r.conclusion &&
+    !["success", "neutral", "skipped"].includes(r.conclusion)
+  );
+}
 
 const REASON_LABELS: Record<string, string> = {
   reviews: "Required approving reviews",
@@ -96,8 +152,34 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!props.headSha && props.pullState === "open",
-    refetchInterval: 15_000,
+    enabled: !!props.headSha,
+    refetchInterval: props.pullState === "open" ? 15_000 : false,
+  });
+
+  // Progress rows reuse the page's shared query keys — no extra fetches.
+  const commentsQ = useQuery({
+    queryKey: ["pull", "comments", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.comments.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+  });
+  const reviewsQ = useQuery({
+    queryKey: ["pull", "reviews", props.owner, props.repoName, props.number] as const,
+    queryFn: async () => {
+      const res = await apiClient.pull.reviews.list({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
   });
 
   const branchQ = useQuery({
@@ -118,13 +200,20 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
   const queue = queueQ.data;
 
   const checkRuns = checksQ.data?.check_runs ?? [];
-  const failingChecks = checkRuns.filter(
-    (r) =>
-      r.status === "completed" &&
-      !!r.conclusion &&
-      !["success", "neutral", "skipped"].includes(r.conclusion),
-  ).length;
+  const failingChecks = checkRuns.filter(isFailingRun).length;
+  const inProgressChecks = checkRuns.filter((r) => r.status === "in_progress").length;
+  const queuedChecks = checkRuns.filter((r) => r.status === "queued").length;
   const pendingChecks = checkRuns.filter((r) => r.status !== "completed").length;
+  const skippedChecks = checkRuns.filter((r) => r.conclusion === "skipped").length;
+  const successChecks = checkRuns.filter((r) => r.conclusion === "success").length;
+
+  const comments = (commentsQ.data?.comments ?? []).filter((c) => !c.pending);
+  const anchored = comments.filter((c) => !!c.path);
+  const resolvedThreads = anchored.filter((c) => c.resolved).length;
+  const openComments = comments.length - resolvedThreads;
+  const approvals = (reviewsQ.data?.reviews ?? []).filter(
+    (r) => r.state === "approved" && !r.dismissed_at,
+  ).length;
 
   const behindBy = branchQ.data?.status === "behind" ? (branchQ.data.behind_count ?? 0) : 0;
 
@@ -213,31 +302,188 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
     await invalidatePull();
   }
 
-  @if (props.pullState !== "open") {
-    <div />;
-  } @else {
-    <div className="rounded-md border border-border bg-card" data-testid="pull-v2-merge-card">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        @if (conflict) {
-          <CircleAlert aria-hidden size={16} className="shrink-0 text-destructive" />;
-        } @else {
-          @if (failingChecks > 0 || blockers.length > 0) {
-            <CircleAlert aria-hidden size={16} className="shrink-0 text-destructive" />;
+  const merged = props.pullState === "merged";
+  const closed = props.pullState === "closed";
+
+  const checkSegments: { fraction: number; className: string }[] = [];
+  if (checkRuns.length > 0) {
+    if (successChecks > 0)
+      checkSegments.push({ fraction: successChecks / checkRuns.length, className: "bg-success" });
+    if (inProgressChecks > 0)
+      checkSegments.push({
+        fraction: inProgressChecks / checkRuns.length,
+        className: "bg-primary",
+      });
+    if (queuedChecks > 0)
+      checkSegments.push({ fraction: queuedChecks / checkRuns.length, className: "bg-amber-500" });
+    if (failingChecks > 0)
+      checkSegments.push({
+        fraction: failingChecks / checkRuns.length,
+        className: "bg-destructive",
+      });
+    const neutral =
+      checkRuns.length - successChecks - inProgressChecks - queuedChecks - failingChecks;
+    if (neutral > 0)
+      checkSegments.push({
+        fraction: neutral / checkRuns.length,
+        className: "bg-muted-foreground/30",
+      });
+  }
+
+  <div className="rounded-md border border-border bg-card" data-testid="pull-v2-merge-card">
+    {/* GitHub's status headline — icon + state sentence + detail line. */}
+    <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
+      @if (merged) {
+        <>
+          <GitMerge aria-hidden size={18} className="shrink-0 text-purple-500" />
+          <div className="min-w-0">
+            <h3 className="text-[14px] font-semibold text-foreground">Pull request merged</h3>
+            <p className="text-[12px] text-muted-foreground">
+              {
+                `${props.mergedBy ? `${props.mergedBy} merged` : "Merged"}${props.mergedAt ? ` ${formatRelative(props.mergedAt)}` : ""}` as string
+              }
+            </p>
+          </div>
+        </>;
+      } @else if (closed) {
+        <>
+          <GitPullRequestClosed aria-hidden size={18} className="shrink-0 text-destructive" />
+          <div className="min-w-0">
+            <h3 className="text-[14px] font-semibold text-foreground">Pull request closed</h3>
+            <p className="text-[12px] text-muted-foreground">
+              {
+                `Closed${props.closedAt ? ` ${formatRelative(props.closedAt)}` : ""}` as string
+              }
+            </p>
+          </div>
+        </>;
+      } @else {
+        <>
+          @if (
+            conflict ||
+            failingChecks > 0 ||
+            blockers.length > 0
+          ) {
+            <CircleAlert aria-hidden size={18} className="shrink-0 text-destructive" />;
           } @else {
             @if (pendingChecks > 0) {
               <Loader2
                 aria-hidden
-                size={16}
+                size={18}
                 className="shrink-0 animate-spin text-amber-500"
               />;
             } @else {
-              <CheckCircle2 aria-hidden size={16} className="shrink-0 text-success" />;
+              @if (props.draft) {
+                <GitPullRequestDraft
+                  aria-hidden
+                  size={18}
+                  className="shrink-0 text-muted-foreground"
+                />;
+              } @else {
+                <CheckCircle2
+                  aria-hidden
+                  size={18}
+                  className="shrink-0 text-success"
+                />;
+              }
             }
           }
+          <div className="min-w-0">
+            <h3 className="text-[14px] font-semibold text-foreground">
+              {
+                (conflict
+                  ? "This branch has conflicts"
+                  : failingChecks > 0
+                    ? "Some checks were not successful"
+                    : pendingChecks > 0
+                      ? "Some checks haven't completed yet"
+                      : props.draft
+                        ? "This pull request is still a work in progress"
+                        : behindBy > 0
+                          ? "This branch is out-of-date with the base branch"
+                          : "This branch has no conflicts with the base branch") as string
+              }
+            </h3>
+            @if (checkRuns.length > 0 || pendingChecks > 0) {
+              <p
+                className="text-[12px] text-muted-foreground"
+                data-testid="pull-v2-checks-sub"
+              >
+                {
+                  `${inProgressChecks > 0 ? `${inProgressChecks} in progress, ` : ""}${queuedChecks > 0 ? `${queuedChecks} queued, ` : ""}${skippedChecks > 0 ? `${skippedChecks} skipped, ` : ""}${successChecks} successful check${successChecks === 1 ? "" : "s"}.` as string
+                }
+              </p>;
+            }
+          </div>
+        </>;
+      }
+    </div>
+
+    {/* GitHub's progress rows — Checks / Comments / Approvals. */}
+    <div className="divide-y divide-border text-[13px]">
+      <AppLink
+        href={`/${props.owner}/${props.repoName}/pull/${props.number}/checks` as string}
+        className="flex items-center gap-2 px-3 py-2 no-underline hover:bg-muted/40"
+        data-testid="pull-v2-checks-row"
+      >
+        <span className="font-medium text-foreground">Checks</span>
+        @if (pendingChecks > 0) {
+          <span className="text-muted-foreground">
+            {`${pendingChecks} pending` as string}
+          </span>;
         }
-        <h3 className="text-[14px] font-semibold text-foreground">Recommended action</h3>
+        <span className="min-w-0 flex-1">
+          <StatusBar
+            segments={checkSegments}
+            empty={checkRuns.length === 0}
+            testid="pull-v2-checks-bar"
+          />
+        </span>
+        <ChevronRight aria-hidden size={14} className="shrink-0 text-muted-foreground" />
+      </AppLink>
+      <div className="flex items-center gap-2 px-3 py-2" data-testid="pull-v2-comments-row">
+        <span className="font-medium text-foreground">Comments</span>
+        @if (openComments > 0) {
+          <span className="text-muted-foreground">
+            {`${openComments} unresolved` as string}
+          </span>;
+        }
+        <span className="min-w-0 flex-1">
+          <StatusBar
+            segments={
+              anchored.length > 0
+                ? [
+                    {
+                      fraction: resolvedThreads / anchored.length,
+                      className: "bg-success",
+                    },
+                  ]
+                : []
+            }
+            empty={anchored.length === 0}
+            testid="pull-v2-comments-bar"
+          />
+        </span>
       </div>
-      <div className="space-y-3 px-3 py-3 text-[13px]">
+      <div className="flex items-center gap-2 px-3 py-2" data-testid="pull-v2-approvals-row">
+        <span className="font-medium text-foreground">Approvals</span>
+        @if (approvals > 0) {
+          <span className="text-muted-foreground">
+            {`${approvals} approval${approvals === 1 ? "" : "s"}` as string}
+          </span>;
+        }
+        <span className="min-w-0 flex-1">
+          <StatusBar
+            segments={approvals > 0 ? [{ fraction: 1, className: "bg-success" }] : []}
+            empty={approvals === 0}
+            testid="pull-v2-approvals-bar"
+          />
+        </span>
+      </div>
+    </div>
+
+    @if (props.pullState === "open") {
+      <div className="space-y-3 border-t border-border px-3 py-3 text-[13px]">
         @if (conflict) {
           <div data-testid="pull-v2-merge-conflict">
             <p className="font-medium text-destructive">This branch has conflicts</p>
@@ -256,11 +502,16 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
               data-testid="pull-v2-checks-failing"
             >
               <MinusCircle aria-hidden size={13} />
-              {`${failingChecks} failing check${failingChecks === 1 ? "" : "s"}` as string}
+              {
+                `${failingChecks} failing check${failingChecks === 1 ? "" : "s"}` as string
+              }
             </li>;
           }
           @if (pendingChecks > 0) {
-            <li className="flex items-center gap-1.5" data-testid="pull-v2-checks-pending">
+            <li
+              className="flex items-center gap-1.5"
+              data-testid="pull-v2-checks-pending"
+            >
               <Loader2 aria-hidden size={13} className="animate-spin text-amber-500" />
               {
                 `${pendingChecks} check${pendingChecks === 1 ? "" : "s"} still pending` as string
@@ -310,7 +561,10 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
           </p>;
         } @else {
           <>
-            @if (queueQ.isPending || settingsQ.isPending) {
+            @if (
+              queueQ.isPending ||
+              settingsQ.isPending
+            ) {
               <p className="text-muted-foreground">Loading merge options…</p>;
             } @else {
               <>
@@ -341,8 +595,8 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
                     } @else {
                       <>
                         <p className="text-muted-foreground">
-                          Merging is handled through the merge queue for
-                          this branch.
+                          Merging is handled through the merge queue
+                          for this branch.
                         </p>
                         <Button
                           type="button"
@@ -391,7 +645,9 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
                         type="checkbox"
                         checked={deleteBranch}
                         onChange={(e) =>
-                          setDeleteBranch((e.target as HTMLInputElement).checked)
+                          setDeleteBranch(
+                            (e.target as HTMLInputElement).checked,
+                          )
                         }
                       />
                       Delete head branch after merge
@@ -429,7 +685,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
         >
           {(error ?? "") as string}
         </p>
-      </div>
-    </div>;
-  }
+      </div>;
+    }
+  </div>;
 }

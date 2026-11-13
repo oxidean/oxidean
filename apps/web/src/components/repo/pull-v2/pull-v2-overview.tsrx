@@ -7,13 +7,12 @@ import type {
   RepoPublic,
 } from "@oxidean/api-client";
 import { useForm } from "@octanejs/tanstack-form";
-import { Bold, Code, Italic, Link, List, Quote, Strikethrough } from "@octanejs/lucide";
+import { Bold, Code, Italic, Link, List, Pencil, Quote, Strikethrough } from "@octanejs/lucide";
 import { useRef, useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
 import { MarkdownBody } from "@/components/repo/markdown-body";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { PullV2MergeCard } from "./pull-v2-merge-card";
-import { PullV2Rail } from "./pull-v2-rail";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,8 +30,6 @@ type PullV2OverviewProps = {
   canInteract: boolean;
   isAuthor: boolean;
   currentUserId: string;
-  /** Mini-header sidebar toggle — hidden rail collapses the layout to one column. */
-  railOpen?: boolean;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -510,6 +507,10 @@ function PullV2Conversation(props: {
   const [sort, setSort] = useState<"oldest" | "newest">("oldest");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingBody, setEditingBody] = useState(false);
+  const [bodyDraft, setBodyDraft] = useState("");
+  const [bodyBusy, setBodyBusy] = useState(false);
+  const [bodyError, setBodyError] = useState("");
 
   const commentsQ = useQuery({
     queryKey: ["pull", "comments", props.owner, props.repoName, props.number] as const,
@@ -599,10 +600,95 @@ function PullV2Conversation(props: {
     }
   }
 
+  async function saveBody() {
+    setBodyBusy(true);
+    setBodyError("");
+    try {
+      const res = await apiClient.pull.update({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        body: bodyDraft,
+      });
+      setBodyBusy(false);
+      if (!res.ok) {
+        setBodyError(res.error.message || "Could not update the description.");
+        return;
+      }
+      setEditingBody(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+      });
+    } catch {
+      setBodyBusy(false);
+      setBodyError(NETWORK_ERROR);
+    }
+  }
+
   <div className="space-y-4" data-testid="pull-v2-conversation">
     <div className="rounded-md border border-border p-3">
-      <p className="mb-2 text-sm font-medium text-muted-foreground">Summary</p>
-      <CommentBody body={props.body} owner={props.owner} repoName={props.repoName} />
+      <div className="mb-2 flex items-center gap-2">
+        <p className="text-sm font-medium text-muted-foreground">Summary</p>
+        @if (props.canWrite && !editingBody) {
+          <button
+            type="button"
+            className="ml-auto inline-flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Edit description"
+            data-testid="pull-v2-body-edit"
+            onClick={() => {
+              setBodyDraft(props.body);
+              setBodyError("");
+              setEditingBody(true);
+            }}
+          >
+            <Pencil aria-hidden size={13} />
+          </button>;
+        }
+      </div>
+      @if (editingBody) {
+        <div className="space-y-2" data-testid="pull-v2-body-editor">
+          <MarkdownWritePreview
+            id="pull-v2-body-editor"
+            value={bodyDraft}
+            onValueChange={setBodyDraft}
+            rows={8}
+            disabled={bodyBusy}
+            owner={props.owner}
+            repo={props.repoName}
+          />
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={bodyBusy}
+              data-testid="pull-v2-body-save"
+              onClick={() => void saveBody()}
+            >
+              Save
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bodyBusy}
+              data-testid="pull-v2-body-cancel"
+              onClick={() => {
+                setEditingBody(false);
+                setBodyError("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+          @if (bodyError) {
+            <p className="text-[12px] text-destructive" role="alert">
+              {bodyError as string}
+            </p>;
+          }
+        </div>;
+      } @else {
+        <CommentBody body={props.body} owner={props.owner} repoName={props.repoName} />;
+      }
     </div>
 
     @if (pending.length > 0) {
@@ -708,47 +794,33 @@ function PullV2Conversation(props: {
 }
 
 /**
- * Overview tab of the new PR experience (WI-0001 S8): the merge box becomes
- * a compact "Recommended action" card, and a "Status and details" rail
- * (reviewers / assignees / labels / activity) sits at lg:w-72 on the right.
- * The timeline uses the v2 conversation (segmentation + toolbar composer).
+ * Overview tab of the new PR experience (WI-0001 S8): the merge card sits on
+ * top of the v2 conversation (segmentation + toolbar composer). The right
+ * pane — GitHub's Description/Activity/Comments/Merge-status selector — is
+ * rendered one level up in PullDetailV2 so it persists across tabs.
  */
 export function PullV2Overview(props: PullV2OverviewProps) @{
-  <div className="flex items-start gap-6" data-testid="pull-v2-overview">
-    <div className="min-w-0 flex-1 space-y-6">
-      <PullV2MergeCard
-        owner={props.owner}
-        repoName={props.repoName}
-        number={props.number}
-        canWrite={props.canWrite}
-        pullState={(props.pull.state as string) ?? "open"}
-        draft={props.pull.draft}
-        headSha={props.pull.head_sha}
-      />
-      <PullV2Conversation
-        owner={props.owner}
-        repoName={props.repoName}
-        number={props.number}
-        canWrite={props.canWrite}
-        canInteract={props.canInteract}
-        currentUserId={props.currentUserId}
-        body={(props.pull.body || "") as string}
-      />
-    </div>
-    @if (props.railOpen !== false) {
-      <aside
-        className="hidden w-72 shrink-0 lg:block"
-        aria-label="Status and details"
-        data-testid="pull-v2-rail-wrap"
-      >
-        <PullV2Rail
-          owner={props.owner}
-          repoName={props.repoName}
-          number={props.number}
-          pull={props.pull}
-          canWrite={props.canWrite}
-        />
-      </aside>;
-    }
+  <div className="space-y-6" data-testid="pull-v2-overview">
+    <PullV2MergeCard
+      owner={props.owner}
+      repoName={props.repoName}
+      number={props.number}
+      canWrite={props.canWrite}
+      pullState={(props.pull.state as string) ?? "open"}
+      draft={props.pull.draft}
+      headSha={props.pull.head_sha}
+      mergedAt={props.pull.merged_at ?? null}
+      mergedBy={props.pull.merged_by ?? null}
+      closedAt={props.pull.closed_at ?? null}
+    />
+    <PullV2Conversation
+      owner={props.owner}
+      repoName={props.repoName}
+      number={props.number}
+      canWrite={props.canWrite}
+      canInteract={props.canInteract}
+      currentUserId={props.currentUserId}
+      body={(props.pull.body || "") as string}
+    />
   </div>;
 }

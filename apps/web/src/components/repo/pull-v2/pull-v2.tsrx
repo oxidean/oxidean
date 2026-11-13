@@ -8,7 +8,9 @@ import type {
 } from "@oxidean/api-client";
 import {
   Check,
+  ChevronDown,
   Copy,
+  FileText,
   GitBranch,
   GitMerge,
   GitPullRequest,
@@ -18,19 +20,30 @@ import {
   PanelRight,
   PanelRightClose,
   Pencil,
+  X,
 } from "@octanejs/lucide";
 import { useEffect, useMemo, useState } from "octane";
+import { PullV2ActivityPane } from "@/components/repo/pull-v2/pull-v2-activity-pane";
 import { PullV2Changes } from "@/components/repo/pull-v2/pull-v2-changes";
 import { PullV2Checks } from "@/components/repo/pull-v2/pull-v2-checks";
 import { PullV2CommentsPanel } from "@/components/repo/pull-v2/pull-v2-comments-panel";
 import { PullV2Commits } from "@/components/repo/pull-v2/pull-v2-commits";
+import { PullV2MergeCard } from "@/components/repo/pull-v2/pull-v2-merge-card";
 import { PullV2Overview } from "@/components/repo/pull-v2/pull-v2-overview";
+import { PullV2Rail } from "@/components/repo/pull-v2/pull-v2-rail";
 import { AppLink } from "@/components/ui/app-link";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
+import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { fileAnchorId } from "./pull-v2-diff-utils";
 
@@ -68,6 +81,29 @@ type PullDetailV2Props = {
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
+/** Right-pane views — GitHub's new UI "Description ▾" pane selector. Panes
+ * with no backend domain (Alerts, Copilot, batch review) stay unlisted. */
+type PullPane = "description" | "activity" | "comments" | "merge";
+
+const PANES: { id: PullPane; label: string }[] = [
+  { id: "activity", label: "Activity" },
+  { id: "comments", label: "Comments" },
+  { id: "description", label: "Description" },
+  { id: "merge", label: "Merge status" },
+];
+
+function paneLabel(pane: PullPane): string {
+  return PANES.find((p) => p.id === pane)?.label ?? "Description";
+}
+
+function paneFromParam(value: string | null): PullPane | null {
+  if (value === "comments") return "comments";
+  if (value === "activity") return "activity";
+  if (value === "merge") return "merge";
+  if (value === "description" || value === "overview") return "description";
+  return null;
+}
+
 function pullStateBadge(state: string, draft: boolean) @{
   @if (state === "merged") {
     <Badge variant="merged">
@@ -92,6 +128,116 @@ function pullStateBadge(state: string, draft: boolean) @{
       </Badge>;
     }
   }
+}
+
+/**
+ * GitHub's `Open ▾` state pill — the caret opens the state-change menu
+ * (draft toggle / close / reopen) when the viewer can write. Merged pulls
+ * and read-only viewers get a static pill.
+ */
+function StatePillMenu(props: {
+  state: string;
+  draft: boolean;
+  canWrite: boolean;
+  busy: boolean;
+  onConvert: (draft: boolean) => void;
+  onClose: () => void;
+  onReopen: () => void;
+}) @{
+  const actionable = props.canWrite && (props.state === "open" || props.state === "closed");
+
+  @if (!actionable) {
+    <span data-testid="pull-v2-state-pill">{pullStateBadge(props.state, props.draft)}</span>;
+  } @else {
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex cursor-pointer items-center gap-0.5 rounded-full focus-visible:outline-2 focus-visible:outline-primary"
+        aria-label="Pull request state actions"
+        aria-haspopup="menu"
+        data-testid="pull-v2-state-menu"
+        disabled={props.busy}
+      >
+        {pullStateBadge(props.state, props.draft)}
+        <ChevronDown aria-hidden size={12} className="-ml-0.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-48">
+        @if (props.state === "open") {
+          <>
+            @if (props.draft) {
+              <DropdownMenuItem
+                data-testid="pull-v2-state-ready"
+                onClick={() => props.onConvert(false)}
+              >
+                <GitPullRequest aria-hidden size={13} />
+                Ready for review
+              </DropdownMenuItem>;
+            } @else {
+              <DropdownMenuItem
+                data-testid="pull-v2-state-draft"
+                onClick={() => props.onConvert(true)}
+              >
+                <GitPullRequestDraft aria-hidden size={13} />
+                Convert to draft
+              </DropdownMenuItem>;
+            }
+            <DropdownMenuItem
+              data-testid="pull-v2-state-close"
+              onClick={() => props.onClose()}
+            >
+              <GitPullRequestClosed aria-hidden size={13} />
+              Close pull request
+            </DropdownMenuItem>
+          </>;
+        } @else {
+          <DropdownMenuItem
+            data-testid="pull-v2-state-reopen"
+            onClick={() => props.onReopen()}
+          >
+            <GitPullRequest aria-hidden size={13} />
+            Reopen pull request
+          </DropdownMenuItem>;
+        }
+      </DropdownMenuContent>
+    </DropdownMenu>;
+  }
+}
+
+/** GitHub's five-square diffstat visual — green share = additions, red =
+ * deletions, muted = untouched remainder. */
+function DiffStatDots(props: { adds: number; dels: number }) @{
+  const total = props.adds + props.dels;
+  let green = 0;
+  let red = 0;
+  if (total > 0) {
+    green = Math.round((props.adds / total) * 5);
+    red = Math.round((props.dels / total) * 5);
+    if (green + red > 5) {
+      if (green >= red) green = 5 - red;
+      else red = 5 - green;
+    }
+    if (props.adds > 0 && green === 0) green = 1;
+    if (props.dels > 0 && red === 0) red = 1;
+    if (green + red > 5) red = 5 - green;
+  }
+  const squares: ("add" | "del" | "empty")[] = [];
+  for (let i = 0; i < 5; i += 1) {
+    if (i < green) squares.push("add");
+    else if (i < green + red) squares.push("del");
+    else squares.push("empty");
+  }
+
+  <span className="inline-flex items-center gap-0.5" aria-hidden data-testid="pull-v2-diffdots">
+    @for (const [i, s] of squares.entries(); key i) {
+      <span
+        className={
+          cn(
+            "inline-block size-2.5 rounded-[2px]",
+            s === "add" ? "bg-success" : s === "del" ? "bg-destructive" : "bg-muted",
+          ) as string
+        }
+      />;
+    }
+  </span>;
 }
 
 const TABS: { id: PullV2Tab; label: string; path: (base: string) => string }[] = [
@@ -180,12 +326,14 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       : `${props.pull.head_owner}:${props.pull.head_ref}`;
 
   const [copied, setCopied] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [railOpen, setRailOpen] = useState(true);
+  const [paneOpen, setPaneOpen] = useState(true);
+  const [pane, setPane] = useState<PullPane>("description");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [titleBusy, setTitleBusy] = useState(false);
   const [titleError, setTitleError] = useState("");
+  const [stateBusy, setStateBusy] = useState(false);
+  const [stateError, setStateError] = useState("");
 
   // Badge/panel queries reuse the tab bodies' keys + queryFns — shared cache,
   // no second fetch when a tab mounts the same key.
@@ -293,10 +441,50 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     },
   });
 
-  // `?panel=comments` opens the comments panel on load / soft-nav.
+  // `?panel=<pane>` deep-links a right pane (comments / activity / merge /
+  // description) on load and soft-nav.
   useEffect(() => {
-    if (new URLSearchParams(searchStr).get("panel") === "comments") setPanelOpen(true);
+    const p = paneFromParam(new URLSearchParams(searchStr).get("panel"));
+    if (p) {
+      setPane(p);
+      setPaneOpen(true);
+    }
   }, [searchStr]);
+
+  const commentsOpen = pane === "comments" && paneOpen;
+
+  function setCommentsOpen(open: boolean) {
+    if (open) {
+      setPane("comments");
+      setPaneOpen(true);
+      syncPaneParam("comments", true);
+    } else {
+      setPaneOpen(false);
+      syncPaneParam("comments", false);
+    }
+  }
+
+  function selectPane(next: PullPane) {
+    setPane(next);
+    setPaneOpen(true);
+    syncPaneParam(next, true);
+  }
+
+  function closePane() {
+    setPaneOpen(false);
+    syncPaneParam(pane, false);
+  }
+
+  /** `?panel=` mirrors the open non-default pane; the default description
+   * pane (and a closed pane) carry no param, matching the pre-pane
+   * `?panel=comments` deep-link contract. */
+  function syncPaneParam(nextPane = pane, open = paneOpen) {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (open && nextPane !== "description") url.searchParams.set("panel", nextPane);
+    else url.searchParams.delete("panel");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 
   const comments: PullCommentPublic[] = commentsQ.data?.comments ?? [];
 
@@ -345,14 +533,68 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     }
   }
 
-  function setPanel(next: boolean) {
-    setPanelOpen(next);
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set("panel", "comments");
-    else url.searchParams.delete("panel");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  async function invalidatePull() {
+    await queryClient.invalidateQueries({
+      queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+    });
   }
+
+  async function stateAction(fn: () => Promise<{ ok: boolean; error?: { message: string } }>) {
+    setStateBusy(true);
+    setStateError("");
+    try {
+      const res = await fn();
+      setStateBusy(false);
+      if (!res.ok) {
+        setStateError(res.error?.message || "Could not update the pull request.");
+        return;
+      }
+      await invalidatePull();
+    } catch {
+      setStateBusy(false);
+      setStateError(NETWORK_ERROR);
+    }
+  }
+
+  const convertDraft = (draft: boolean) =>
+    void stateAction(() =>
+      apiClient.pull.update({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        draft,
+      }),
+    );
+  const closePull = () =>
+    void stateAction(() =>
+      apiClient.pull.close({ owner: props.owner, name: props.repoName, number: props.number }),
+    );
+  const reopenPull = () =>
+    void stateAction(() =>
+      apiClient.pull.reopen({ owner: props.owner, name: props.repoName, number: props.number }),
+    );
+  const retargetBase = (base_ref: string) =>
+    void stateAction(() =>
+      apiClient.pull.update({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        base_ref,
+      }),
+    );
+
+  const refsQ = useQuery({
+    queryKey: ["repo", "refs", props.owner, props.repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.repo.refs({ owner: props.owner, name: props.repoName });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+    enabled: props.canWrite && pullState === "open",
+  });
+  const baseChoices = (refsQ.data?.refs ?? [])
+    .map((r) => r.name.replace(/^refs\/heads\//, ""))
+    .filter((n) => n && n !== props.pull.base_ref);
 
   function startTitleEdit() {
     setTitleDraft(props.pull.title);
@@ -391,68 +633,27 @@ export function PullDetailV2(props: PullDetailV2Props) @{
   }
 
   <div className="space-y-4">
+    {/* Row 1 — mini-header: #N, truncated title, copy, status + pane actions.
+        Sticks to the top like GitHub's pull mini-header. */}
     <div className="sticky top-0 z-20 -mx-4 border-b border-border bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
       <div className="flex flex-wrap items-center gap-2 py-2 text-[14px]">
         <span className="font-mono text-muted-foreground">#{props.number as number}</span>
-        @if (editingTitle) {
-          <form
-            method="post"
-            action="#"
-            className="flex min-w-0 flex-1 items-center gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void saveTitle();
-            }}
-          >
-            <Input
-              value={titleDraft}
-              className="h-7 min-w-0 flex-1 text-[14px]"
-              disabled={titleBusy}
-              aria-label="Pull request title"
-              data-testid="pull-v2-title-input"
-              onInput={(e) => setTitleDraft((e.currentTarget as HTMLInputElement).value)}
-            />
-            <Button
-              type="submit"
-              size="sm"
-              disabled={titleBusy || !titleDraft.trim()}
-              data-testid="pull-v2-title-save"
-            >
-              Save
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={titleBusy}
-              data-testid="pull-v2-title-cancel"
-              onClick={() => {
-                setEditingTitle(false);
-                setTitleError("");
-              }}
-            >
-              Cancel
-            </Button>
-          </form>;
-        } @else {
-          <>
-            <h2 className="min-w-0 truncate font-[family-name:var(--font-display)] font-semibold">
-              {props.pull.title as string}
-            </h2>
-            @if (props.canWrite && pullState === "open") {
-              <button
-                type="button"
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Edit title"
-                data-testid="pull-v2-title-edit"
-                onClick={startTitleEdit}
-              >
-                <Pencil aria-hidden size={13} />
-              </button>;
-            }
-          </>;
-        }
-        {pullStateBadge(pullState, props.pull.draft)}
+        <h2 className="min-w-0 max-w-[55%] truncate font-[family-name:var(--font-display)] font-semibold">
+          {props.pull.title as string}
+        </h2>
+        <button
+          type="button"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Copy link"
+          data-testid="pull-v2-copy-link"
+          onClick={() => void copyLink()}
+        >
+          @if (copied) {
+            <Check aria-hidden size={13} className="text-success" />;
+          } @else {
+            <Copy aria-hidden size={13} />;
+          }
+        </button>
         <div className="ml-auto flex items-center gap-1">
           @if (mergeChip) {
             <AppLink
@@ -487,31 +688,18 @@ export function PullDetailV2(props: PullDetailV2Props) @{
           }
           <button
             type="button"
-            className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Copy link"
-            data-testid="pull-v2-copy-link"
-            onClick={() => void copyLink()}
-          >
-            @if (copied) {
-              <Check aria-hidden size={15} className="text-success" />;
-            } @else {
-              <Copy aria-hidden size={15} />;
-            }
-          </button>
-          <button
-            type="button"
             className={
               cn(
                 "inline-flex size-7 items-center justify-center rounded-sm",
-                panelOpen
+                commentsOpen
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               ) as string
             }
             aria-label="Toggle comments panel"
-            aria-expanded={panelOpen}
+            aria-expanded={commentsOpen}
             data-testid="pull-v2-panel-toggle"
-            onClick={() => setPanel(!panelOpen)}
+            onClick={() => setCommentsOpen(!commentsOpen)}
           >
             <MessageSquare aria-hidden size={15} />
           </button>
@@ -520,17 +708,21 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             className={
               cn(
                 "inline-flex size-7 items-center justify-center rounded-sm",
-                railOpen
+                paneOpen
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               ) as string
             }
             aria-label="Toggle sidebar"
-            aria-expanded={railOpen}
+            aria-expanded={paneOpen}
             data-testid="pull-v2-rail-toggle"
-            onClick={() => setRailOpen(!railOpen)}
+            onClick={() => {
+              const next = !paneOpen;
+              setPaneOpen(next);
+              syncPaneParam(pane, next);
+            }}
           >
-            @if (railOpen) {
+            @if (paneOpen) {
               <PanelRightClose aria-hidden size={15} />;
             } @else {
               <PanelRight aria-hidden size={15} />;
@@ -547,57 +739,248 @@ export function PullDetailV2(props: PullDetailV2Props) @{
           {titleError as string}
         </p>;
       }
-      <nav className="flex gap-1 overflow-x-auto" aria-label="Pull request sections">
-        @for (const t of TABS; key t.id) {
-          <AppLink
-            href={t.path(base) as string}
-            className={
-              cn(
-                "border-b-2 px-3 pb-2 pt-1 text-sm no-underline",
-                props.tab === t.id
-                  ? "border-primary font-semibold text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              ) as string
-            }
-            aria-current={props.tab === t.id ? "page" : undefined}
-            data-testid={`pull-v2-tab-${t.id}`}
-          >
-            {t.label as string}
-            @if (tabCounts[t.id] !== undefined) {
-              <span
-                className="ml-1 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal leading-none text-muted-foreground"
-                data-testid={`pull-v2-tab-count-${t.id}` as string}
-              >
-                {tabCounts[t.id] as number}
-              </span>;
-            }
-          </AppLink>;
-        }
-      </nav>
     </div>
 
-    <div className="flex items-start gap-4">
-      <div className="min-w-0 flex-1 space-y-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">
-            {props.pull.author_username as string}
+    {/* Row 2 — pane toolbar: GitHub's "Description ▾" selector + edit + close
+        sits above the right pane. Preview/code/notifications controls have no
+        backend domain here and stay out rather than rendering dead buttons. */}
+    <div className="flex items-center justify-end gap-1" data-testid="pull-v2-pane-toolbar">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 text-[13px] text-foreground hover:bg-muted"
+          aria-label="Select right pane"
+          aria-haspopup="menu"
+          data-testid="pull-v2-pane-select"
+        >
+          <FileText aria-hidden size={13} className="text-muted-foreground" />
+          {paneLabel(pane) as string}
+          <ChevronDown aria-hidden size={12} className="text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="min-w-44">
+          @for (const p of PANES; key p.id) {
+            <DropdownMenuItem
+              data-testid={`pull-v2-pane-${p.id}` as string}
+              onClick={() => selectPane(p.id)}
+            >
+              <Check aria-hidden size={13} className={pane === p.id ? "" : "invisible"} />
+              {p.label as string}
+            </DropdownMenuItem>;
+          }
+        </DropdownMenuContent>
+      </DropdownMenu>
+      @if (props.canWrite && pullState === "open") {
+        <button
+          type="button"
+          className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Edit title"
+          data-testid="pull-v2-title-edit"
+          onClick={startTitleEdit}
+        >
+          <Pencil aria-hidden size={14} />
+        </button>;
+      }
+      @if (paneOpen) {
+        <button
+          type="button"
+          className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Close right pane"
+          data-testid="pull-v2-pane-close"
+          onClick={closePane}
+        >
+          <X aria-hidden size={14} />
+        </button>;
+      }
+    </div>
+
+    {/* Row 3 — title block: GitHub's large H1 with the inline-edit pencil. */}
+    <div data-testid="pull-v2-title-block">
+      @if (editingTitle) {
+        <form
+          method="post"
+          action="#"
+          className="flex min-w-0 items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveTitle();
+          }}
+        >
+          <Input
+            value={titleDraft}
+            className="h-9 min-w-0 flex-1 text-[20px] font-semibold"
+            disabled={titleBusy}
+            aria-label="Pull request title"
+            data-testid="pull-v2-title-input"
+            onInput={(e) => setTitleDraft((e.currentTarget as HTMLInputElement).value)}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={titleBusy || !titleDraft.trim()}
+            data-testid="pull-v2-title-save"
+          >
+            Save
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={titleBusy}
+            data-testid="pull-v2-title-cancel"
+            onClick={() => {
+              setEditingTitle(false);
+              setTitleError("");
+            }}
+          >
+            Cancel
+          </Button>
+        </form>;
+      } @else {
+        <div className="flex items-start gap-2">
+          <h1 className="min-w-0 font-[family-name:var(--font-display)] text-[24px] font-semibold leading-tight text-foreground">
+            {props.pull.title as string}
+          </h1>
+          @if (props.canWrite && pullState === "open") {
+            <button
+              type="button"
+              className="mt-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Edit title"
+              onClick={startTitleEdit}
+            >
+              <Pencil aria-hidden size={14} />
+            </button>;
+          }
+        </div>;
+      }
+    </div>
+
+    {/* Row 4 — state row: state pill (with actions), author + opened-at,
+        base ← head ref chips, and the +/− diffstat with GitHub's five dots. */}
+    <div
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
+      data-testid="pull-v2-state-row"
+    >
+      <StatePillMenu
+        state={pullState}
+        draft={props.pull.draft}
+        canWrite={props.canWrite}
+        busy={stateBusy}
+        onConvert={convertDraft}
+        onClose={closePull}
+        onReopen={reopenPull}
+      />
+      <span
+        className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground"
+        aria-hidden
+      >
+        {(props.pull.author_username || "?").slice(0, 1).toUpperCase() as string}
+      </span>
+      <span>
+        <span className="font-medium text-foreground">{props.pull.author_username as string}</span>
+        {
+          (pullState === "merged" && props.pull.merged_at
+            ? ` merged ${formatRelative(props.pull.merged_at)}`
+            : ` opened ${formatRelative(props.pull.created_at)}`) as string
+        }
+      </span>
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        @if (
+          props.canWrite &&
+          pullState === "open" &&
+          baseChoices.length > 0
+        ) {
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex cursor-pointer items-center gap-0.5 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-foreground hover:bg-muted"
+              aria-label="Change base branch"
+              aria-haspopup="menu"
+              data-testid="pull-v2-base-menu"
+              disabled={stateBusy}
+            >
+              <GitBranch aria-hidden size={11} className="text-muted-foreground" />
+              {props.pull.base_ref as string}
+              <ChevronDown aria-hidden size={11} className="text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-44">
+              @for (const b of baseChoices; key b) {
+                <DropdownMenuItem
+                  data-testid={`pull-v2-base-${b}` as string}
+                  onClick={() => retargetBase(b)}
+                >
+                  {b as string}
+                </DropdownMenuItem>;
+              }
+            </DropdownMenuContent>
+          </DropdownMenu>;
+        } @else {
+          <span
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-foreground"
+            data-testid="pull-v2-base-branch"
+          >
+            <GitBranch aria-hidden size={11} className="text-muted-foreground" />
+            {props.pull.base_ref as string}
+          </span>;
+        }
+        <span aria-hidden>←</span>
+        <BranchChip label="head" name={headRef} testid="pull-v2-head-branch" />
+      </span>
+      @if (filesQ.data) {
+        <span
+          className="ml-auto inline-flex items-center gap-1.5 font-mono text-[13px]"
+          data-testid="pull-v2-diffstat"
+        >
+          <span className="text-success">{`+${stats.adds.toLocaleString()}` as string}</span>{" "}
+          <span className="text-destructive">
+            {`−${stats.dels.toLocaleString()}` as string}
           </span>
-          <span className="inline-flex flex-wrap items-center gap-1.5">
-            wants to merge
-            @if (commitCount !== undefined) {
-              <span>{`${commitCount} commit${commitCount === 1 ? "" : "s"}` as string}</span>;
-            }
-            into <BranchChip label="base" name={props.pull.base_ref} testid="pull-v2-base-branch" />
-            from <BranchChip label="head" name={headRef} testid="pull-v2-head-branch" />
-          </span>
-          @if (filesQ.data) {
-            <span className="ml-auto font-mono text-[13px]" data-testid="pull-v2-diffstat">
-              <span className="text-success">{`+${stats.adds}` as string}</span>{" "}
-              <span className="text-destructive">{`−${stats.dels}` as string}</span>
+          <DiffStatDots adds={stats.adds} dels={stats.dels} />
+        </span>;
+      }
+    </div>
+    @if (stateError) {
+      <p
+        className="text-[12px] text-destructive"
+        role="alert"
+        data-testid="pull-v2-state-error"
+      >
+        {stateError as string}
+      </p>;
+    }
+
+    {/* Row 5 — tab nav (sticky under the mini-header on scroll). */}
+    <nav
+      className="sticky top-10 z-10 -mx-4 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6"
+      aria-label="Pull request sections"
+    >
+      @for (const t of TABS; key t.id) {
+        <AppLink
+          href={t.path(base) as string}
+          className={
+            cn(
+              "border-b-2 px-3 pb-2 pt-1 text-sm no-underline",
+              props.tab === t.id
+                ? "border-primary font-semibold text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            ) as string
+          }
+          aria-current={props.tab === t.id ? "page" : undefined}
+          data-testid={`pull-v2-tab-${t.id}`}
+        >
+          {t.label as string}
+          @if (tabCounts[t.id] !== undefined) {
+            <span
+              className="ml-1 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal leading-none text-muted-foreground"
+              data-testid={`pull-v2-tab-count-${t.id}` as string}
+            >
+              {tabCounts[t.id] as number}
             </span>;
           }
-        </div>
+        </AppLink>;
+      }
+    </nav>
 
+    {/* Row 6 — tab body + unified right pane (all tabs, like GitHub). */}
+    <div className="flex items-start gap-6">
+      <div className="min-w-0 flex-1 space-y-4">
         @if (props.tab === "overview") {
           <PullV2Overview
             owner={props.owner}
@@ -609,7 +992,6 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             canInteract={props.canInteract}
             isAuthor={props.isAuthor}
             currentUserId={props.currentUserId}
-            railOpen={railOpen}
           />;
         }
         @if (props.tab === "commits") {
@@ -637,24 +1019,63 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             currentUserId={props.currentUserId}
             changesSha={props.changesSha}
             headSha={props.pull.head_sha}
-            panelOpen={panelOpen}
-            onPanelToggle={setPanel}
+            panelOpen={commentsOpen}
+            onPanelToggle={setCommentsOpen}
           />;
         }
       </div>
 
-      @if (panelOpen && props.tab !== "changes") {
-        <aside className="sticky top-36 hidden max-h-[calc(100vh-10rem)] w-80 shrink-0 self-start overflow-hidden rounded-md border border-border bg-card lg:block">
-          <PullV2CommentsPanel
-            comments={comments}
-            currentUserId={props.currentUserId}
-            owner={props.owner}
-            repoName={props.repoName}
-            number={props.number}
-            canInteract={props.canInteract}
-            onClose={() => setPanel(false)}
-            onJump={scrollToFile}
-          />
+      @if (paneOpen) {
+        <aside
+          className="sticky top-24 hidden max-h-[calc(100vh-8rem)] w-80 shrink-0 self-start overflow-y-auto lg:block"
+          aria-label={`${paneLabel(pane)} pane`}
+          data-testid="pull-v2-pane"
+        >
+          @if (pane === "description") {
+            <PullV2Rail
+              owner={props.owner}
+              repoName={props.repoName}
+              number={props.number}
+              pull={props.pull}
+              canWrite={props.canWrite}
+            />;
+          }
+          @if (pane === "comments") {
+            <div className="overflow-hidden rounded-md border border-border bg-card">
+              <PullV2CommentsPanel
+                comments={comments}
+                currentUserId={props.currentUserId}
+                owner={props.owner}
+                repoName={props.repoName}
+                number={props.number}
+                canInteract={props.canInteract}
+                onClose={() => setCommentsOpen(false)}
+                onJump={scrollToFile}
+              />
+            </div>;
+          }
+          @if (pane === "activity") {
+            <PullV2ActivityPane
+              owner={props.owner}
+              repoName={props.repoName}
+              number={props.number}
+              onJump={scrollToFile}
+            />;
+          }
+          @if (pane === "merge") {
+            <PullV2MergeCard
+              owner={props.owner}
+              repoName={props.repoName}
+              number={props.number}
+              canWrite={props.canWrite}
+              pullState={pullState}
+              draft={props.pull.draft}
+              headSha={props.pull.head_sha}
+              mergedAt={props.pull.merged_at ?? null}
+              mergedBy={props.pull.merged_by ?? null}
+              closedAt={props.pull.closed_at ?? null}
+            />;
+          }
         </aside>;
       }
     </div>

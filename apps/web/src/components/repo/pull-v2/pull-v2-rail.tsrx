@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { IssueAssigneePublic, LabelPublic, PullPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
-import { CircleSlash, GitPullRequest, GitPullRequestDraft, X } from "@octanejs/lucide";
+import { CircleSlash, GitPullRequest, GitPullRequestDraft, Settings, X } from "@octanejs/lucide";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -26,10 +26,30 @@ function pullLabels(pull: PullPublic): LabelPublic[] {
   return pull.labels ?? [];
 }
 
+/** Gear button that toggles a section's picker — GitHub's rail gear affordance. */
+function RailGear(props: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  testid: string;
+}) @{
+  <button
+    type="button"
+    className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+    aria-label={props.label as string}
+    aria-expanded={props.open}
+    data-testid={props.testid as string}
+    onClick={() => props.onToggle()}
+  >
+    <Settings aria-hidden size={13} />
+  </button>;
+}
+
 /** Reviewers section — pull.reviewRequests.* (existing RPCs). */
 function RailReviewers(props: PullV2RailProps) @{
   const queryClient = useQueryClient();
   const [requestUser, setRequestUser] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -90,9 +110,19 @@ function RailReviewers(props: PullV2RailProps) @{
   }
 
   <section aria-labelledby="pull-v2-reviewers-heading" data-testid="pull-v2-rail-reviewers">
-    <h3 id="pull-v2-reviewers-heading" className="text-[13px] font-semibold text-foreground">
-      Reviewers
-    </h3>
+    <div className="flex items-center justify-between gap-2">
+      <h3 id="pull-v2-reviewers-heading" className="text-[13px] font-semibold text-foreground">
+        Reviewers
+      </h3>
+      @if (props.canWrite) {
+        <RailGear
+          label="Edit reviewers"
+          open={pickerOpen}
+          onToggle={() => setPickerOpen(!pickerOpen)}
+          testid="pull-v2-reviewers-gear"
+        />;
+      }
+    </div>
     <div className="mt-1.5">
       @if (requested.length === 0) {
         <p className="text-[13px] text-muted-foreground">No reviewers requested</p>;
@@ -119,8 +149,8 @@ function RailReviewers(props: PullV2RailProps) @{
         </ul>;
       }
     </div>
-    @if (props.canWrite) {
-      <div className="mt-2 flex gap-1.5">
+    @if (props.canWrite && pickerOpen) {
+      <div className="mt-2 flex gap-1.5" data-testid="pull-v2-reviewer-picker">
         <input
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[13px]"
           value={requestUser}
@@ -150,6 +180,7 @@ function RailAssignees(props: PullV2RailProps) @{
   const [selected, setSelected] = useState<string[]>(() =>
     (props.pull.assignees ?? []).map((a) => a.user_id),
   );
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -167,7 +198,7 @@ function RailAssignees(props: PullV2RailProps) @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data.users;
     },
-    enabled: props.canWrite,
+    enabled: props.canWrite && pickerOpen,
   });
 
   const current: IssueAssigneePublic[] = props.pull.assignees ?? [];
@@ -199,9 +230,19 @@ function RailAssignees(props: PullV2RailProps) @{
   }
 
   <section aria-labelledby="pull-v2-assignees-heading" data-testid="pull-v2-rail-assignees">
-    <h3 id="pull-v2-assignees-heading" className="text-[13px] font-semibold text-foreground">
-      Assignees
-    </h3>
+    <div className="flex items-center justify-between gap-2">
+      <h3 id="pull-v2-assignees-heading" className="text-[13px] font-semibold text-foreground">
+        Assignees
+      </h3>
+      @if (props.canWrite) {
+        <RailGear
+          label="Edit assignees"
+          open={pickerOpen}
+          onToggle={() => setPickerOpen(!pickerOpen)}
+          testid="pull-v2-assignees-gear"
+        />;
+      }
+    </div>
     <div className="mt-1.5">
       @if (current.length === 0) {
         <p className="text-[13px] text-muted-foreground">No one assigned</p>;
@@ -215,8 +256,8 @@ function RailAssignees(props: PullV2RailProps) @{
         </ul>;
       }
     </div>
-    @if (props.canWrite) {
-      <div className="mt-2 flex flex-col gap-1.5">
+    @if (props.canWrite && pickerOpen) {
+      <div className="mt-2 flex flex-col gap-1.5" data-testid="pull-v2-assignees-picker">
         @if (candidatesQ.isPending) {
           <p className="text-[12px] text-muted-foreground">Loading assignees…</p>;
         } @else {
@@ -268,6 +309,7 @@ function RailAssignees(props: PullV2RailProps) @{
 function RailLabels(props: PullV2RailProps) @{
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>(() => pullLabels(props.pull).map((l) => l.id));
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -285,7 +327,7 @@ function RailLabels(props: PullV2RailProps) @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data.labels;
     },
-    enabled: props.canWrite,
+    enabled: props.canWrite && pickerOpen,
   });
 
   const current = pullLabels(props.pull);
@@ -315,9 +357,19 @@ function RailLabels(props: PullV2RailProps) @{
   }
 
   <section aria-labelledby="pull-v2-labels-heading" data-testid="pull-v2-rail-labels">
-    <h3 id="pull-v2-labels-heading" className="text-[13px] font-semibold text-foreground">
-      Labels
-    </h3>
+    <div className="flex items-center justify-between gap-2">
+      <h3 id="pull-v2-labels-heading" className="text-[13px] font-semibold text-foreground">
+        Labels
+      </h3>
+      @if (props.canWrite) {
+        <RailGear
+          label="Edit labels"
+          open={pickerOpen}
+          onToggle={() => setPickerOpen(!pickerOpen)}
+          testid="pull-v2-labels-gear"
+        />;
+      }
+    </div>
     <div className="mt-1.5">
       @if (current.length === 0) {
         <p className="text-[13px] text-muted-foreground">None yet</p>;
@@ -336,8 +388,8 @@ function RailLabels(props: PullV2RailProps) @{
         </ul>;
       }
     </div>
-    @if (props.canWrite) {
-      <div className="mt-2 flex flex-col gap-1.5">
+    @if (props.canWrite && pickerOpen) {
+      <div className="mt-2 flex flex-col gap-1.5" data-testid="pull-v2-labels-picker">
         @if (catalogQ.isPending) {
           <p className="text-[12px] text-muted-foreground">Loading labels…</p>;
         } @else {
@@ -383,10 +435,20 @@ function RailLabels(props: PullV2RailProps) @{
 }
 
 /** Inert rail section for domains with no pull-scoped RPC yet — keeps the
- * GitHub rail layout ("None yet" row) instead of dropping the section. */
+ * GitHub rail layout ("None yet" row + disabled gear) instead of dropping
+ * the section. */
 function RailEmptySection(props: { title: string; empty: string; testid: string }) @{
   <section data-testid={props.testid as string}>
-    <h3 className="text-[13px] font-semibold text-foreground">{props.title as string}</h3>
+    <div className="flex items-center justify-between gap-2">
+      <h3 className="text-[13px] font-semibold text-foreground">{props.title as string}</h3>
+      <span
+        className="inline-flex size-5 items-center justify-center text-muted-foreground/40"
+        title={`${props.title} isn't configurable yet`}
+        aria-hidden
+      >
+        <Settings size={13} />
+      </span>
+    </div>
     <p className="mt-1.5 text-[13px] text-muted-foreground">{props.empty as string}</p>
   </section>;
 }

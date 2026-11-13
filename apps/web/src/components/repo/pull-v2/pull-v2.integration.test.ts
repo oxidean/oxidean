@@ -280,8 +280,9 @@ describe("PullDetailV2 chrome", () => {
   it("renders the number, title, state, and URL-backed tabs", () => {
     renderV2("overview");
     expect(screen.getByText("#42")).toBeTruthy();
-    expect(screen.getByText("Wire the thing")).toBeTruthy();
-    expect(screen.getByText("Open")).toBeTruthy();
+    // Title renders in both the mini-header and the H1 title block (GitHub layout).
+    expect(screen.getAllByText("Wire the thing").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Open").length).toBeGreaterThan(0);
 
     const overview = screen.getByTestId("pull-v2-tab-overview");
     expect(overview.getAttribute("href")).toBe("/ada/hello/pull/42");
@@ -307,11 +308,11 @@ describe("PullDetailV2 chrome", () => {
   it("shows draft + merged states", () => {
     const draft = { ...PULL, draft: true };
     renderV2("overview", { pull: draft });
-    expect(screen.getByText("Draft")).toBeTruthy();
+    expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
     cleanup();
     const merged = { ...PULL, state: "merged" };
     renderV2("overview", { pull: merged });
-    expect(screen.getByText("Merged")).toBeTruthy();
+    expect(screen.getAllByText("Merged").length).toBeGreaterThan(0);
   });
 
   it("renders count pills on Commits / Checks / Files changed", async () => {
