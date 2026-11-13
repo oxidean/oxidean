@@ -89,6 +89,14 @@ function ActivityRow(props: {
           <p className="text-[12px] text-muted-foreground" title={it.at as string}>
             {formatRelative(it.at) as string}
           </p>
+          @if (it.comment.body?.trim()) {
+            <MarkdownBody
+              markdown={it.comment.body}
+              owner={props.owner}
+              repo={props.repoName}
+              className="mt-1 text-[13px]"
+            />;
+          }
         </>;
       }
       @if (it.kind === "review" && it.review) {
