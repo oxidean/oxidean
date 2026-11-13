@@ -130,6 +130,10 @@ pub struct PullPublic {
     /// above the open-PR list.
     #[serde(default)]
     pub pinned: bool,
+    /// Milestone this pull belongs to (embedded object, GitHub parity with
+    /// issues — PRs share the repo milestone set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<Box<crate::MilestonePublic>>,
 }
 
 /// GitHub parity — at most three pinned pull requests per repository.
@@ -558,6 +562,60 @@ pub struct ForkRepoRequest {
     pub into_owner: Option<String>,
     #[serde(default)]
     pub into_name: Option<String>,
+}
+
+/// `pull.milestone.set` — Write+. `milestone` is the milestone `#N`;
+/// `null`/absent clears (mirrors `issue.milestone.set`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetPullMilestoneRequest {
+    pub owner: String,
+    pub name: String,
+    /// Pull `#N`.
+    pub number: i64,
+    /// Milestone `#N`; `null` clears the pull's milestone.
+    #[serde(default)]
+    pub milestone: Option<i64>,
+}
+
+/// One row of the PR rail "Development" section — an issue this pull's
+/// body/title references with a closing keyword (`closes`/`fixes`/`resolves`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDevelopmentItem {
+    /// `closes` | `fixes` | `resolves` — the keyword matched.
+    pub relation: String,
+    pub issue: crate::IssuePublic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDevelopmentListResponse {
+    pub items: Vec<PullDevelopmentItem>,
+}
+
+/// One row of the PR rail "Projects" section — a project-board card linked
+/// to this pull.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullProjectLink {
+    /// Linked card row id (for future move/archive affordances).
+    pub card_id: String,
+    /// Board column the card sits in.
+    pub column_name: String,
+    /// Board per-repo `#N`.
+    pub project_number: i64,
+    pub project_title: String,
+    /// `open` | `closed`.
+    pub project_state: String,
+    /// `/{owner}/{repo}/projects/{number}` web route.
+    pub project_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullProjectsListResponse {
+    pub links: Vec<PullProjectLink>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullDeploymentsListResponse {
+    pub deployments: Vec<crate::ActionDeploymentPublic>,
 }
 
 #[cfg(test)]

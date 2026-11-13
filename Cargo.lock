@@ -4124,6 +4124,7 @@ dependencies = [
  "oxidean-db",
  "serde_json",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

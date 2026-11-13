@@ -47,6 +47,7 @@ pub mod repo_collaborators;
 pub mod repo_invites;
 pub mod repo_units;
 pub mod repositories;
+pub mod saved_replies;
 pub mod search;
 pub mod sessions;
 pub mod ssh_keys;
@@ -109,7 +110,7 @@ pub use pages::{PagesBuildRow, RepoPagesRow};
 pub use pats::PatRow;
 pub use pool::DbPool;
 use pool::DbPool as Pool;
-pub use projects::{ProjectCardRow, ProjectColumnRow, ProjectRow};
+pub use projects::{ProjectCardLinkRow, ProjectCardRow, ProjectColumnRow, ProjectRow};
 pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoMergeSettingsRow};
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
@@ -120,6 +121,7 @@ pub use repo_collaborators::{
 pub use repo_invites::RepoInviteRow;
 pub use repo_units::RepoUnitFlags;
 pub use repositories::{RepoDiskRef, RepositoryRow};
+pub use saved_replies::SavedReplyRow;
 pub use search::{
     GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
     ScanRepoRow,
@@ -1038,6 +1040,48 @@ impl Database {
         experiments::set_user_experiment(self.require_pool()?, user_id, flag_key, enabled).await
     }
 
+    // --- saved replies (per-user comment templates) ---
+
+    /// All of a user's saved replies, most recently updated first.
+    pub async fn list_saved_replies(&self, user_id: &str) -> Result<Vec<SavedReplyRow>, String> {
+        saved_replies::list_saved_replies(self.require_pool()?, user_id).await
+    }
+
+    /// Fetch one reply scoped to its owner (`None` when missing or foreign).
+    pub async fn find_saved_reply(
+        &self,
+        user_id: &str,
+        id: &str,
+    ) -> Result<Option<SavedReplyRow>, String> {
+        saved_replies::find_saved_reply(self.require_pool()?, user_id, id).await
+    }
+
+    pub async fn insert_saved_reply(
+        &self,
+        id: &str,
+        user_id: &str,
+        name: &str,
+        body: &str,
+    ) -> Result<SavedReplyRow, String> {
+        saved_replies::insert_saved_reply(self.require_pool()?, id, user_id, name, body).await
+    }
+
+    /// Update name/body; `None` when the row is missing or not the caller's.
+    pub async fn update_saved_reply(
+        &self,
+        user_id: &str,
+        id: &str,
+        name: &str,
+        body: &str,
+    ) -> Result<Option<SavedReplyRow>, String> {
+        saved_replies::update_saved_reply(self.require_pool()?, user_id, id, name, body).await
+    }
+
+    /// Delete scoped to the owner — returns whether a row was removed.
+    pub async fn delete_saved_reply(&self, user_id: &str, id: &str) -> Result<bool, String> {
+        saved_replies::delete_saved_reply(self.require_pool()?, user_id, id).await
+    }
+
     /// Pinned repo ids for `user_id`, display order (COL-04 profile pins).
     pub async fn list_pinned_repo_ids(&self, user_id: &str) -> Result<Vec<String>, String> {
         pinned_repos::list_pinned_repo_ids(self.require_pool()?, user_id).await
@@ -1593,6 +1637,15 @@ impl Database {
 
     pub async fn update_pull_head_sha(&self, id: &str, head_sha: &str) -> Result<(), String> {
         pulls::update_pull_head_sha(self.require_pool()?, id, head_sha).await
+    }
+
+    /// Set/clear a pull's milestone (`None` clears).
+    pub async fn set_pull_milestone(
+        &self,
+        pull_id: &str,
+        milestone_id: Option<&str>,
+    ) -> Result<(), String> {
+        pulls::set_pull_milestone(self.require_pool()?, pull_id, milestone_id).await
     }
 
     pub async fn pull_has_label(&self, pull_id: &str, label: &str) -> Result<bool, String> {
@@ -2300,6 +2353,18 @@ impl Database {
         include_archived: bool,
     ) -> Result<Vec<ProjectCardRow>, String> {
         projects::list_cards_for_column(self.require_pool()?, column_id, include_archived).await
+    }
+
+    /// Non-archived cards in `repo_id` linked to `content_id`
+    /// (`content_type` = `issue` | `pull_request`) — PR rail Projects.
+    pub async fn list_project_cards_for_content(
+        &self,
+        repo_id: &str,
+        content_type: &str,
+        content_id: &str,
+    ) -> Result<Vec<ProjectCardLinkRow>, String> {
+        projects::list_cards_for_content(self.require_pool()?, repo_id, content_type, content_id)
+            .await
     }
 
     pub async fn insert_project_card(
@@ -4915,6 +4980,28 @@ impl Database {
             sha,
             git_ref,
             task,
+            limit,
+        )
+        .await
+    }
+
+    /// Deployments associated with a pull request's head (sha or head-ref
+    /// match) — the PR rail "Deployments" section.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_action_deployments_for_pull(
+        &self,
+        repository_id: &str,
+        head_sha: &str,
+        head_ref: &str,
+        pull_number: i64,
+        limit: i64,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_deployments_for_pull(
+            self.require_pool()?,
+            repository_id,
+            head_sha,
+            head_ref,
+            pull_number,
             limit,
         )
         .await

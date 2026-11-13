@@ -157,6 +157,41 @@ export type ExperimentSetRequest = {
   enabled: boolean;
 };
 
+export type SavedReplyPublic = {
+  id: string;
+  /** Picker label (GitHub `name`). */
+  name: string;
+  /** Markdown body inserted into a composer. */
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SavedRepliesListResponse = {
+  replies: SavedReplyPublic[];
+};
+
+export type SavedReplyCreateRequest = {
+  /** Picker label — 1..=80 chars after trim. */
+  name: string;
+  /** Markdown body — non-empty after trim. */
+  body: string;
+};
+
+export type SavedReplyUpdateRequest = {
+  id: string;
+  name?: string | null;
+  body?: string | null;
+};
+
+export type SavedReplyRefRequest = {
+  id: string;
+};
+
+export type SavedReplyDeleteResponse = {
+  ok: boolean;
+};
+
 export type BootstrapStatus = {
   needs_setup: boolean;
 };
@@ -4621,6 +4656,7 @@ export type PullPublic = {
   assignees?: IssueAssigneePublic[];
   labels?: LabelPublic[];
   pinned?: boolean;
+  milestone?: MilestonePublic | null;
 };
 
 export type CreatePullRequest = {
@@ -4660,6 +4696,47 @@ export type PullListResponse = {
   offset: number;
   limit: number;
   pinned?: PullPublic[];
+};
+
+export type SetPullMilestoneRequest = {
+  owner: string;
+  name: string;
+  /** Pull `#N`. */
+  number: number;
+  /** Milestone `#N`; `null` clears the pull's milestone. */
+  milestone?: number | null;
+};
+
+export type PullDevelopmentItem = {
+  /** `closes` | `fixes` | `resolves` — the keyword matched. */
+  relation: string;
+  issue: IssuePublic;
+};
+
+export type PullDevelopmentListResponse = {
+  items: PullDevelopmentItem[];
+};
+
+export type PullProjectLink = {
+  /** Linked card row id (for future move/archive affordances). */
+  card_id: string;
+  /** Board column the card sits in. */
+  column_name: string;
+  /** Board per-repo `#N`. */
+  project_number: number;
+  project_title: string;
+  /** `open` | `closed`. */
+  project_state: string;
+  /** `/{owner}/{repo}/projects/{number}` web route. */
+  project_url: string;
+};
+
+export type PullProjectsListResponse = {
+  links: PullProjectLink[];
+};
+
+export type PullDeploymentsListResponse = {
+  deployments: ActionDeploymentPublic[];
 };
 
 export type UpdatePullRequest = {
@@ -5971,6 +6048,15 @@ export function createClient(opts: CreateClientOptions) {
       set: (input: ExperimentSetRequest) =>
         rpcCall<UserPublic>(opts, "experiments.set", input),
     },
+    savedReplies: {
+      list: () => rpcCall<SavedRepliesListResponse>(opts, "savedReplies.list", {}),
+      create: (input: SavedReplyCreateRequest) =>
+        rpcCall<SavedReplyPublic>(opts, "savedReplies.create", input),
+      update: (input: SavedReplyUpdateRequest) =>
+        rpcCall<SavedReplyPublic>(opts, "savedReplies.update", input),
+      delete: (input: SavedReplyRefRequest) =>
+        rpcCall<SavedReplyDeleteResponse>(opts, "savedReplies.delete", input),
+    },
     search: {
       global: (input: GlobalSearchRequest) =>
         rpcCall<GlobalSearchResponse>(opts, "search.global", input),
@@ -6899,6 +6985,22 @@ export function createClient(opts: CreateClientOptions) {
       assignees: {
         set: (input: SetPullAssigneesRequest) =>
           rpcCall<PullPublic>(opts, "pull.assignees.set", input),
+      },
+      milestone: {
+        set: (input: SetPullMilestoneRequest) =>
+          rpcCall<PullPublic>(opts, "pull.milestone.set", input),
+      },
+      development: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullDevelopmentListResponse>(opts, "pull.development.list", input),
+      },
+      projects: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullProjectsListResponse>(opts, "pull.projects.list", input),
+      },
+      deployments: {
+        list: (input: PullRefRequest) =>
+          rpcCall<PullDeploymentsListResponse>(opts, "pull.deployments.list", input),
       },
       commits: (input: PullRefRequest) =>
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),

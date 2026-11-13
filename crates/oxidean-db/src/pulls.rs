@@ -30,6 +30,9 @@ pub struct PullRow {
     pub updated_at: String,
     /// 0-based pin display order; `NULL` = not pinned (COL-04).
     pub pinned_position: Option<i64>,
+    /// `milestones.id` — set via `set_pull_milestone`; cleared when the
+    /// milestone row is deleted (`ON DELETE SET NULL`).
+    pub milestone_id: Option<String>,
     /// Derived `pull_comments` count carried by every `PULL_COLS` select.
     pub comment_count: i64,
 }
@@ -119,6 +122,9 @@ macro_rules! map_pull {
                         .map(|v| v.map(i64::from))
                 })
                 .map_err(|e| format!("pull row: {e}"))?,
+            milestone_id: row
+                .try_get::<Option<String>, _>("milestone_id")
+                .map_err(|e| format!("pull row: {e}"))?,
             comment_count: {
                 let v: i64 = row
                     .try_get("comment_count")
@@ -133,7 +139,7 @@ macro_rules! map_pull {
 const PULL_COLS: &str = concat!(
     "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, ",
     "head_repo_id, head_ref, head_sha, merged_at, merged_by, merge_commit_sha, merge_method, ",
-    "closed_at, closed_by, created_at, updated_at, pinned_position, ",
+    "closed_at, closed_by, created_at, updated_at, pinned_position, milestone_id, ",
     "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -146,7 +152,7 @@ const PULL_COLS_PG: &str = concat!(
     "closed_by, ",
     "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, ",
     "to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at, ",
-    "pinned_position, ",
+    "pinned_position, milestone_id, ",
     "(SELECT COUNT(*)::bigint FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -159,7 +165,7 @@ const PULL_COLS_MYSQL: &str = concat!(
     "closed_by, ",
     "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, ",
     "DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at, ",
-    "pinned_position, ",
+    "pinned_position, milestone_id, ",
     "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
@@ -1888,6 +1894,48 @@ pub async fn mark_pull_line_comments_outdated(pool: &DbPool, pull_id: &str) -> R
             .execute(p)
             .await
             .map_err(|e| format!("mark outdated failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Set/clear a pull's milestone (`None` clears) — mirrors
+/// `milestones::set_issue_milestone` for the pull_requests table.
+pub async fn set_pull_milestone(
+    pool: &DbPool,
+    pull_id: &str,
+    milestone_id: Option<&str>,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET milestone_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            )
+            .bind(milestone_id)
+            .bind(pull_id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull milestone failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET milestone_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(milestone_id)
+            .bind(pull_id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull milestone failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET milestone_id = ?1, updated_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ?2",
+            )
+            .bind(milestone_id)
+            .bind(pull_id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull milestone failed: {e}"))?;
         }
     }
     Ok(())

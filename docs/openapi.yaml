@@ -17878,6 +17878,15 @@ components:
             Repo-maintainer pin (COL-04) — pinned PRs surface in the pinned box
             above the open-PR list.
           default: false
+        milestone:
+          anyOf:
+          - $ref: '#/components/schemas/MilestonePublic'
+          - enum:
+            - null
+          description: |-
+            Milestone this pull belongs to (embedded object, GitHub parity with
+            issues — PRs share the repo milestone set).
+          nullable: true
       required:
       - id
       - repo_id

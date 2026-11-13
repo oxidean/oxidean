@@ -20,8 +20,8 @@ use tower_http::trace::TraceLayer;
 pub use oxidean_api_core::app::*;
 
 use crate::routes::{
-    action_badge, auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, pages_serve,
-    release_assets, repo_raw, template_packs,
+    action_badge, auth_callbacks, avatar, cli_dist, comment_assets, feeds, git_lfs, git_smart_http,
+    pages_serve, release_assets, repo_raw, template_packs,
 };
 use crate::rpc::{self, VERSION_HEADER};
 
@@ -106,6 +106,16 @@ pub fn router_with_state(mut state: AppState, cors: CorsLayer) -> Router {
                 .delete(avatar::delete_avatar),
         )
         .route("/uploads/avatars/{file}", get(avatar::serve_avatar))
+        .route(
+            "/api/uploads/comment-attachments",
+            post(comment_assets::upload_attachment).layer(DefaultBodyLimit::max(
+                comment_assets::COMMENT_ATTACHMENT_MAX_BYTES,
+            )),
+        )
+        .route(
+            "/uploads/comment-attachments/{id}",
+            get(comment_assets::serve_attachment),
+        )
         .route(
             "/api/repos/{owner}/{repo}/releases/{release_id}/assets",
             post(release_assets::upload_asset).layer(DefaultBodyLimit::max(asset_body_limit)),
