@@ -170,9 +170,21 @@ pub async fn commits(
         &accessible.owner_username,
         &accessible.row.name,
     )?;
+    // Fork heads live in the head repo — pull the head objects into the base
+    // bare repo so the base..head range resolves (same as pull.files/merge).
+    oxidean_api_core::pull::ensure_head_objects_in_base(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &path,
+        &row,
+    )
+    .await?;
+    // The PR commit set is base..head — plain `git log head` would list up to
+    // 100 ancestors including commits already on the base branch.
     let summaries = ctx
         .git
-        .log(&path, &row.head_ref, 0, 100, None, None)
+        .log_range(&path, &row.base_sha, &row.head_sha, 0, 100, None, None)
         .await
         .map_err(|e| AppError::new("pull.commits_failed", format!("log failed: {e}")))?;
     let mut emails: Vec<String> = Vec::new();
@@ -193,9 +205,10 @@ pub async fn commits(
         oxidean_api_core::repo::signatures::keyring_for_resolved(&ctx.db, &emails, &resolved).await;
     let summaries = if keyring.has_any() {
         ctx.git
-            .log(
+            .log_range(
                 &path,
-                &row.head_ref,
+                &row.base_sha,
+                &row.head_sha,
                 0,
                 100,
                 keyring.allowed_signers.as_deref(),

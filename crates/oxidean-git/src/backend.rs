@@ -639,6 +639,20 @@ pub trait GitBackend: Send + Sync {
         gpg_home: Option<&Path>,
     ) -> Result<Vec<CommitSummary>, GitError>;
 
+    /// Paged `git log base..head` — commits reachable from `head` but not
+    /// `base` (the PR commit set). Same paging and signature verification as
+    /// [`log`](Self::log); an unresolvable endpoint yields `Ok(vec![])`.
+    async fn log_range(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        skip: u32,
+        limit: u32,
+        allowed_signers: Option<&Path>,
+        gpg_home: Option<&Path>,
+    ) -> Result<Vec<CommitSummary>, GitError>;
+
     /// Commit metadata + per-file unified patches (`git show`).
     async fn show_commit(
         &self,
