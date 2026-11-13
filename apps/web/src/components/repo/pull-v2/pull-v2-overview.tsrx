@@ -287,6 +287,7 @@ function OverviewCommentItem(props: {
             type="button"
             variant="secondary"
             disabled={pending}
+            data-testid={`pull-comment-edit-cancel-${c.id}` as string}
             onClick={() => {
               setEditing(false);
               setError("");
@@ -808,7 +809,7 @@ function PullV2Conversation(props: {
 /**
  * Overview tab of the new PR experience (WI-0001 S8): the merge card sits on
  * top of the v2 conversation (segmentation + toolbar composer). The right
- * pane — GitHub's Description/Activity/Comments/Merge-status selector — is
+ * pane — GitHub's Overview/Activity/Comments/Merge-status selector — is
  * rendered one level up in PullDetailV2 so it persists across tabs.
  */
 export function PullV2Overview(props: PullV2OverviewProps) @{

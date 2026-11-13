@@ -28,6 +28,7 @@ import { PullV2Changes } from "@/components/repo/pull-v2/pull-v2-changes";
 import { PullV2Checks } from "@/components/repo/pull-v2/pull-v2-checks";
 import { PullV2CommentsPanel } from "@/components/repo/pull-v2/pull-v2-comments-panel";
 import { PullV2Commits } from "@/components/repo/pull-v2/pull-v2-commits";
+import { PullV2DescriptionPanel } from "@/components/repo/pull-v2/pull-v2-description-panel";
 import { PullV2MergeCard } from "@/components/repo/pull-v2/pull-v2-merge-card";
 import { PullV2Overview } from "@/components/repo/pull-v2/pull-v2-overview";
 import { PullV2Rail } from "@/components/repo/pull-v2/pull-v2-rail";
@@ -81,19 +82,19 @@ type PullDetailV2Props = {
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-/** Right-pane views — GitHub's new UI "Description ▾" pane selector. Panes
+/** Right-pane views — GitHub's new UI "Overview ▾" pane selector. Panes
  * with no backend domain (Alerts, Copilot, batch review) stay unlisted. */
 type PullPane = "description" | "activity" | "comments" | "merge";
 
 const PANES: { id: PullPane; label: string }[] = [
   { id: "activity", label: "Activity" },
   { id: "comments", label: "Comments" },
-  { id: "description", label: "Description" },
+  { id: "description", label: "Overview" },
   { id: "merge", label: "Merge status" },
 ];
 
 function paneLabel(pane: PullPane): string {
-  return PANES.find((p) => p.id === pane)?.label ?? "Description";
+  return PANES.find((p) => p.id === pane)?.label ?? "Overview";
 }
 
 function paneFromParam(value: string | null): PullPane | null {
@@ -330,7 +331,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       : `${props.pull.head_owner}:${props.pull.head_ref}`;
 
   const [copied, setCopied] = useState(false);
-  const [paneOpen, setPaneOpen] = useState(true);
+  const [paneOpen, setPaneOpen] = useState(false);
   const [pane, setPane] = useState<PullPane>("description");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -479,13 +480,14 @@ export function PullDetailV2(props: PullDetailV2Props) @{
     syncPaneParam(pane, false);
   }
 
-  /** `?panel=` mirrors the open non-default pane; the default description
-   * pane (and a closed pane) carry no param, matching the pre-pane
-   * `?panel=comments` deep-link contract. */
+  /** `?panel=` mirrors the open docked pane. GitHub calls the description pane
+   * `overview` (`?panel=overview`); comments/activity/merge keep their ids. A
+   * closed pane carries no param. */
   function syncPaneParam(nextPane = pane, open = paneOpen) {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    if (open && nextPane !== "description") url.searchParams.set("panel", nextPane);
+    const param = nextPane === "description" ? "overview" : nextPane;
+    if (open) url.searchParams.set("panel", param);
     else url.searchParams.delete("panel");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }
@@ -756,7 +758,7 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       }
     </div>
 
-    {/* Row 2 — pane toolbar: GitHub's "Description ▾" selector + edit + close
+    {/* Row 2 — pane toolbar: GitHub's "Overview ▾" selector + edit + close
         sits above the right pane. Preview/code/notifications controls have no
         backend domain here and stay out rather than rendering dead buttons. */}
     <div
@@ -996,7 +998,9 @@ export function PullDetailV2(props: PullDetailV2Props) @{
       }
     </nav>
 
-    {/* Row 6 — tab body + unified right pane (all tabs, like GitHub). */}
+    {/* Row 6 — tab body + details rail (overview) + docked pane. GitHub keeps
+        the status/details sidebar on the overview and docks Overview /
+        Activity / Comments / Merge status beside it via `?panel=`. */}
     <div className="flex items-start gap-6">
       <div className="min-w-0 flex-1 space-y-4">
         @if (props.tab === "overview") {
@@ -1043,6 +1047,23 @@ export function PullDetailV2(props: PullDetailV2Props) @{
         }
       </div>
 
+      @if (props.tab === "overview") {
+        <aside
+          className="sticky top-24 hidden max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto lg:block"
+          aria-label="Pull request details"
+          data-testid="pull-v2-details-rail"
+        >
+          <PullV2Rail
+            owner={props.owner}
+            repoName={props.repoName}
+            number={props.number}
+            pull={props.pull}
+            canWrite={props.canWrite}
+            canEdit={canEdit}
+          />
+        </aside>;
+      }
+
       @if (paneOpen) {
         <aside
           className="sticky top-24 hidden max-h-[calc(100vh-8rem)] w-80 shrink-0 self-start overflow-y-auto lg:block"
@@ -1050,13 +1071,10 @@ export function PullDetailV2(props: PullDetailV2Props) @{
           data-testid="pull-v2-pane"
         >
           @if (pane === "description") {
-            <PullV2Rail
+            <PullV2DescriptionPanel
               owner={props.owner}
               repoName={props.repoName}
-              number={props.number}
               pull={props.pull}
-              canWrite={props.canWrite}
-              canEdit={canEdit}
             />;
           }
           @if (pane === "comments") {

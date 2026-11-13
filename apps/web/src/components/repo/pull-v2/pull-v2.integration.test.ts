@@ -439,6 +439,27 @@ describe("PullDetailV2 chrome", () => {
     expect(await screen.findByTestId("pull-v2-comments-panel")).toBeTruthy();
   });
 
+  it("keeps the details rail on overview and opens the Description pane via the rail toggle", async () => {
+    renderV2("overview");
+    expect(screen.getByTestId("pull-v2-details-rail")).toBeTruthy();
+    expect(screen.queryByTestId("pull-v2-pane")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("pull-v2-rail-toggle"));
+    expect(await screen.findByTestId("pull-v2-pane")).toBeTruthy();
+    expect(await screen.findByTestId("pull-v2-description-panel")).toBeTruthy();
+    expect(window.location.search).toContain("panel=overview");
+  });
+
+  it("opens the Description pane on load when ?panel=overview is in the URL", async () => {
+    window.history.pushState(null, "", "/ada/hello/pull/42?panel=overview");
+    renderV2("overview", { pull: { ...PULL, body: "PR body markdown" } });
+    const panel = await screen.findByTestId("pull-v2-description-panel");
+    await waitFor(() => {
+      expect(panel.textContent).toContain("PR body markdown");
+    });
+    expect(screen.getByTestId("pull-v2-details-rail")).toBeTruthy();
+  });
+
   it("edits the title inline via pull.update and invalidates pull.get", async () => {
     renderV2("overview");
     fireEvent.click(screen.getByTestId("pull-v2-title-edit"));

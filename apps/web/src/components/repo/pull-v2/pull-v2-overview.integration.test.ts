@@ -336,7 +336,7 @@ describe("PullV2Overview conversation", () => {
     });
 
     fireEvent.click(screen.getByText("Edit"));
-    fireEvent.click(screen.getByText("Cancel"));
+    fireEvent.click(screen.getByTestId("pull-comment-edit-cancel-c3"));
     fireEvent.click(screen.getByText("Delete"));
     await waitFor(() => {
       expect(commentsDeleteMock).toHaveBeenCalledWith({
