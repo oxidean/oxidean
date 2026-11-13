@@ -332,6 +332,7 @@ function OverviewComposer(props: {
   onPost: (body: string) => Promise<boolean>;
 }) @{
   const [draft, setDraft] = useState("");
+  const [uploading, setUploading] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   function commit(next: string, caret: number, caretEnd?: number) {
@@ -471,7 +472,12 @@ function OverviewComposer(props: {
       >
         <List aria-hidden size={14} />
       </button>
-      <ComposerExtras value={draft} onValueChange={setDraft} disabled={props.busy} />
+      <ComposerExtras
+        value={draft}
+        onValueChange={setDraft}
+        disabled={props.busy}
+        onUploadingChange={setUploading}
+      />
     </div>
     <Textarea
       ref={taRef}
@@ -485,7 +491,7 @@ function OverviewComposer(props: {
     />
     <Button
       type="button"
-      disabled={props.busy || !draft.trim()}
+      disabled={props.busy || uploading || !draft.trim()}
       data-testid="pull-v2-comment-submit"
       onClick={() => void post()}
     >

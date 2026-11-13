@@ -139,6 +139,8 @@ function LineDraftBox(props: {
   onSubmit: (pending: boolean) => void;
   onCancel: () => void;
 }) @{
+  const [uploading, setUploading] = useState(false);
+  const busy = props.busy || uploading;
   <div className="border-t border-border/50 bg-muted/20 px-8 py-2" data-testid="pull-v2-line-draft">
     @if (props.rangeLabel) {
       <p className="mb-1 text-[12px] text-muted-foreground">{props.rangeLabel as string}</p>;
@@ -148,7 +150,7 @@ function LineDraftBox(props: {
       className="font-sans text-[13px]"
       placeholder="Leave a review comment"
       value={props.body}
-      disabled={props.busy}
+      disabled={busy}
       onInput={(e) => props.onBody((e.currentTarget as HTMLTextAreaElement).value)}
     />
     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -156,7 +158,7 @@ function LineDraftBox(props: {
         <button
           type="button"
           className="rounded-md bg-primary px-2 py-1 text-[13px] font-medium text-primary-foreground disabled:opacity-60"
-          disabled={props.busy || !props.body.trim()}
+          disabled={busy || !props.body.trim()}
           data-testid="pull-v2-line-draft-add"
           onClick={() => props.onSubmit(true)}
         >
@@ -166,7 +168,7 @@ function LineDraftBox(props: {
       <button
         type="button"
         className="rounded-md border border-border px-2 py-1 text-[13px] text-foreground hover:bg-muted disabled:opacity-60"
-        disabled={props.busy || !props.body.trim()}
+        disabled={busy || !props.body.trim()}
         data-testid="pull-v2-line-draft-add-single"
         onClick={() => props.onSubmit(false)}
       >
@@ -175,7 +177,7 @@ function LineDraftBox(props: {
       <button
         type="button"
         className="rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted"
-        disabled={props.busy}
+        disabled={busy}
         data-testid="pull-v2-line-draft-cancel"
         onClick={() => props.onCancel()}
       >
@@ -184,8 +186,9 @@ function LineDraftBox(props: {
       <ComposerExtras
         value={props.body}
         onValueChange={props.onBody}
-        disabled={props.busy}
+        disabled={busy}
         testidPrefix="pull-v2-line-draft"
+        onUploadingChange={setUploading}
       />
     </div>
     @if (props.error) {

@@ -20,6 +20,9 @@ type ComposerExtrasProps = {
   onValueChange: (next: string) => void;
   disabled?: boolean;
   testidPrefix?: string;
+  /** Notifies the parent while an attachment upload is in flight so submit
+   * controls can stay disabled (the draft stays editable). */
+  onUploadingChange?: (uploading: boolean) => void;
 };
 
 function appendMarkdown(draft: string, markdown: string): string {
@@ -82,6 +85,14 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
   const replies: SavedReplyPublic[] = repliesQ.data ?? [];
   const authFailed =
     !!repliesQ.error && (repliesQ.error as { code?: string }).code === "auth.unauthenticated";
+  const listError = repliesQ.isError
+    ? String((repliesQ.error as Error | undefined)?.message ?? "Could not load saved replies.")
+    : "";
+  // Latest draft value — uploads append to whatever the composer holds when
+  // they finish, not the snapshot from pick time (keystrokes during a slow
+  // upload must not be lost).
+  const latest = useRef(props.value);
+  latest.current = props.value;
 
   function insert(markdown: string) {
     props.onValueChange(appendMarkdown(props.value, markdown));
@@ -98,25 +109,38 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
     if (!body?.trim()) return;
     setBusy(true);
     setError("");
-    const res = await apiClient.savedReplies.create({ name: name.trim(), body: body.trim() });
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error.message || "Could not save the reply.");
-      return;
+    try {
+      const res = await apiClient.savedReplies.create({
+        name: name.trim(),
+        body: body.trim(),
+      });
+      if (!res.ok) {
+        setError(res.error.message || "Could not save the reply.");
+        return;
+      }
+      await invalidateReplies();
+    } catch {
+      setError(NETWORK_ERROR);
+    } finally {
+      setBusy(false);
     }
-    await invalidateReplies();
   }
 
   async function deleteReply(id: string) {
     setBusy(true);
     setError("");
-    const res = await apiClient.savedReplies.delete({ id });
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error.message || "Could not delete the reply.");
-      return;
+    try {
+      const res = await apiClient.savedReplies.delete({ id });
+      if (!res.ok) {
+        setError(res.error.message || "Could not delete the reply.");
+        return;
+      }
+      await invalidateReplies();
+    } catch {
+      setError(NETWORK_ERROR);
+    } finally {
+      setBusy(false);
     }
-    await invalidateReplies();
   }
 
   async function onFilesPicked(e: Event) {
@@ -136,21 +160,28 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
     }
     if (ok.length === 0) return;
     setUploading(true);
-    let next = props.value;
+    props.onUploadingChange?.(true);
+    const parts: string[] = [];
     const failures: string[] = [];
-    for (const file of ok) {
-      try {
-        next = appendMarkdown(next, await uploadCommentAttachment(file));
-      } catch (err) {
-        failures.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+    try {
+      for (const file of ok) {
+        try {
+          parts.push(await uploadCommentAttachment(file));
+        } catch (err) {
+          failures.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+        }
       }
+    } finally {
+      setUploading(false);
+      props.onUploadingChange?.(false);
     }
-    setUploading(false);
     if (failures.length > 0) {
       setError(failures.join(" "));
     }
-    if (next !== props.value) {
-      props.onValueChange(next);
+    if (parts.length > 0) {
+      let next = latest.current;
+      for (const part of parts) next = appendMarkdown(next, part);
+      if (next !== latest.current) props.onValueChange(next);
     }
   }
 
@@ -182,41 +213,40 @@ export function ComposerExtras(props: ComposerExtrasProps) @{
           @if (authFailed) {
             <DropdownMenuItem disabled>Sign in to use saved replies</DropdownMenuItem>;
           } @else {
-            @if (replies.length === 0) {
-              <DropdownMenuItem disabled>No saved replies yet</DropdownMenuItem>;
+            @if (repliesQ.isError) {
+              <DropdownMenuItem disabled>{listError as string}</DropdownMenuItem>;
             } @else {
-              @for (const r of replies; key r.id) {
-                <div
-                  className="flex items-center gap-1"
-                  data-testid={`${prefix}-reply-${r.id}` as string}
-                >
-                  <button
-                    type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                    disabled={props.disabled || busy}
-                    onClick={() => {
-                      insert(r.body);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{r.name as string}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {r.body as string}
+              @if (replies.length === 0) {
+                <DropdownMenuItem disabled>No saved replies yet</DropdownMenuItem>;
+              } @else {
+                @for (const r of replies; key r.id) {
+                  <>
+                    <DropdownMenuItem
+                      disabled={props.disabled || busy}
+                      data-testid={`${prefix}-reply-${r.id}` as string}
+                      onClick={() => {
+                        insert(r.body);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate font-medium">{r.name as string}</span>
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {r.body as string}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-destructive"
-                    aria-label={`Delete saved reply ${r.name}`}
-                    data-testid={`${prefix}-reply-delete-${r.id}` as string}
-                    disabled={busy}
-                    onClick={() => void deleteReply(r.id)}
-                  >
-                    <Trash2 aria-hidden size={12} />
-                  </button>
-                </div>;
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={busy}
+                      data-testid={`${prefix}-reply-delete-${r.id}` as string}
+                      aria-label={`Delete saved reply ${r.name}`}
+                      onClick={() => void deleteReply(r.id)}
+                    >
+                      <Trash2 aria-hidden size={12} />
+                      <span className="text-muted-foreground">Delete</span>
+                    </DropdownMenuItem>
+                  </>;
+                }
               }
             }
           }

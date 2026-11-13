@@ -12,6 +12,7 @@ import {
   mountWithQueryClient,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
+import { act } from "octane";
 
 const listMock = vi.fn();
 const createMock = vi.fn();
@@ -74,10 +75,9 @@ describe("pull-v2 composer extras browser DOM", () => {
       await clickTestId("pull-v2-saved-replies");
       await waitForTestId("pull-v2-reply-r1");
 
-      const replyBtn = document.querySelector('[data-testid="pull-v2-reply-r1"] button');
-      if (!replyBtn) throw new Error(`reply button missing. ${debugBody()}`);
-      await vi.waitFor(async () => {
-        (replyBtn as HTMLElement).click();
+      const replyItem = await waitForTestId("pull-v2-reply-r1");
+      await act(async () => {
+        (replyItem as HTMLElement).click();
       });
       expect(onValueChange).toHaveBeenCalledWith(
         "existing draft\n\nThanks for the PR — could you add a test?",

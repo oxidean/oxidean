@@ -452,34 +452,45 @@ function RailProjects(props: PullV2RailProps) @{
     },
   });
   const links = linksQ.data ?? [];
+  const linksError = linksQ.isError
+    ? String(linksQ.error?.message ?? "Could not load projects.")
+    : "";
 
   <section aria-labelledby="pull-v2-projects-heading" data-testid="pull-v2-rail-projects">
     <h3 id="pull-v2-projects-heading" className="text-[13px] font-semibold text-foreground">
       Projects
     </h3>
     <div className="mt-1.5">
-      @if (links.length === 0) {
-        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      @if (linksQ.isPending) {
+        <p className="text-[13px] text-muted-foreground">Loading…</p>;
       } @else {
-        <ul className="flex flex-col gap-1">
-          @for (const link of links; key link.card_id) {
-            <li className="text-[13px]">
-              <AppLink
-                href={link.project_url as string}
-                className="font-medium text-foreground no-underline hover:text-primary hover:underline"
-                data-testid="pull-v2-rail-project-link"
-              >
-                {link.project_title as string}
-              </AppLink>
-              <span className="text-muted-foreground">
-                {` · ${link.column_name}` as string}
-              </span>
-              @if (link.project_state === "closed") {
-                <span className="text-muted-foreground"> (closed)</span>;
+        @if (linksQ.isError) {
+          <p className="text-[13px] text-destructive">{linksError as string}</p>;
+        } @else {
+          @if (links.length === 0) {
+            <p className="text-[13px] text-muted-foreground">None yet</p>;
+          } @else {
+            <ul className="flex flex-col gap-1">
+              @for (const link of links; key link.card_id) {
+                <li className="text-[13px]">
+                  <AppLink
+                    href={link.project_url as string}
+                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                    data-testid="pull-v2-rail-project-link"
+                  >
+                    {link.project_title as string}
+                  </AppLink>
+                  <span className="text-muted-foreground">
+                    {` · ${link.column_name}` as string}
+                  </span>
+                  @if (link.project_state === "closed") {
+                    <span className="text-muted-foreground"> (closed)</span>;
+                  }
+                </li>;
               }
-            </li>;
+            </ul>;
           }
-        </ul>;
+        }
       }
     </div>
   </section>;
@@ -525,20 +536,25 @@ function RailMilestone(props: PullV2RailProps) @{
   async function save() {
     setBusy(true);
     setError("");
-    const res = await apiClient.pull.milestone.set({
-      owner: props.owner,
-      name: props.repoName,
-      number: props.number,
-      milestone: selected,
-    });
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error.message || "Could not update milestone.");
-      return;
+    try {
+      const res = await apiClient.pull.milestone.set({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        milestone: selected,
+      });
+      if (!res.ok) {
+        setError(res.error.message || "Could not update milestone.");
+        return;
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["pull", "get", props.owner, props.repoName, props.number],
+      });
+    } catch {
+      setError(NETWORK_ERROR);
+    } finally {
+      setBusy(false);
     }
-    await queryClient.invalidateQueries({
-      queryKey: ["pull", "get", props.owner, props.repoName, props.number],
-    });
   }
 
   <section aria-labelledby="pull-v2-milestone-heading" data-testid="pull-v2-rail-milestone">
@@ -588,36 +604,46 @@ function RailMilestone(props: PullV2RailProps) @{
         @if (catalogQ.isPending) {
           <p className="text-[12px] text-muted-foreground">Loading milestones…</p>;
         } @else {
-          <>
-            <select
-              aria-label="Milestone"
-              className="h-8 rounded-md border border-border bg-background px-2 text-[13px] text-foreground"
-              value={selected === null ? "" : String(selected)}
-              disabled={busy}
-              data-testid="pull-v2-milestone-select"
-              onChange={(e) => {
-                const v = (e.target as HTMLSelectElement).value;
-                setSelected(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">No milestone</option>
-              @for (const m of options; key m.id) {
-                <option value={String(m.number) as string}>
-                  {`${m.title} (${m.open_issues ?? 0} open)` as string}
-                </option>;
+          @if (catalogQ.isError) {
+            <p className="text-[12px] text-destructive">
+              {
+                String(
+                  catalogQ.error?.message ?? "Could not load milestones.",
+                ) as string
               }
-            </select>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy || !dirty}
-              data-testid="pull-v2-milestone-save"
-              onClick={() => void save()}
-            >
-              Save milestone
-            </Button>
-          </>;
+            </p>;
+          } @else {
+            <>
+              <select
+                aria-label="Milestone"
+                className="h-8 rounded-md border border-border bg-background px-2 text-[13px] text-foreground"
+                value={selected === null ? "" : String(selected)}
+                disabled={busy}
+                data-testid="pull-v2-milestone-select"
+                onChange={(e) => {
+                  const v = (e.target as HTMLSelectElement).value;
+                  setSelected(v === "" ? null : Number(v));
+                }}
+              >
+                <option value="">No milestone</option>
+                @for (const m of options; key m.id) {
+                  <option value={String(m.number) as string}>
+                    {`${m.title} (${m.open_issues ?? 0} open)` as string}
+                  </option>;
+                }
+              </select>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy || !dirty}
+                data-testid="pull-v2-milestone-save"
+                onClick={() => void save()}
+              >
+                Save milestone
+              </Button>
+            </>;
+          }
         }
       </div>;
     }
@@ -643,33 +669,44 @@ function RailDevelopment(props: PullV2RailProps) @{
     },
   });
   const items = devQ.data ?? [];
+  const devError = devQ.isError
+    ? String(devQ.error?.message ?? "Could not load development links.")
+    : "";
 
   <section aria-labelledby="pull-v2-development-heading" data-testid="pull-v2-rail-development">
     <h3 id="pull-v2-development-heading" className="text-[13px] font-semibold text-foreground">
       Development
     </h3>
     <div className="mt-1.5">
-      @if (items.length === 0) {
-        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      @if (devQ.isPending) {
+        <p className="text-[13px] text-muted-foreground">Loading…</p>;
       } @else {
-        <ul className="flex flex-col gap-1">
-          @for (const item of items; key `${item.issue.id}-${item.relation}`) {
-            <li className="text-[13px]">
-              <span className="text-muted-foreground">
-                {`${item.relation} ` as string}
-              </span>
-              <AppLink
-                href={
-                  `/${props.owner}/${props.repoName}/issues/${item.issue.number}` as string
-                }
-                className="font-medium text-foreground no-underline hover:text-primary hover:underline"
-                data-testid="pull-v2-rail-development-link"
-              >
-                {`#${item.issue.number} ${item.issue.title}` as string}
-              </AppLink>
-            </li>;
+        @if (devQ.isError) {
+          <p className="text-[13px] text-destructive">{devError as string}</p>;
+        } @else {
+          @if (items.length === 0) {
+            <p className="text-[13px] text-muted-foreground">None yet</p>;
+          } @else {
+            <ul className="flex flex-col gap-1">
+              @for (const item of items; key `${item.issue.id}-${item.relation}`) {
+                <li className="text-[13px]">
+                  <span className="text-muted-foreground">
+                    {`${item.relation} ` as string}
+                  </span>
+                  <AppLink
+                    href={
+                      `/${props.owner}/${props.repoName}/issues/${item.issue.number}` as string
+                    }
+                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                    data-testid="pull-v2-rail-development-link"
+                  >
+                    {`#${item.issue.number} ${item.issue.title}` as string}
+                  </AppLink>
+                </li>;
+              }
+            </ul>;
           }
-        </ul>;
+        }
       }
     </div>
   </section>;
@@ -701,54 +738,67 @@ function RailDeployments(props: PullV2RailProps) @{
     },
   });
   const deployments = depsQ.data ?? [];
+  const depsError = depsQ.isError
+    ? String(depsQ.error?.message ?? "Could not load deployments.")
+    : "";
 
   <section aria-labelledby="pull-v2-deployments-heading" data-testid="pull-v2-rail-deployments">
     <h3 id="pull-v2-deployments-heading" className="text-[13px] font-semibold text-foreground">
       Deployments
     </h3>
     <div className="mt-1.5">
-      @if (deployments.length === 0) {
-        <p className="text-[13px] text-muted-foreground">None yet</p>;
+      @if (depsQ.isPending) {
+        <p className="text-[13px] text-muted-foreground">Loading…</p>;
       } @else {
-        <ul className="flex flex-col gap-1.5">
-          @for (const d of deployments; key d.id) {
-            <li className="text-[13px]">
-              <div className="flex items-center gap-1.5">
-                @if (d.url) {
-                  {
-                    /* raw-anchor-ok: deployment url is external (cloud
+        @if (depsQ.isError) {
+          <p className="text-[13px] text-destructive">{depsError as string}</p>;
+        } @else {
+          @if (deployments.length === 0) {
+            <p className="text-[13px] text-muted-foreground">None yet</p>;
+          } @else {
+            <ul className="flex flex-col gap-1.5">
+              @for (const d of deployments; key d.id) {
+                <li className="text-[13px]">
+                  <div className="flex items-center gap-1.5">
+                    @if (d.url) {
+                      {
+                        /* raw-anchor-ok: deployment url is external (cloud
                     console, service endpoint) — not an app route. */
+                      }
+                      <a
+                        href={d.url as string}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                        data-testid="pull-v2-rail-deployment-link"
+                      >
+                        {d.environment as string}
+                      </a>;
+                    } @else {
+                      <AppLink
+                        href={
+                          `/${props.owner}/${props.repoName}/actions` as string
+                        }
+                        className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                        data-testid="pull-v2-rail-deployment-link"
+                      >
+                        {d.environment as string}
+                      </AppLink>;
+                    }
+                    <Badge variant={deploymentBadgeVariant(d.state, d.job_status)}>
+                      {(d.state ?? d.job_status) as string}
+                    </Badge>
+                  </div>
+                  @if (d.description) {
+                    <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                      {d.description as string}
+                    </p>;
                   }
-                  <a
-                    href={d.url as string}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
-                    data-testid="pull-v2-rail-deployment-link"
-                  >
-                    {d.environment as string}
-                  </a>;
-                } @else {
-                  <AppLink
-                    href={`/${props.owner}/${props.repoName}/actions` as string}
-                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
-                    data-testid="pull-v2-rail-deployment-link"
-                  >
-                    {d.environment as string}
-                  </AppLink>;
-                }
-                <Badge variant={deploymentBadgeVariant(d.state, d.job_status)}>
-                  {(d.state ?? d.job_status) as string}
-                </Badge>
-              </div>
-              @if (d.description) {
-                <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                  {d.description as string}
-                </p>;
+                </li>;
               }
-            </li>;
+            </ul>;
           }
-        </ul>;
+        }
       }
     </div>
   </section>;

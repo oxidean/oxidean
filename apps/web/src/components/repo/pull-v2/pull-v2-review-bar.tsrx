@@ -35,10 +35,12 @@ export function PullV2ReviewBar(props: {
 }) @{
   const [state, setState] = useState<"commented" | "approved" | "changes_requested">("commented");
   const [body, setBody] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   const pendingCount = props.pending.length;
   const needsContent = state === "commented";
-  const canSubmit = !props.busy && (pendingCount > 0 || body.trim().length > 0 || !needsContent);
+  const canSubmit =
+    !props.busy && !uploading && (pendingCount > 0 || body.trim().length > 0 || !needsContent);
 
   <div
     className="rounded-md border border-border bg-card p-3 shadow-sm"
@@ -99,6 +101,7 @@ export function PullV2ReviewBar(props: {
         onValueChange={setBody}
         disabled={props.busy}
         testidPrefix="pull-v2-review"
+        onUploadingChange={setUploading}
       />
     </div>
     <RadioGroup
