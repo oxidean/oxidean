@@ -100,7 +100,20 @@ async function settle(ms = 250) {
 }
 
 beforeEach(() => {
-  commitsMock.mockResolvedValue({ ok: true, data: { commits: [{ sha: "a1" }] } });
+  commitsMock.mockResolvedValue({
+    ok: true,
+    data: {
+      commits: [
+        {
+          sha: "a1",
+          subject: "wire the thing",
+          author_username: "ada",
+          author_name: "Ada",
+          committed_at: "2026-03-04T10:00:00Z",
+        },
+      ],
+    },
+  });
   filesMock.mockResolvedValue({
     ok: true,
     data: { files: [{ path: "src/a.ts", status: "modified", patch: "@@ -1 +1 @@\n-x\n+y" }] },
@@ -238,6 +251,29 @@ describe("pull-v2 detail chrome browser DOM races", () => {
       expect(commits?.textContent).toBe("1");
       expect(changes?.textContent).toBe("1");
       expect(document.querySelector('[data-testid="pull-v2-submit-review"]')).not.toBeNull();
+
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("pull-v2-activity-pane: pane selector mounts the activity feed cleanly", async () => {
+    const tracker = trackDomErrors();
+    try {
+      await mount();
+      await clickTestId("pull-v2-pane-select");
+      await settle(80);
+      await clickTestId("pull-v2-pane-activity");
+      await settle(120);
+
+      const pane = document.querySelector('[data-testid="pull-v2-activity-pane"]');
+      if (!pane) throw new Error(`activity pane missing. ${debugBody()}`);
+      expect(pane.textContent).toContain("wire the thing");
+
+      await clickTestId("pull-v2-pane-close");
+      await settle(60);
+      expect(document.querySelector('[data-testid="pull-v2-activity-pane"]')).toBeNull();
 
       expectNoOctaneOverlayInDocument();
     } finally {

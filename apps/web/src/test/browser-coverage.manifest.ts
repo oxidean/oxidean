@@ -629,6 +629,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/pull-v2/pull-v2.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/pull-v2/pull-v2.browser.test.tsx",
+        subject: "pull-v2",
+      },
+    ],
+  },
+  {
     surface: "routes/settings/experiments.tsrx",
     coverage: [
       {
