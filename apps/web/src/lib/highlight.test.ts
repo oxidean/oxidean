@@ -10,17 +10,20 @@ import {
 } from "./highlight";
 
 describe("highlight", { timeout: 60_000 }, () => {
-  it("maps .tsrx and .ripple via in-repo grammars not TS/JS alias alone", async () => {
+  it("maps .tsrx, .ripple, and .oxl via in-repo grammars not TS/JS alias alone", async () => {
     expect(languageIdForPath("App.tsrx")).toBe("tsrx");
     expect(languageIdForPath("view.ripple")).toBe("ripple");
+    expect(languageIdForPath("src/main.oxl")).toBe("oxl");
 
     const highlighter = await getHighlighter();
-    // Grammars load on demand — pull the in-repo pair in explicitly.
+    // Grammars load on demand — pull the in-repo set in explicitly.
     await ensureLanguage("tsrx");
     await ensureLanguage("ripple");
+    await ensureLanguage("oxl");
     const langs = highlighter.getLoadedLanguages();
     expect(langs).toContain("tsrx");
     expect(langs).toContain("ripple");
+    expect(langs).toContain("oxl");
 
     const themes = highlighter.getLoadedThemes();
     expect(themes).toContain("oxidean-light");

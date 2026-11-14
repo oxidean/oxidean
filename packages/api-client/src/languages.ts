@@ -24,6 +24,7 @@ export const LANGUAGES: LanguageSpec[] = [
   { name: "Rust", group: null, shiki: "rust", extensions: ["rs"], filenames: [], aliases: [], color: "#dea584", stats: true },
   { name: "TSRX", group: null, shiki: "tsrx", extensions: ["tsrx"], filenames: [], aliases: [], color: "#6f00ff", stats: true },
   { name: "Ripple", group: null, shiki: "ripple", extensions: ["ripple"], filenames: [], aliases: [], color: "#8b5cf6", stats: true },
+  { name: "OXL", group: null, shiki: "oxl", extensions: ["oxl"], filenames: [], aliases: [], color: "#0ca5a5", stats: true },
   { name: "TypeScript", group: null, shiki: "typescript", extensions: ["ts", "mts", "cts"], filenames: [], aliases: ["ts"], color: "#3178c6", stats: true },
   { name: "TSX", group: "TypeScript", shiki: "tsx", extensions: ["tsx"], filenames: [], aliases: [], color: null, stats: true },
   { name: "JavaScript", group: null, shiki: "javascript", extensions: ["js", "mjs", "cjs"], filenames: [], aliases: ["js"], color: "#f1e05a", stats: true },
