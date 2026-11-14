@@ -145,9 +145,12 @@ jobs:
         if: inputs.action == 'promote'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Via env, never ${{ }} inside run: — dispatch inputs interpolate
+          # before shell parsing (injection into a job holding deploy tokens).
+          INPUT_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
-          INPUT="${{ inputs.commit_sha }}"
+          INPUT="${INPUT_SHA}"
           if [[ -z "${INPUT// }" ]]; then
             # Default: the newest main commit with proven-green CI and a
             # published sha-* image set — never bare HEAD. A merge landing
@@ -156,6 +159,10 @@ jobs:
             SHA="$(scripts/last-green-main-commit.sh)"
             echo "No commit_sha — resolved last CI-green main commit: ${SHA}"
           else
+            if [[ ! "$INPUT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              echo "Refuse: commit_sha must be a hex commit SHA (7-40 chars), got '${INPUT}'" >&2
+              exit 1
+            fi
             SHA="$(git rev-parse "${INPUT}^{commit}")"
             echo "Using input commit: ${SHA}"
           fi
@@ -283,9 +290,17 @@ jobs:
           make rpc-gen openapi-gen
           git add -A
           git commit -m "chore(release): cut stable release"
-          # Fast-forward only: if main moved since the promoted SHA, fail —
-          # the operator re-runs the promote (the plan is computed fresh).
-          git push origin "HEAD:main"
+          # The bump commit must fast-forward main. The resolver deliberately
+          # picks the last CI-green commit, which sits behind origin/main
+          # whenever HEAD's CI is in-flight — and main can also move mid-run.
+          # A non-fast-forward push cannot land, so degrade to a cut-less
+          # promote of the proven SHA (deploy_sha stays unset → the promoted
+          # commit ships) instead of failing; the next promote re-cuts.
+          git fetch origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor origin/main HEAD || ! git push origin "HEAD:main"; then
+            echo "::warning::origin/main is not an ancestor of the bump commit — skipping the stable cut push; deploying the promoted commit uncut (re-run promote after main's tip is green to cut)"
+            exit 0
+          fi
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --plan /tmp/stable-plan.json
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"

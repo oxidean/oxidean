@@ -244,14 +244,31 @@ describe("production-deploy.yml stable cut", () => {
       join(ROOT, "scripts/last-green-main-commit.sh"),
       "utf-8",
     );
-    expect(script).toContain("ci.yml/runs?branch=main");
-    expect(script).toContain("images.yml/runs?branch=main");
+    expect(script).toContain("ci.yml/runs?head_sha=");
+    expect(script).toContain("images.yml/runs?head_sha=");
     expect(script).toContain("rev-list --first-parent");
-    // jq scoping pitfall: the candidate sha must bind to a variable before
-    // the images-membership test — `index(.)` inside `($imgOk | ...)`
-    // sees the array, not the input line, and silently matches everything.
-    expect(script).toContain(". as $s");
-    expect(script).toContain("index($s)");
+    // Per-SHA probes must mirror the Require CI success step exactly —
+    // ci.yml newest-run-only, images.yml any completed-success push run —
+    // so resolver and gate can never diverge.
+    expect(script).toContain('select(.event == "push"');
+  });
+
+  test("commit_sha reaches the shell via env, never expression interpolation", () => {
+    // ${{ inputs.* }} inside run: interpolates before shell parsing — a
+    // crafted dispatch input could break out of the quotes in a job holding
+    // RAILWAY_TOKEN + packages/actions/deployments write.
+    expect(yml).toContain("INPUT_SHA: ${{ inputs.commit_sha }}");
+    expect(yml).not.toContain('INPUT="${{ inputs.commit_sha }}"');
+    expect(yml).toContain("^[0-9a-fA-F]{7,40}$");
+  });
+
+  test("a non-fast-forward stable cut degrades to a cut-less promote", () => {
+    // The resolver picks the last CI-green commit, which sits behind
+    // origin/main whenever HEAD's CI is in-flight — the bump commit cannot
+    // push HEAD:main then. Skip the cut with a warning and deploy the
+    // promoted SHA rather than failing the whole promote.
+    expect(yml).toContain("merge-base --is-ancestor origin/main HEAD");
+    expect(yml).toContain("skipping the stable cut push");
   });
 
   test("promote preflights the resolved CLI feed before touching Railway", () => {
