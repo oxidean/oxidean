@@ -233,6 +233,27 @@ describe("production-deploy.yml stable cut", () => {
     expect(yml).not.toContain('endswith("ox-cli.yml")');
   });
 
+  test("empty commit_sha resolves the last CI-green main commit, not HEAD", () => {
+    // A merge landing while a promote is being prepared must not block it:
+    // the resolver walks first-parent main history for the newest commit
+    // with a successful ci.yml run AND a successful Images push run, so an
+    // in-flight or red HEAD is skipped instead of failing the promote.
+    expect(yml).toContain("scripts/last-green-main-commit.sh");
+    expect(yml).toContain("last main commit with green CI");
+    const script = readFileSync(
+      join(ROOT, "scripts/last-green-main-commit.sh"),
+      "utf-8",
+    );
+    expect(script).toContain("ci.yml/runs?branch=main");
+    expect(script).toContain("images.yml/runs?branch=main");
+    expect(script).toContain("rev-list --first-parent");
+    // jq scoping pitfall: the candidate sha must bind to a variable before
+    // the images-membership test — `index(.)` inside `($imgOk | ...)`
+    // sees the array, not the input line, and silently matches everything.
+    expect(script).toContain(". as $s");
+    expect(script).toContain("index($s)");
+  });
+
   test("promote preflights the resolved CLI feed before touching Railway", () => {
     // A resolved ox tag whose release was never published used to crash-loop
     // the api entrypoint for ~5min after the upsert. The deploy script must

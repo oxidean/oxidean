@@ -33,7 +33,7 @@ on:
           - rollback
         default: promote
       commit_sha:
-        description: Commit SHA to promote (empty = origin/main HEAD). Ignored for rollback.
+        description: Commit SHA to promote (empty = last main commit with green CI + published images). Ignored for rollback.
         required: false
         type: string
         default: ""
@@ -143,12 +143,18 @@ jobs:
       - name: Resolve promote SHA
         id: sha
         if: inputs.action == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           INPUT="${{ inputs.commit_sha }}"
           if [[ -z "${INPUT// }" ]]; then
-            SHA="$(git rev-parse origin/main)"
-            echo "Using origin/main HEAD: ${SHA}"
+            # Default: the newest main commit with proven-green CI and a
+            # published sha-* image set — never bare HEAD. A merge landing
+            # while this run is being prepared (CI still in-flight, or just
+            # went red) is skipped instead of blocking the promote.
+            SHA="$(scripts/last-green-main-commit.sh)"
+            echo "No commit_sha — resolved last CI-green main commit: ${SHA}"
           else
             SHA="$(git rev-parse "${INPUT}^{commit}")"
             echo "Using input commit: ${SHA}"
