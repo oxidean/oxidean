@@ -233,6 +233,49 @@ describe("production-deploy.yml stable cut", () => {
     expect(yml).not.toContain('endswith("ox-cli.yml")');
   });
 
+  test("empty commit_sha resolves the last CI-green main commit, not HEAD", () => {
+    // A merge landing while a promote is being prepared must not block it:
+    // the resolver walks first-parent main history for the newest commit
+    // with a successful ci.yml run AND a successful Images push run, so an
+    // in-flight or red HEAD is skipped instead of failing the promote.
+    expect(yml).toContain("scripts/last-green-main-commit.sh");
+    expect(yml).toContain("last main commit with green CI");
+    const script = readFileSync(
+      join(ROOT, "scripts/last-green-main-commit.sh"),
+      "utf-8",
+    );
+    expect(script).toContain("ci.yml/runs?head_sha=");
+    expect(script).toContain("images.yml/runs?head_sha=");
+    expect(script).toContain("rev-list --first-parent");
+    // Per-SHA probes must mirror the Require CI success step exactly —
+    // ci.yml newest-run-only, images.yml any completed-success push run —
+    // so resolver and gate can never diverge.
+    expect(script).toContain('select(.event == "push"');
+  });
+
+  test("commit_sha reaches the shell via env, never expression interpolation", () => {
+    // ${{ inputs.* }} inside run: interpolates before shell parsing — a
+    // crafted dispatch input could break out of the quotes in a job holding
+    // RAILWAY_TOKEN + packages/actions/deployments write.
+    expect(yml).toContain("INPUT_SHA: ${{ inputs.commit_sha }}");
+    expect(yml).not.toContain('INPUT="${{ inputs.commit_sha }}"');
+    expect(yml).toContain("^[0-9a-fA-F]{7,40}$");
+  });
+
+  test("a non-fast-forward stable cut degrades to a cut-less promote", () => {
+    // The resolver picks the last CI-green commit, which sits behind
+    // origin/main whenever HEAD's CI is in-flight — the bump commit cannot
+    // push HEAD:main then. Skip the cut with a warning and deploy the
+    // promoted SHA rather than failing the whole promote.
+    expect(yml).toContain("merge-base --is-ancestor origin/main HEAD");
+    expect(yml).toContain("skipping the stable cut push");
+    // A push failure while the bump commit is still a descendant of
+    // origin/main is a real problem (token scope, ruleset), not the
+    // non-fast-forward race — it must fail loudly instead of silently
+    // skipping every stable cut.
+    expect(yml).toContain("not a fast-forward race");
+  });
+
   test("promote preflights the resolved CLI feed before touching Railway", () => {
     // A resolved ox tag whose release was never published used to crash-loop
     // the api entrypoint for ~5min after the upsert. The deploy script must
