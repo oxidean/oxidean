@@ -12,8 +12,11 @@ workspace (`crates/*`). Do not invent alternatives; extend existing patterns.
 | Persistence | `oxidean-db` — one `Database` façade over Postgres / MySQL / SQLite (sqlx); dialect SQL lives only here |
 | Git engine | `oxidean-git` `GitBackend` trait; shipped `CliGitBackend` drives system `git` ≥ 2.5; future `gix` adapter documented as an option |
 | TS RPC client | `@oxidean/api-client` — **generated** by `make rpc-gen`; never hand-edited |
-| CLI | `ox` (`crates/oxidean-cli`) — companion CLI over the same RPC surface |
-| Email | `EmailSender` trait: log sink (unconfigured), SMTP (`OXIDEAN_SMTP_URL`), Resend |
+| CLI | `ox` (`crates/oxidean-cli`) — companion CLI over the same RPC surface, gated by the server-driven `system.manifest` capability contract |
+| Agent surfaces | Instance MCP server (`POST/GET /api/mcp`, PAT/OAuth auth) + WebMCP browser surface (`apps/web/src/lib/webmcp.ts`) |
+| Email | `EmailSender` trait: log sink (unconfigured), SMTP (`OXIDEAN_SMTP_URL`), Resend — auth mail only today |
+| Object storage | `crates/oxidean-storage` `BlobStore` trait (`fs`/`s3` backends); bundled eval-grade RustFS (compose `s3` profile ↔ helm `objectstore.enabled`) and SeaweedFS as the production-shaped alternative; consumers still migrate behind the trait |
+| Kubernetes | Helm chart `deploy/helm/oxidean/` published as `oci://ghcr.io/oxidean/charts/oxidean` — see `docs/SELFHOST-KUBERNETES.md` |
 | Runtime | Docker Compose (local + self-host, Traefik edge); Oxidean Cloud on Railway (Caddy gateway, same images, `.railway/railway.ts` IaC) |
 | Package manager | Bun 1.4.4 (`bun install --frozen-lockfile`; `npm ci` only inside `.railway/`); GNU Make is the task façade |
 | CI | GitHub Actions inside self-owned digest-pinned `oxidean-ci:*` images; Rust via cargo-nextest, web via Vitest 5 + Playwright Chromium |

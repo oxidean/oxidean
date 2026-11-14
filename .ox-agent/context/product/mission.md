@@ -16,8 +16,18 @@ git clients and remotes keep working.
 
 v1.0 (2026-09-19): the full GitHub-shaped collaboration slice plus Compose
 self-host and a Railway IaC deploy path — Postgres, MySQL, and SQLite via one
-storage abstraction. Details: [`.ox-agent/context/product/roadmap.md`](roadmap.md)
-and the [v1.0 milestone archive](../specs/_archive/gsd/).
+storage abstraction.
+
+Post-v1.0 the surface grew to: the versioned REST API + OpenAPI spec, MCP
+server + WebMCP + the `ox` CLI, milestones on issues and PRs, comment
+attachments, repo-scoped project boards, wiki, discussions, per-repo unit
+toggles, near-complete Actions parity (triggers, job graph, artifacts,
+cache, environments, badges, re-runs, OIDC, `act_runner` bridge), Helm/k8s
+deploy with bundled RustFS/SeaweedFS object stores, an S3 `BlobStore`
+abstraction, and the `pr-new-ui` GitHub-style PR experience behind an
+experiment flag. Details and the remaining backlog:
+[`.ox-agent/context/product/roadmap.md`](roadmap.md) and the
+[v1.0 milestone archive](../specs/_archive/gsd/).
 
 ## Non-goals
 

@@ -8,6 +8,8 @@ Markers: `[ ]` not started · `[~]` in progress · `[x]` shipped on `main`. IDs 
 
 v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTPS and SSH, code browse/blame/compare, pull requests with reviews and three merge strategies, branch protection with packaged direct-push denial, orgs and collaborator ACL, issues with labels/assignees/reactions/history, LFS, releases and repo transfer, in-repo search, in-app notifications, webhooks, Actions-compatible self-hosted runners, OCI/npm/generic packages, explore/stars/forks/watchers, topics, mirroring, admin console with setup wizard and factory reset, Compose deployment plus Railway IaC, Postgres/MySQL/SQLite. Full list: [README — What's included](../../../README.md#whats-included); audit detail: [v1.0 milestone archive](../specs/_archive/gsd/milestones/v1.0-MILESTONE-AUDIT.md).
 
+Since v1.0 the forge has also shipped: the versioned REST API with OpenAPI spec, token-authenticated API access (PAT scopes + fine-grained tokens), OAuth apps, the instance MCP server + WebMCP surface + `ox` companion CLI with a server-driven capability manifest, milestones on both issues and PRs, comment attachments on the PR surface, repo-scoped project boards, wiki, discussions, per-repo unit toggles, the GitHub-style PR experience behind the `pr-new-ui` experiment flag, near-complete Actions parity (cron/`workflow_run`/reusable-workflow triggers, job `needs`/matrix/`concurrency`, artifacts v1+v2 with retention, the cache service, environments with protection rules, status badges, job re-runs and debug logging, an OIDC issuer, and an `act_runner` ConnectRPC bridge), Helm chart + Kubernetes deployment with bundled RustFS and SeaweedFS object stores, an S3-compatible `BlobStore` abstraction, and the removal of the oxpilot agentic-chat experiment.
+
 ## Carry-overs from v1.0
 
 Deferred items recorded at milestone close. Finish these first; several are cheap and unblock later sections.
@@ -61,35 +63,35 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 
 The v1 loop (open, comment, review, merge, close) works. Parity is about the planning and review depth around it.
 
-- [~] **COL-01** Milestones: group issues/PRs by release goal with progress and due dates. Issues side shipped — `milestone.*` RPCs, `issue.milestone.set`, the `/issues/milestones` page and issue panel; PR-side milestone coverage still open.
+- [x] **COL-01** Milestones: group issues/PRs by release goal with progress and due dates. `milestone.*` RPCs, `issue.milestone.set`/`pull.milestone.set`, the `/issues/milestones` page, issue panel, and PR rail/picker (PR UI behind the `pr-new-ui` experiment flag; the API is unconditional).
 - [x] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser. (#99)
-- [ ] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions.
+- [~] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions. Backend shipped — `POST /api/uploads/comment-attachments` with per-user quota and orphan GC, wired into the pull-v2 composers (overview comments, review bar, diff review comments; `pr-new-ui` flag). Issue-comment and release-discussion composers still lack upload UI.
 - [x] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles. User-profile pins shipped — `user_pinned_repos`, `user.listPinnedRepos`/`user.setPinnedRepos` (≤6, ordered, owned repos), the Pinned cards section and "Customize your pins" dialog. Repo issue/PR pinning shipped — `pinned_position` on `issues`/`pull_requests`, `issue.pin`/`issue.unpin` and `pull.pin`/`pull.unpin` (≤3 each, ordered, Write+), pinned boxes on the issues/PRs indexes and pin toggles on detail pages. Org-profile pins shipped — `org_pinned_repos`, `org.listPinnedRepos`/`org.setPinnedRepos` (≤6, ordered, org-owned repos, Admin+ edit), shared Pinned cards section on `/{org}`.
 - [ ] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today.
 - [ ] **COL-06** CODEOWNERS-enforced review requests (COLLAB-V2-03).
 - [~] **COL-07** Merge queue and auto-merge-when-green (COLLAB-V2-04). Merge queue shipped — `merge_queue.*` RPCs (enqueue/dequeue/get/list/groups), merge groups, branch-protection "must go through the merge queue" mode, merge-panel UI. Standalone auto-merge-when-green on plain PRs still open (`auto_merge` is stubbed null on the REST surface).
 - [ ] **COL-08** Suggested-change code blocks in review comments.
-- [ ] **COL-09** Discussions and gists/snippets as separate sharing surfaces.
-- [ ] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01).
-- [ ] **COL-11** Wiki per repository (COLLAB-V2-02).
+- [~] **COL-09** Discussions and gists/snippets as separate sharing surfaces. Discussions shipped end-to-end — `discussions.*` RPCs (categories, comments, answers, pin/lock/transfer), repo unit toggle, `/discussions` UI. Gists/snippets remain unshipped.
+- [~] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01). Repo-scoped boards shipped — `projects.*`/`projects.columns.*`/`projects.cards.*` RPCs and the `/projects` kanban UI. Org/user-scoped boards remain open.
+- [x] **COL-11** Wiki per repository (COLLAB-V2-02). `wiki.pages.*`/`wiki.revisions.*` RPCs (REST mirror too), `/wiki` UI with revision history, repo-migrate sidecar support, per-repo unit toggle.
 - [x] **COL-12** Contribution graph / profile activity and profile README support. (#230)
-- [x] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (`repo.issues.*`/`repo.pulls.*` `getEnabled`/`setEnabled`, `issue.*`/`pull.*` reject `repo.<unit>.disabled` while off, Settings → Features). Wiki/boards remain future units following the same pattern. (#100)
+- [x] **COL-13** Per-repo unit toggles: enable/disable feature units per repository — `repo.{issues,pulls,wiki,projects,discussions}.{get,set}Enabled`, unit RPCs reject `repo.<unit>.disabled` while off, Settings → Features. (#100)
 
 ## Actions (CI)
 
-v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity needs the scheduling and artifact surfaces real CI depends on.
+v1 runs push, pull_request, and manual dispatch on self-hosted runners. The Actions surface has since grown to near-parity — the drift-gated contract lives in [`docs/actions/compatibility.md`](../../../docs/actions/compatibility.md).
 
-- [ ] **CI-01** More triggers: `schedule` (cron), tag/release events, `create`/`delete`, `workflow_run`, plus branch/tag/path filters on push and pull_request.
-- [ ] **CI-02** Job graph: `needs` ordering, matrix strategies, `concurrency` groups with cancel-in-progress, reusable workflows (`workflow_call`).
-- [ ] **CI-03** Artifacts: upload/download between jobs and from the UI, with retention policy.
-- [ ] **CI-04** Dependency cache equivalent to `actions/cache` on the runner protocol.
-- [ ] **CI-05** Environments and deployment protection rules.
-- [ ] **CI-06** Runner groups and org-level runner registration; today only sys-admin registration tokens exist.
-- [ ] **CI-07** Workflow status badges endpoint for README embedding.
-- [ ] **CI-08** Re-run failed jobs and step-level debug logging controls.
-- [ ] **CI-09** Job `id-token`/OIDC for keyless cloud auth from workflows.
+- [x] **CI-01** More triggers: `schedule` (cron, with a sweeper and dedupe state), tag/release events, `create`/`delete`, `workflow_run`, plus branch/tag/path filters on push and pull_request.
+- [x] **CI-02** Job graph: `needs` ordering, matrix strategies (include/exclude, caps, fail-fast, max-parallel), `concurrency` groups with cancel-in-progress, reusable workflows (`workflow_call`).
+- [x] **CI-03** Artifacts: upload/download between jobs and from the UI (protocol v1 + v4 `ArtifactService`), with per-artifact retention and a retention sweep.
+- [x] **CI-04** Dependency cache equivalent to `actions/cache` on the runner protocol (`_apis/artifactcache` + Twirp `CacheService`, save/restore/lookup-only, size-capped LRU).
+- [x] **CI-05** Environments and deployment protection rules: required reviewers, wait timer, prevent-self-review, branch allowlists, env secrets/vars, deployment review endpoints.
+- [~] **CI-06** Runner groups and org-level runner registration; org-level registration shipped (`org.actions.runners.*` + REST), named runner groups with restrictions do not exist.
+- [x] **CI-07** Workflow status badges endpoint for README embedding (`/{owner}/{repo}/actions/workflows/{file}/badge.svg`, `?branch=`/`?event=`).
+- [x] **CI-08** Re-run failed jobs (`rerunRun` whole/`failed_only`/single job) and step-level debug logging (`ACTIONS_STEP_DEBUG`/`ACTIONS_RUNNER_DEBUG` at claim).
+- [x] **CI-09** Job `id-token`/OIDC for keyless cloud auth from workflows — full issuer at `/api/actions/oidc` (discovery, JWKS, RS256, GitHub claim set).
 - [ ] **CI-10** External/hosted runner providers (Blacksmith-class): publish a stable, versioned spec and reference SDK for `proto/runner.proto`, plus provider-facing docs and `runs-on` label conventions.
-- [ ] **CI-11** Runner protocol compatibility shim: speak an existing runner protocol (act_runner or the GitHub runner protocol) so hosted providers register without writing a custom client.
+- [x] **CI-11** Runner protocol compatibility shim: `actions/gitea_proto.rs` speaks ConnectRPC `runner.v1`, so stock `act_runner` registers and claims without a custom client (pinned e2e in TESTING.md).
 
 ## Packages and registries
 
@@ -99,45 +101,45 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 
 ## Search and discovery
 
-- [ ] **SRCH-01** Instance-wide cross-repo code search backed by an index (COLLAB-V2-05). In-repo search ships today; global code search does not.
-- [ ] **SRCH-02** Search qualifiers and filters (org:, language:, path:) consistent across web UI and API.
-- [ ] **SRCH-03** Topic and org browsing pages on `/explore` (topics exist per-repo; discovery does not).
+- [ ] **SRCH-01** Instance-wide cross-repo code search backed by an index (COLLAB-V2-05). `search.global` returns ACL-filtered groups plus bounded commits/code scans of the newest readable repos — no cross-repo index yet.
+- [~] **SRCH-02** Search qualifiers and filters consistent across web UI and API. Shared `parse_search_query` backs both `repo.search` and `search.global` (`is:`/`author:`/`path:`/`language:`/`lang:`); `org:` is parsed-then-stripped — no org qualifier exists.
+- [ ] **SRCH-03** Topic and org browsing pages on `/explore` (topics exist per-repo; `/explore` is a flat star-sorted list with a text filter only).
 
 ## Notifications and email
 
-- [ ] **NOT-01** Outbound email for watched/assigned/mentioned issue and PR activity. Notifications are in-app only today.
+- [ ] **NOT-01** Outbound email for watched/assigned/mentioned issue and PR activity. Email infra exists (`EmailSender`: SMTP/Resend/log) but is wired to auth mail only; notification fan-out writes DB rows, no email send.
 - [ ] **NOT-02** Email digests (COLLAB-V2-06).
 - [ ] **NOT-03** Reply-by-email: inbound replies append to the issue/PR thread.
-- [ ] **NOT-04** Notification filters: watching matrix (DEBT-06), per-repo subscriptions, mute.
+- [~] **NOT-04** Notification filters: watch levels (`all`/`participating`/`ignore` with mention suppression), `user.follow`, and auto-unwatch on access loss shipped (DEBT-06). Global mute, per-type filters, and email prefs remain open.
 
 ## Auth, security, and moderation
 
 - [ ] **SEC-01** OAuth login for GitHub and/or Google (AUTH-V2-01). OIDC and WorkOS exist; the common consumer providers do not.
 - [x] **SEC-02** Two-factor authentication: TOTP with recovery codes, WebAuthn/passkeys (AUTH-V2-02). Shipped — `auth/two_factor/` (TOTP, recovery, flags) plus settings enrollment and login challenge UI.
 - [ ] **SEC-03** LDAP auth provider for self-host parity.
-- [ ] **SEC-04** Session management UI: list active sessions, revoke individually. `auth.logout_all` exists; per-device control does not.
-- [ ] **SEC-05** Signup and abuse controls: optional CAPTCHA, broader rate limiting, invite codes for closed instances.
-- [ ] **SEC-06** Audit log: admin, auth, repo-admin, and permission-changing events, queryable by sys-admin.
+- [~] **SEC-04** Session management UI: list active sessions, revoke individually. Sys-admin side shipped — `admin.users.listSessions`/`revokeSessions` (all-sessions-per-user). Self-service per-device session list/revoke remains open.
+- [~] **SEC-05** Signup and abuse controls: optional CAPTCHA, broader rate limiting, invite codes for closed instances. Invite links (`admin.invites.*`, `/invites/$token`) and auth rate limiters shipped; CAPTCHA absent.
+- [~] **SEC-06** Audit log: admin, auth, repo-admin, and permission-changing events, queryable by sys-admin. `audit_events` write-through + `admin.users.getActivity` per-user query shipped; no instance-wide audit log RPC/UI.
 - [ ] **SEC-07** User block/report and an admin moderation queue.
 - [ ] **SEC-08** Security advisories, dependency graph, and vulnerability scanning — staged last; pairs with CI and packages work.
 - [ ] **SEC-09** Private-instance mode: require sign-in for any view (Forgejo `REQUIRE_SIGNIN_VIEW` equivalent). Public repos are anonymously readable today with no instance-level opt-out.
 
 ## Migration and interoperability
 
-- [ ] **MIG-01** One-shot repository import from GitHub, Gitea/Forgejo, and GitLab: git data plus issues, PRs, releases, LFS. Continuous mirrors exist; a full migrator does not.
-- [ ] **MIG-02** Instance backup/export and documented restore: DB dump plus repos, LFS, packages, uploads. Factory reset exists; no export path does.
+- [~] **MIG-01** One-shot repository import from GitHub, Gitea/Forgejo, and GitLab: git data plus issues, PRs, releases, LFS. `repo.migrate` + `POST /api/v1/repos/migrate` clone git refs (plus a `.wiki.git` sidecar) today; issues/PRs/releases/LFS and the GitHub/GitLab API migrators remain open. Continuous mirrors (`repo.mirror.*`) are separate.
+- [~] **MIG-02** Instance backup/export and documented restore: DB dump plus repos, LFS, packages, uploads. A manual `pg_dump` + data-volume procedure is documented in SELF-HOSTING.md; no productized export/restore path.
 - [ ] **MIG-03** Per-repo export bundle for portability and archival.
 
 ## Admin and operations
 
 - [ ] **OPS-01** Metrics endpoint (Prometheus) and observability docs.
-- [~] **OPS-02** S3-compatible object storage for non-git stores. `crates/oxidean-storage` `BlobStore` with `fs`/`s3` backends and per-store key prefixes shipped ([#214](https://github.com/oxidean/oxidean/pull/214)); consumer migration behind the trait is the tracked follow-up. Spec: [`.ox-agent/context/specs/2026-11-01-1425-storage-blob-backend/`](../specs/2026-11-01-1425-storage-blob-backend/).
-- [ ] **OPS-03** HA / horizontal scaling guidance: shared git storage, DB, object store, runner fleet.
+- [~] **OPS-02** S3-compatible object storage for non-git stores. `crates/oxidean-storage` `BlobStore` with `fs`/`s3` backends and per-store key prefixes shipped ([#214](https://github.com/oxidean/oxidean/pull/214)); no crate consumes the trait yet — consumer migration behind it is the tracked follow-up. Spec: [`.ox-agent/context/specs/2026-11-01-1425-storage-blob-backend/`](../specs/2026-11-01-1425-storage-blob-backend/).
+- [~] **OPS-03** HA / horizontal scaling guidance: shared git storage, DB, object store, runner fleet. `docs/SELFHOST-KUBERNETES.md` covers chart topology limits (single-replica api on RWO volumes, web scaling, RWX failover notes); a dedicated cross-surface HA guide remains open.
 - [ ] **OPS-04** UI internationalization framework; the product is English-only.
-- [ ] **OPS-05** Admin console depth beyond DEBT-10: repo listing/search, runner detail, system info, broadcast notices.
+- [~] **OPS-05** Admin console depth beyond DEBT-10: users/invites/auth/git/lfs/mcp/packages/templates/runners surfaces shipped; repo listing/search, system info, and broadcast notices remain open.
 - [x] **OPS-06** Kubernetes deployment: Helm chart [`deploy/helm/oxidean/`](../../../deploy/helm/oxidean/) published as `oci://ghcr.io/oxidean/charts/oxidean` — single-replica api on RWO volumes, scalable web behind one Ingress hostname, bundled eval-grade Postgres + external `DATABASE_URL` path, `fs`/`s3` storage modes (s3 slim-PVCs until OPS-02 consumers land), SSH `LoadBalancer`, `lookup`-guarded generated secrets, opt-in privileged-DinD runner, `helm` CI lane (`helm lint`/render matrix/kind smoke) + `publish-chart` OCI lane on `oxidean-chart-v*` tags. Spec: [`.ox-agent/context/specs/2026-11-01-1628-helm-k8s-deploy/`](../specs/2026-11-01-1628-helm-k8s-deploy/).
 - [x] **OPS-07** Bundled self-hostable object store (RustFS) + compose/helm parity: `objectstore.enabled` chart section ↔ `s3` compose profile, shared generated credentials, bucket-init Job, CI kind lane. Spec: [`.ox-agent/context/specs/2026-11-01-1934-selfhost-object-store/`](../specs/2026-11-01-1934-selfhost-object-store/).
-- [~] **OPS-08** Kubernetes-native storage alternatives: `existingClaim`/`accessModes`/RWX on product PVCs (EFS/Filestore/Azure Files/CephFS/Longhorn/NFS provisioner) + bundled SeaweedFS provider via subchart (Apache-2.0, master+volume+filer+s3 topology, shared `OXIDEAN_S3_*` credentials). Spec: [`.ox-agent/context/specs/2026-11-01-2013-k8s-native-storage/`](../specs/2026-11-01-2013-k8s-native-storage/).
+- [x] **OPS-08** Kubernetes-native storage alternatives: `existingClaim`/`accessModes` on every product PVC plus the bundled SeaweedFS provider subchart (master+volume+filer+s3 topology, shared `OXIDEAN_S3_*` credentials, mutually exclusive with RustFS). Spec: [`.ox-agent/context/specs/2026-11-01-2013-k8s-native-storage/`](../specs/2026-11-01-2013-k8s-native-storage/).
 
 ## Exploratory / later
 
@@ -159,15 +161,16 @@ Carried from [.ox-agent/context/specs/_archive/gsd/PROJECT.md](../specs/_archive
 
 ## Suggested order
 
-1. **DEBT-\*** — close v1.0 residue; several items (DEBT-01, DEBT-04, DEBT-05) are prerequisites for later sections.
-2. **API-01..03** — the integration surface is the biggest parity blocker; it also unlocks MIG-01 tooling and is a prerequisite for AGT/CLI.
-3. **GIT-19..23** — web editing, archive, protected tags, deploy keys: the most-felt daily gaps for repo admins.
-4. **COL-01..08** — collaboration depth (milestones, templates, attachments, CODEOWNERS, merge queue).
-5. **CI-01..05** — scheduling, job graph, artifacts, cache, environments. CI-06..11 (runner groups, badges, re-runs, OIDC tokens, external-provider spec and compat shim) can ride the same phase or a dedicated runners milestone.
-6. **SEC-01..04** — OAuth login, 2FA, LDAP, session controls.
-7. **SRCH, NOT, PKG, OPS, AGT, CLI** — breadth tracks, parallelizable once the API surface exists.
-8. **MIG-\*** — importers gain the most from the REST API landing first.
-9. **XPL-\*** — last, on explicit decision.
+The v1 carry-overs, API/integration surface, daily-gap GIT items, most of the Actions CI surface, and the k8s/storage deploy tracks have all landed. What remains, roughly by leverage:
+
+1. **COL tails** — org teams (COL-05), CODEOWNERS (COL-06), suggested-change blocks (COL-08), auto-merge (COL-07 tail), gists (COL-09 tail), org-scoped boards (COL-10 tail), attachment UI on issue/release composers (COL-03 tail).
+2. **SEC** — OAuth social login, LDAP, self-service session controls, CAPTCHA, a real audit-log view, moderation queue, private-instance mode. SEC-08 (advisories/dependency graph) stays staged last.
+3. **SRCH-01 + SRCH-03** — the indexed cross-repo code search is the biggest remaining search gap; explore topic/org browsing is cheap after it.
+4. **NOT** — outbound email on notification fan-out is the unlock; digests and reply-by-email build on it.
+5. **PKG-06..08** — additional ecosystems, retention policies, pull-through caching.
+6. **MIG tails** — issues/PRs/releases/LFS in the one-shot importer, a productized backup/export.
+7. **OPS tails** — metrics endpoint, i18n, BlobStore consumer migration (OPS-02), admin-console depth (OPS-05), runner groups (CI-06), provider spec (CI-10).
+8. **XPL-\*** — last, on explicit decision.
 
 ---
 *Created 2026-10-01. Update status markers as items land; do not delete entries — mark them `[x]` and link the PR.*

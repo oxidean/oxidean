@@ -1,21 +1,21 @@
 schema_version: 1
-generated_at: "2026-11-08T16:51:11Z"
+generated_at: "2026-11-14T13:17:49Z"
 files:
     - path: context/decisions/standing-decisions.md
-      sha256: 2d254fac6c8098edaeae0a160cb62e82dc44851c57483193cdcecd731f25e957
-      bytes: 3084
+      sha256: b557d51a295b0655c08d3f10b9cd7570208df2ba362dc1f08252c103f99df550
+      bytes: 3085
       kind: decision
     - path: context/product/mission.md
-      sha256: ad91f2bc6264ff697196d720c5e999e2f907fbb2b4e10fe40fc7f8accf053173
-      bytes: 1170
+      sha256: ff0836b82ed91c0a5129464da29171352998d6e276e6f96522cae53c8297f40d
+      bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: 4b95e39d632d9cecb878ab3700456ffae45b6be2037910f52fbaabc7193bc219
-      bytes: 18969
+      sha256: 5395dbb1b72c8dc5f871927e2c9ba477ac73a4b80b5243d7c3d401df03cf68a7
+      bytes: 23069
       kind: other
     - path: context/product/tech-stack.md
-      sha256: aa07f48d098c3e9aa047f6278255e1b7c48ad3e76c4fdf71db17411a333596d1
-      bytes: 1915
+      sha256: efea7fb72bee455f870dc07463f39a188de11823b226b873b5b3d7edd2d65c2e
+      bytes: 2550
       kind: other
     - path: context/project.yaml
       sha256: b5f0caf7cce6b5b127228ebb46eaf2c44b2da7989a30f98715beba5b69e16ffd
@@ -42,8 +42,8 @@ files:
       bytes: 529
       kind: other
     - path: context/specs/2026-10-14-0059-semver-rollout/shape.md
-      sha256: d0c656ec6151695544b62bfc6afe782f34ab0e082bdd90a45232225f66e8dd8a
-      bytes: 1277
+      sha256: a4a9811e06a6b5748c85096c0e25f2ff43252caf53f17dd1501872ce1fa703ed
+      bytes: 1279
       kind: other
     - path: context/specs/2026-10-18-0239-agentic-vcs-protocol/plan.md
       sha256: 0e855ac754c5b3605322e114b61ee2492441fc308db767e85a5a23b76d0ed251
@@ -56,6 +56,10 @@ files:
     - path: context/specs/2026-10-18-0239-agentic-vcs-protocol/shape.md
       sha256: bce35246c09212d9014470e3bc1442d549fade398007edc2d88ff90a8ef99313
       bytes: 1513
+      kind: other
+    - path: context/specs/2026-10-27-0033-oxpilot-agent/RETIRED.md
+      sha256: df894cda14620fa119414c617346bd8d6c40bb23c67a438eff3a5582682dd2ad
+      bytes: 488
       kind: other
     - path: context/specs/2026-10-27-0033-oxpilot-agent/plan.md
       sha256: 559e7a0903ad28a6a0c6483925995f604dda59ce4ef569c10e71ea1c1e8db503
@@ -94,8 +98,8 @@ files:
       bytes: 7385
       kind: other
     - path: context/specs/2026-11-01-1628-helm-k8s-deploy/standards.md
-      sha256: cc978f3c9911ac9edaa02fc10cbbefd1ad8311fbe06e6d41e72d14cc724530e7
-      bytes: 5635
+      sha256: 49ea70ce9dd24e2db8c3a94e297d589a957943178eb8d7ea5e7a9d7f6df4cb9a
+      bytes: 5627
       kind: other
     - path: context/specs/2026-11-01-1934-selfhost-object-store/plan.md
       sha256: 98773b6b6b8a2ee962364a7195dcabbcd78adf7897636e4da3ec6aa5abd3d9a6
@@ -122,8 +126,8 @@ files:
       bytes: 3948
       kind: other
     - path: context/specs/2026-11-01-2013-k8s-native-storage/standards.md
-      sha256: 9e243249e0759c70bf3a9e268a8997ba6d9ca8bccc2af0d3cec43c65d4922ce4
-      bytes: 5939
+      sha256: c9d1d0b6c4cde89c7c47fac97d98542d78d458d99ea6bb4139c64bd65d1261e6
+      bytes: 5945
       kind: other
     - path: context/specs/2026-11-03-1128-profile-contribution-graph/plan.md
       sha256: 56ea3ed1c369a888d1e85236bf18db66ea654bc5be18a6b97ed7a940e98843da
@@ -7998,12 +8002,12 @@ files:
       bytes: 2179
       kind: other
     - path: context/standards/code-style.md
-      sha256: 5d32520723ff47f57e73f982aa38f43fd9714b00b4802a890e1c3343b23a5a86
-      bytes: 2250
+      sha256: c50ae8385c03b2109a48439b1097b831ab82223791d8210b8ae3b5128efe24e9
+      bytes: 2256
       kind: standard
     - path: context/standards/commits-versioning.md
-      sha256: ae3209adfd4cc7f4eb9004c5f40d208d8be52ace630ed2b9e994665287643fb8
-      bytes: 1045
+      sha256: 7fdcb17131d426816805377a138150367418fb277c5ee29a5ef5e383ed61e2bb
+      bytes: 1050
       kind: standard
     - path: context/standards/review-practices.md
       sha256: 3f24f8358cc7740371a18501e5c9965cec9cdd7aa9d39e44ea760c4e581c61be
@@ -8014,14 +8018,14 @@ files:
       bytes: 1198
       kind: standard
     - path: context/standards/testing.md
-      sha256: 5b0638594e0b67f3e878bae2ea6f052af34b3c87d0c517eec9886b1afef669cb
-      bytes: 1834
+      sha256: 3211db39530ec285a85a63f84222526986de66123c29ea6e8b8f04928418aef3
+      bytes: 1837
       kind: standard
     - path: context/standards/way-of-working.md
-      sha256: 4bfcf60d420ff995da4e1e35fa7a2a6df5ab2b7cf622d669061762ad36c9632d
-      bytes: 1105
+      sha256: 6b3af8ad764265ecac3193a16445f282ac247833baa109ae1cf4f6410566d8fb
+      bytes: 1107
       kind: standard
     - path: context/standards/web-ui.md
-      sha256: df3150ccceab3d177c328727996c7446e5cb657fe4e3d007bbc0bbfefa87616d
-      bytes: 1057
+      sha256: d011edb834213c2cd0b699128c0bde6bfddb86548baa8bc46f47485b1d0d43a6
+      bytes: 1059
       kind: standard
