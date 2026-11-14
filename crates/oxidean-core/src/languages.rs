@@ -106,6 +106,16 @@ pub const LANGUAGES: &[LanguageSpec] = &[
         true,
     ),
     lang(
+        "OXL",
+        None,
+        Some("oxl"),
+        &["oxl"],
+        &[],
+        &[],
+        Some("#0ca5a5"),
+        true,
+    ),
+    lang(
         "TypeScript",
         None,
         Some("typescript"),

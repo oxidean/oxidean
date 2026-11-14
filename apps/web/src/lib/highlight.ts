@@ -9,6 +9,7 @@ import {
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import tsrxGrammar from "./grammars/tsrx.tmLanguage.json";
 import rippleGrammar from "./grammars/ripple.tmLanguage.json";
+import oxlGrammar from "./grammars/oxl.tmLanguage.json";
 
 /**
  * Branded Oxidean syntax themes (issue #59). Token colors follow the palette
@@ -245,17 +246,26 @@ const rippleLang = {
   embeddedLangs: ["jsx", "tsx", "css"] as const,
 };
 
+/** OXL grammar vendored from oxidean/oxl `editors/grammars/` — no embedded langs. */
+const oxlLang = {
+  ...oxlGrammar,
+  name: "oxl",
+  scopeName: "source.oxl",
+};
+
 /**
  * Every Shiki grammar id referenced by the shared language table
  * (`@oxidean/api-client` LANGUAGES — generated from
  * `crates/oxidean-core/src/languages.rs`). Rows with `shiki: null` render as
- * plaintext and load nothing; tsrx/ripple are excluded — the bare ids would
+ * plaintext and load nothing; tsrx/ripple/oxl are excluded — the bare ids would
  * look up Shiki's bundle and fail, they load via the grammar objects below.
  * Exported for the table-load gate in `highlight.test.ts`.
  */
 export const TABLE_LANGS = [
   ...new Set(
-    LANGUAGES.map((l) => l.shiki).filter((s): s is string => !!s && s !== "tsrx" && s !== "ripple"),
+    LANGUAGES.map((l) => l.shiki).filter(
+      (s): s is string => !!s && s !== "tsrx" && s !== "ripple" && s !== "oxl",
+    ),
   ),
 ];
 
@@ -267,6 +277,7 @@ export const TABLE_LANGS = [
 const CUSTOM_LANG_INPUTS: Record<string, LanguageInput[]> = {
   tsrx: [tsrxLang as LanguageInput, "jsx", "tsx", "css"],
   ripple: [rippleLang as LanguageInput, "jsx", "tsx", "css"],
+  oxl: [oxlLang as LanguageInput],
 };
 
 let highlighterPromise: Promise<Highlighter> | null = null;
