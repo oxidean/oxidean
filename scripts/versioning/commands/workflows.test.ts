@@ -269,6 +269,11 @@ describe("production-deploy.yml stable cut", () => {
     // promoted SHA rather than failing the whole promote.
     expect(yml).toContain("merge-base --is-ancestor origin/main HEAD");
     expect(yml).toContain("skipping the stable cut push");
+    // A push failure while the bump commit is still a descendant of
+    // origin/main is a real problem (token scope, ruleset), not the
+    // non-fast-forward race — it must fail loudly instead of silently
+    // skipping every stable cut.
+    expect(yml).toContain("not a fast-forward race");
   });
 
   test("promote preflights the resolved CLI feed before touching Railway", () => {

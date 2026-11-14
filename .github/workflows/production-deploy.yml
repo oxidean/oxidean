@@ -296,10 +296,22 @@ jobs:
           # A non-fast-forward push cannot land, so degrade to a cut-less
           # promote of the proven SHA (deploy_sha stays unset → the promoted
           # commit ships) instead of failing; the next promote re-cuts.
+          # Only degrade when main actually moved — a push failure while our
+          # commit is still a descendant is a real problem (token scope,
+          # ruleset) and must fail loudly rather than silently skip every cut.
           git fetch origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor origin/main HEAD || ! git push origin "HEAD:main"; then
+          if ! git merge-base --is-ancestor origin/main HEAD; then
             echo "::warning::origin/main is not an ancestor of the bump commit — skipping the stable cut push; deploying the promoted commit uncut (re-run promote after main's tip is green to cut)"
             exit 0
+          fi
+          if ! git push origin "HEAD:main"; then
+            git fetch origin main:refs/remotes/origin/main || true
+            if ! git merge-base --is-ancestor origin/main HEAD; then
+              echo "::warning::origin/main moved during the push — skipping the stable cut push; deploying the promoted commit uncut (re-run promote after main's tip is green to cut)"
+              exit 0
+            fi
+            echo "::error::bump commit is a descendant of origin/main but the push failed — not a fast-forward race; investigate before retrying"
+            exit 1
           fi
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --plan /tmp/stable-plan.json
