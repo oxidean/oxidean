@@ -3,6 +3,22 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.8.0] - 2026-11-15
+
+### Features
+
+- feat(prs): GitHub-style PR experience behind a per-user experiments flag (#260) (88e7012)
+- feat!: remove oxpilot agentic chat and connector (#259) (e2ad0ac) **breaking**
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-api-pulls`
+- Bumped for changes in `oxidean-api-user`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+- Bumped for changes in `oxidean-git`
+
 ## [0.7.0] - 2026-11-04
 
 ### Features

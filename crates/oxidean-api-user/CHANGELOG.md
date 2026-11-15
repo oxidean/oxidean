@@ -2,6 +2,19 @@
 
 All notable changes to this component are documented here.
 
+## [0.5.0] - 2026-11-15
+
+### Features
+
+- feat(prs): GitHub-style PR experience behind a per-user experiments flag (#260) (88e7012)
+
+### Dependencies
+
+- Bumped for changes in `oxidean-api-core`
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+- Bumped for changes in `oxidean-git`
+
 ## [0.4.0] - 2026-11-04
 
 ### Features

@@ -3,6 +3,13 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.6.0] - 2026-11-15
+
+### Features
+
+- feat(prs): GitHub-style PR experience behind a per-user experiments flag (#260) (88e7012)
+- feat!: remove oxpilot agentic chat and connector (#259) (e2ad0ac) **breaking**
+
 ## [0.5.0] - 2026-11-02
 
 ### Features

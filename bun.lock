@@ -12,7 +12,7 @@
     },
     "apps/web": {
       "name": "@oxidean/web",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "@octanejs/astro": "0.0.46",
         "@octanejs/base-ui": "^0.1.70",
@@ -67,7 +67,7 @@
     },
     "packages/api-client": {
       "name": "@oxidean/api-client",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "devDependencies": {
         "vitest": "^5.1.0",
       },

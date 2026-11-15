@@ -2,6 +2,19 @@
 
 All notable changes to this component are documented here.
 
+## [0.7.0] - 2026-11-15
+
+### Features
+
+- feat(prs): GitHub-style PR experience behind a per-user experiments flag (#260) (88e7012)
+- feat!: remove oxpilot agentic chat and connector (#259) (e2ad0ac) **breaking**
+
+### Dependencies
+
+- Bumped for changes in `oxidean-core`
+- Bumped for changes in `oxidean-db`
+- Bumped for changes in `oxidean-git`
+
 ## [0.6.0] - 2026-11-04
 
 ### Features

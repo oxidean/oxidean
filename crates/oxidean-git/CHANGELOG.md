@@ -3,6 +3,12 @@
 All notable changes to this component are documented here.
 The format follows Keep a Changelog; versions follow SemVer.
 
+## [0.3.0] - 2026-11-15
+
+### Features
+
+- feat(prs): GitHub-style PR experience behind a per-user experiments flag (#260) (88e7012)
+
 ## [0.2.1] - 2026-10-28
 
 ### Fixes
