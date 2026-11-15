@@ -150,6 +150,21 @@ describe("runCheck — fixture workspace", () => {
     ).toBe(true);
   });
 
+  test("versioned path dep in root [workspace.dependencies] → violation", () => {
+    const { root } = fixture();
+    const members = withSecondCrate(root);
+    writeFileSync(
+      join(root, "Cargo.toml"),
+      '[workspace]\nmembers = ["crates/*"]\n\n[workspace.dependencies]\nbc = { path = "crates/b", version = "0.1.0" }\n',
+    );
+    const r = runCheck(root, injected(members));
+    expect(
+      r.violations.some(
+        (v) => v.file === "Cargo.toml" && v.message.includes('dependency "bc"'),
+      ),
+    ).toBe(true);
+  });
+
   test("unversioned path dep and external versioned path dep → clean", () => {
     const { root } = fixture();
     const members = withSecondCrate(root);

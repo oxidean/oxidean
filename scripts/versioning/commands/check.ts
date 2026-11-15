@@ -5,7 +5,7 @@
  * only), 1 violations, 2 usage/IO error.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   loadRegistry,
   REGISTRY_FILENAME,
@@ -157,7 +157,12 @@ export function validateWorkspace(
         if (!spec || typeof spec !== "object") continue;
         const s = spec as Record<string, unknown>;
         if (typeof s.path !== "string" || typeof s.version !== "string") continue;
-        const targetRel = join(dirname(rel), s.path, "Cargo.toml").split(sep).join("/");
+        const targetRel = relative(
+          rootDir,
+          resolve(rootDir, dirname(rel), s.path, "Cargo.toml"),
+        )
+          .split(sep)
+          .join("/");
         if (!cargoManifestSet.has(targetRel)) continue;
         const line = manifestDepLine(text, depName);
         violations.push({
