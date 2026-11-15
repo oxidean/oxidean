@@ -4,8 +4,8 @@
  * lines on stderr, or `--json` for CI annotation. Exit 0 clean (or warnings
  * only), 1 violations, 2 usage/IO error.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   loadRegistry,
   REGISTRY_FILENAME,
@@ -120,7 +120,68 @@ export function validateWorkspace(
       push(lineFor(e.id), `component "${e.id}" manifest_path "${e.manifest_path}" is not a workspace member (BR1.2)`);
     }
   }
+
+  // A `version` pin on a path dep targeting a workspace member breaks release
+  // cuts: `bump` rewrites the member's version and `cargo metadata` then fails
+  // on the stale constraint. External path deps may legitimately keep a pin.
+  const cargoManifestSet = new Set(members.cargo);
+  for (const rel of [...members.cargo, "Cargo.toml"]) {
+    if (!existsSync(join(rootDir, rel))) continue;
+    const text = readFileSync(join(rootDir, rel), "utf-8");
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = Bun.TOML.parse(text) as Record<string, unknown>;
+    } catch {
+      continue; // cargo metadata already validated member manifests
+    }
+    const depTables: Record<string, unknown>[] = [];
+    for (const key of ["dependencies", "dev-dependencies", "build-dependencies"]) {
+      const t = parsed[key];
+      if (t && typeof t === "object") depTables.push(t as Record<string, unknown>);
+    }
+    const target = parsed.target;
+    if (target && typeof target === "object") {
+      for (const cfg of Object.values(target as Record<string, unknown>)) {
+        if (!cfg || typeof cfg !== "object") continue;
+        for (const key of ["dependencies", "dev-dependencies", "build-dependencies"]) {
+          const t = (cfg as Record<string, unknown>)[key];
+          if (t && typeof t === "object") depTables.push(t as Record<string, unknown>);
+        }
+      }
+    }
+    const wsDeps = (parsed.workspace as Record<string, unknown> | undefined)?.dependencies;
+    if (wsDeps && typeof wsDeps === "object") depTables.push(wsDeps as Record<string, unknown>);
+
+    for (const table of depTables) {
+      for (const [depName, spec] of Object.entries(table)) {
+        if (!spec || typeof spec !== "object") continue;
+        const s = spec as Record<string, unknown>;
+        if (typeof s.path !== "string" || typeof s.version !== "string") continue;
+        const targetRel = relative(
+          rootDir,
+          resolve(rootDir, dirname(rel), s.path, "Cargo.toml"),
+        )
+          .split(sep)
+          .join("/");
+        if (!cargoManifestSet.has(targetRel)) continue;
+        const line = manifestDepLine(text, depName);
+        violations.push({
+          file: rel,
+          line,
+          message: `dependency "${depName}" pins version "${s.version}" on workspace path dep "${s.path}" — drop the version key; release bumps rewrite member versions and the stale pin breaks cargo metadata`,
+        });
+      }
+    }
+  }
   return { violations, warnings };
+}
+
+/** Line of a dependency entry (`name = ...` or dotted `name.key = ...`). */
+function manifestDepLine(text: string, depName: string): number {
+  const escaped = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^\\s*${escaped}(?:\\.|\\s*=)`);
+  const idx = text.split("\n").findIndex((l) => re.test(l));
+  return idx === -1 ? 1 : idx + 1;
 }
 
 /** Full `check` — schema load + workspace validation against `rootDir`. */
