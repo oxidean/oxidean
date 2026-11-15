@@ -119,4 +119,45 @@ describe("runCheck — fixture workspace", () => {
     const r = runCheck(root, injected(members));
     expect(r.violations.some((v) => v.message.includes("WIRE_VERSION"))).toBe(true);
   });
+
+  /** Fixture + a second crate member so path-dep resolution has a target. */
+  function withSecondCrate(root: string) {
+    mkdirSync(join(root, "crates/b"), { recursive: true });
+    writeFileSync(join(root, "crates/b/Cargo.toml"), '[package]\nname = "bc"\nversion = "0.1.0"\n');
+    writeFileSync(
+      join(root, "versioning.toml"),
+      readFileSync(join(root, "versioning.toml"), "utf-8") +
+        `\n[[component]]\nid = "bc"\nkind = "crate"\nmanifest_path = "crates/b/Cargo.toml"\ntag_prefix = "bc-v"\nchangelog_path = "crates/b/CHANGELOG.md"\nglobs = ["crates/b/**"]\nscopes = ["bc"]\ndepends_on = []\n`,
+    );
+    return {
+      cargo: ["crates/a/Cargo.toml", "crates/b/Cargo.toml"],
+      bun: ["apps/b/package.json"],
+    } satisfies WorkspaceMembers;
+  }
+
+  test("versioned path dep on workspace member → violation", () => {
+    const { root } = fixture();
+    const members = withSecondCrate(root);
+    writeFileSync(
+      join(root, "crates/a/Cargo.toml"),
+      '[package]\nname = "a"\nversion = "0.1.0"\n\n[dependencies]\nbc = { path = "../b", version = "0.1.0" }\n',
+    );
+    const r = runCheck(root, injected(members));
+    expect(
+      r.violations.some(
+        (v) => v.file === "crates/a/Cargo.toml" && v.message.includes('dependency "bc"'),
+      ),
+    ).toBe(true);
+  });
+
+  test("unversioned path dep and external versioned path dep → clean", () => {
+    const { root } = fixture();
+    const members = withSecondCrate(root);
+    writeFileSync(
+      join(root, "crates/a/Cargo.toml"),
+      '[package]\nname = "a"\nversion = "0.1.0"\n\n[dependencies]\nbc = { path = "../b" }\next = { path = "../ext", version = "1.0.0" }\nserde = "1"\n',
+    );
+    const r = runCheck(root, injected(members));
+    expect(r.violations.filter((v) => v.file === "crates/a/Cargo.toml")).toEqual([]);
+  });
 });
