@@ -1,0 +1,9 @@
+package main
+
+fn greet(name: str) -> str {
+    return "hello, " + name
+}
+
+fn main() {
+    println(greet("world"))
+}

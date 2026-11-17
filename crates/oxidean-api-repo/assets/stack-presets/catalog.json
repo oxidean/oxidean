@@ -64,6 +64,20 @@
       ]
     },
     {
+      "id": "oxl",
+      "label": "oxl",
+      "group": "Systems",
+      "description": "Minimal oxl module with a package main entrypoint — oxl build/run/test ready.",
+      "default_gitignore": "Oxl",
+      "source": "oxidean",
+      "source_ref": "oxidean/oxl — oxl mod init output shape",
+      "last_synced": "2026-11-17",
+      "verify_commands": [
+        "oxl build",
+        "oxl test"
+      ]
+    },
+    {
       "id": "go",
       "label": "Go",
       "group": "Backend",

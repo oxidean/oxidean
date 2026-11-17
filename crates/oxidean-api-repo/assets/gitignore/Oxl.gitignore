@@ -1,0 +1,7 @@
+/target/
+*.o
+a.out
+out.c
+*.exe
+core
+core.*

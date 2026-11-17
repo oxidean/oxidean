@@ -20,6 +20,7 @@
     {"id": "Lua", "label": "Lua", "group": "Languages", "description": "LuaRocks trees and compiled bytecode."},
     {"id": "Perl", "label": "Perl", "group": "Languages", "description": "blib, Build, and local::lib residues."},
     {"id": "Clojure", "label": "Clojure", "group": "Languages", "description": "Leiningen/deps.edn target and .cpcache."},
+    {"id": "Oxl", "label": "oxl", "group": "Languages", "description": "target/, emitted C, object files, and core dumps."},
     {"id": "Terraform", "label": "Terraform", "group": "Tools", "description": ".terraform/, plans, and tfstate crash files."},
     {"id": "Unity", "label": "Unity", "group": "Tools", "description": "Library, Temp, Builds, and Unity lockfiles."},
     {"id": "Docker", "label": "Docker", "group": "Tools", "description": "Local override compose files and container scratch."},
