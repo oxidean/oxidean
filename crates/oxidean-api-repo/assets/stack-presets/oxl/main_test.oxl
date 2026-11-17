@@ -1,0 +1,6 @@
+package main
+
+// `oxl test` runs every fn test_*() in scope.
+fn test_greet() {
+    assert(greet("oxl") == "hello, oxl")
+}

@@ -1,0 +1,4 @@
+/target/
+*.o
+a.out
+out.c
