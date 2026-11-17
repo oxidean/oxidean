@@ -375,7 +375,7 @@ export async function highlightCodeToHast(
   });
   const pre = hast.children.find((c): c is Element => c.type === "element" && c.tagName === "pre");
   if (!pre) throw new Error("shiki codeToHast returned no <pre> element");
-  pre.properties["data-language"] = lang;
+  pre.properties = { ...pre.properties, "data-language": lang };
   return pre;
 }
 

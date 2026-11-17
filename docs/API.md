@@ -24,7 +24,7 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 - Manual HTTP: include `Cookie: oxidean_session=<token>`.
 - Signup, login, and WorkOS/OIDC callbacks attach `Set-Cookie`. Logout / logout-all clear the cookie (`Max-Age=0`).
 
-**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. The REST + RPC edge additionally accepts **Gitea-style `Authorization: Basic <user>:<pat>`** — the password slot must carry a PAT (or Actions job token); raw account passwords are never honored, matching Git Smart HTTP. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
+**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer *** when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. The REST + RPC edge additionally accepts **Gitea-style `Authorization: Basic *** — the password slot must carry a PAT (or Actions job token); raw account passwords are never honored, matching Git Smart HTTP. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
 
 **Provider modes** (instance setting via `admin.auth.*`): `local` | `workos` | `oidc`. Local signup/login RPC only works when mode is `local`. SSO browser flows require matching mode and ENV secrets (see [CONFIGURATION.md](CONFIGURATION.md)).
 
@@ -222,7 +222,7 @@ API-01 adds a resource-oriented REST surface alongside the RPC procedures. Every
 
 - **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated — regenerate with `make openapi-gen`; CI fails if it drifts). The same document is served at runtime from `GET /api/v1/openapi.json`, and a bundled Swagger UI is available at `/api/v1/docs` (no CDN dependency). Both are generated from the route table in `crates/oxidean-api-rest/src/` — adding a route definition updates the router and the spec together.
 - **Base path**: `/api/v1` (e.g. `GET /api/v1/repos/octo/hello`).
-- **Auth**: `Cookie: oxidean_session=…` or `Authorization: Bearer <pat>`; the cookie wins when both are sent (same as `/api/rpc`). Anonymous requests can reach public read endpoints. Session-only procedures (org creation, `admin.*`, credential management) return `403 auth.pat_scope` for PATs — see [PAT Bearer authentication](#pat-bearer-authentication).
+- **Auth**: `Cookie: oxidean_session=…` or `Authorization: Bearer *** the cookie wins when both are sent (same as `/api/rpc`). Anonymous requests can reach public read endpoints. Session-only procedures (org creation, `admin.*`, credential management) return `403 auth.pat_scope` for PATs — see [PAT Bearer authentication](#pat-bearer-authentication).
 - **No version header**: unlike `/api/rpc`, REST requests do not send `Oxidean-RPC-Version`.
 - **Response shape**: success returns the procedure's `data` payload directly (no `{ok, data}` envelope); `POST` create endpoints return `201`. Errors return the `AppError` body `{code, message, data?}` with a mapped status: `*.not_found` → 404, `*.forbidden` / `auth.pat_scope` / `auth.email_unverified` → 403, `auth.unauthenticated` → 401, `auth.rate_limited` → 429, `release.tag_taken` / `pull.merge_conflict` / `auth.taken` → 409, `*.internal` / `*_failed` → 500, otherwise 400.
 - **Input mapping**: URL segments fill the procedure's identity fields (`{owner, name, number, …}`) and always override body fields of the same name; query params map to optional inputs.
@@ -230,7 +230,7 @@ API-01 adds a resource-oriented REST surface alongside the RPC procedures. Every
 - **Wildcard params**: `…/tree/{path}`, `…/contents/{path}`, and `…/releases/tags/{tag}` accept slashes — URL-encode slashed tags (`release%2F1.0`).
 
 ```bash
-curl -sS http://127.0.0.1:8080/api/v1/repos/octo/hello   -H 'Authorization: Bearer oxidean_pat_…'
+curl -sS http://127.0.0.1:8080/api/v1/repos/octo/hello   -H 'Authorization: Bearer ***'
 ```
 
 ### REST endpoints
@@ -513,7 +513,7 @@ curl -sS http://127.0.0.1:8080/api/rpc \
 `auth.signup`:
 
 ```json
-{ "email": "user@example.com", "username": "alice", "password": "at-least-8-chars" }
+{ "email": "user@example.com", "username": "alice", "password": "***" }
 ```
 
 `auth.login_begin` (identifier-first sign-in, #130):
@@ -527,14 +527,14 @@ curl -sS http://127.0.0.1:8080/api/rpc \
 `auth.login`:
 
 ```json
-{ "identifier": "alice", "password": "…", "remember_me": false }
+{ "identifier": "alice", "password": "***", "remember_me": false }
 ```
 
 or, as the password leg of a `login_begin` challenge (the challenge binds the
 account — `identifier` optional):
 
 ```json
-{ "challenge": "<id>", "password": "…", "remember_me": false }
+{ "challenge": "<id>", "password": "***", "remember_me": false }
 ```
 
 `identifier` is email or username. Password minimum length: **8**. Response data is `UserPublic` (`id`, `email`, `username`, `display_name`, `bio`, `avatar_url`, `role` (`user` \| `admin` \| `sys-admin`), `profile_incomplete`, `email_verified`). When a challenge remains incomplete after the password leg, the response is `auth.two_factor_required` with `{ challenge, kind, methods }` in `error.data`.
@@ -646,7 +646,7 @@ Non-browser clients (CLI, MCP, agents, scripts) call `/api/rpc` and `/api/rpc/ws
 curl -s https://oxidean.example.com/api/rpc \
   -H 'content-type: application/json' \
   -H 'Oxidean-RPC-Version: 0.1.0' \
-  -H 'Authorization: Bearer oxidean_pat_…' \
+  -H 'Authorization: Bearer ***' \
   -d '{"procedure":"auth.me","input":{}}'
 ```
 
@@ -759,7 +759,7 @@ max 10 per app.
 
 1. Send the user's browser to `GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&scope=…&state=…`. Signed-in users land on the `/oauth/consent` SPA page; anonymous users bounce through `/login?returnTo=` first. `redirect_uri` must byte-match a registered URI or the request fails with a 400 JSON error (errors never redirect to unregistered URIs).
 2. On approve, the browser redirects to `redirect_uri?code=…&state=…`; deny yields `error=access_denied`. Codes are single-use and expire after 10 minutes.
-3. Exchange the code at `POST /oauth/token` (form-encoded, or JSON; HTTP Basic `client_id:client_secret` also accepted): `grant_type=authorization_code&code=…&redirect_uri=…&client_id=…&client_secret=…` → `{ "access_token": "oxidean_oat_…", "token_type": "bearer", "expires_in": 28800, "scope": "…" }`. Wrong secret → `invalid_client`; used/expired/mismatched code → `invalid_grant`.
+3. Exchange the code at `POST /oauth/token` (form-encoded, or JSON; HTTP Basic `client_id:client_secret` also accepted): `grant_type=authorization_code&code=…&redirect_uri=…&client_id=…&client_secret=…` → `{ "access_token": "***", "token_type": "bearer", "expires_in": 28800, "scope": "…" }`. Wrong secret → `invalid_client`; used/expired/mismatched code → `invalid_grant`.
 
 **Scopes** (space-delimited) are validated against the same catalog
 `pat.catalog` exposes (see `pat.createClassic` above), so OAuth apps can
@@ -772,7 +772,7 @@ catalog descriptions — so consent screens render human-readable labels
 without a hard-coded map.
 
 **Using the token:** `GET /oauth/userinfo` with `Authorization: Bearer
-oxidean_oat_…` returns `{ id, username, display_name, avatar_url?, email? }`.
+*** returns `{ id, username, display_name, avatar_url?, email? }`.
 OAuth access tokens also authenticate anywhere a PAT does — as the HTTP Basic
 password for git clone/push, and as Basic or Bearer credentials on the OCI /
 npm / generic package registries — with the granted scopes mapped onto the
@@ -834,7 +834,7 @@ Phase 11 ships per-repository issues (ISS-01…04) on migration `0011_issues`:
 | --- | --- |
 | **Numbering** | Each repo allocates monotonic `#N` via `issue_counters`. Hard-delete does **not** reclaim numbers. |
 | **ACL** | Capability gates: Read+ to view; Write+ to create/comment/assign/react/link; author or Write+ to edit own issue/comment; Admin (or typed confirm) for hard-delete. Private unauthorized access returns soft `repo.not_found` / `issue.not_found` (no enumeration). |
-| **Markdown** | Web Write\|Preview uses `renderGfm` with `#N` / `owner/repo#N` autolink and sanitize-last. `@mention` / commit SHA autolink are off. |
+| **Markdown** | Web Write\|Preview uses `renderGfm` with `#N` / `owner/repo#N` autolink; sanitize runs before generated-markup passes (Shiki fence highlighting, lazy images). `@mention` / commit SHA autolink are off. |
 | **Linked PRs** | `issue.links.*` supports `pr` (real PR `#N`) and legacy `pr_stub`. Prefer `pr` when linking to an open/merged pull. |
 | **Closing keywords** | On `pull.merge` into the **default branch**, `fixes` / `closes` / `resolves` `#N` in the PR body (and merge commit message) close matching open issues. Keywords do **not** fire on close-without-merge or non-default bases. |
 
@@ -926,7 +926,7 @@ Example (redacted token):
 ```bash
 git clone https://git:oxidean_pat_REDACTED@example.com/alice/demo.git
 # or:
-git -c http.extraHeader="Authorization: Basic $(printf 'git:oxidean_pat_REDACTED' | base64 -w0)" \
+git -c http.extraHeader="Authorization: Basic *** 'git:oxidean_pat_REDACTED' | base64 -w0)" \
   ls-remote https://example.com/alice/demo.git
 ```
 
@@ -1029,7 +1029,7 @@ Accept any of:
 
 - GitHub / Gitea: `X-Hub-Signature-256: sha256=<hmac>` (or `X-Gitea-Signature`)
 - GitLab: `X-Gitlab-Token: <secret>`
-- `Authorization: Bearer <secret>`
+- `Authorization: Bearer ***
 
 The secret is generated on mirror upsert / `repo.mirror.rotateWebhookSecret`. RPC list/get return a masked value; plaintext is returned **once** on create/rotate. Store it like Actions secrets (AES-256-GCM via `OXIDEAN_ACTIONS_SECRETS_KEY`).
 
@@ -1152,7 +1152,7 @@ repositories, issues, pull requests, Actions runs, packages, and search as MCP
 tools, plus file/issue/PR bodies as `oxidean://` resources — each call is a thin
 wrapper over the same typed RPC handlers and ACL checks as `/api/rpc`.
 
-Auth: `oxidean_session` cookie or `Authorization: Bearer` with a classic
+Auth: `oxidean_session` cookie or `Authorization: *** with a classic
 (`oxidean_pat_…`) / fine-grained (`oxidean_fg_…`) PAT. The `oxidean_oat_…` OAuth
 access-token prefix is dispatched to a dedicated resolver seam — it fails closed
 (`401`) until the OAuth provider (API-03) lands; the three prefixes stay
@@ -1203,7 +1203,7 @@ Example register body (placeholders only):
 {
   "name": "compose-runner",
   "labels": ["ubuntu-latest:docker://node:20-bookworm", "self-hosted"],
-  "token": "reg_REPLACE_ME"
+  "token": "***"
 }
 ```
 

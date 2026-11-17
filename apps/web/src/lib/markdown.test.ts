@@ -80,4 +80,20 @@ describe("renderGfm", () => {
     expect(html).not.toContain("onerror=");
     expect(html).toContain("&#x3C;img");
   });
+
+  it("highlights fences nested in blockquotes", async () => {
+    const html = await renderGfm("> ```rust\n> fn a() {}\n> ```");
+    expect(html).toContain('data-language="rust"');
+  });
+
+  it("leaves inline code untouched", async () => {
+    const html = await renderGfm("Run `cargo build` first.");
+    expect(html).toContain("<code>cargo build</code>");
+    expect(html).not.toMatch(/class="shiki/);
+  });
+
+  it("resolves language aliases on fences", async () => {
+    const html = await renderGfm("```ts\nconst x = 1\n```");
+    expect(html).toMatch(/<pre[^>]*class="shiki/);
+  });
 });

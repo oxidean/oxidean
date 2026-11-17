@@ -6,7 +6,6 @@ import remarkRehype from "remark-rehype";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import type { Element, ElementContent, Root } from "hast";
-import { highlightCodeToHast } from "./highlight";
 
 export type RenderGfmOptions = {
   /** Default owner for bare `#N` refs (ISS-04 / D-ISS-13). */
@@ -78,7 +77,8 @@ function textOf(node: Element): string {
  * Shiki's `style` attributes, and inserting our generated hast afterwards
  * can't reintroduce user markup (fence text re-enters as escaped text
  * nodes). Unknown langs fall back to plaintext inside `highlightCodeToHast`;
- * langless fences keep the plain `pre > code` shape.
+ * langless fences keep the plain `pre > code` shape. `./highlight` loads
+ * lazily so fence-free pages never pull Shiki into the bundle path.
  */
 function rehypeHighlightFences() {
   return async (tree: Root) => {
@@ -100,6 +100,8 @@ function rehypeHighlightFences() {
       });
     };
     walk(tree);
+    if (fences.length === 0) return;
+    const { highlightCodeToHast } = await import("./highlight");
     await Promise.all(
       fences.map(async (fence) => {
         try {
