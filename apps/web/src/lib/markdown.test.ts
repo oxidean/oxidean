@@ -39,4 +39,61 @@ describe("renderGfm", () => {
     const html = await renderGfm("![x](javascript:alert(1)) ![d](data:image/png;base64,AA)");
     expect(html).not.toMatch(/<img[^>]*src=/i);
   });
+
+  it("highlights fenced code blocks through Shiki", async () => {
+    const html = await renderGfm("```rust\nfn main() {}\n```");
+    expect(html).toMatch(/<pre[^>]*class="shiki/);
+    expect(html).toContain('data-language="rust"');
+    expect(html).toContain("<span");
+  });
+
+  it("highlights oxl fences via the packaged grammar", async () => {
+    const html = await renderGfm("```oxl\nfn main() {}\n```");
+    expect(html).toContain('data-language="oxl"');
+    expect(html).toMatch(/<span[^>]*style=/);
+  });
+
+  it("highlights multiple fences in one document", async () => {
+    const html = await renderGfm(
+      "```rust\nfn a() {}\n```\n\n```oxl\nfn main() {}\n```\n\n```typescript\nconst x = 1\n```",
+    );
+    expect(html.match(/<pre[^>]*class="shiki/g)?.length).toBe(3);
+  });
+
+  it("falls back to plaintext for unknown languages", async () => {
+    const html = await renderGfm("```nolang-xyz\na < b\n```");
+    expect(html).toMatch(/<pre[^>]*class="shiki/);
+    expect(html).toContain('data-language="plaintext"');
+    expect(html).toContain("&#x3C;");
+    expect(html).not.toContain("<script");
+  });
+
+  it("leaves langless fences as plain pre/code", async () => {
+    const html = await renderGfm("```\nplain\n```");
+    expect(html).toContain("<pre><code>");
+    expect(html).not.toMatch(/class="shiki/);
+  });
+
+  it("escapes markup inside fenced code", async () => {
+    const html = await renderGfm("```rust\n<img src=x onerror=alert(1)>\n```");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("onerror=");
+    expect(html).toContain("&#x3C;img");
+  });
+
+  it("highlights fences nested in blockquotes", async () => {
+    const html = await renderGfm("> ```rust\n> fn a() {}\n> ```");
+    expect(html).toContain('data-language="rust"');
+  });
+
+  it("leaves inline code untouched", async () => {
+    const html = await renderGfm("Run `cargo build` first.");
+    expect(html).toContain("<code>cargo build</code>");
+    expect(html).not.toMatch(/class="shiki/);
+  });
+
+  it("resolves language aliases on fences", async () => {
+    const html = await renderGfm("```ts\nconst x = 1\n```");
+    expect(html).toMatch(/<pre[^>]*class="shiki/);
+  });
 });

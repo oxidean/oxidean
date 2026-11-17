@@ -1,5 +1,6 @@
 import { LANGUAGES } from "@oxidean/api-client";
 import oxlGrammar from "@oxidean/shiki-oxl/grammar.json";
+import type { Element } from "hast";
 import {
   createHighlighter,
   type BundledLanguage,
@@ -351,6 +352,31 @@ export async function highlightCode(code: string, options: { lang: string }): Pr
   const highlighter = await getHighlighter();
   await ensureLanguage(options.lang).catch(() => {});
   return renderHighlighted(highlighter, code, options);
+}
+
+/**
+ * Same render as {@link highlightCode} but returns the hast `<pre>` element
+ * instead of serialized HTML, so rehype transforms can splice it into a
+ * tree (markdown fence highlighting in `markdown.ts`).
+ */
+export async function highlightCodeToHast(
+  code: string,
+  options: { lang: string },
+): Promise<Element> {
+  const highlighter = await getHighlighter();
+  await ensureLanguage(options.lang).catch(() => {});
+  const loaded = highlighter.getLoadedLanguages();
+  const lang = loaded.includes(options.lang) ? options.lang : "plaintext";
+  const display = stripTrailingNewline(code);
+  const hast = highlighter.codeToHast(display, {
+    lang,
+    themes: { light: THEMES.light, dark: THEMES.dark },
+    defaultColor: "light-dark()",
+  });
+  const pre = hast.children.find((c): c is Element => c.type === "element" && c.tagName === "pre");
+  if (!pre) throw new Error("shiki codeToHast returned no <pre> element");
+  pre.properties = { ...pre.properties, "data-language": lang };
+  return pre;
 }
 
 /**
