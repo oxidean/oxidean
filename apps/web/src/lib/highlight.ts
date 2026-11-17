@@ -1,4 +1,5 @@
 import { LANGUAGES } from "@oxidean/api-client";
+import oxlGrammar from "@oxidean/shiki-oxl/grammar.json";
 import {
   createHighlighter,
   type BundledLanguage,
@@ -9,7 +10,6 @@ import {
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import tsrxGrammar from "./grammars/tsrx.tmLanguage.json";
 import rippleGrammar from "./grammars/ripple.tmLanguage.json";
-import oxlGrammar from "./grammars/oxl.tmLanguage.json";
 
 /**
  * Branded Oxidean syntax themes (issue #59). Token colors follow the palette
@@ -246,7 +246,7 @@ const rippleLang = {
   embeddedLangs: ["jsx", "tsx", "css"] as const,
 };
 
-/** OXL grammar vendored from oxidean/oxl `editors/grammars/` — no embedded langs. */
+/** OXL grammar from the @oxidean/shiki-oxl package (oxidean/oxl release) — no embedded langs. */
 const oxlLang = {
   ...oxlGrammar,
   name: "oxl",

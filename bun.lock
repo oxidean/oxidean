@@ -23,6 +23,7 @@
         "@octanejs/tanstack-query": "^0.1.69",
         "@octanejs/zustand": "^0.1.70",
         "@oxidean/api-client": "workspace:*",
+        "@oxidean/shiki-oxl": "https://github.com/oxidean/oxl/releases/download/v0.14.1/oxidean-shiki-oxl-0.14.1.tgz",
         "@simplewebauthn/browser": "^14.0.0",
         "astro": "^7.4.11",
         "class-variance-authority": "^0.7.1",
@@ -440,6 +441,8 @@
     "@oxfmt/binding-win32-x64-msvc": ["@oxfmt/binding-win32-x64-msvc@0.68.0", "", { "os": "win32", "cpu": "x64" }, "sha512-gPe+dJLXaPuWPWqlpklDAJp0k+K9KhQPYiQLHfb+i2rmFuUGfJ/5Qlj6tr1mO6of5g0DiLjG/XCFHIaPhotqqA=="],
 
     "@oxidean/api-client": ["@oxidean/api-client@workspace:packages/api-client"],
+
+    "@oxidean/shiki-oxl": ["@oxidean/shiki-oxl@https://github.com/oxidean/oxl/releases/download/v0.14.1/oxidean-shiki-oxl-0.14.1.tgz", {}, "sha512-ycwIziDYOA4zW6p9k+AjmM30Q1KkxOifufXFKG2r+PLmSFScc0Xb++zdLVZW9PQPI2fR8yU8yppstYDDL2xbfA=="],
 
     "@oxidean/web": ["@oxidean/web@workspace:apps/web"],
 

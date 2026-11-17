@@ -30,6 +30,7 @@
     "@octanejs/tanstack-query": "^0.1.69",
     "@octanejs/zustand": "^0.1.70",
     "@oxidean/api-client": "workspace:*",
+    "@oxidean/shiki-oxl": "https://github.com/oxidean/oxl/releases/download/v0.14.1/oxidean-shiki-oxl-0.14.1.tgz",
     "@simplewebauthn/browser": "^14.0.0",
     "astro": "^7.4.11",
     "class-variance-authority": "^0.7.1",
