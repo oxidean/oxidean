@@ -5,7 +5,8 @@ import remarkGithub from "remark-github";
 import remarkRehype from "remark-rehype";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
-import type { Element, Root } from "hast";
+import type { Element, ElementContent, Root } from "hast";
+import { highlightCodeToHast } from "./highlight";
 
 export type RenderGfmOptions = {
   /** Default owner for bare `#N` refs (ISS-04 / D-ISS-13). */
@@ -44,9 +45,80 @@ function rehypeLazyImages() {
   };
 }
 
+/** Language id from a fenced `code` element's `language-*` class, if present. */
+function fenceLanguage(codeEl: Element): string | undefined {
+  const cls = codeEl.properties.className;
+  const names = Array.isArray(cls) ? cls : typeof cls === "string" ? [cls] : [];
+  for (const n of names) {
+    if (typeof n === "string" && n.startsWith("language-")) {
+      const lang = n.slice("language-".length).trim().toLowerCase();
+      if (lang) return lang;
+    }
+  }
+  return undefined;
+}
+
+/** Concatenated text of a hast subtree — fence source lives in text nodes. */
+function textOf(node: Element): string {
+  let out = "";
+  const walk = (n: Element | ElementContent) => {
+    if (n.type === "text") {
+      out += n.value;
+      return;
+    }
+    if ("children" in n) for (const c of n.children) walk(c);
+  };
+  walk(node);
+  return out;
+}
+
 /**
- * Render GitHub-flavored Markdown to HTML with rehype-sanitize last (D-18 / D-ISS-10).
- * Never passes raw HTML through — XSS vectors from README/issue blobs are stripped.
+ * Post-sanitize pass: swap `pre > code.language-*` fences for Shiki
+ * highlighted markup. Runs AFTER rehype-sanitize — the schema would strip
+ * Shiki's `style` attributes, and inserting our generated hast afterwards
+ * can't reintroduce user markup (fence text re-enters as escaped text
+ * nodes). Unknown langs fall back to plaintext inside `highlightCodeToHast`;
+ * langless fences keep the plain `pre > code` shape.
+ */
+function rehypeHighlightFences() {
+  return async (tree: Root) => {
+    const fences: { parent: Root | Element; index: number; lang: string; code: string }[] = [];
+    const walk = (node: Root | Element) => {
+      (node.children ?? []).forEach((child, index) => {
+        if (child.type !== "element") return;
+        if (child.tagName === "pre") {
+          const codeEl = child.children.find(
+            (c): c is Element => c.type === "element" && c.tagName === "code",
+          );
+          const lang = codeEl ? fenceLanguage(codeEl) : undefined;
+          if (codeEl && lang) {
+            fences.push({ parent: node, index, lang, code: textOf(codeEl) });
+            return;
+          }
+        }
+        walk(child);
+      });
+    };
+    walk(tree);
+    await Promise.all(
+      fences.map(async (fence) => {
+        try {
+          fence.parent.children[fence.index] = await highlightCodeToHast(fence.code, {
+            lang: fence.lang,
+          });
+        } catch {
+          // Highlight failure leaves the sanitized plaintext fence in place.
+        }
+      }),
+    );
+  };
+}
+
+/**
+ * Render GitHub-flavored Markdown to HTML. rehype-sanitize runs before the
+ * generated-markup passes (fence highlighting, lazy images) — raw user HTML
+ * is stripped first (D-18 / D-ISS-10), so nothing afterwards can reintroduce
+ * it; Shiki output is trusted generator markup, not user input.
  *
  * With owner/repo context, `remark-github` autolinks `#N` and `owner/repo#N` to
  * `/{owner}/{repo}/issues/{n}`. Mentions and commits are not linked (Q1 / D-ISS-13).
@@ -70,6 +142,7 @@ export async function renderGfm(markdown: string, opts?: RenderGfmOptions): Prom
     })
     .use(remarkRehype)
     .use(rehypeSanitize)
+    .use(rehypeHighlightFences)
     .use(rehypeLazyImages)
     .use(rehypeStringify)
     .process(markdown);
