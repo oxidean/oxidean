@@ -50,20 +50,22 @@ Production-oriented Compose notes: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Shipped on the current mainline:
 
-- **Git hosting** over HTTPS (Smart HTTP + PATs) and SSH, with commit signature verification (SSH and GPG) and author recognition
-- **Code browsing**: tree, blob, blame, commits, compare, branches, tags, and a repo activity feed
-- **Pull requests** with merge controls, plus **branch protection** rules
-- **Issues** with comments, labels, and assignees
-- **CI actions**: workflow runs and logs, with self-hosted runners (`oxidean-runner`)
+- **Git hosting** over HTTPS (Smart HTTP + PATs) and SSH — protocol v2, partial clone/filter, shallow clone — with commit signature verification (SSH and GPG), author recognition, deploy keys, and repo size quotas
+- **Code browsing**: tree, blob, blame, commits, compare, branches, tags, a repo activity feed, contributor/commit insights, and Shiki syntax highlighting in files and markdown code fences
+- **Pull requests** with reviews, three merge strategies, a merge queue, a checks view, and **branch protection** rules (including required signed commits) plus protected tags
+- **Issues** with comments, labels, assignees, milestones, reactions, comment attachments, templates, and pinning
+- **Discussions**, a per-repo **wiki** with revision history, and repo-scoped **project boards**
+- **CI actions** at near GitHub parity: cron / `workflow_run` / reusable workflows, `needs` / matrix / `concurrency`, artifacts and dependency caching, environments with protection rules, status badges, re-runs and debug logging, an OIDC issuer, and self-hosted runners (`oxidean-runner`, plus a stock `act_runner` bridge)
 - **Package registries** for OCI, npm, and generic/raw artifacts
-- **Git LFS** with quotas, **releases** with assets, repo rename and transfer
-- **Notifications**, repo **webhooks**, and repository **forks**
-- **Search** across repos, code, issues, users, and orgs, plus an **explore** feed with stars, watchers, and social lists
-- **Organizations**, collaborators, invites, and repository visibility / ACL
-- **Repository mirroring** (push, pull, and two-way) and **stack presets** on `/new`
-- **Auth**: local accounts plus SSO via OIDC or WorkOS AuthKit; fine-grained PATs and SSH keys in user settings
-- **Admin console**: auth providers, LFS, packages, runners, and repo templates, with a first-run setup wizard and factory reset
-- **Multi-database** support: Postgres, MySQL, SQLite
+- **Git LFS** with quotas, **releases** with assets, repo archive flag, rename and transfer
+- **Notifications** (in-app, with watch/follow controls), Atom/RSS **feeds**, broad-event repo **webhooks**, and repository **forks** with sync-from-upstream
+- **Search** across repos, code, issues, users, and orgs, plus an **explore** feed with stars, watchers, topics, and social lists
+- **Organizations**, collaborators, invites, repository visibility / ACL, per-repo **unit toggles**, profile READMEs and contribution graphs
+- **Repository mirroring** (push, pull, and two-way), **stack presets** and gitignore templates on `/new`, and in-browser **file editing** with a new-branch-PR flow
+- **Auth**: local accounts, TOTP 2FA and WebAuthn/passkeys, SSO via OIDC or WorkOS AuthKit; fine-grained PATs and SSH keys in user settings
+- **Integrations**: versioned REST API with an OpenAPI spec, OAuth apps ("sign in with Oxidean"), an instance **MCP** server plus WebMCP surface, and the **`ox` CLI** gated by a server-driven capability manifest
+- **Admin console**: users, invites, auth providers, git, LFS, MCP, packages, repo templates, and runners — with a first-run setup wizard and factory reset
+- **Deploy anywhere**: Docker Compose or a Helm chart for Kubernetes with bundled RustFS/SeaweedFS object stores and external S3-compatible endpoints — on **Postgres, MySQL, or SQLite**
 
 What still separates Oxidean from established forges is tracked in [ROADMAP.md](ROADMAP.md).
 
@@ -75,16 +77,26 @@ Canonical docs live under [`docs/`](docs/).
 
 - [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md) — first run (Compose or host)
 - [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md) — production Compose install from published images
+- [`docs/SELFHOST-KUBERNETES.md`](docs/SELFHOST-KUBERNETES.md) — Helm-chart install on Kubernetes
+- [`docs/SELFHOST-MIGRATE-TO-K8S.md`](docs/SELFHOST-MIGRATE-TO-K8S.md) — move a Compose deployment onto the Helm chart
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose images, Traefik, volumes, production knobs
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — environment variables
 - [`docs/database.md`](docs/database.md) — Postgres / MySQL / SQLite, migrations, dialect switching
+- [`docs/FEATURE-FLAGS.md`](docs/FEATURE-FLAGS.md) — per-user experiment flags (e.g. `pr-new-ui`)
+- [`docs/guides/administration.md`](docs/guides/administration.md) — sys-admin users, sessions, and invites
 
 **Product & API**
 
 - [`ROADMAP.md`](ROADMAP.md) — remaining work toward functional forge parity
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system overview (git, SSH, LFS, orgs, packages)
 - [`docs/API.md`](docs/API.md) — RPC + Smart HTTP / LFS / SSH / registry surfaces
+- [`docs/openapi.yaml`](docs/openapi.yaml) — generated OpenAPI spec for the versioned REST API
+- [`docs/GIT-PROTOCOL.md`](docs/GIT-PROTOCOL.md) — git wire-protocol audit (protocol v2, filters, shallow)
 - [`docs/CLI.md`](docs/CLI.md) — `ox`, the companion command-line client
+- [`docs/CLI-PARITY.md`](docs/CLI-PARITY.md) — `ox` ↔ `gh` command parity matrix
+- [`docs/MCP.md`](docs/MCP.md) — instance MCP endpoint and auth model
+- [`docs/WEBMCP.md`](docs/WEBMCP.md) — WebMCP surface in the web app
+- [`docs/actions/compatibility.md`](docs/actions/compatibility.md) — GitHub Actions compatibility contract
 - [`docs/guides/stack-presets.md`](docs/guides/stack-presets.md) — in-repo `/new` stack presets
 - [`docs/guides/workflow-templates.md`](docs/guides/workflow-templates.md) — Actions workflow-template catalog (builtin / instance / org sources)
 - [`docs/guides/actions-runtime.md`](docs/guides/actions-runtime.md) — job environment, `OXIDEAN_*`/`GITHUB_*` variables, `OXIDEAN_TOKEN`
@@ -93,6 +105,7 @@ Canonical docs live under [`docs/`](docs/).
 
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — local API + Vite, RPC sync, monorepo layout
 - [`docs/TESTING.md`](docs/TESTING.md) — nextest + Vitest + stack e2e
+- [`docs/VERSIONING.md`](docs/VERSIONING.md) — per-component SemVer, commit grammar, release flow
 - [`docs/dev-auth.md`](docs/dev-auth.md) — auth/email stubs without cloud secrets
 - [`docs/CODE_PRACTICES.md`](docs/CODE_PRACTICES.md) — conventions for humans and agents
 
