@@ -1,5 +1,5 @@
 schema_version: 1
-generated_at: "2026-11-22T19:34:42Z"
+generated_at: "2026-11-22T19:36:04Z"
 files:
     - path: context/decisions/adr-2026-11-22-codeowners-enforced-review-requests.md
       sha256: 02f76aa34a078a01a35519d916cb114ffc4807f5cfbea8ae8ca6ce161fb18825
@@ -14,8 +14,8 @@ files:
       bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: 3bf0f0a7f27b91a6c3e77b1abfc4da8c3d9bb99bcaea6f8fa2a3dd71bf49994b
-      bytes: 25591
+      sha256: 132df796b15191f06685f68037f71fc0f0a199650b0004e7057fc23fdad0f9a8
+      bytes: 25828
       kind: other
     - path: context/product/tech-stack.md
       sha256: efea7fb72bee455f870dc07463f39a188de11823b226b873b5b3d7edd2d65c2e
