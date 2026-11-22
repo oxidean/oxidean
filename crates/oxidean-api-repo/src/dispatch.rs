@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::{
     activity, branch_protection, collaborators, commit_status, file_templates, files, insights,
-    invites, lifecycle, rename_transfer, search, social_lists, sync_fork, tag_protection, units,
+    invites, lifecycle, rename_transfer, search, social_lists, sync_fork, tag_protection, teams,
+    units,
 };
 
 macro_rules! arm {
@@ -84,6 +85,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "repo.collaborators.add" => arm!(collaborators::add(ctx, input)),
         "repo.collaborators.update" => arm!(collaborators::update(ctx, input)),
         "repo.collaborators.remove" => arm!(collaborators::remove(ctx, input)),
+        "repo.teams.list" => arm!(teams::list(ctx, input)),
+        "repo.teams.add" => arm!(teams::add(ctx, input)),
+        "repo.teams.update" => arm!(teams::update(ctx, input)),
+        "repo.teams.remove" => arm!(teams::remove(ctx, input)),
         "repo.invites.create" => arm!(invites::create(ctx, input)),
         "repo.invites.createLink" => arm!(invites::create_link(ctx, input)),
         "repo.invites.list" => arm!(invites::list(ctx, input)),

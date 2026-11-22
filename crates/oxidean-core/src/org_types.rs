@@ -310,3 +310,221 @@ pub struct OrgInvitesAcceptResponse {
     pub org: OrgPublic,
     pub member: OrgMemberPublic,
 }
+
+// ---------------------------------------------------------------------------
+// Org teams (COL-05) — org-scoped groups holding read|write|admin grants on
+// org-owned repos. Membership is org-members-only; effective repo access is
+// highest-wins across all grant sources (see api-core::repo::acl).
+// ---------------------------------------------------------------------------
+
+/// Team-scoped role (COL-05). `Maintainer` may manage members/repos of the
+/// team without full org Admin; ACL access still comes only from repo grants.
+/// Serialized lowercase: `member` | `maintainer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TeamRole {
+    Member,
+    Maintainer,
+}
+
+impl TeamRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Member => "member",
+            Self::Maintainer => "maintainer",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "member" => Ok(Self::Member),
+            "maintainer" => Ok(Self::Maintainer),
+            other => Err(format!("invalid team role: {other}")),
+        }
+    }
+}
+
+/// Public org team row — id, identity, aggregate counts (COL-05).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamPublic {
+    pub id: String,
+    pub org_id: String,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub member_count: i64,
+    pub repo_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `org.teams.list` response (input: [`OrgSlugRequest`]).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsListResponse {
+    pub teams: Vec<OrgTeamPublic>,
+}
+
+/// Team-scoped org RPC input — org slug + team slug.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamSlugRequest {
+    pub slug: String,
+    pub team_slug: String,
+}
+
+/// `org.teams.create` — `team_slug` optional; derived from `name` when absent.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsCreateRequest {
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub team_slug: Option<String>,
+}
+
+/// `org.teams.update` — Admin+ or team maintainer.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsUpdateRequest {
+    pub slug: String,
+    pub team_slug: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub new_slug: Option<String>,
+}
+
+/// `org.teams.delete` — Admin+.
+pub type OrgTeamsDeleteRequest = OrgTeamSlugRequest;
+/// `org.teams.get` — org member.
+pub type OrgTeamsGetRequest = OrgTeamSlugRequest;
+/// `org.teams.members.list` / `org.teams.repos.list` — org member.
+pub type OrgTeamsMembersListRequest = OrgTeamSlugRequest;
+pub type OrgTeamsReposListRequest = OrgTeamSlugRequest;
+
+/// Team member row — username only, no email (ORG-01 parity).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamMemberPublic {
+    pub user_id: String,
+    pub username: String,
+    pub role: TeamRole,
+    pub created_at: String,
+}
+
+/// `org.teams.members.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsMembersListResponse {
+    pub members: Vec<OrgTeamMemberPublic>,
+}
+
+/// `org.teams.members.add` — existing user, must already be an org member.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsMembersAddRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub username: String,
+    #[serde(default)]
+    pub role: Option<TeamRole>,
+}
+
+/// `org.teams.members.remove` / `set_role` — target by user_id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsMembersRemoveRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub user_id: String,
+}
+
+/// `org.teams.members.set_role`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsMembersSetRoleRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub user_id: String,
+    pub role: TeamRole,
+}
+
+/// Team's grant on one repo (repo identified by name within the org).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamRepoPublic {
+    pub team_id: String,
+    pub repo_id: String,
+    pub repo_name: String,
+    pub permission: CollaboratorPermission,
+    pub created_at: String,
+}
+
+/// `org.teams.repos.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsReposListResponse {
+    pub repos: Vec<OrgTeamRepoPublic>,
+}
+
+/// `org.teams.repos.add` — upsert grant; `repo` is the repo name inside the org.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsReposAddRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub repo: String,
+    pub permission: CollaboratorPermission,
+}
+
+/// `org.teams.repos.update`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsReposUpdateRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub repo: String,
+    pub permission: CollaboratorPermission,
+}
+
+/// `org.teams.repos.remove`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgTeamsReposRemoveRequest {
+    pub slug: String,
+    pub team_slug: String,
+    pub repo: String,
+}
+
+/// Team holding a grant on a repo — `repo.teams.list` row.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoTeamPublic {
+    pub team_id: String,
+    pub slug: String,
+    pub name: String,
+    pub permission: CollaboratorPermission,
+    pub created_at: String,
+}
+
+/// `repo.teams.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoTeamsListResponse {
+    pub teams: Vec<RepoTeamPublic>,
+}
+
+/// Repo-scoped team RPCs — owner slug + repo name + team slug (COL-05).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoTeamsAddRequest {
+    pub owner: String,
+    pub name: String,
+    pub team_slug: String,
+    pub permission: CollaboratorPermission,
+}
+
+/// `repo.teams.update`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoTeamsUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub team_slug: String,
+    pub permission: CollaboratorPermission,
+}
+
+/// `repo.teams.remove`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoTeamsRemoveRequest {
+    pub owner: String,
+    pub name: String,
+    pub team_slug: String,
+}

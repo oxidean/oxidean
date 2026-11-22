@@ -29,6 +29,7 @@ pub mod notifications;
 pub mod oauth;
 pub mod org_invites;
 pub mod org_members;
+pub mod org_teams;
 pub mod organizations;
 pub mod packages;
 pub mod pages;
@@ -104,6 +105,10 @@ pub use notifications::NotificationRow;
 pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthDeviceCodeRow, OAuthTokenRow};
 pub use org_invites::OrgInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
+pub use org_teams::{
+    OrgTeamListRow, OrgTeamMemberListRow, OrgTeamMemberRow, OrgTeamRepoListRow, OrgTeamRepoRow,
+    OrgTeamRow, RepoTeamListRow,
+};
 pub use organizations::OrganizationRow;
 pub use oxidean_core::DbProbeResponse;
 pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
@@ -358,6 +363,150 @@ impl Database {
 
     pub async fn list_orgs_for_user(&self, user_id: &str) -> Result<Vec<OrgMineRow>, String> {
         org_members::list_orgs_for_user(self.require_pool()?, user_id).await
+    }
+
+    // --- org teams (COL-05) ---
+
+    pub async fn insert_org_team(
+        &self,
+        id: &str,
+        org_id: &str,
+        slug: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<OrgTeamRow, String> {
+        org_teams::insert_team(self.require_pool()?, id, org_id, slug, name, description).await
+    }
+
+    pub async fn find_org_team_by_slug(
+        &self,
+        org_id: &str,
+        slug: &str,
+    ) -> Result<Option<OrgTeamRow>, String> {
+        org_teams::find_team_by_slug(self.require_pool()?, org_id, slug).await
+    }
+
+    pub async fn find_org_team_by_id(
+        &self,
+        team_id: &str,
+    ) -> Result<Option<OrgTeamRow>, String> {
+        org_teams::find_team_by_id(self.require_pool()?, team_id).await
+    }
+
+    pub async fn list_org_teams(&self, org_id: &str) -> Result<Vec<OrgTeamListRow>, String> {
+        org_teams::list_teams_for_org(self.require_pool()?, org_id).await
+    }
+
+    pub async fn update_org_team(
+        &self,
+        team_id: &str,
+        slug: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<OrgTeamRow, String> {
+        org_teams::update_team(self.require_pool()?, team_id, slug, name, description).await
+    }
+
+    pub async fn delete_org_team(&self, team_id: &str) -> Result<(), String> {
+        org_teams::delete_team(self.require_pool()?, team_id).await
+    }
+
+    pub async fn insert_team_member(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> Result<OrgTeamMemberRow, String> {
+        org_teams::insert_team_member(self.require_pool()?, team_id, user_id, role).await
+    }
+
+    pub async fn find_team_member(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<Option<OrgTeamMemberRow>, String> {
+        org_teams::find_team_member(self.require_pool()?, team_id, user_id).await
+    }
+
+    pub async fn list_team_members(
+        &self,
+        team_id: &str,
+    ) -> Result<Vec<OrgTeamMemberListRow>, String> {
+        org_teams::list_team_members(self.require_pool()?, team_id).await
+    }
+
+    pub async fn update_team_member_role(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> Result<OrgTeamMemberRow, String> {
+        org_teams::update_team_member_role(self.require_pool()?, team_id, user_id, role).await
+    }
+
+    pub async fn delete_team_member(&self, team_id: &str, user_id: &str) -> Result<(), String> {
+        org_teams::delete_team_member(self.require_pool()?, team_id, user_id).await
+    }
+
+    pub async fn delete_team_memberships_for_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+    ) -> Result<u64, String> {
+        org_teams::delete_team_memberships_for_org_member(self.require_pool()?, org_id, user_id)
+            .await
+    }
+
+    pub async fn upsert_team_repo(
+        &self,
+        team_id: &str,
+        repo_id: &str,
+        permission: &str,
+    ) -> Result<OrgTeamRepoRow, String> {
+        org_teams::upsert_team_repo(self.require_pool()?, team_id, repo_id, permission).await
+    }
+
+    pub async fn find_team_repo(
+        &self,
+        team_id: &str,
+        repo_id: &str,
+    ) -> Result<Option<OrgTeamRepoRow>, String> {
+        org_teams::find_team_repo(self.require_pool()?, team_id, repo_id).await
+    }
+
+    pub async fn list_team_repos(
+        &self,
+        team_id: &str,
+    ) -> Result<Vec<OrgTeamRepoListRow>, String> {
+        org_teams::list_team_repos(self.require_pool()?, team_id).await
+    }
+
+    pub async fn list_repo_teams(&self, repo_id: &str) -> Result<Vec<RepoTeamListRow>, String> {
+        org_teams::list_repos_teams(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn update_team_repo_permission(
+        &self,
+        team_id: &str,
+        repo_id: &str,
+        permission: &str,
+    ) -> Result<OrgTeamRepoRow, String> {
+        org_teams::update_team_repo_permission(self.require_pool()?, team_id, repo_id, permission)
+            .await
+    }
+
+    pub async fn delete_team_repo(&self, team_id: &str, repo_id: &str) -> Result<(), String> {
+        org_teams::delete_team_repo(self.require_pool()?, team_id, repo_id).await
+    }
+
+    /// Highest team-derived grant (`admin`|`write`|`read`) for a user on a
+    /// repo — the team ACL source (COL-05).
+    pub async fn max_team_permission_for_user_repo(
+        &self,
+        repo_id: &str,
+        user_id: &str,
+    ) -> Result<Option<String>, String> {
+        org_teams::max_team_permission_for_user_repo(self.require_pool()?, repo_id, user_id).await
     }
 
     // --- instance invites ---

@@ -1984,6 +1984,38 @@ export type RepoCollaboratorsRemoveRequest = {
   user_id: string;
 };
 
+export type RepoTeamPublic = {
+  team_id: string;
+  slug: string;
+  name: string;
+  permission: CollaboratorPermission;
+  created_at: string;
+};
+
+export type RepoTeamsListResponse = {
+  teams: RepoTeamPublic[];
+};
+
+export type RepoTeamsAddRequest = {
+  owner: string;
+  name: string;
+  team_slug: string;
+  permission: CollaboratorPermission;
+};
+
+export type RepoTeamsUpdateRequest = {
+  owner: string;
+  name: string;
+  team_slug: string;
+  permission: CollaboratorPermission;
+};
+
+export type RepoTeamsRemoveRequest = {
+  owner: string;
+  name: string;
+  team_slug: string;
+};
+
 export type RepoInvitePublic = {
   id: string;
   /** null = shareable link (not bound to a recipient email). */
@@ -4061,6 +4093,109 @@ export type OrgMembersUpdateRoleRequest = {
 export type OrgMembersRemoveRequest = {
   slug: string;
   user_id: string;
+};
+
+export type TeamRole = "member" | "maintainer";
+
+export type OrgTeamPublic = {
+  id: string;
+  org_id: string;
+  slug: string;
+  name: string;
+  description: string;
+  member_count: number;
+  repo_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrgTeamsListResponse = {
+  teams: OrgTeamPublic[];
+};
+
+export type OrgTeamSlugRequest = {
+  slug: string;
+  team_slug: string;
+};
+
+export type OrgTeamsCreateRequest = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  /** Absent = derived from name. */
+  team_slug?: string | null;
+};
+
+export type OrgTeamsUpdateRequest = {
+  slug: string;
+  team_slug: string;
+  name?: string | null;
+  description?: string | null;
+  new_slug?: string | null;
+};
+
+export type OrgTeamMemberPublic = {
+  user_id: string;
+  username: string;
+  role: TeamRole;
+  created_at: string;
+};
+
+export type OrgTeamsMembersListResponse = {
+  members: OrgTeamMemberPublic[];
+};
+
+export type OrgTeamsMembersAddRequest = {
+  slug: string;
+  team_slug: string;
+  username: string;
+  role?: TeamRole | null;
+};
+
+export type OrgTeamsMembersRemoveRequest = {
+  slug: string;
+  team_slug: string;
+  user_id: string;
+};
+
+export type OrgTeamsMembersSetRoleRequest = {
+  slug: string;
+  team_slug: string;
+  user_id: string;
+  role: TeamRole;
+};
+
+export type OrgTeamRepoPublic = {
+  team_id: string;
+  repo_id: string;
+  repo_name: string;
+  permission: CollaboratorPermission;
+  created_at: string;
+};
+
+export type OrgTeamsReposListResponse = {
+  repos: OrgTeamRepoPublic[];
+};
+
+export type OrgTeamsReposAddRequest = {
+  slug: string;
+  team_slug: string;
+  /** Repo name inside the owning org. */
+  repo: string;
+  permission: CollaboratorPermission;
+};
+
+export type OrgTeamsReposUpdateRequest = {
+  slug: string;
+  team_slug: string;
+  repo: string;
+  permission: CollaboratorPermission;
+};
+
+export type OrgTeamsReposRemoveRequest = {
+  slug: string;
+  team_slug: string;
+  repo: string;
 };
 
 export type OrgInvitePublic = {
@@ -6226,6 +6361,16 @@ export function createClient(opts: CreateClientOptions) {
         remove: (input: RepoCollaboratorsRemoveRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.collaborators.remove", input),
       },
+      teams: {
+        list: (input: RepoGetRequest) =>
+          rpcCall<RepoTeamsListResponse>(opts, "repo.teams.list", input),
+        add: (input: RepoTeamsAddRequest) =>
+          rpcCall<RepoTeamPublic>(opts, "repo.teams.add", input),
+        update: (input: RepoTeamsUpdateRequest) =>
+          rpcCall<RepoTeamPublic>(opts, "repo.teams.update", input),
+        remove: (input: RepoTeamsRemoveRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.teams.remove", input),
+      },
       invites: {
         create: (input: RepoInvitesCreateRequest) =>
           rpcCall<RepoInvitesCreateResponse>(opts, "repo.invites.create", input),
@@ -6600,6 +6745,38 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<OrgMemberPublic>(opts, "org.members.updateRole", input),
         remove: (input: OrgMembersRemoveRequest) =>
           rpcCall<{ ok: boolean }>(opts, "org.members.remove", input),
+      },
+      teams: {
+        list: (input: OrgSlugRequest) =>
+          rpcCall<OrgTeamsListResponse>(opts, "org.teams.list", input),
+        get: (input: OrgTeamSlugRequest) =>
+          rpcCall<OrgTeamPublic>(opts, "org.teams.get", input),
+        create: (input: OrgTeamsCreateRequest) =>
+          rpcCall<OrgTeamPublic>(opts, "org.teams.create", input),
+        update: (input: OrgTeamsUpdateRequest) =>
+          rpcCall<OrgTeamPublic>(opts, "org.teams.update", input),
+        delete: (input: OrgTeamSlugRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "org.teams.delete", input),
+        members: {
+          list: (input: OrgTeamSlugRequest) =>
+            rpcCall<OrgTeamsMembersListResponse>(opts, "org.teams.members.list", input),
+          add: (input: OrgTeamsMembersAddRequest) =>
+            rpcCall<OrgTeamMemberPublic>(opts, "org.teams.members.add", input),
+          remove: (input: OrgTeamsMembersRemoveRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.teams.members.remove", input),
+          setRole: (input: OrgTeamsMembersSetRoleRequest) =>
+            rpcCall<OrgTeamMemberPublic>(opts, "org.teams.members.set_role", input),
+        },
+        repos: {
+          list: (input: OrgTeamSlugRequest) =>
+            rpcCall<OrgTeamsReposListResponse>(opts, "org.teams.repos.list", input),
+          add: (input: OrgTeamsReposAddRequest) =>
+            rpcCall<OrgTeamRepoPublic>(opts, "org.teams.repos.add", input),
+          update: (input: OrgTeamsReposUpdateRequest) =>
+            rpcCall<OrgTeamRepoPublic>(opts, "org.teams.repos.update", input),
+          remove: (input: OrgTeamsReposRemoveRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.teams.repos.remove", input),
+        },
       },
       invites: {
         create: (input: OrgInvitesCreateRequest) =>

@@ -11,6 +11,7 @@ pub mod members;
 pub mod pinned;
 pub mod runners;
 pub mod secrets;
+pub mod teams;
 pub mod vars;
 
 pub use dispatch::dispatch;
@@ -47,5 +48,18 @@ pub const PROCEDURES: &[&str] = &[
     "org.members.remove",
     "org.members.updateRole",
     "org.setPinnedRepos",
+    "org.teams.create",
+    "org.teams.delete",
+    "org.teams.get",
+    "org.teams.list",
+    "org.teams.members.add",
+    "org.teams.members.list",
+    "org.teams.members.remove",
+    "org.teams.members.set_role",
+    "org.teams.repos.add",
+    "org.teams.repos.list",
+    "org.teams.repos.remove",
+    "org.teams.repos.update",
+    "org.teams.update",
     "org.updateSettings",
 ];

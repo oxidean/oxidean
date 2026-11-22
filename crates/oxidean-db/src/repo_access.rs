@@ -7,6 +7,10 @@
 //!   * org owner/admin member of the owning org → read
 //!   * org member + org `member_base_permission` read|write → read
 //!   * `repository_collaborators` row with read|write|admin → read
+//!   * team grant (`organization_team_repos` via the caller's
+//!     `organization_team_members` row) with read|write|admin → read;
+//!     team grants are member-scoped — the EXISTS also joins
+//!     `organization_members` (COL-05)
 //!   * non-`private` visibility → read for everyone
 //!
 //! Values pass through `LOWER(TRIM(...))` to match the Rust parse helpers.
@@ -36,6 +40,13 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = $1
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
+                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                JOIN organization_teams t ON t.id = tr.team_id
+                                JOIN organization_members m ON m.org_id = t.org_id
+                                  AND m.user_id = tm.user_id
+                                WHERE tr.repo_id = r.id AND tm.user_id = $1
+                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -63,6 +74,13 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = ?
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
+                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                JOIN organization_teams t ON t.id = tr.team_id
+                                JOIN organization_members m ON m.org_id = t.org_id
+                                  AND m.user_id = tm.user_id
+                                WHERE tr.repo_id = r.id AND tm.user_id = ?
+                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -73,9 +91,14 @@ pub async fn readable_repo_ids(
                  )",
             );
             let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
-            // `?` binds are positional: ids first (the IN list), then uid ×3.
+            // `?` binds are positional: ids first (the IN list), then uid ×4
+            // (user-owner, collaborator, team, org-member arms).
             let q = repo_ids.iter().fold(q, |q, id| q.bind(id));
-            let q = q.bind(user_id).bind(user_id).bind(user_id);
+            let q = q
+                .bind(user_id)
+                .bind(user_id)
+                .bind(user_id)
+                .bind(user_id);
             q.fetch_all(p)
                 .await
                 .map_err(|e| format!("readable repo ids failed: {e}"))?
@@ -92,6 +115,13 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = ?1
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
+                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                JOIN organization_teams t ON t.id = tr.team_id
+                                JOIN organization_members m ON m.org_id = t.org_id
+                                  AND m.user_id = tm.user_id
+                                WHERE tr.repo_id = r.id AND tm.user_id = ?1
+                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -134,6 +164,14 @@ pub async fn readers_of_repo(
                        WHERE c.repo_id = $1
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
                      UNION
+                     SELECT tm.user_id FROM organization_team_repos tr
+                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                       JOIN organization_teams t ON t.id = tr.team_id
+                       JOIN organization_members m0 ON m0.org_id = t.org_id
+                         AND m0.user_id = tm.user_id
+                       WHERE tr.repo_id = $1
+                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                     UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id
                        JOIN repositories r2 ON r2.owner_id = o.id
@@ -161,6 +199,14 @@ pub async fn readers_of_repo(
                        WHERE c.repo_id = ?
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
                      UNION
+                     SELECT tm.user_id FROM organization_team_repos tr
+                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                       JOIN organization_teams t ON t.id = tr.team_id
+                       JOIN organization_members m0 ON m0.org_id = t.org_id
+                         AND m0.user_id = tm.user_id
+                       WHERE tr.repo_id = ?
+                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                     UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id
                        JOIN repositories r2 ON r2.owner_id = o.id
@@ -171,8 +217,8 @@ pub async fn readers_of_repo(
                  ) sub WHERE sub.uid IN ({in_list})",
             );
             let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
-            // `?` binds are positional: repo_id ×3 (UNION arms), then uids.
-            let q = q.bind(repo_id).bind(repo_id).bind(repo_id);
+            // `?` binds are positional: repo_id ×4 (UNION arms), then uids.
+            let q = q.bind(repo_id).bind(repo_id).bind(repo_id).bind(repo_id);
             let q = user_ids.iter().fold(q, |q, id| q.bind(id));
             q.fetch_all(p)
                 .await
@@ -190,6 +236,14 @@ pub async fn readers_of_repo(
                      SELECT c.user_id FROM repository_collaborators c
                        WHERE c.repo_id = ?1
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
+                     UNION
+                     SELECT tm.user_id FROM organization_team_repos tr
+                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                       JOIN organization_teams t ON t.id = tr.team_id
+                       JOIN organization_members m0 ON m0.org_id = t.org_id
+                         AND m0.user_id = tm.user_id
+                       WHERE tr.repo_id = ?1
+                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
                      UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id
