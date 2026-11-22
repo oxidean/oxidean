@@ -752,6 +752,24 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "$owner.settings.teams.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/org-team-routes.integration.test.tsx",
+      },
+    ],
+  },
+  {
+    route: "$owner.settings.teams.$team.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/org-team-routes.integration.test.tsx",
+      },
+    ],
+  },
+  {
     route: "$owner.settings.labels.tsrx",
     coverage: [{ kind: "stack-browser", test: FORGE_SSH_ORGS }],
   },

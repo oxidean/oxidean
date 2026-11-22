@@ -235,37 +235,79 @@ WHERE org_id = ?1 AND user_id = ?2",
 }
 
 pub async fn remove_member(pool: &DbPool, org_id: &str, user_id: &str) -> Result<(), String> {
-    let n = match pool {
+    match pool {
         DbPool::Postgres(p) => {
-            sqlx::query("DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2")
-                .bind(org_id)
-                .bind(user_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("remove org member failed: {e}"))?
-                .rows_affected()
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(
+                "DELETE FROM organization_team_members
+WHERE user_id = $2 AND team_id IN (SELECT id FROM organization_teams WHERE org_id = $1)",
+            )
+            .bind(org_id)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("remove org member team memberships failed: {e}"))?;
+            let n =
+                sqlx::query("DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2")
+                    .bind(org_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("remove org member failed: {e}"))?
+                    .rows_affected();
+            if n == 0 {
+                return Err("org member not found".into());
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query("DELETE FROM organization_members WHERE org_id = ? AND user_id = ?")
-                .bind(org_id)
-                .bind(user_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("remove org member failed: {e}"))?
-                .rows_affected()
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(
+                "DELETE FROM organization_team_members
+WHERE user_id = ? AND team_id IN (SELECT id FROM organization_teams WHERE org_id = ?)",
+            )
+            .bind(user_id)
+            .bind(org_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("remove org member team memberships failed: {e}"))?;
+            let n =
+                sqlx::query("DELETE FROM organization_members WHERE org_id = ? AND user_id = ?")
+                    .bind(org_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("remove org member failed: {e}"))?
+                    .rows_affected();
+            if n == 0 {
+                return Err("org member not found".into());
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
-            sqlx::query("DELETE FROM organization_members WHERE org_id = ?1 AND user_id = ?2")
-                .bind(org_id)
-                .bind(user_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("remove org member failed: {e}"))?
-                .rows_affected()
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query(
+                "DELETE FROM organization_team_members
+WHERE user_id = ?2 AND team_id IN (SELECT id FROM organization_teams WHERE org_id = ?1)",
+            )
+            .bind(org_id)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("remove org member team memberships failed: {e}"))?;
+            let n =
+                sqlx::query("DELETE FROM organization_members WHERE org_id = ?1 AND user_id = ?2")
+                    .bind(org_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("remove org member failed: {e}"))?
+                    .rows_affected();
+            if n == 0 {
+                return Err("org member not found".into());
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
-    };
-    if n == 0 {
-        return Err("org member not found".into());
     }
     Ok(())
 }

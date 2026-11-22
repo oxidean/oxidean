@@ -1116,8 +1116,9 @@ pub async fn list_team_repos(
                 "SELECT tr.team_id, tr.repo_id, r.name AS repo_name, tr.permission,
        to_char(tr.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM organization_team_repos tr
+JOIN organization_teams t ON t.id = tr.team_id
 JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
-WHERE tr.team_id = $1
+WHERE tr.team_id = $1 AND r.owner_type = 'org' AND r.owner_id = t.org_id
 ORDER BY lower(r.name) ASC",
             )
             .bind(team_id)
@@ -1151,8 +1152,9 @@ ORDER BY lower(r.name) ASC",
                 "SELECT tr.team_id, tr.repo_id, r.name AS repo_name, tr.permission,
        DATE_FORMAT(tr.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM organization_team_repos tr
+JOIN organization_teams t ON t.id = tr.team_id
 JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
-WHERE tr.team_id = ?
+WHERE tr.team_id = ? AND r.owner_type = 'org' AND r.owner_id = t.org_id
 ORDER BY lower(r.name) ASC",
             )
             .bind(team_id)
@@ -1186,8 +1188,9 @@ ORDER BY lower(r.name) ASC",
                 "SELECT tr.team_id, tr.repo_id, r.name AS repo_name, tr.permission,
        strftime('%Y-%m-%dT%H:%M:%SZ', tr.created_at) AS created_at
 FROM organization_team_repos tr
+JOIN organization_teams t ON t.id = tr.team_id
 JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
-WHERE tr.team_id = ?1
+WHERE tr.team_id = ?1 AND r.owner_type = 'org' AND r.owner_id = t.org_id
 ORDER BY lower(r.name) ASC",
             )
             .bind(team_id)
@@ -1231,7 +1234,8 @@ pub async fn list_repos_teams(
        to_char(tr.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM organization_team_repos tr
 JOIN organization_teams t ON t.id = tr.team_id
-WHERE tr.repo_id = $1
+JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
+WHERE tr.repo_id = $1 AND r.owner_type = 'org' AND t.org_id = r.owner_id
 ORDER BY lower(t.slug) ASC",
             )
             .bind(repo_id)
@@ -1266,7 +1270,8 @@ ORDER BY lower(t.slug) ASC",
        DATE_FORMAT(tr.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM organization_team_repos tr
 JOIN organization_teams t ON t.id = tr.team_id
-WHERE tr.repo_id = ?
+JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
+WHERE tr.repo_id = ? AND r.owner_type = 'org' AND t.org_id = r.owner_id
 ORDER BY lower(t.slug) ASC",
             )
             .bind(repo_id)
@@ -1301,7 +1306,8 @@ ORDER BY lower(t.slug) ASC",
        strftime('%Y-%m-%dT%H:%M:%SZ', tr.created_at) AS created_at
 FROM organization_team_repos tr
 JOIN organization_teams t ON t.id = tr.team_id
-WHERE tr.repo_id = ?1
+JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
+WHERE tr.repo_id = ?1 AND r.owner_type = 'org' AND t.org_id = r.owner_id
 ORDER BY lower(t.slug) ASC",
             )
             .bind(repo_id)
@@ -1352,7 +1358,8 @@ pub async fn max_team_permission_for_user_repo(
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = $1 AND tm.user_id = $2
                    AND EXISTS (SELECT 1 FROM organization_members m
-                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
+                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)
+                    AND r.owner_type = 'org' AND t.org_id = r.owner_id"
         )))
         .bind(repo_id)
         .bind(user_id)
@@ -1366,7 +1373,8 @@ pub async fn max_team_permission_for_user_repo(
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = ? AND tm.user_id = ?
                    AND EXISTS (SELECT 1 FROM organization_members m
-                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
+                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)
+                    AND r.owner_type = 'org' AND t.org_id = r.owner_id"
         )))
         .bind(repo_id)
         .bind(user_id)
@@ -1380,7 +1388,8 @@ pub async fn max_team_permission_for_user_repo(
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = ?1 AND tm.user_id = ?2
                    AND EXISTS (SELECT 1 FROM organization_members m
-                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
+                               WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)
+                    AND r.owner_type = 'org' AND t.org_id = r.owner_id"
         )))
         .bind(repo_id)
         .bind(user_id)

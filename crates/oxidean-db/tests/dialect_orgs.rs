@@ -148,3 +148,136 @@ fn dialect_orgs_tri_dialect_files() {
         );
     }
 }
+
+#[tokio::test]
+async fn team_repo_grants_do_not_survive_repository_transfer() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("team-transfer.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+
+    let member = db
+        .create_user(
+            "u-transfer-member",
+            "transfer-member@example.com",
+            "transfer_member",
+            Some("hash"),
+            "Transfer Member",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("create member");
+    let former_org = db
+        .insert_organization("o-transfer-a", "transfer-a", "Transfer A", "none")
+        .await
+        .expect("insert former org");
+    let new_org = db
+        .insert_organization("o-transfer-b", "transfer-b", "Transfer B", "none")
+        .await
+        .expect("insert new org");
+    db.insert_org_owner_membership(&former_org.id, &member.id)
+        .await
+        .expect("insert org member");
+    let team = db
+        .insert_org_team("t-transfer", &former_org.id, "devs", "Devs", "")
+        .await
+        .expect("insert team");
+    db.insert_team_member(&team.id, &member.id, "member")
+        .await
+        .expect("insert team member");
+    let repo = db
+        .insert_repository(
+            "r-transfer",
+            &former_org.id,
+            "org",
+            "private-project",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("insert repository");
+    db.upsert_team_repo(&team.id, &repo.id, "admin")
+        .await
+        .expect("grant team access");
+
+    assert_eq!(
+        db.max_team_permission_for_user_repo(&repo.id, &member.id)
+            .await
+            .expect("resolve initial team access")
+            .as_deref(),
+        Some("admin")
+    );
+
+    db.update_repository_owner(&repo.id, &new_org.id, "org")
+        .await
+        .expect("transfer repository");
+
+    assert_eq!(
+        db.max_team_permission_for_user_repo(&repo.id, &member.id)
+            .await
+            .expect("resolve team access after transfer"),
+        None
+    );
+    assert!(db
+        .list_repo_teams(&repo.id)
+        .await
+        .expect("list repo teams")
+        .is_empty());
+    assert!(db
+        .list_team_repos(&team.id)
+        .await
+        .expect("list team repos")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn removing_org_member_also_removes_team_membership() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("team-member-removal.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+
+    let member = db
+        .create_user(
+            "u-team-removal",
+            "team-removal@example.com",
+            "team_removal",
+            Some("hash"),
+            "Team Removal",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("create member");
+    let org = db
+        .insert_organization("o-team-removal", "team-removal", "Team Removal", "none")
+        .await
+        .expect("insert org");
+    db.insert_org_owner_membership(&org.id, &member.id)
+        .await
+        .expect("insert org member");
+    let team = db
+        .insert_org_team("t-team-removal", &org.id, "devs", "Devs", "")
+        .await
+        .expect("insert team");
+    db.insert_team_member(&team.id, &member.id, "member")
+        .await
+        .expect("insert team member");
+
+    db.remove_org_member(&org.id, &member.id)
+        .await
+        .expect("remove org member");
+
+    assert!(db
+        .find_team_member(&team.id, &member.id)
+        .await
+        .expect("find team member")
+        .is_none());
+}

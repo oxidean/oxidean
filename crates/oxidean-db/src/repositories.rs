@@ -382,6 +382,12 @@ pub async fn update_owner(
 ) -> Result<RepositoryRow, String> {
     match pool {
         DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM organization_team_repos WHERE repo_id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear team grants for repository transfer failed: {e}"))?;
             let n = sqlx::query(
                 "UPDATE repositories SET owner_id = $2, owner_type = $3, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL",
@@ -389,15 +395,22 @@ WHERE id = $1 AND deleted_at IS NULL",
             .bind(id)
             .bind(owner_id)
             .bind(owner_type)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("update repository owner failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("repository not found".into());
             }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM organization_team_repos WHERE repo_id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear team grants for repository transfer failed: {e}"))?;
             let n = sqlx::query(
                 "UPDATE repositories SET owner_id = ?, owner_type = ?, updated_at = NOW()
 WHERE id = ? AND deleted_at IS NULL",
@@ -405,15 +418,22 @@ WHERE id = ? AND deleted_at IS NULL",
             .bind(owner_id)
             .bind(owner_type)
             .bind(id)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("update repository owner failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("repository not found".into());
             }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM organization_team_repos WHERE repo_id = ?1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("clear team grants for repository transfer failed: {e}"))?;
             let n = sqlx::query(
                 "UPDATE repositories SET owner_id = ?2, owner_type = ?3, updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
 WHERE id = ?1 AND deleted_at IS NULL",
@@ -421,13 +441,14 @@ WHERE id = ?1 AND deleted_at IS NULL",
             .bind(id)
             .bind(owner_id)
             .bind(owner_type)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("update repository owner failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("repository not found".into());
             }
+            tx.commit().await.map_err(|e| e.to_string())?;
         }
     }
     find_by_id(pool, id)

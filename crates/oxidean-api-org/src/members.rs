@@ -12,12 +12,6 @@ use oxidean_api_core::notify;
 use oxidean_api_core::org::{db_err, load_org_by_slug, require_org_role};
 use oxidean_api_core::rpc::RpcCtx;
 
-/// Team cleanup rows share `org.internal` on failure (no team-specific codes
-/// needed on the org-member-removal path).
-fn team_err_or_db(e: String) -> AppError {
-    db_err(e)
-}
-
 fn is_admin_plus(role: OrgRole) -> bool {
     matches!(role, OrgRole::Owner | OrgRole::Admin)
 }
@@ -235,10 +229,6 @@ pub async fn remove(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
     guard_last_owner(ctx, &org.id, &req.user_id, was_owner).await?;
 
     // COL-05: leaving the org also leaves its teams — grants are member-scoped.
-    ctx.db
-        .delete_team_memberships_for_org_member(&org.id, &req.user_id)
-        .await
-        .map_err(team_err_or_db)?;
     ctx.db
         .remove_org_member(&org.id, &req.user_id)
         .await
