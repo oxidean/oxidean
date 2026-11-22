@@ -1148,7 +1148,6 @@ pub async fn set_merge_settings(
     Ok(())
 }
 
-
 /// Arm auto-merge on a pull (COL-07) — stores the method, the enabling
 /// user, and the optional commit title/body GitHub's GraphQL input takes.
 #[allow(clippy::too_many_arguments)]
@@ -1278,9 +1277,7 @@ pub async fn list_armed_pulls_for_head(
             Ok(out)
         }
         DbPool::Postgres(p) => {
-            let sql = sql
-                .replacen("%PH%", "$1", 1)
-                .replacen("%PH%", "$2", 1);
+            let sql = sql.replacen("%PH%", "$1", 1).replacen("%PH%", "$2", 1);
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(head_sha)

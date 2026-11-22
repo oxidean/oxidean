@@ -14,8 +14,7 @@ use crate::actions::PullRequestAction;
 use crate::merge_queue::{repo_coords, MqDeps, QueueScope};
 use crate::protection::effective_for_branch;
 use crate::pull::{
-    db_err, emit_pull_event_db, merge_exec, merge_ops::evaluate_merge_gate,
-    notify_actions_for_pull,
+    db_err, emit_pull_event_db, merge_exec, merge_ops::evaluate_merge_gate, notify_actions_for_pull,
 };
 use crate::repo::{effective_capability, owner_ref_for_repo, AccessibleRepo};
 use oxidean_core::{AppError, MergeMethod};
@@ -25,11 +24,7 @@ use oxidean_db::PullRow;
 /// — the check/status seams know the completed sha, nothing else.
 /// Soft-fails per pull: one failing merge must not starve the others.
 pub async fn maybe_fire_for_head(deps: &MqDeps, repo_id: &str, head_sha: &str) {
-    let pulls = match deps
-        .db
-        .list_armed_pulls_for_head(repo_id, head_sha)
-        .await
-    {
+    let pulls = match deps.db.list_armed_pulls_for_head(repo_id, head_sha).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, repo_id, head_sha, "list_armed_pulls_for_head failed");
@@ -67,7 +62,9 @@ pub async fn maybe_fire_pull(
         return Ok(());
     }
     let (Some(method), Some(set_by)) = (
-        row.auto_merge_method.as_deref().and_then(|m| MergeMethod::parse(m).ok()),
+        row.auto_merge_method
+            .as_deref()
+            .and_then(|m| MergeMethod::parse(m).ok()),
         row.auto_merge_set_by.as_deref(),
     ) else {
         return Ok(());

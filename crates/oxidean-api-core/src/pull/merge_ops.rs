@@ -70,10 +70,7 @@ pub async fn evaluate_merge_gate(
         approving_reviewer_ids.push(r.author_id.clone());
     }
     // Pending drafts never gate merges — only submitted comments count.
-    let comments = db
-        .list_pull_comments(&row.id, None)
-        .await
-        .map_err(db_err)?;
+    let comments = db.list_pull_comments(&row.id, None).await.map_err(db_err)?;
     let unresolved = comments
         .iter()
         .filter(|c| c.path.is_some() && !c.resolved)
@@ -112,11 +109,7 @@ pub async fn evaluate_merge_gate(
             status_by_context.insert(name, state);
         }
     }
-    let path_for_anc = bare_repo_path(
-        repos_dir,
-        &accessible.owner_username,
-        &accessible.row.name,
-    )?;
+    let path_for_anc = bare_repo_path(repos_dir, &accessible.owner_username, &accessible.row.name)?;
     let head_up_to_date = git_is_ancestor(&path_for_anc, &row.base_sha, &row.head_sha)
         .await
         .unwrap_or(true);

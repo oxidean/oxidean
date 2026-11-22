@@ -8,7 +8,10 @@ use crate::git::{bare_repo_path, quota::refresh_repo_size_bytes};
 use crate::merge_queue::{repo_coords, MqDeps, QueueScope};
 use crate::mirror::notify_mirror_after_local_mutation;
 use crate::notify;
-use crate::pull::{closing_refs, db_err, ensure_head_objects_in_base, emit_pull_event_db, notify_actions_for_pull, refs};
+use crate::pull::{
+    closing_refs, db_err, emit_pull_event_db, ensure_head_objects_in_base, notify_actions_for_pull,
+    refs,
+};
 use crate::webhook::dispatch;
 use oxidean_core::{AppError, MergeMethod};
 use oxidean_db::PullRow;
@@ -67,7 +70,11 @@ pub async fn execute(
                 .squash_merge(&path, &row.base_ref, &row.head_sha, &full_message)
                 .await
         }
-        MergeMethod::Rebase => deps.git.rebase_merge(&path, &row.base_ref, &row.head_sha).await,
+        MergeMethod::Rebase => {
+            deps.git
+                .rebase_merge(&path, &row.base_ref, &row.head_sha)
+                .await
+        }
     }
     .map_err(|e| {
         let msg = e.to_string().to_lowercase();

@@ -177,8 +177,15 @@ pub async fn enqueue(
     // Same gate `pull.merge` runs — reviews, threads, required contexts,
     // up-to-date-head. The queue decides the method (`None` skips the
     // repo's allowed-methods check).
-    oxidean_api_core::pull::merge_ops::evaluate_merge_gate(&ctx.db, &ctx.repos_dir, &accessible, &eff, &pull, None)
-        .await?;
+    oxidean_api_core::pull::merge_ops::evaluate_merge_gate(
+        &ctx.db,
+        &ctx.repos_dir,
+        &accessible,
+        &eff,
+        &pull,
+        None,
+    )
+    .await?;
     let bare = bare_repo_path(
         &ctx.repos_dir,
         &accessible.owner_username,

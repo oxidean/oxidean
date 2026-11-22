@@ -289,10 +289,7 @@ async fn auto_merge_enable_requires_flag_method_and_open_state() {
     let en = arm(&t, &cookie, "am1", "core", n, "merge").await;
     assert_eq!(en["ok"], true, "{en}");
     assert_eq!(en["data"]["auto_merge"]["method"], "merge", "{en}");
-    assert_eq!(
-        en["data"]["auto_merge"]["set_by_username"], "am1",
-        "{en}"
-    );
+    assert_eq!(en["data"]["auto_merge"]["set_by_username"], "am1", "{en}");
 
     // Disable requires armed state or actor rights — owner can disable.
     let dis = rpc_json(
@@ -459,12 +456,11 @@ async fn auto_merge_disabled_on_head_push() {
         .await
         .expect("push");
     let rid = repo_id(&t, &uid, "core").await;
-    let row = t
-        .db
-        .find_pull_by_repo_number(&rid, n)
-        .await
-        .unwrap()
-        .unwrap();
+    let row =
+        t.db.find_pull_by_repo_number(&rid, n)
+            .await
+            .unwrap()
+            .unwrap();
     oxidean_api::pull::synchronize_pull_after_head_move(
         &t.db,
         &t.repos_dir,

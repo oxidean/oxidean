@@ -294,7 +294,13 @@ pub async fn deployments_list(
 mod tests {
     use oxidean_api_core::pull::closing_refs::closing_refs;
 
-    fn refs(text: &str) -> Vec<(Option<oxidean_api_core::pull::closing_refs::RepoSlug>, i64, &'static str)> {
+    fn refs(
+        text: &str,
+    ) -> Vec<(
+        Option<oxidean_api_core::pull::closing_refs::RepoSlug>,
+        i64,
+        &'static str,
+    )> {
         closing_refs(text)
             .into_iter()
             .map(|r| (r.repo, r.number, r.relation))

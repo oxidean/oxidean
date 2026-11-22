@@ -7,9 +7,7 @@ use oxidean_api_core::auth::gate::require_verified;
 use oxidean_api_core::merge_queue::{MqDeps, QueueScope};
 use oxidean_api_core::notify;
 use oxidean_api_core::rpc::RpcCtx;
-use oxidean_core::{
-    AppError, MergeMethod, PullAutoMergeEnableRequest, PullPublic, PullRefRequest,
-};
+use oxidean_core::{AppError, MergeMethod, PullAutoMergeEnableRequest, PullPublic, PullRefRequest};
 use serde_json::Value;
 
 use oxidean_api_core::pull::{acl, db_err, emit_pull_event, load_pull_in_repo, to_public};
@@ -20,7 +18,10 @@ use oxidean_api_core::pull::{acl, db_err, emit_pull_event, load_pull_in_repo, to
 pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: PullAutoMergeEnableRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid pull.auto_merge.enable input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid pull.auto_merge.enable input: {e}"),
+        )
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -56,7 +57,10 @@ pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> 
     if !allowed {
         return Err(AppError::new(
             "pull.merge_disabled",
-            format!("{} merges are disabled for this repository", method.as_str()),
+            format!(
+                "{} merges are disabled for this repository",
+                method.as_str()
+            ),
         ));
     }
 
@@ -107,7 +111,10 @@ pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> 
             .await
             .map(|s| (s.owner, s.name))
             .unwrap_or_else(|| {
-                (accessible.owner_username.clone(), accessible.row.name.clone())
+                (
+                    accessible.owner_username.clone(),
+                    accessible.row.name.clone(),
+                )
             })
     };
     oxidean_api_core::pull::notify_actions_for_pull(
@@ -127,15 +134,20 @@ pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> 
     .await;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
-    notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_auto_merge_enabled", &subject).await;
+    notify::fanout_activity(
+        &ctx.db,
+        &user.id,
+        recipients,
+        "pr_auto_merge_enabled",
+        &subject,
+    )
+    .await;
 
     // Green-already PRs merge immediately rather than waiting for the next
     // signal — the arm itself is the first fire event.
     let deps = MqDeps::from_ctx(ctx);
     let scope = QueueScope::of(&accessible);
-    if let Err(e) =
-        oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &updated).await
-    {
+    if let Err(e) = oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &updated).await {
         tracing::warn!(pull = %updated.id, error = %e.message, "auto-merge immediate fire failed");
     }
     let current = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -147,7 +159,10 @@ pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> 
 pub async fn disable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: PullRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid pull.auto_merge.disable input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid pull.auto_merge.disable input: {e}"),
+        )
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
