@@ -72,6 +72,56 @@ function textOf(node: Element): string {
 }
 
 /**
+ * Post-sanitize pass: ````suggestion` fences (COL-08) become a labeled
+ * suggested-change block rather than an ordinary code fence. Runs BEFORE
+ * the highlighter so `language-suggestion` never reaches Shiki. The block
+ * body reuses the fence's text children — escaped text nodes, no markup —
+ * same trust posture as the rest of this post-sanitize phase. Diff-file
+ * comments render the richer `-`/`+` widget instead; this covers every
+ * other markdown surface (PR conversation, comments panel, issues).
+ */
+function rehypeSuggestionFences() {
+  return (tree: Root) => {
+    const walk = (node: Root | Element) => {
+      const children = node.children ?? [];
+      for (let index = 0; index < children.length; index++) {
+        const child = children[index];
+        if (child.type !== "element") continue;
+        if (child.tagName === "pre") {
+          const codeEl = child.children.find(
+            (c): c is Element => c.type === "element" && c.tagName === "code",
+          );
+          if (codeEl && fenceLanguage(codeEl) === "suggestion") {
+            children[index] = {
+              type: "element",
+              tagName: "div",
+              properties: { className: ["md-suggestion"] },
+              children: [
+                {
+                  type: "element",
+                  tagName: "div",
+                  properties: { className: ["md-suggestion-label"] },
+                  children: [{ type: "text", value: "Suggested change" }],
+                },
+                {
+                  type: "element",
+                  tagName: "pre",
+                  properties: { className: ["md-suggestion-code"] },
+                  children: codeEl.children,
+                },
+              ],
+            };
+            continue; // already replaced — don't descend into it
+          }
+        }
+        walk(child);
+      }
+    };
+    walk(tree);
+  };
+}
+
+/**
  * Post-sanitize pass: swap `pre > code.language-*` fences for Shiki
  * highlighted markup. Runs AFTER rehype-sanitize — the schema would strip
  * Shiki's `style` attributes, and inserting our generated hast afterwards
@@ -144,6 +194,7 @@ export async function renderGfm(markdown: string, opts?: RenderGfmOptions): Prom
     })
     .use(remarkRehype)
     .use(rehypeSanitize)
+    .use(rehypeSuggestionFences)
     .use(rehypeHighlightFences)
     .use(rehypeLazyImages)
     .use(rehypeStringify)

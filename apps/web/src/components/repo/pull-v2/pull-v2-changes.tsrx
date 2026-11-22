@@ -52,6 +52,9 @@ type PullV2ChangesProps = {
   canInteract: boolean;
   /** Write+ capability — pending drafts + review submit are Write-gated. */
   canWrite?: boolean;
+  /** COL-08 — Write on the head OR base repo (`pull.branchStatus.can_update`
+   * covers head-only writers like fork owners). Falls back to `canWrite`. */
+  canApplySuggestions?: boolean;
   isAuthor: boolean;
   currentUserId: string;
   /** `/pull/N/changes/<sha>` or `/pull/N/changes/<base>..<head>` (#261). */
@@ -114,6 +117,15 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
   // Bumped on successful review submit — remounts the review bar so a stale
   // body/decision can't fire a duplicate review.
   const [reviewReset, setReviewReset] = useState(0);
+  // COL-08 — suggestion batch: comment ids enrolled via "Add suggestion to
+  // batch", committed together through `pull.suggestions.apply_batch`.
+  const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [applyBusy, setApplyBusy] = useState(false);
+  // `{scope}` is a comment id or "__batch" so the error lands where it was
+  // triggered (the comment's commit form or the batch strip).
+  const [applyError, setApplyError] = useState<{ scope: string; message: string } | null>(null);
+  const [batchMsgOpen, setBatchMsgOpen] = useState(false);
+  const [batchMessage, setBatchMessage] = useState("");
   // `since` is a client-only scope (no URL) — picking it from the scope menu
   // overlays whatever `changesSha` carries; URL changes clear it.
   const [sinceActive, setSinceActive] = useState(false);
@@ -387,6 +399,90 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
       await invalidateComments();
     } else {
       setReviewError(res.error.message || "Could not discard comment");
+    }
+  }
+
+  // Applying a suggestion commits onto the PR head — refresh every
+  // pull-scoped surface the head move affects (same set as retargetBase).
+  function invalidateAfterHeadMove() {
+    const keys = ["get", "commits", "files", "comments", "reviews", "branchStatus"] as const;
+    return Promise.all(
+      keys.map((k) =>
+        queryClient.invalidateQueries({
+          queryKey: ["pull", k, props.owner, props.repoName, props.number],
+        }),
+      ),
+    );
+  }
+
+  async function applySuggestion(
+    commentId: string,
+    index: number,
+    message: string | null,
+  ): Promise<boolean> {
+    if (applyBusy) return false;
+    setApplyBusy(true);
+    setApplyError(null);
+    try {
+      const res = await apiClient.pull.suggestions.apply({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        commentId,
+        suggestionIndex: index,
+        message,
+      });
+      if (!res.ok) {
+        setApplyError({
+          scope: commentId,
+          message: res.error.message || "Could not apply suggestion",
+        });
+        return false;
+      }
+      setBatchIds((prev) => prev.filter((id) => id !== commentId));
+      await invalidateAfterHeadMove();
+      return true;
+    } catch {
+      setApplyError({ scope: commentId, message: NETWORK_ERROR });
+      return false;
+    } finally {
+      setApplyBusy(false);
+    }
+  }
+
+  function toggleBatch(id: string) {
+    setBatchIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function applyBatch(): Promise<boolean> {
+    if (applyBusy || batchIds.length === 0) return false;
+    setApplyBusy(true);
+    setApplyError(null);
+    try {
+      const res = await apiClient.pull.suggestions.applyBatch({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+        commentIds: batchIds,
+        message: batchMessage.trim() || null,
+      });
+      if (!res.ok) {
+        setApplyError({
+          scope: "__batch",
+          message: res.error.message || "Could not apply suggestions",
+        });
+        return false;
+      }
+      setBatchIds([]);
+      setBatchMsgOpen(false);
+      setBatchMessage("");
+      await invalidateAfterHeadMove();
+      return true;
+    } catch {
+      setApplyError({ scope: "__batch", message: NETWORK_ERROR });
+      return false;
+    } finally {
+      setApplyBusy(false);
     }
   }
 
@@ -864,6 +960,87 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
           </DropdownMenu>
         </div>
 
+        @if (batchIds.length > 0) {
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+            data-testid="pull-v2-suggestion-batch-strip"
+          >
+            <span className="text-[13px] text-foreground">
+              {
+                `${batchIds.length} suggestion${batchIds.length === 1 ? "" : "s"} added to batch` as string
+              }
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-2 py-1 text-[12px] font-medium text-primary-foreground disabled:opacity-60"
+                disabled={applyBusy}
+                data-testid="pull-v2-suggestion-batch-open"
+                onClick={() => setBatchMsgOpen(!batchMsgOpen)}
+              >
+                Commit suggestions
+              </button>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted disabled:opacity-60"
+                disabled={applyBusy}
+                data-testid="pull-v2-suggestion-batch-clear"
+                onClick={() => {
+                  setBatchIds([]);
+                  setBatchMsgOpen(false);
+                  setApplyError(null);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            @if (batchMsgOpen) {
+              <div className="flex w-full items-center gap-1.5 pt-1">
+                <input
+                  type="text"
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground"
+                  placeholder="Apply suggestions from code review"
+                  value={batchMessage}
+                  disabled={applyBusy}
+                  data-testid="pull-v2-suggestion-batch-message"
+                  onInput={(e) =>
+                    setBatchMessage((e.currentTarget as HTMLInputElement).value)
+                  }
+                />
+                <button
+                  type="button"
+                  className="rounded-md bg-primary px-2 py-1 text-[12px] font-medium text-primary-foreground disabled:opacity-60"
+                  disabled={applyBusy}
+                  data-testid="pull-v2-suggestion-batch-commit"
+                  onClick={() => void applyBatch()}
+                >
+                  Commit changes
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted"
+                  disabled={applyBusy}
+                  onClick={() => {
+                    setBatchMsgOpen(false);
+                    setBatchMessage("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>;
+            }
+            @if (applyError?.scope === "__batch") {
+              <p
+                role="alert"
+                className="w-full text-[12px] text-destructive"
+                data-testid="pull-v2-suggestion-batch-error"
+              >
+                {applyError.message as string}
+              </p>;
+            }
+          </div>;
+        }
+
         @if (filesQ.isPending) {
           <p className="text-sm text-muted-foreground">Loading files…</p>;
         } @else {
@@ -919,6 +1096,14 @@ export function PullV2Changes(props: PullV2ChangesProps) @{
                         setDraftError(null);
                       }}
                       onDiscardPending={(id) => void discardPending(id)}
+                      canApplySuggestions={
+                        props.canApplySuggestions ?? props.canWrite ?? false
+                      }
+                      suggestionBatch={batchIds}
+                      applyBusy={applyBusy}
+                      applyError={applyError}
+                      onApplySuggestion={applySuggestion}
+                      onToggleBatch={toggleBatch}
                     />;
                   }
                 </div>

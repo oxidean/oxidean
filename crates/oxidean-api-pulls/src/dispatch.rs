@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{comments, lifecycle, merge_ops, meta, rail, reviews, update_branch};
+use crate::{comments, lifecycle, merge_ops, meta, rail, reviews, suggestions, update_branch};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -44,6 +44,8 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "pull.comments.delete" => arm!(comments::comments_delete(ctx, input)),
         "pull.comments.history" => arm!(comments::comments_history(ctx, input)),
         "pull.comments.resolve" => arm!(comments::comments_resolve(ctx, input)),
+        "pull.suggestions.apply" => arm!(suggestions::apply(ctx, input)),
+        "pull.suggestions.apply_batch" => arm!(suggestions::apply_batch(ctx, input)),
         "pull.reviews.list" => arm!(reviews::reviews_list(ctx, input)),
         "pull.reviews.submit" => arm!(reviews::reviews_submit(ctx, input)),
         "pull.reviews.dismiss" => arm!(reviews::reviews_dismiss(ctx, input)),

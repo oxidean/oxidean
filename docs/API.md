@@ -179,6 +179,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
 | `pull.comments.list` / `create` / `update` / `delete` / `history` / `resolve` | General + line comments; create = verified + Read, update = author, delete = author or Write+, history = Read+, resolve = Write+ | Session (+ capability) |
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |
+| `pull.suggestions.apply` / `apply_batch` | Apply ````suggestion` blocks from RIGHT-side line comments — splices the anchored range at the head tip and commits to the PR head branch (same-repo or fork head), with receive-pack fan-out (synchronize, webhooks, Actions, mirrors). Defaults: "Apply suggestion(s) from code review". Errors: `pull.comment_not_found`, `pull.suggestion_not_found`, `pull.suggestion_invalid`, `pull.suggestion_out_of_range`, `pull.suggestion_overlap`, `pull.invalid_state`, `pull.head_unavailable`, `repo.branch_protection` | Session + verified + Write on head **or** base repo |
 | `pull.reviewRequests.list` / `add` / `remove` | Optional requested reviewers (UX only) | Session (+ capability) |
 | `pull.merge` | Merge / squash / rebase; optional delete head; closing keywords on default branch | Session (+ Write+) |
 | `pull.branchStatus` | Live head-vs-base freshness for a PR: `status` (`up_to_date` \| `behind`), `ahead_count` / `behind_count`, `base_sha` / `head_sha`, `can_update` | Session/anon + Read on base repo |

@@ -17,6 +17,8 @@ const commentsListMock = vi.fn();
 const commentsCreateMock = vi.fn();
 const commentsDeleteMock = vi.fn();
 const reviewsSubmitMock = vi.fn();
+const suggestionsApplyMock = vi.fn();
+const suggestionsApplyBatchMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -34,6 +36,10 @@ vi.mock("@/lib/api-client", () => ({
       },
       reviews: {
         submit: (...args: unknown[]) => reviewsSubmitMock(...args),
+      },
+      suggestions: {
+        apply: (...args: unknown[]) => suggestionsApplyMock(...args),
+        applyBatch: (...args: unknown[]) => suggestionsApplyBatchMock(...args),
       },
     },
   },
@@ -117,6 +123,8 @@ beforeEach(() => {
     commentsCreateMock,
     commentsDeleteMock,
     reviewsSubmitMock,
+    suggestionsApplyMock,
+    suggestionsApplyBatchMock,
   ]) {
     m.mockReset();
   }
@@ -129,6 +137,14 @@ beforeEach(() => {
   commentsCreateMock.mockResolvedValue({ ok: true, data: comment({ id: "c-new", pending: true }) });
   commentsDeleteMock.mockResolvedValue({ ok: true, data: { deleted: true } });
   reviewsSubmitMock.mockResolvedValue({ ok: true, data: { id: "r1" } });
+  suggestionsApplyMock.mockResolvedValue({
+    ok: true,
+    data: { commit_sha: "feed1234", branch: "feature" },
+  });
+  suggestionsApplyBatchMock.mockResolvedValue({
+    ok: true,
+    data: { commit_sha: "feed5678", branch: "feature", applied: 2 },
+  });
 });
 
 afterEach(() => {
@@ -336,6 +352,83 @@ describe("PullV2Changes minimize comments (#263)", () => {
     // The settings menu lives in a portal — assert the persisted setting flag
     // by mounting with comments then checking the toggle path in Chromium
     // (pull-v2-changes.browser.test.tsx covers the portal flow).
+  });
+});
+
+describe("PullV2Changes suggestion blocks (COL-08)", () => {
+  const SUGGESTION_BODY = "try this\n```suggestion\n    better();\n```";
+
+  it("renders a suggested diff and commits a single suggestion", async () => {
+    commentsListMock.mockResolvedValue({
+      ok: true,
+      data: { comments: [comment({ id: "sg1", body: SUGGESTION_BODY })] },
+    });
+    renderChanges();
+    const note = await screen.findByTestId("pull-v2-line-comment");
+    const block = await screen.findByTestId("pull-v2-suggestion");
+    // `-` replays the anchored head line, `+` shows the proposed code.
+    expect(block.textContent).toContain("new();");
+    expect(block.textContent).toContain("better();");
+    fireEvent.click(await screen.findByTestId("pull-v2-suggestion-commit-open"));
+    fireEvent.click(await screen.findByTestId("pull-v2-suggestion-commit"));
+    await waitFor(() => {
+      expect(suggestionsApplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "acme",
+          name: "core",
+          number: 3,
+          commentId: "sg1",
+          suggestionIndex: 0,
+          message: null,
+        }),
+      );
+    });
+    expect(note).toBeTruthy();
+  });
+
+  it("batches suggestion comments into one apply_batch call", async () => {
+    commentsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        comments: [
+          comment({ id: "sg1", body: SUGGESTION_BODY }),
+          comment({ id: "sg2", body: "```suggestion\n    also();\n```" }),
+        ],
+      },
+    });
+    renderChanges();
+    const toggles = await screen.findAllByTestId("pull-v2-suggestion-batch");
+    expect(toggles).toHaveLength(2);
+    fireEvent.click(toggles[0]!);
+    fireEvent.click(toggles[1]!);
+    const strip = await screen.findByTestId("pull-v2-suggestion-batch-strip");
+    expect(strip.textContent).toContain("2 suggestions added to batch");
+    fireEvent.click(await screen.findByTestId("pull-v2-suggestion-batch-open"));
+    fireEvent.click(await screen.findByTestId("pull-v2-suggestion-batch-commit"));
+    await waitFor(() => {
+      expect(suggestionsApplyBatchMock).toHaveBeenCalledWith(
+        expect.objectContaining({ commentIds: ["sg1", "sg2"], message: null }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("pull-v2-suggestion-batch-strip")).toBeNull();
+    });
+  });
+
+  it("hides apply controls on outdated and pending comments", async () => {
+    commentsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        comments: [
+          comment({ id: "sg-old", body: SUGGESTION_BODY, outdated: true }),
+          comment({ id: "sg-pen", body: SUGGESTION_BODY, pending: true }),
+        ],
+      },
+    });
+    renderChanges();
+    await screen.findByTestId("pull-v2-line-comment");
+    expect(screen.queryByTestId("pull-v2-suggestion-commit-open")).toBeNull();
+    expect(screen.queryByTestId("pull-v2-suggestion-batch")).toBeNull();
   });
 });
 

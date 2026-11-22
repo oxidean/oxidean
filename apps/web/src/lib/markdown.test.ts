@@ -96,4 +96,20 @@ describe("renderGfm", () => {
     const html = await renderGfm("```ts\nconst x = 1\n```");
     expect(html).toMatch(/<pre[^>]*class="shiki/);
   });
+
+  it("renders ```suggestion fences as a labeled block, not a code fence", async () => {
+    const html = await renderGfm("try this\n```suggestion\nlet x = 1;\n```\n\nend");
+    expect(html).toContain('class="md-suggestion"');
+    expect(html).toContain("Suggested change");
+    expect(html).toContain("let x = 1;");
+    expect(html).not.toMatch(/language-suggestion|class="shiki/);
+  });
+
+  it("escapes markup inside suggestion fences", async () => {
+    const html = await renderGfm("```suggestion\n<img src=x onerror=alert(1)>\n```");
+    expect(html).toContain('class="md-suggestion"');
+    // No tag is created — the would-be markup stays an escaped text node.
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&#x3C;img");
+  });
 });
