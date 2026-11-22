@@ -39,7 +39,9 @@ async fn dialect_notifications_migration_module_present() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("notif.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
     db.migrate().await.expect("migrate 0018_notifications");
 }
 
@@ -164,7 +166,9 @@ async fn dialect_notification_subject_kinds_migration_present() {
 async fn list_primary_verified_emails_for_users_sqlite() {
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("notif-mail.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
     db.migrate().await.expect("migrate");
 
     assert!(db

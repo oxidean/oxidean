@@ -95,18 +95,29 @@ async fn actor_display_name(db: &Database, actor_id: &str) -> String {
 /// `apps/web/src/lib/notification-queries.ts` (path only — callers prefix
 /// the public origin).
 pub fn subject_path(subject: &NotifySubject, owner: &str, repo: &str) -> String {
+    fn path_segment(value: &str) -> String {
+        let mut url = url::Url::parse("https://forge.invalid").expect("static URL");
+        url.path_segments_mut()
+            .expect("base URL supports path segments")
+            .push(value);
+        url.path().trim_start_matches('/').to_string()
+    }
+
     match subject.kind {
         "pull_request" => format!("/{owner}/{repo}/pull/{}", subject.number),
         "release" => match &subject.subject_ref {
-            Some(tag) => format!("/{owner}/{repo}/releases/{tag}"),
+            Some(tag) => format!("/{owner}/{repo}/releases/{}", path_segment(tag)),
             None => format!("/{owner}/{repo}/releases"),
         },
         "workflow_run" => match &subject.subject_ref {
-            Some(run) => format!("/{owner}/{repo}/actions/{run}"),
+            Some(run) => format!("/{owner}/{repo}/actions/{}", path_segment(run)),
             None => format!("/{owner}/{repo}/actions"),
         },
         "push" => match &subject.subject_ref {
-            Some(r) => format!("/{owner}/{repo}/commits/{r}"),
+            Some(r) => {
+                let encoded = r.split('/').map(path_segment).collect::<Vec<_>>().join("/");
+                format!("/{owner}/{repo}/commits/{encoded}")
+            }
             None => format!("/{owner}/{repo}"),
         },
         _ => format!("/{owner}/{repo}/issues/{}", subject.number),
@@ -363,6 +374,10 @@ mod tests {
             "/alice/app/releases/v1.0"
         );
         assert_eq!(
+            subject_path(&subject("release", 0, "t", Some("v1#rc1")), "alice", "app"),
+            "/alice/app/releases/v1%23rc1"
+        );
+        assert_eq!(
             subject_path(&subject("release", 0, "t", None), "alice", "app"),
             "/alice/app/releases"
         );
@@ -381,6 +396,14 @@ mod tests {
                 "app"
             ),
             "/alice/app/commits/refs/heads/main"
+        );
+        assert_eq!(
+            subject_path(
+                &subject("push", 0, "t", Some("refs/heads/feature#1")),
+                "alice",
+                "app"
+            ),
+            "/alice/app/commits/refs/heads/feature%231"
         );
     }
 

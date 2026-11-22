@@ -91,7 +91,7 @@ Then:
 
 1. Sign up or click **Resend email**, then open Mailpit — verify mail should appear.
 2. Or set **Admin → Auth → email provider** to **smtp** if you previously chose log/resend.
-3. Notification mail rides the same channel: comment on an issue in a repo you watch (`all` level) and the notification email lands in Mailpit too. `OXIDEAN_NOTIFY_EMAIL_ENABLED=0` disables notification mail only — auth mail is unaffected.
+3. Notification mail rides the same channel: have a second account comment on an issue in a repo that the first account watches (`all` level). The first account's notification email lands in Mailpit too. `OXIDEAN_NOTIFY_EMAIL_ENABLED=0` disables notification mail only — auth mail is unaffected.
 
 ## Resend stub
 
