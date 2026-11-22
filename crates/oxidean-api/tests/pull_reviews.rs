@@ -504,6 +504,12 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     )
     .await;
     assert_eq!(second_team_member["ok"], true, "{second_team_member}");
+    db.set_user_banned_at(
+        second_reviewer_v["data"]["id"].as_str().unwrap(),
+        "2000-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
     let team_id = team["data"]["id"].as_str().unwrap();
     let limited_members = db.list_team_members_limited(team_id, 1).await.unwrap();
     assert_eq!(limited_members.len(), 1);
@@ -567,11 +573,12 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     .await;
     assert_eq!(requests["ok"], true, "{requests}");
     let requested_usernames = requests["data"]["usernames"].as_array().unwrap();
-    for username in ["teamreviewer", "teamreviewer2"] {
-        assert!(requested_usernames
-            .iter()
-            .any(|requested| requested.as_str() == Some(username)));
-    }
+    assert!(requested_usernames
+        .iter()
+        .any(|requested| requested.as_str() == Some("teamreviewer")));
+    assert!(requested_usernames
+        .iter()
+        .all(|requested| requested.as_str() != Some("teamreviewer2")));
     let detail = rpc_json(
         &app,
         &reviewer_cookie,

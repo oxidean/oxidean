@@ -3,15 +3,17 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::backend::{
-    validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
-    CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
-    FileChange, FilesCommit, FlatTreeEntry, GitBackend, GitError, GitIdent, GitRef, GrepHit,
-    GrepResult, NameStatusKind, NameStatusRow, PushEventCommit, RawCommit, RemoteAuthKind,
-    RemoteCredentials, RevList, SizedBlobEntry, TreeEntry, TreeEntryKind, TreeWriteEntry,
-    ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    validate_remote_url, ArchiveFormat, BlameFile, BlameLine, ChangedPaths, CommitDetail,
+    CommitSummary, CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary,
+    DiffFile, DiffResult, FileChange, FilesCommit, FlatTreeEntry, GitBackend, GitError, GitIdent,
+    GitRef, GrepHit, GrepResult, NameStatusKind, NameStatusRow, PushEventCommit, RawCommit,
+    RemoteAuthKind, RemoteCredentials, RevList, SizedBlobEntry, TreeEntry, TreeEntryKind,
+    TreeWriteEntry, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES,
+    FORGE_NOREPLY_EMAIL, MAX_CHANGED_PATH_OUTPUT_BYTES,
 };
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.
@@ -2647,6 +2649,117 @@ impl GitBackend for CliGitBackend {
         })
     }
 
+    async fn changed_paths(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        limit: usize,
+    ) -> Result<ChangedPaths, GitError> {
+        let base = validate_treeish(base)?;
+        let head = validate_treeish(head)?;
+        let repo_s = repo_str(repo)?;
+        let mut commits_only = true;
+        for tip in [base, head] {
+            let mut resolved = false;
+            for peel in ["{commit}", "{tree}"] {
+                let rev = Command::new("git")
+                    .args([
+                        "-C",
+                        repo_s,
+                        "rev-parse",
+                        "--verify",
+                        &format!("{tip}^{peel}"),
+                    ])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await
+                    .map_err(|error| GitError::Process(format!("failed to spawn git: {error}")))?;
+                if rev.status.success() {
+                    resolved = true;
+                    if peel == "{tree}" {
+                        commits_only = false;
+                    }
+                    break;
+                }
+            }
+            if !resolved {
+                return Err(GitError::NotFound(format!("ref {tip}")));
+            }
+        }
+        let range = if commits_only {
+            format!("{base}...{head}")
+        } else {
+            format!("{base}..{head}")
+        };
+        let mut child = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--find-renames",
+                "--name-only",
+                "-z",
+                range.as_str(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| GitError::Process(format!("failed to spawn git: {error}")))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| GitError::Process("git diff paths stdout unavailable".into()))?;
+        let mut stdout = stdout.take((MAX_CHANGED_PATH_OUTPUT_BYTES + 1) as u64);
+        let mut bytes = Vec::new();
+        if let Err(error) = stdout.read_to_end(&mut bytes).await {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(GitError::Process(format!(
+                "failed to read git diff paths: {error}"
+            )));
+        }
+        if bytes.len() > MAX_CHANGED_PATH_OUTPUT_BYTES {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Ok(ChangedPaths {
+                paths: Vec::new(),
+                truncated: true,
+            });
+        }
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|error| GitError::Process(format!("failed to wait for git: {error}")))?;
+        if !output.status.success() {
+            return Err(GitError::Process(format!(
+                "git diff paths failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let mut paths = Vec::with_capacity(limit.min(1024));
+        let mut truncated = false;
+        for raw_path in bytes
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+        {
+            if paths.len() == limit {
+                truncated = true;
+                break;
+            }
+            paths.push(
+                String::from_utf8(raw_path.to_vec())
+                    .map_err(|_| GitError::Process("git diff returned a non-UTF-8 path".into()))?,
+            );
+        }
+        Ok(ChangedPaths { paths, truncated })
+    }
+
     async fn blame(&self, repo: &Path, refname: &str, path: &str) -> Result<BlameFile, GitError> {
         let refname = validate_treeish(refname)?;
         let path = validate_repo_rel_path(path)?;
@@ -5112,6 +5225,66 @@ mod tests {
             "expected unified patch content, got: {}",
             hello.patch
         );
+    }
+
+    #[tokio::test]
+    async fn changed_paths_caps_results_without_materializing_patches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("changed_paths.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "base",
+            &[("base.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        let base = git
+            .list_refs(&bare)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|reference| reference.name == "refs/heads/main")
+            .unwrap()
+            .oid;
+        git.commit_files(
+            &bare,
+            "feature",
+            "main",
+            "head",
+            &[
+                FileChange::Upsert {
+                    path: "one.txt".into(),
+                    content: b"one\n".to_vec(),
+                },
+                FileChange::Upsert {
+                    path: "two.txt".into(),
+                    content: b"two\n".to_vec(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+
+        let limited = git
+            .changed_paths(&bare, &base, "feature", 1)
+            .await
+            .expect("limited changed paths");
+        assert_eq!(limited.paths.len(), 1);
+        assert!(limited.truncated);
+
+        let complete = git
+            .changed_paths(&bare, &base, "feature", 3)
+            .await
+            .expect("complete changed paths");
+        assert_eq!(complete.paths, ["one.txt", "two.txt"]);
+        assert!(!complete.truncated);
     }
 
     #[tokio::test]

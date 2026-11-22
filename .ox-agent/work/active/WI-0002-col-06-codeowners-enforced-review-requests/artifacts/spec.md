@@ -8,7 +8,7 @@ Use repository ownership rules to request the right pull-request reviewers and, 
 
 - One canonical source: `.github/CODEOWNERS` from the pull request base branch.
 - Parse a bounded GitHub-style subset: blank/comment lines; root-relative patterns; `*`, `**`, `?`, character classes, and leading `/`; one or more owners; later matching lines replace earlier owners for that path.
-- Owners: existing `@username` or `@<repository-owner>/<team-slug>` from the owning organization. Owners must have write-capable access to the repository; team owners are expanded to current eligible members for user-request and notification compatibility.
+- Owners: existing `@username` or `@<repository-owner>/<team-slug>` from the owning organization. Owners must be unbanned and have write-capable access to the repository; team owners are expanded to current eligible members for user-request and notification compatibility.
 - Automatically request owners for matching changed paths on PR creation and whenever the changed-file set is refreshed.
 - Do not request the pull request author as a reviewer. If a matched path has no eligible owner other than the author, surface an evaluation error; that path cannot satisfy required owner approval.
 - Expose declared owner handles in pull status, not expanded team-member usernames.

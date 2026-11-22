@@ -93,8 +93,11 @@ pub async fn evaluate(
             Some(line) => format!("line {line}: {}", error.message),
             None => error.message.clone(),
         }));
-    let diff = match git.diff(&bare, &pull.base_sha, &pull.head_sha).await {
-        Ok(diff) => diff,
+    let changed_paths = match git
+        .changed_paths(&bare, &pull.base_sha, &pull.head_sha, MAX_CHANGED_PATHS)
+        .await
+    {
+        Ok(paths) => paths,
         Err(_) => {
             evaluation
                 .status
@@ -104,10 +107,11 @@ pub async fn evaluate(
             return Ok(evaluation);
         }
     };
-    if diff.files.len() > MAX_CHANGED_PATHS {
-        evaluation.status.errors.push(format!(
-            "changed file set exceeds {MAX_CHANGED_PATHS} paths"
-        ));
+    if changed_paths.truncated {
+        evaluation
+            .status
+            .errors
+            .push("changed path set exceeds configured CODEOWNERS limits".into());
         evaluation.approved = !required;
         return Ok(evaluation);
     }
@@ -121,11 +125,7 @@ pub async fn evaluate(
     };
     let mut resolved_owners: BTreeMap<Owner, Result<Vec<String>, String>> = BTreeMap::new();
 
-    let paths = diff
-        .files
-        .iter()
-        .map(|file| file.path.clone())
-        .collect::<Vec<_>>();
+    let paths = changed_paths.paths;
     let declared_by_path = match parsed.owners_for_paths(&paths) {
         Ok(owners) => owners,
         Err(error) => {
@@ -142,11 +142,11 @@ pub async fn evaluate(
         return Ok(evaluation);
     }
 
-    for (file, declared) in diff.files.into_iter().zip(declared_by_path) {
+    for (path, declared) in paths.into_iter().zip(declared_by_path) {
         let declared_handles = declared.iter().map(owner_handle).collect::<Vec<_>>();
         if declared.is_empty() {
             evaluation.status.paths.push(PullCodeownersPathStatus {
-                path: file.path,
+                path,
                 owners: declared_handles,
                 approved: true,
             });
@@ -173,17 +173,14 @@ pub async fn evaluate(
                 }
                 Err(error) => {
                     owner_resolution_failed = true;
-                    evaluation
-                        .status
-                        .errors
-                        .push(format!("{}: {error}", file.path));
+                    evaluation.status.errors.push(format!("{}: {error}", path));
                 }
             }
         }
         if owner_ids.is_empty() && !owner_resolution_failed {
             evaluation.status.errors.push(format!(
                 "{}: no eligible code owner can approve this pull request",
-                file.path
+                path
             ));
         }
         let is_approved = !owner_ids.is_empty()
@@ -206,7 +203,7 @@ pub async fn evaluate(
             return Ok(evaluation);
         }
         evaluation.status.paths.push(PullCodeownersPathStatus {
-            path: file.path,
+            path,
             owners: declared_handles,
             approved: is_approved,
         });
@@ -242,6 +239,11 @@ async fn resolve_owner(
                 .await
                 .map_err(|_| "owner access could not be verified".to_string())?
                 .ok_or_else(|| format!("owner @{username} is unknown or lacks write access"))?;
+            if user.banned_at.is_some() {
+                return Err(format!(
+                    "owner @{username} is unknown or lacks write access"
+                ));
+            }
             let capability = repo::effective_capability(db, Some(&user.id), repository, owner)
                 .await
                 .map_err(|_| "owner access could not be verified".to_string())?;
@@ -306,6 +308,9 @@ async fn resolve_owner(
                 else {
                     continue;
                 };
+                if user.banned_at.is_some() {
+                    continue;
+                }
                 let capability = repo::effective_capability(db, Some(&user.id), repository, owner)
                     .await
                     .map_err(|_| "team member access could not be verified".to_string())?;

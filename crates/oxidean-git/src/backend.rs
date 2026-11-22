@@ -328,6 +328,14 @@ pub struct DiffResult {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedPaths {
+    pub paths: Vec<String>,
+    pub truncated: bool,
+}
+
+pub const MAX_CHANGED_PATH_OUTPUT_BYTES: usize = 1_048_576;
+
 /// Optional knobs for a unified diff (WI-0001 diff settings).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffOpts {
@@ -675,6 +683,32 @@ pub trait GitBackend: Send + Sync {
         _opts: &DiffOpts,
     ) -> Result<DiffResult, GitError> {
         self.diff(repo, base, head).await
+    }
+
+    async fn changed_paths(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        limit: usize,
+    ) -> Result<ChangedPaths, GitError> {
+        let diff = self.diff(repo, base, head).await?;
+        let truncated = diff.truncated
+            || diff.files.len() > limit
+            || diff
+                .files
+                .iter()
+                .take(limit)
+                .map(|file| file.path.len())
+                .sum::<usize>()
+                > MAX_CHANGED_PATH_OUTPUT_BYTES;
+        let paths = diff
+            .files
+            .into_iter()
+            .take(limit)
+            .map(|file| file.path)
+            .collect();
+        Ok(ChangedPaths { paths, truncated })
     }
 
     /// Per-line blame for a text file (`git blame --line-porcelain`).

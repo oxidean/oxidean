@@ -1,5 +1,5 @@
 schema_version: 1
-generated_at: "2026-11-22T22:14:00Z"
+generated_at: "2026-11-22T22:28:06Z"
 files:
     - path: context/decisions/adr-2026-11-22-codeowners-enforced-review-requests.md
       sha256: 78e5ff1eabd56efec0a3ac7af1a08a65f493f6e90c2a886e765b17dfc25e0e33

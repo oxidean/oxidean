@@ -8,6 +8,8 @@ The read-only review compared the CODEOWNERS implementation with the WI-0002 spe
 - Changed invalid repository paths from silently uncovered to an evaluation error; added a regression test.
 - Added support for a trailing `/` directory rule and documented it in the specification.
 - Recorded the actor that refreshes the pull head as `requested_by` for newly inserted automatic review requests.
+- Excluded banned users from direct and team owner eligibility.
+- Switched CODEOWNERS changed-path enumeration to a name-only Git diff capped at 1 MiB and the configured path count, instead of materializing patch content.
 
 ## Findings assessed against the contract
 
@@ -15,6 +17,12 @@ The read-only review compared the CODEOWNERS implementation with the WI-0002 spe
 - CODEOWNERS and changed paths are intentionally evaluated at the PR's stored base commit, as required by the source-selection contract.
 - Pull status returns declared user/team handles without expanding team membership. Team owners still fan out to individual review requests, so the existing review-request list exposes eligible reviewer usernames; this privacy tradeoff is documented in the ADR and PR description.
 - Creation notifies requested reviewers through the existing `pr_opened` fan-out; head refresh emits `pr_review_requested` for newly added requests.
+
+## Low-severity notes assessed
+
+- Owner handles resolve using the canonical spelling stored by the account/team records; case-insensitive username resolution is not part of this contract.
+- Evaluation intentionally uses the pull's stored base commit. A base-only advance is observed when the pull is next synchronized or edited.
+- Existing reviewer requests remain across new commits; repeated refreshes do not re-notify already-requested owners, matching the additive/idempotent request contract.
 
 ## Remaining external gates
 
