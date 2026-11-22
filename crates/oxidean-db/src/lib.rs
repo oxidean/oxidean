@@ -386,10 +386,7 @@ impl Database {
         org_teams::find_team_by_slug(self.require_pool()?, org_id, slug).await
     }
 
-    pub async fn find_org_team_by_id(
-        &self,
-        team_id: &str,
-    ) -> Result<Option<OrgTeamRow>, String> {
+    pub async fn find_org_team_by_id(&self, team_id: &str) -> Result<Option<OrgTeamRow>, String> {
         org_teams::find_team_by_id(self.require_pool()?, team_id).await
     }
 
@@ -474,10 +471,7 @@ impl Database {
         org_teams::find_team_repo(self.require_pool()?, team_id, repo_id).await
     }
 
-    pub async fn list_team_repos(
-        &self,
-        team_id: &str,
-    ) -> Result<Vec<OrgTeamRepoListRow>, String> {
+    pub async fn list_team_repos(&self, team_id: &str) -> Result<Vec<OrgTeamRepoListRow>, String> {
         org_teams::list_team_repos(self.require_pool()?, team_id).await
     }
 

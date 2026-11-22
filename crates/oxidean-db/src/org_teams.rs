@@ -85,12 +85,8 @@ macro_rules! map_team {
             org_id: row
                 .try_get("org_id")
                 .map_err(|e| format!("team row: {e}"))?,
-            slug: row
-                .try_get("slug")
-                .map_err(|e| format!("team row: {e}"))?,
-            name: row
-                .try_get("name")
-                .map_err(|e| format!("team row: {e}"))?,
+            slug: row.try_get("slug").map_err(|e| format!("team row: {e}"))?,
+            name: row.try_get("name").map_err(|e| format!("team row: {e}"))?,
             description: row
                 .try_get("description")
                 .map_err(|e| format!("team row: {e}"))?,
@@ -258,9 +254,9 @@ pub async fn find_team_by_slug(
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -272,9 +268,9 @@ pub async fn find_team_by_slug(
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -286,9 +282,9 @@ pub async fn find_team_by_slug(
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -305,9 +301,9 @@ pub async fn find_team_by_id(pool: &DbPool, team_id: &str) -> Result<Option<OrgT
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -318,9 +314,9 @@ pub async fn find_team_by_id(pool: &DbPool, team_id: &str) -> Result<Option<OrgT
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -331,9 +327,9 @@ pub async fn find_team_by_id(pool: &DbPool, team_id: &str) -> Result<Option<OrgT
             .await
             .map_err(|e| format!("find org team failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team!(&r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -366,12 +362,8 @@ ORDER BY lower(t.slug) ASC",
                         org_id: row
                             .try_get("org_id")
                             .map_err(|e| format!("team list: {e}"))?,
-                        slug: row
-                            .try_get("slug")
-                            .map_err(|e| format!("team list: {e}"))?,
-                        name: row
-                            .try_get("name")
-                            .map_err(|e| format!("team list: {e}"))?,
+                        slug: row.try_get("slug").map_err(|e| format!("team list: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("team list: {e}"))?,
                         description: row
                             .try_get("description")
                             .map_err(|e| format!("team list: {e}"))?,
@@ -413,12 +405,8 @@ ORDER BY lower(t.slug) ASC",
                         org_id: row
                             .try_get("org_id")
                             .map_err(|e| format!("team list: {e}"))?,
-                        slug: row
-                            .try_get("slug")
-                            .map_err(|e| format!("team list: {e}"))?,
-                        name: row
-                            .try_get("name")
-                            .map_err(|e| format!("team list: {e}"))?,
+                        slug: row.try_get("slug").map_err(|e| format!("team list: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("team list: {e}"))?,
                         description: row
                             .try_get("description")
                             .map_err(|e| format!("team list: {e}"))?,
@@ -460,12 +448,8 @@ ORDER BY lower(t.slug) ASC",
                         org_id: row
                             .try_get("org_id")
                             .map_err(|e| format!("team list: {e}"))?,
-                        slug: row
-                            .try_get("slug")
-                            .map_err(|e| format!("team list: {e}"))?,
-                        name: row
-                            .try_get("name")
-                            .map_err(|e| format!("team list: {e}"))?,
+                        slug: row.try_get("slug").map_err(|e| format!("team list: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("team list: {e}"))?,
                         description: row
                             .try_get("description")
                             .map_err(|e| format!("team list: {e}"))?,
@@ -649,9 +633,9 @@ pub async fn find_team_member(
             .await
             .map_err(|e| format!("find team member failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_member!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_member!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -663,9 +647,9 @@ pub async fn find_team_member(
             .await
             .map_err(|e| format!("find team member failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_member!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_member!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -677,9 +661,9 @@ pub async fn find_team_member(
             .await
             .map_err(|e| format!("find team member failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_member!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_member!(&r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -849,11 +833,7 @@ WHERE team_id = ?1 AND user_id = ?2",
 }
 
 /// Remove one member from one team.
-pub async fn delete_team_member(
-    pool: &DbPool,
-    team_id: &str,
-    user_id: &str,
-) -> Result<(), String> {
+pub async fn delete_team_member(pool: &DbPool, team_id: &str, user_id: &str) -> Result<(), String> {
     let n = match pool {
         DbPool::Postgres(p) => {
             sqlx::query("DELETE FROM organization_team_members WHERE team_id = $1 AND user_id = $2")
@@ -1003,9 +983,9 @@ pub async fn find_team_repo(
             .await
             .map_err(|e| format!("find team repo failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_repo!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_repo!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -1017,9 +997,9 @@ pub async fn find_team_repo(
             .await
             .map_err(|e| format!("find team repo failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_repo!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_repo!(&r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -1031,9 +1011,9 @@ pub async fn find_team_repo(
             .await
             .map_err(|e| format!("find team repo failed: {e}"))?;
             match row {
-            Some(r) => Ok(Some(map_team_repo!(&r))),
-            None => Ok(None),
-        }
+                Some(r) => Ok(Some(map_team_repo!(&r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -1089,39 +1069,35 @@ WHERE team_id = ?1 AND repo_id = ?2",
 }
 
 /// Remove a team repo grant.
-pub async fn delete_team_repo(
-    pool: &DbPool,
-    team_id: &str,
-    repo_id: &str,
-) -> Result<(), String> {
+pub async fn delete_team_repo(pool: &DbPool, team_id: &str, repo_id: &str) -> Result<(), String> {
     let n = match pool {
-        DbPool::Postgres(p) => sqlx::query(
-            "DELETE FROM organization_team_repos WHERE team_id = $1 AND repo_id = $2",
-        )
-        .bind(team_id)
-        .bind(repo_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove team repo failed: {e}"))?
-        .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM organization_team_repos WHERE team_id = ? AND repo_id = ?",
-        )
-        .bind(team_id)
-        .bind(repo_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove team repo failed: {e}"))?
-        .rows_affected(),
-        DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM organization_team_repos WHERE team_id = ?1 AND repo_id = ?2",
-        )
-        .bind(team_id)
-        .bind(repo_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove team repo failed: {e}"))?
-        .rows_affected(),
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM organization_team_repos WHERE team_id = $1 AND repo_id = $2")
+                .bind(team_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove team repo failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM organization_team_repos WHERE team_id = ? AND repo_id = ?")
+                .bind(team_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove team repo failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM organization_team_repos WHERE team_id = ?1 AND repo_id = ?2")
+                .bind(team_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove team repo failed: {e}"))?
+                .rows_affected()
+        }
     };
     if n == 0 {
         return Err("team repo grant not found".into());
@@ -1369,54 +1345,48 @@ pub async fn max_team_permission_for_user_repo(
     const TIER: &str = "CASE LOWER(TRIM(tr.permission))
         WHEN 'admin' THEN 3 WHEN 'write' THEN 2 WHEN 'read' THEN 1 ELSE 0 END";
     let rank = match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT MAX({TIER}) FROM organization_team_repos tr
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT MAX({TIER}) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = $1 AND tm.user_id = $2
                    AND EXISTS (SELECT 1 FROM organization_members m
                                WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
-            )))
-            .bind(repo_id)
-            .bind(user_id)
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("max team permission failed: {e}"))?
-        }
-        DbPool::MySql(p) => {
-            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT MAX({TIER}) FROM organization_team_repos tr
+        )))
+        .bind(repo_id)
+        .bind(user_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("max team permission failed: {e}"))?,
+        DbPool::MySql(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT MAX({TIER}) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = ? AND tm.user_id = ?
                    AND EXISTS (SELECT 1 FROM organization_members m
                                WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
-            )))
-            .bind(repo_id)
-            .bind(user_id)
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("max team permission failed: {e}"))?
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT MAX({TIER}) FROM organization_team_repos tr
+        )))
+        .bind(repo_id)
+        .bind(user_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("max team permission failed: {e}"))?,
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT MAX({TIER}) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
                  WHERE tr.repo_id = ?1 AND tm.user_id = ?2
                    AND EXISTS (SELECT 1 FROM organization_members m
                                WHERE m.org_id = t.org_id AND m.user_id = tm.user_id)"
-            )))
-            .bind(repo_id)
-            .bind(user_id)
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("max team permission failed: {e}"))?
-        }
+        )))
+        .bind(repo_id)
+        .bind(user_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("max team permission failed: {e}"))?,
     };
     Ok(match rank {
         3 => Some("admin".into()),

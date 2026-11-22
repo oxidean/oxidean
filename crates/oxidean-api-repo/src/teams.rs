@@ -19,7 +19,10 @@ fn db_err(e: String) -> AppError {
             "no database configured for this instance",
         )
     } else if e == "team repo grant not found" {
-        AppError::new("org.team_repo_not_found", "team has no grant on that repository")
+        AppError::new(
+            "org.team_repo_not_found",
+            "team has no grant on that repository",
+        )
     } else {
         tracing::error!("repo teams db error: {e}");
         AppError::new("repo.internal", "repository operation failed")
@@ -91,7 +94,10 @@ async fn org_and_team(
         .await
         .map_err(|e| {
             if e == "database not configured" {
-                AppError::new("db.not_configured", "no database configured for this instance")
+                AppError::new(
+                    "db.not_configured",
+                    "no database configured for this instance",
+                )
             } else {
                 tracing::error!("repo teams db error: {e}");
                 AppError::new("repo.internal", "repository operation failed")
@@ -102,10 +108,7 @@ async fn org_and_team(
 }
 
 /// `repo.teams.add` — repo Admin; upsert grant (GitHub PUT parity).
-pub async fn add(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<RepoTeamPublic, AppError> {
+pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTeamPublic, AppError> {
     let req: RepoTeamsAddRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -146,10 +149,7 @@ pub async fn add(
 }
 
 /// `repo.teams.update` — repo Admin; grant must exist.
-pub async fn update(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<RepoTeamPublic, AppError> {
+pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTeamPublic, AppError> {
     let req: RepoTeamsUpdateRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -166,7 +166,10 @@ pub async fn update(
         .await
         .map_err(db_err)?
         .ok_or_else(|| {
-            AppError::new("org.team_repo_not_found", "team has no grant on that repository")
+            AppError::new(
+                "org.team_repo_not_found",
+                "team has no grant on that repository",
+            )
         })?;
 
     ctx.db
@@ -209,10 +212,7 @@ pub async fn update(
 }
 
 /// `repo.teams.remove` — repo Admin; grant must exist.
-pub async fn remove(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, AppError> {
+pub async fn remove(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let req: RepoTeamsRemoveRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",

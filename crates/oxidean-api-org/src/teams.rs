@@ -5,14 +5,13 @@
 //! `maintainer` can manage the team's members/repo grants without org Admin.
 
 use oxidean_core::{
-    AppError, OrgSlugRequest, OrgTeamMemberPublic, OrgTeamPublic, OrgTeamRepoPublic,
-    OrgTeamSlugRequest, OrgTeamsCreateRequest, OrgTeamsListResponse,
-    OrgTeamsMembersAddRequest, OrgTeamsMembersListResponse, OrgTeamsMembersRemoveRequest,
-    OrgTeamsMembersSetRoleRequest, OrgTeamsReposAddRequest, OrgTeamsReposListResponse,
-    OrgTeamsReposRemoveRequest, OrgTeamsReposUpdateRequest, OrgTeamsUpdateRequest, OrgRole,
-    TeamRole,
+    AppError, OrgRole, OrgSlugRequest, OrgTeamMemberPublic, OrgTeamPublic, OrgTeamRepoPublic,
+    OrgTeamSlugRequest, OrgTeamsCreateRequest, OrgTeamsListResponse, OrgTeamsMembersAddRequest,
+    OrgTeamsMembersListResponse, OrgTeamsMembersRemoveRequest, OrgTeamsMembersSetRoleRequest,
+    OrgTeamsReposAddRequest, OrgTeamsReposListResponse, OrgTeamsReposRemoveRequest,
+    OrgTeamsReposUpdateRequest, OrgTeamsUpdateRequest, TeamRole,
 };
-use oxidean_db::{OrganizationRow, OrgTeamListRow, OrgTeamRow, UserRow};
+use oxidean_db::{OrgTeamListRow, OrgTeamRow, OrganizationRow, UserRow};
 
 use crate::members::require_admin_plus;
 use oxidean_api_core::audit;
@@ -24,15 +23,24 @@ use oxidean_api_core::rpc::RpcCtx;
 /// DB-error mapping for the teams domain — stable reason codes per spec.
 fn team_db_err(e: String) -> AppError {
     if e == "database not configured" {
-        AppError::new("db.not_configured", "no database configured for this instance")
+        AppError::new(
+            "db.not_configured",
+            "no database configured for this instance",
+        )
     } else if e.contains("UNIQUE") || e.contains("unique") || e.contains("Duplicate") {
-        AppError::new("org.team_slug_taken", "a team with that slug already exists")
+        AppError::new(
+            "org.team_slug_taken",
+            "a team with that slug already exists",
+        )
     } else if e == "org team not found" {
         AppError::new("org.team_not_found", "team not found")
     } else if e == "team member not found" {
         AppError::new("org.team_member_not_found", "team member not found")
     } else if e == "team repo grant not found" {
-        AppError::new("org.team_repo_not_found", "team has no grant on that repository")
+        AppError::new(
+            "org.team_repo_not_found",
+            "team has no grant on that repository",
+        )
     } else {
         tracing::error!("org teams db error: {e}");
         AppError::new("org.internal", "organization operation failed")
@@ -92,7 +100,11 @@ fn team_public(row: &OrgTeamListRow) -> OrgTeamPublic {
 
 /// `org.teams.get`/`update`/`delete`/`members.*`/`repos.*` resolve a team
 /// inside its org by slug — identical `org.team_not_found` for misses.
-async fn load_team(ctx: &RpcCtx, org: &OrganizationRow, team_slug: &str) -> Result<OrgTeamRow, AppError> {
+async fn load_team(
+    ctx: &RpcCtx,
+    org: &OrganizationRow,
+    team_slug: &str,
+) -> Result<OrgTeamRow, AppError> {
     let slug = team_slug.trim();
     if slug.is_empty() {
         return Err(AppError::new("rpc.bad_input", "team_slug is required"));
@@ -140,7 +152,10 @@ pub async fn list(
 ) -> Result<OrgTeamsListResponse, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgSlugRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.teams.list input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.teams.list input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_org_role(ctx, &org.id, &caller.id).await?;
@@ -151,14 +166,10 @@ pub async fn list(
 }
 
 /// `org.teams.get` — any org member; single team with counts.
-pub async fn get(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<OrgTeamPublic, AppError> {
+pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgTeamPublic, AppError> {
     let caller = require_verified(ctx).await?;
-    let req: OrgTeamSlugRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.teams.get input: {e}"))
-    })?;
+    let req: OrgTeamSlugRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid org.teams.get input: {e}")))?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_org_role(ctx, &org.id, &caller.id).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
@@ -172,13 +183,13 @@ pub async fn get(
 }
 
 /// `org.teams.create` — Admin+; `team_slug` optional (derived from `name`).
-pub async fn create(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<OrgTeamPublic, AppError> {
+pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgTeamPublic, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgTeamsCreateRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.teams.create input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.teams.create input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_admin_plus(ctx, &org, &caller).await?;
@@ -199,7 +210,12 @@ pub async fn create(
     }
     // Explicit slugs normalize lowercase — `OPS-TEAM` means `ops-team`
     // (GitHub parity) and hits the case-insensitive uniqueness check.
-    let slug = match req.team_slug.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let slug = match req
+        .team_slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(s) => s.to_lowercase(),
         None => derive_team_slug(name),
     };
@@ -252,19 +268,24 @@ pub async fn create(
 }
 
 /// `org.teams.update` — Admin+ or maintainer; rename/redesc/reslug.
-pub async fn update(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<OrgTeamPublic, AppError> {
+pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgTeamPublic, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgTeamsUpdateRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.teams.update input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.teams.update input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
     require_team_admin(ctx, &org, &team.id, &caller).await?;
 
-    let slug = match req.new_slug.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let slug = match req
+        .new_slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(s) => s.to_lowercase(),
         None => team.slug.clone(),
     };
@@ -338,19 +359,22 @@ pub async fn update(
 }
 
 /// `org.teams.delete` — Admin+; cascades members + repo grants.
-pub async fn delete(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, AppError> {
+pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgTeamSlugRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.teams.delete input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.teams.delete input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_admin_plus(ctx, &org, &caller).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
 
-    ctx.db.delete_org_team(&team.id).await.map_err(team_db_err)?;
+    ctx.db
+        .delete_org_team(&team.id)
+        .await
+        .map_err(team_db_err)?;
 
     audit::record(
         ctx,
@@ -584,7 +608,11 @@ pub async fn repos_list(
     let _ = require_org_role(ctx, &org.id, &caller.id).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
 
-    let rows = ctx.db.list_team_repos(&team.id).await.map_err(team_db_err)?;
+    let rows = ctx
+        .db
+        .list_team_repos(&team.id)
+        .await
+        .map_err(team_db_err)?;
     let mut repos = Vec::with_capacity(rows.len());
     for row in rows {
         repos.push(OrgTeamRepoPublic {
@@ -693,7 +721,10 @@ pub async fn repos_update(
         .await
         .map_err(team_db_err)?
         .ok_or_else(|| {
-            AppError::new("org.team_repo_not_found", "team has no grant on that repository")
+            AppError::new(
+                "org.team_repo_not_found",
+                "team has no grant on that repository",
+            )
         })?;
 
     let row = ctx
@@ -763,7 +794,10 @@ pub async fn repos_remove(
         Some((&caller.id, &caller.username)),
         "org.team_repo_remove",
         Some(("team", &team.id)),
-        Some(format!("removed team {} from {}/{}", team.slug, org.slug, repo.name)),
+        Some(format!(
+            "removed team {} from {}/{}",
+            team.slug, org.slug, repo.name
+        )),
     )
     .await;
 

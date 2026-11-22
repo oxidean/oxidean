@@ -265,7 +265,10 @@ async fn team_crud_and_slug_rules() {
         Some(&f.member_cookie),
     )
     .await;
-    assert_eq!(del_forbidden["error"]["code"], "org.forbidden", "{del_forbidden}");
+    assert_eq!(
+        del_forbidden["error"]["code"], "org.forbidden",
+        "{del_forbidden}"
+    );
     let (_, del) = rpc_json(
         &app,
         r#"{"procedure":"org.teams.delete","input":{"slug":"crud-org","team_slug":"operations"}}"#,
@@ -371,7 +374,10 @@ async fn team_membership_rules() {
         Some(&f.member_cookie),
     )
     .await;
-    assert_eq!(maint_add["ok"], true, "maintainer adds member — {maint_add}");
+    assert_eq!(
+        maint_add["ok"], true,
+        "maintainer adds member — {maint_add}"
+    );
 
     // ...but cannot delete the team.
     let (_, maint_del) = rpc_json(
@@ -606,7 +612,10 @@ async fn team_grant_highest_wins_and_org_only() {
         Some(&f.member_cookie),
     )
     .await;
-    assert_eq!(get["data"]["can_write"], true, "collab write > team read — {get}");
+    assert_eq!(
+        get["data"]["can_write"], true,
+        "collab write > team read — {get}"
+    );
     assert_eq!(get["data"]["can_admin"], false, "{get}");
 
     // A second team with admin raises to admin (teams union).
@@ -785,7 +794,10 @@ async fn repo_teams_surface() {
         Some(&f.owner_cookie),
     )
     .await;
-    assert_eq!(org_only["error"]["code"], "repo.teams.org_only", "{org_only}");
+    assert_eq!(
+        org_only["error"]["code"], "repo.teams.org_only",
+        "{org_only}"
+    );
 
     // Grant from repo side → member reads.
     let (_, m) = rpc_json(

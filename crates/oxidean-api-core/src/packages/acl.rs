@@ -88,7 +88,9 @@ pub async fn owner_capability(
             None,
             MemberBasePermission::None,
             None,
-            public, None));
+            public,
+            None,
+        ));
     };
 
     if package.owner_type == "user" {
@@ -99,7 +101,9 @@ pub async fn owner_capability(
             None,
             MemberBasePermission::None,
             None,
-            public, None));
+            public,
+            None,
+        ));
     }
 
     // org-owned unlinked — org 2FA lockout (#130) suppresses grants for
@@ -107,8 +111,7 @@ pub async fn owner_capability(
     let (org_role, member_base, _locked) =
         org_member_capability_sources(db, &package.owner_id, uid).await?;
     let public = is_public(&package.visibility);
-    Ok(coalesce(false, org_role, member_base, None, public,
-            None))
+    Ok(coalesce(false, org_role, member_base, None, public, None))
 }
 
 pub fn authorize(

@@ -21,8 +21,8 @@ pub mod rename_transfer;
 pub mod search;
 pub mod social_lists;
 pub mod sync_fork;
-pub mod teams;
 pub mod tag_protection;
+pub mod teams;
 pub mod templates;
 pub mod units;
 
