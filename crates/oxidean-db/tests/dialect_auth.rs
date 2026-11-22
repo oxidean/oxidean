@@ -325,3 +325,99 @@ async fn user_emails_backfill_uniqueness_and_primary_sync() {
     assert_eq!(mirrored.email, "alice-work@example.com");
     assert!(mirrored.email_verified_at.is_some());
 }
+
+/// NOT-01: `list_primary_verified_emails_for_users` parity — same matrix
+/// as the unconditional sqlite test in `dialect_notifications.rs`,
+/// gated on `DATABASE_URL` for per-dialect CI legs / local probing.
+#[tokio::test]
+async fn list_primary_verified_emails_for_users_parity() {
+    let Some(url) = database_url() else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    let _guard = SERIAL.lock().await;
+
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+
+    assert!(db
+        .list_primary_verified_emails_for_users(&[])
+        .await
+        .expect("empty input")
+        .is_empty());
+
+    let now = "2026-01-01T00:00:00Z";
+    let a = db
+        .create_user(
+            "u-pv-a",
+            "a@example.com",
+            "pv-alice",
+            Some("h"),
+            "A",
+            "",
+            None,
+            oxidean_core::Role::User,
+        )
+        .await
+        .expect("user a");
+    let b = db
+        .create_user(
+            "u-pv-b",
+            "b@example.com",
+            "pv-bob",
+            Some("h"),
+            "B",
+            "",
+            None,
+            oxidean_core::Role::User,
+        )
+        .await
+        .expect("user b");
+    let c = db
+        .create_user(
+            "u-pv-c",
+            "c@example.com",
+            "pv-carol",
+            Some("h"),
+            "C",
+            "",
+            None,
+            oxidean_core::Role::User,
+        )
+        .await
+        .expect("user c");
+
+    db.set_user_email_verified_at(&format!("{}-primary-email", a.id), Some(now))
+        .await
+        .expect("verify a");
+    db.set_user_email_verified_at(&format!("{}-primary-email", c.id), Some(now))
+        .await
+        .expect("verify c");
+    db.create_user_email(
+        "u-pv-c-sec",
+        &c.id,
+        "carol-work@example.com",
+        false,
+        Some(now),
+    )
+    .await
+    .expect("secondary");
+
+    let out = db
+        .list_primary_verified_emails_for_users(&[
+            a.id.clone(),
+            b.id.clone(),
+            c.id.clone(),
+            "u-missing".to_string(),
+        ])
+        .await
+        .expect("batch lookup");
+    let map: std::collections::HashMap<String, String> = out.into_iter().collect();
+    assert_eq!(map.get(&a.id).map(String::as_str), Some("a@example.com"));
+    assert!(
+        !map.contains_key(&b.id),
+        "unverified primary must be skipped"
+    );
+    assert_eq!(map.get(&c.id).map(String::as_str), Some("c@example.com"));
+    assert_eq!(map.len(), 2);
+}

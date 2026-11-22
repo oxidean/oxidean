@@ -4,6 +4,11 @@
 //! their watch row is removed (GitHub auto-unwatch) and its notification rows
 //! are deleted — eagerly at every ACL mutation point and lazily when the user
 //! reads their inbox / watch list.
+//!
+//! Outbound email (NOT-01): recipients whose rows inserted get a detached
+//! mail dispatch — see `mail` (fire-and-forget, env-switched).
+
+mod mail;
 
 use std::collections::{HashMap, HashSet};
 
@@ -62,16 +67,23 @@ async fn fanout_inner(
             )
         }))
         .await;
+    let mut inserted: Vec<String> = Vec::with_capacity(targets.len());
     for (recipient_id, result) in targets.iter().zip(results) {
-        if let Err(e) = result {
-            tracing::warn!(
-                error = %e,
-                recipient_id = %recipient_id,
-                reason = %reason,
-                "notification fanout insert failed (soft-fail)"
-            );
+        match result {
+            Ok(_) => inserted.push(recipient_id.clone()),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    recipient_id = %recipient_id,
+                    reason = %reason,
+                    "notification fanout insert failed (soft-fail)"
+                );
+            }
         }
     }
+    // NOT-01: mail mirrors the inbox — recipients whose row inserted get a
+    // detached send; insert failures mail nobody.
+    mail::maybe_spawn(db, actor_id, &inserted, reason, subject);
 }
 
 /// Insert one notification per recipient, excluding the actor (D-03).

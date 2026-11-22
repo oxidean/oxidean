@@ -1,7 +1,7 @@
 //! SMTP email adapter via lettre (AUTH-10).
 
 use lettre::{
-    message::{header::ContentType, Mailbox},
+    message::{header::ContentType, Mailbox, MultiPart, SinglePart},
     transport::smtp::AsyncSmtpTransport,
     AsyncTransport, Message, Tokio1Executor,
 };
@@ -33,9 +33,12 @@ impl SmtpSender {
         let mut builder = Message::builder().from(from).to(to).subject(&msg.subject);
 
         if let Some(html) = &msg.html {
-            builder = builder.header(ContentType::TEXT_HTML);
             builder
-                .body(html.clone())
+                .multipart(
+                    MultiPart::alternative()
+                        .singlepart(SinglePart::plain(msg.text.clone()))
+                        .singlepart(SinglePart::html(html.clone())),
+                )
                 .map_err(|e| EmailError::Transport(e.to_string()))
         } else {
             builder = builder.header(ContentType::TEXT_PLAIN);
@@ -104,5 +107,26 @@ mod tests {
         // Invalid To rejects before send.
         let err = parse_mailbox("not-an-email").unwrap_err();
         assert!(matches!(err, EmailError::InvalidAddress(_)));
+    }
+
+    #[test]
+    fn smtp_includes_plain_text_and_html_alternatives() {
+        let sender =
+            SmtpSender::from_url("smtp://localhost:2525", "noreply@example.com").expect("sender");
+        let message = sender
+            .build_message(&OutboundEmail {
+                to: "user@example.com".into(),
+                subject: "Notification".into(),
+                text: "Plain text body".into(),
+                html: Some("<p>HTML body</p>".into()),
+            })
+            .expect("message builds");
+        let formatted = String::from_utf8_lossy(&message.formatted()).into_owned();
+
+        assert!(formatted.contains("multipart/alternative"));
+        assert!(formatted.contains("Content-Type: text/plain"));
+        assert!(formatted.contains("Plain text body"));
+        assert!(formatted.contains("Content-Type: text/html"));
+        assert!(formatted.contains("<p>HTML body</p>"));
     }
 }

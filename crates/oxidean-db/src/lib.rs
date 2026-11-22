@@ -3737,6 +3737,15 @@ impl Database {
         user_emails::list_verified_emails_for_users(self.require_pool()?, user_ids).await
     }
 
+    /// `(user_id, email)` primary-verified pairs for many users — one `IN`
+    /// round trip; each user yields at most one row (NOT-01).
+    pub async fn list_primary_verified_emails_for_users(
+        &self,
+        user_ids: &[String],
+    ) -> Result<Vec<(String, String)>, String> {
+        user_emails::list_primary_verified_emails_for_users(self.require_pool()?, user_ids).await
+    }
+
     // --- sessions ---
 
     #[allow(clippy::too_many_arguments)]

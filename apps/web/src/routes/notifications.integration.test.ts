@@ -103,7 +103,7 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     vi.mocked(apiClient.notification.list).mockResolvedValue({
       ok: true,
       data: {
-        total: 2,
+        total: 3,
         notifications: [
           {
             id: "n2",
@@ -114,7 +114,7 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
             repo: "hello",
             subject_number: 0,
             subject_title: "Ship it",
-            subject_ref: "v1.0.0",
+            subject_ref: "v1#rc1",
             actor_id: "u2",
             actor_username: "bob",
             created_at: "2026-09-17T00:00:00Z",
@@ -135,6 +135,21 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
             created_at: "2026-09-18T00:00:00Z",
             read_at: null,
           },
+          {
+            id: "n4",
+            reason: "pr_comment",
+            subject_kind: "push",
+            subject_repo_id: "r1",
+            owner: "ada",
+            repo: "hello",
+            subject_number: 0,
+            subject_title: "Change",
+            subject_ref: "refs/heads/feature#1",
+            actor_id: "u2",
+            actor_username: "bob",
+            created_at: "2026-09-19T00:00:00Z",
+            read_at: null,
+          },
         ],
       },
     } as never);
@@ -142,13 +157,17 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     renderWithQueryClient(NotificationsPage);
 
     const release = await waitFor(() =>
-      screen.getByRole("link", { name: /bob published a release on ada\/hello v1\.0\.0/i }),
+      screen.getByRole("link", { name: /bob published a release on ada\/hello v1#rc1/i }),
     );
     expect(
       screen.getByRole("link", { name: /bob workflow run failed on ada\/hello/i }),
     ).toBeInTheDocument();
+    const push = screen.getByRole("link", {
+      name: /bob commented on ada\/hello refs\/heads\/feature#1/i,
+    });
 
-    expect(release).toHaveAttribute("href", "/ada/hello/releases/v1.0.0");
+    expect(release).toHaveAttribute("href", "/ada/hello/releases/v1%23rc1");
+    expect(push).toHaveAttribute("href", "/ada/hello/commits/refs/heads/feature%231");
   });
 
   it("falls back to the index route when subject_ref is null (DEBT-06 review)", async () => {

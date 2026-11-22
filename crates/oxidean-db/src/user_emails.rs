@@ -356,6 +356,95 @@ pub async fn list_verified_emails_for_users(
     }
 }
 
+/// Primary verified `(user_id, email)` pairs for many users — one round
+/// trip (NOT-01 notification fan-out addressing). Same shape as
+/// [`list_verified_emails_for_users`] plus `is_primary`: each user yields
+/// at most one row.
+pub async fn list_primary_verified_emails_for_users(
+    pool: &DbPool,
+    user_ids: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    if user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id = ANY($1) AND is_primary = true AND verified_at IS NOT NULL",
+            )
+            .bind(user_ids)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list primary verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, user_ids.len());
+            let q_str = format!(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id IN ({in_list}) AND is_primary = 1 AND verified_at IS NOT NULL"
+            );
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list primary verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, user_ids.len());
+            let q_str = format!(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id IN ({in_list}) AND is_primary = 1 AND verified_at IS NOT NULL"
+            );
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list primary verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("primary verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+    }
+}
+
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<UserEmailRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
