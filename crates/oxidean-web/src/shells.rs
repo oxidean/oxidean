@@ -348,6 +348,20 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[P("owner"), L("settings"), L("teams")],
+        file: "_/settings/teams/index.html",
+        title: Some("Teams · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), L("settings"), L("teams"), P("team")],
+        file: "_/settings/teams/_/index.html",
+        title: Some("Team · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[P("owner"), L("settings"), L("actions")],
         file: "_/settings/actions/index.html",
         title: Some("Actions · {owner} · Oxidean"),
