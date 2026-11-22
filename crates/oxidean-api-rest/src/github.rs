@@ -575,7 +575,22 @@ fn pull_ref_gh(v: &Value, o: &str, owner: &str, repo: &str) -> Value {
             "user": user_ref(&json!({"username": owner}), o),
         },
         "author_association": "MEMBER",
-        "auto_merge": Value::Null,
+        // GitHub's `auto_merge` embed — armed state or null (COL-07).
+        "auto_merge": v.get("auto_merge").map(|am| {
+            if am.is_null() || am.get("method").is_none() {
+                Value::Null
+            } else {
+                json!({
+                    "enabled_by": user_ref(&json!({
+                        "username": am.get("set_by_username"),
+                        "id": am.get("set_by"),
+                    }), o),
+                    "merge_method": am.get("method").cloned().unwrap_or(Value::Null),
+                    "commit_title": am.get("commit_title").cloned().unwrap_or(Value::Null),
+                    "commit_message": am.get("commit_message").cloned().unwrap_or(Value::Null),
+                })
+            }
+        }).unwrap_or(Value::Null),
     })
 }
 

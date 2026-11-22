@@ -977,6 +977,14 @@ async fn emit_suite_completed_if_due(
         suite.conclusion.as_deref().unwrap_or("failure"),
     )
     .await;
+    // COL-07: a completed suite may be the last required check greening an
+    // armed pull on this head — re-evaluate and merge the ones that pass.
+    oxidean_api_core::auto_merge::maybe_fire_for_head(
+        &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
+        &suite.repository_id,
+        &suite.head_sha,
+    )
+    .await;
 }
 
 /// Persist inline annotations under a check run.

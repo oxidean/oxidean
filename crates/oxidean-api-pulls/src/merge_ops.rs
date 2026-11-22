@@ -1,16 +1,13 @@
 //! `pull.files` / `pull.commits` / `pull.merge` / `repo.mergeSettings.*`
 //! handlers. Merge-gate evaluation lives in `oxidean_api_core::pull::merge_ops` (#162).
 
-use crate::closing_refs::closing_refs;
 use oxidean_api_core::auth::gate::require_verified;
 use oxidean_api_core::git::bare_repo_path;
-use oxidean_api_core::notify;
 use oxidean_api_core::protection::effective_for_branch;
 use oxidean_api_core::pull::acl;
 use oxidean_api_core::pull::merge_ops::evaluate_merge_gate;
 use oxidean_api_core::pull::{db_err, load_pull_in_repo, to_public};
 use oxidean_api_core::rpc::RpcCtx;
-use oxidean_api_core::webhook::dispatch;
 use oxidean_core::{
     AppError, MergeMethod, MergePullRequest, MergePullResponse, PullCommitSummary,
     PullCommitsResponse, PullDiffFile, PullFilesResponse, PullRefRequest, RepoGetRequest,
@@ -318,7 +315,8 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
                 ));
             }
             evaluate_merge_gate(
-                ctx,
+                &ctx.db,
+                &ctx.repos_dir,
                 &accessible,
                 &eff,
                 &row,
@@ -332,266 +330,23 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         }
     }
 
-    let path = bare_repo_path(
-        &ctx.repos_dir,
-        &accessible.owner_username,
-        &accessible.row.name,
-    )?;
-    oxidean_api_core::pull::ensure_head_objects_in_base(
-        &ctx.db,
-        ctx.git.as_ref(),
-        &ctx.repos_dir,
-        &path,
+    // Shared executor (COL-07): the auto-merge fire path runs the same
+    // post-gate merge + fan-out with the enabling user as actor.
+    let sha = oxidean_api_core::pull::merge_exec::execute(
+        &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
+        &oxidean_api_core::merge_queue::QueueScope::of(&accessible),
         &row,
-    )
-    .await?;
-
-    let message = req
-        .commit_title
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(row.title.as_str());
-    let full_message = match req
-        .commit_message
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(body) => format!("{message}\n\n{body}"),
-        None => message.to_string(),
-    };
-
-    // Pre-merge base tip — rebase merges rewrite several commits so the
-    // merge result's first parent is not the old tip; the recorded
-    // attribution range needs the tip the worktree merged onto.
-    let base_tip = ctx
-        .git
-        .rev_parse(&path, &row.base_ref)
-        .await
-        .ok()
-        .filter(|s| !s.is_empty());
-
-    let sha = match req.method {
-        MergeMethod::Merge => {
-            ctx.git
-                .merge_commit(&path, &row.base_ref, &row.head_sha, &full_message)
-                .await
-        }
-        MergeMethod::Squash => {
-            ctx.git
-                .squash_merge(&path, &row.base_ref, &row.head_sha, &full_message)
-                .await
-        }
-        MergeMethod::Rebase => {
-            ctx.git
-                .rebase_merge(&path, &row.base_ref, &row.head_sha)
-                .await
-        }
-    }
-    .map_err(|e| {
-        let msg = e.to_string().to_lowercase();
-        if msg.contains("conflict") {
-            AppError::new("pull.merge_conflict", "merge conflict")
-        } else {
-            AppError::new("pull.merge_failed", format!("merge failed: {e}"))
-        }
-    })?;
-
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    ctx.db
-        .mark_pull_merged(&row.id, &user.id, &sha, req.method.as_str(), &now)
-        .await
-        .map_err(db_err)?;
-
-    // API-06: refs/pull/{N}/merge resolves to the recorded merge commit — the
-    // merge object was pushed into the base repo by the worktree merge above.
-    // (`/head` keeps tracking pull.head_sha; while the PR was open /merge held
-    // the actions test-merge commit — the real merge repoints it here.)
-    oxidean_api_core::pull::refs::sync_merge_ref(
-        ctx.git.as_ref(),
-        &ctx.repos_dir,
-        &accessible.owner_username,
-        &accessible.row.name,
-        row.number,
-        &sha,
-    )
-    .await;
-
-    let merge_subject = full_message.lines().next().unwrap_or("").trim();
-    oxidean_api_core::repo::record_pr_merge(
-        &ctx.db,
-        &accessible.row.id,
-        &user.id,
-        &row.base_ref,
-        &sha,
-        row.number,
-        if merge_subject.is_empty() {
-            None
-        } else {
-            Some(merge_subject)
+        req.method,
+        req.commit_title.as_deref(),
+        req.commit_message.as_deref(),
+        req.delete_branch.unwrap_or(false),
+        &oxidean_api_core::pull::merge_exec::MergeActor {
+            id: &user.id,
+            login: &user.username,
         },
     )
-    .await;
-
-    // Authored-commit attribution: credit head commits landing on default.
-    if let Ok(bare) = oxidean_api_core::git::bare_repo_path(
-        &ctx.repos_dir,
-        &accessible.owner_username,
-        &accessible.row.name,
-    ) {
-        oxidean_api_core::repo::record_authored_merge(
-            &ctx.db,
-            ctx.git.clone(),
-            bare,
-            &accessible.row.id,
-            &row.base_ref,
-            &sha,
-            base_tip.as_deref(),
-        )
-        .await;
-    }
-
-    oxidean_api_core::mirror::notify_mirror_after_local_mutation(
-        ctx.db.clone(),
-        ctx.git.clone(),
-        ctx.repos_dir.clone(),
-        accessible.row.id.clone(),
-    );
-
-    // GIT-25: refresh cached size_bytes after merge objects landed.
-    if let Err(e) =
-        oxidean_api_core::git::quota::refresh_repo_size_bytes(&ctx.db, &accessible.row.id, &path)
-            .await
-    {
-        tracing::warn!(error = %e, "refresh repo size_bytes failed");
-    }
-
-    if row.base_ref == accessible.row.default_branch {
-        let mut refs = closing_refs(&row.body);
-        refs.extend(closing_refs(&full_message));
-        let mut seen = std::collections::HashSet::new();
-        refs.retain(|r| {
-            seen.insert((
-                r.repo
-                    .as_ref()
-                    .map(|(o, n)| (o.to_lowercase(), n.to_lowercase())),
-                r.number,
-            ))
-        });
-        for r in refs {
-            let same_repo = match &r.repo {
-                None => true,
-                Some((owner, name)) => {
-                    owner.eq_ignore_ascii_case(&accessible.owner_username)
-                        && name.eq_ignore_ascii_case(&accessible.row.name)
-                }
-            };
-            if !same_repo {
-                continue;
-            }
-            if let Ok(Some(issue)) = ctx
-                .db
-                .find_issue_by_repo_number(&accessible.row.id, r.number)
-                .await
-            {
-                if issue.state == "open" {
-                    let _ = ctx.db.close_issue(&issue.id, &user.id).await;
-                }
-            }
-        }
-    }
-
-    if req.delete_branch.unwrap_or(false)
-        && row.head_repo_id == row.repo_id
-        && ctx.git.branch_delete(&path, &row.head_ref).await.is_ok()
-    {
-        // API-04: deleting the head branch on merge fires `delete`.
-        let payload = dispatch::ref_event_payload(
-            "delete",
-            &row.head_ref,
-            "branch",
-            &accessible.row.default_branch,
-            &accessible.row.description,
-            &accessible.owner_username,
-            &accessible.row.name,
-            &accessible.row.id,
-            &user.username,
-            &user.id,
-        );
-        dispatch::emit(
-            &ctx.db,
-            &accessible.row.id,
-            "delete",
-            "",
-            payload,
-            &ctx.env_name,
-        )
-        .await;
-    }
-
+    .await?;
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    oxidean_api_core::pull::emit_pull_event(
-        ctx,
-        &accessible,
-        &updated,
-        "closed",
-        &user.username,
-        &user.id,
-        true,
-    )
-    .await;
-    // `on: pull_request types: [closed]` — merged reads true in the
-    // payload (GitHub fires this on merge, same as the webhook).
-    let (head_owner, head_name) = if updated.head_repo_id == updated.repo_id {
-        (
-            accessible.owner_username.clone(),
-            accessible.row.name.clone(),
-        )
-    } else if let Ok(Some(head_repo)) = ctx.db.find_repository_by_id(&updated.head_repo_id).await {
-        let owner = match head_repo.owner_type.as_str() {
-            "org" => ctx
-                .db
-                .find_organization_by_id(&head_repo.owner_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|o| o.slug)
-                .unwrap_or_default(),
-            _ => ctx
-                .db
-                .find_user_by_id(&head_repo.owner_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|u| u.username)
-                .unwrap_or_default(),
-        };
-        (owner, head_repo.name)
-    } else {
-        (
-            accessible.owner_username.clone(),
-            accessible.row.name.clone(),
-        )
-    };
-    oxidean_api_core::pull::notify_actions_for_pull(
-        &ctx.db,
-        ctx.git.as_ref(),
-        &ctx.repos_dir,
-        &updated,
-        &accessible.owner_username,
-        &accessible.row.name,
-        &head_owner,
-        &head_name,
-        Some(&user.id),
-        oxidean_api_core::actions::events::rpc_caller_is_job_token(ctx),
-        oxidean_api_core::actions::PullRequestAction::Closed,
-        true,
-    )
-    .await;
-    let subject = notify::subject_for_pull(&updated);
-    let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
-    notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_merged", &subject).await;
     let pull = to_public(ctx, &updated).await?;
     Ok(MergePullResponse {
         pull,
@@ -619,6 +374,7 @@ pub async fn merge_settings_get(
         allow_merge_commit: s.allow_merge_commit,
         allow_squash_merge: s.allow_squash_merge,
         allow_rebase_merge: s.allow_rebase_merge,
+        allow_auto_merge: s.allow_auto_merge,
     })
 }
 
@@ -642,13 +398,21 @@ pub async fn merge_settings_update(
     let allow_merge = req.allow_merge_commit.unwrap_or(current.allow_merge_commit);
     let allow_squash = req.allow_squash_merge.unwrap_or(current.allow_squash_merge);
     let allow_rebase = req.allow_rebase_merge.unwrap_or(current.allow_rebase_merge);
+    let allow_auto = req.allow_auto_merge.unwrap_or(current.allow_auto_merge);
     ctx.db
-        .set_repo_merge_settings(&accessible.row.id, allow_merge, allow_squash, allow_rebase)
+        .set_repo_merge_settings(
+            &accessible.row.id,
+            allow_merge,
+            allow_squash,
+            allow_rebase,
+            allow_auto,
+        )
         .await
         .map_err(db_err)?;
     Ok(RepoMergeSettings {
         allow_merge_commit: allow_merge,
         allow_squash_merge: allow_squash,
         allow_rebase_merge: allow_rebase,
+        allow_auto_merge: allow_auto,
     })
 }

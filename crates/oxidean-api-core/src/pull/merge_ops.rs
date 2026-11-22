@@ -3,7 +3,6 @@
 
 use crate::git::bare_repo_path;
 use crate::protection::{evaluate_merge, MergeEvalInput};
-use crate::rpc::RpcCtx;
 use oxidean_core::AppError;
 
 use super::db_err;
@@ -41,13 +40,14 @@ async fn git_is_ancestor(
 /// `merge_method` reports GitHub's eval shape — `None` from the queue path
 /// (the queue decides the method; the allowed-methods check is skipped).
 pub async fn evaluate_merge_gate(
-    ctx: &RpcCtx,
+    db: &oxidean_db::Database,
+    repos_dir: &std::path::Path,
     accessible: &crate::repo::AccessibleRepo,
     eff: &crate::protection::EffectiveProtection,
     row: &oxidean_db::PullRow,
     merge_method: Option<String>,
 ) -> Result<(), AppError> {
-    let reviews = ctx.db.list_pull_reviews(&row.id).await.map_err(db_err)?;
+    let reviews = db.list_pull_reviews(&row.id).await.map_err(db_err)?;
     // Latest-per-user review state (D-PR-07); dismiss_stale excludes Approves on older SHAs.
     let mut latest: std::collections::BTreeMap<String, &oxidean_db::PullReviewRow> =
         std::collections::BTreeMap::new();
@@ -70,8 +70,7 @@ pub async fn evaluate_merge_gate(
         approving_reviewer_ids.push(r.author_id.clone());
     }
     // Pending drafts never gate merges — only submitted comments count.
-    let comments = ctx
-        .db
+    let comments = db
         .list_pull_comments(&row.id, None)
         .await
         .map_err(db_err)?;
@@ -79,8 +78,7 @@ pub async fn evaluate_merge_gate(
         .iter()
         .filter(|c| c.path.is_some() && !c.resolved)
         .count() as i32;
-    let statuses = ctx
-        .db
+    let statuses = db
         .list_commit_statuses(&accessible.row.id, &row.head_sha)
         .await
         .map_err(db_err)?;
@@ -94,8 +92,7 @@ pub async fn evaluate_merge_gate(
     // conclusion onto the status vocabulary; mid-flight reads as
     // `pending`. Check runs win over same-named commit statuses —
     // they're the newer context writer.
-    if let Ok(check_runs) = ctx
-        .db
+    if let Ok(check_runs) = db
         .list_check_runs_for_sha(&accessible.row.id, &row.head_sha, None, None, None, 500)
         .await
     {
@@ -116,7 +113,7 @@ pub async fn evaluate_merge_gate(
         }
     }
     let path_for_anc = bare_repo_path(
-        &ctx.repos_dir,
+        repos_dir,
         &accessible.owner_username,
         &accessible.row.name,
     )?;

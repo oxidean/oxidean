@@ -280,6 +280,9 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
         .set_pull_state(&row.id, "closed", Some(&now), Some(&user.id))
         .await
         .map_err(db_err)?;
+    // COL-07: a closed pull can't keep an arm — clear without emitting a
+    // separate event (the `closed` lifecycle covers it).
+    let _ = ctx.db.clear_pull_auto_merge(&row.id).await;
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
@@ -483,6 +486,21 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             .mark_pull_line_comments_outdated(&row.id)
             .await
             .map_err(db_err)?;
+        // COL-07: retarget or head-move disarms auto-merge — the gate
+        // evaluated a different change.
+        let scope = oxidean_api_core::merge_queue::QueueScope::of(&accessible);
+        oxidean_api_core::auto_merge::disable_for_pull(
+            &ctx.db,
+            ctx.git.as_ref(),
+            &ctx.repos_dir,
+            &ctx.env_name,
+            oxidean_api_core::actions::events::rpc_caller_is_job_token(ctx),
+            &scope,
+            &row,
+            &user.username,
+            &user.id,
+        )
+        .await;
     }
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     // Merge queue: a head move or base retarget removes the PR from its
@@ -530,7 +548,18 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         false,
     )
     .await;
-    to_public(ctx, &updated).await
+    // COL-07: a draft→ready flip (or any edit) may open the gate for an
+    // armed pull — re-evaluate and merge if it now passes.
+    {
+        let deps = oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx);
+        let scope = oxidean_api_core::merge_queue::QueueScope::of(&accessible);
+        if let Err(e) = oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &updated).await
+        {
+            tracing::warn!(pull = %updated.id, error = %e.message, "auto-merge fire failed");
+        }
+    }
+    let current = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    to_public(ctx, &current).await
 }
 
 /// `pull.pin` — Write+; add to the repo's pinned box (≤`MAX_PINNED_PULLS`).

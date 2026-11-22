@@ -60,10 +60,12 @@ impl MqDeps {
 /// Narrow repo scope for non-RPC seams (check completion, post-receive,
 /// pull sync) — the `AccessibleRepo` fields the orchestrator touches.
 pub struct QueueScope {
-    owner: String,
-    name: String,
-    default_branch: String,
-    repo_id: String,
+    pub owner: String,
+    pub name: String,
+    pub default_branch: String,
+    pub repo_id: String,
+    /// Repo description — `ref_event_payload` wants it for `delete` events.
+    pub description: String,
 }
 
 impl QueueScope {
@@ -73,6 +75,7 @@ impl QueueScope {
             name: accessible.row.name.clone(),
             default_branch: accessible.row.default_branch.clone(),
             repo_id: accessible.row.id.clone(),
+            description: accessible.row.description.clone(),
         }
     }
 }
@@ -100,6 +103,7 @@ pub async fn repo_coords(db: &Database, repo_id: &str) -> Option<QueueScope> {
         name: repo.name,
         default_branch: repo.default_branch,
         repo_id: repo_id.to_string(),
+        description: repo.description,
     })
 }
 

@@ -4,6 +4,8 @@
 //! `pull.*` RPC handlers live in `oxidean-api-pulls` (issue #162).
 
 pub mod acl;
+pub mod closing_refs;
+pub mod merge_exec;
 pub mod merge_ops;
 pub mod refs;
 
@@ -417,6 +419,22 @@ pub async fn synchronize_pull_after_head_move(
         .await?;
     }
     db.update_pull_head_sha(&pull.id, new_head_sha).await?;
+    // COL-07: a head move disarms auto-merge (GitHub parity — pushing new
+    // commits to the head branch cancels a pending auto-merge).
+    if let Some(scope) = crate::merge_queue::repo_coords(db, &pull.repo_id).await {
+        crate::auto_merge::disable_for_pull(
+            db,
+            git,
+            repos_dir,
+            env_name,
+            job_token_actor,
+            &scope,
+            pull,
+            actor_login,
+            actor_id,
+        )
+        .await;
+    }
     // API-06: keep refs/pull/{N}/head tracking the new head tip. The ref lives
     // in the PR's *base* repo — for fork heads `sync_head_ref` fetches the
     // object in first (the head tip may belong to a fork bare).
@@ -621,6 +639,7 @@ pub async fn load_pull_enrichment(
     // Authors + user-type head owners share one users lookup; org owners get their own.
     let mut user_ids: Vec<String> = rows.iter().map(|r| r.author_id.clone()).collect();
     user_ids.extend(milestone_rows.iter().filter_map(|m| m.creator_id.clone()));
+    user_ids.extend(rows.iter().filter_map(|r| r.auto_merge_set_by.clone()));
     let mut org_ids: Vec<String> = Vec::new();
     for repo in &head_repos {
         match repo.owner_type.as_str() {
@@ -764,6 +783,24 @@ pub fn pull_row_to_public(row: &PullRow, enr: &PullEnrichment) -> Result<PullPub
             .and_then(|id| enr.milestones.get(id))
             .cloned()
             .map(Box::new),
+        auto_merge: match row.auto_merge_method.as_deref() {
+            Some(m) => Some(oxidean_core::PullAutoMergePublic {
+                method: MergeMethod::parse(m).map_err(|e| {
+                    tracing::error!(error = %e, "invalid auto_merge_method in db");
+                    AppError::new("pull.internal", "pull operation failed")
+                })?,
+                set_by: row.auto_merge_set_by.clone().unwrap_or_default(),
+                set_by_username: row
+                    .auto_merge_set_by
+                    .as_ref()
+                    .and_then(|id| enr.usernames.get(id))
+                    .cloned()
+                    .unwrap_or_default(),
+                commit_title: row.auto_merge_commit_title.clone(),
+                commit_message: row.auto_merge_commit_message.clone(),
+            }),
+            None => None,
+        },
     })
 }
 

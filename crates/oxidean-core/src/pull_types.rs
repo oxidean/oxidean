@@ -134,6 +134,39 @@ pub struct PullPublic {
     /// issues — PRs share the repo milestone set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub milestone: Option<Box<crate::MilestonePublic>>,
+    /// Armed auto-merge state (COL-07); `None` = auto-merge not enabled.
+    /// GitHub's PR `autoMergeRequest` embed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_merge: Option<PullAutoMergePublic>,
+}
+
+/// Armed auto-merge state on a pull (COL-07).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullAutoMergePublic {
+    /// Merge method the merge will use when the gate greens.
+    pub method: MergeMethod,
+    /// User id that armed auto-merge.
+    pub set_by: String,
+    /// Username of the arming user (display + REST `enabled_by` fill).
+    pub set_by_username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+}
+
+/// `pull.auto_merge.enable` input (COL-07).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullAutoMergeEnableRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    /// Method the eventual merge uses — must be repo-allowed.
+    pub method: MergeMethod,
+    #[serde(default)]
+    pub commit_title: Option<String>,
+    #[serde(default)]
+    pub commit_message: Option<String>,
 }
 
 /// GitHub parity — at most three pinned pull requests per repository.
@@ -272,6 +305,9 @@ pub struct RepoMergeSettings {
     pub allow_merge_commit: bool,
     pub allow_squash_merge: bool,
     pub allow_rebase_merge: bool,
+    /// GitHub "Allow auto-merge" repository toggle (COL-07).
+    #[serde(default)]
+    pub allow_auto_merge: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -284,6 +320,8 @@ pub struct UpdateRepoMergeSettingsRequest {
     pub allow_squash_merge: Option<bool>,
     #[serde(default)]
     pub allow_rebase_merge: Option<bool>,
+    #[serde(default)]
+    pub allow_auto_merge: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

@@ -12,6 +12,7 @@ pub mod admin;
 pub mod app;
 pub mod audit;
 pub mod auth;
+pub mod auto_merge;
 pub mod check;
 pub mod comment_attachments;
 pub mod crypto;

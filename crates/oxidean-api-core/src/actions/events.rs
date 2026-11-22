@@ -41,6 +41,10 @@ pub enum PullRequestAction {
     Enqueued,
     /// Entry left the queue (manual remove, failed checks, head moved, close).
     Dequeued,
+    /// Auto-merge armed (`pull.auto_merge.enable`) — COL-07.
+    AutoMergeEnabled,
+    /// Auto-merge disarmed (disable / head push / retarget).
+    AutoMergeDisabled,
 }
 
 impl PullRequestAction {
@@ -53,6 +57,8 @@ impl PullRequestAction {
             Self::Closed => "closed",
             Self::Enqueued => "enqueued",
             Self::Dequeued => "dequeued",
+            Self::AutoMergeEnabled => "auto_merge_enabled",
+            Self::AutoMergeDisabled => "auto_merge_disabled",
         }
     }
 }

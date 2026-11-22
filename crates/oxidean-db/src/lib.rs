@@ -1477,6 +1477,7 @@ impl Database {
         allow_merge_commit: bool,
         allow_squash_merge: bool,
         allow_rebase_merge: bool,
+        allow_auto_merge: bool,
     ) -> Result<(), String> {
         pulls::set_merge_settings(
             self.require_pool()?,
@@ -1484,8 +1485,43 @@ impl Database {
             allow_merge_commit,
             allow_squash_merge,
             allow_rebase_merge,
+            allow_auto_merge,
         )
         .await
+    }
+
+    /// Arm auto-merge on a pull (COL-07).
+    pub async fn set_pull_auto_merge(
+        &self,
+        id: &str,
+        method: &str,
+        set_by: &str,
+        commit_title: Option<&str>,
+        commit_message: Option<&str>,
+    ) -> Result<(), String> {
+        pulls::set_pull_auto_merge(
+            self.require_pool()?,
+            id,
+            method,
+            set_by,
+            commit_title,
+            commit_message,
+        )
+        .await
+    }
+
+    /// Disarm auto-merge — explicit disable, head push, retarget, close.
+    pub async fn clear_pull_auto_merge(&self, id: &str) -> Result<(), String> {
+        pulls::clear_pull_auto_merge(self.require_pool()?, id).await
+    }
+
+    /// Open pulls armed for auto-merge whose head is `head_sha`.
+    pub async fn list_armed_pulls_for_head(
+        &self,
+        repo_id: &str,
+        head_sha: &str,
+    ) -> Result<Vec<PullRow>, String> {
+        pulls::list_armed_pulls_for_head(self.require_pool()?, repo_id, head_sha).await
     }
 
     pub async fn set_repo_forked_from(

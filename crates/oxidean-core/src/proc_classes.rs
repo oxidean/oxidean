@@ -304,6 +304,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.reviewRequests.add"
         | "pull.reviewRequests.remove"
         | "pull.merge"
+        | "pull.auto_merge.enable"
+        | "pull.auto_merge.disable"
         | "pull.updateBranch"
         | "pull.pin"
         | "pull.unpin"
