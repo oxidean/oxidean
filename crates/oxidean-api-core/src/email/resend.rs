@@ -48,11 +48,10 @@ impl EmailSender for ResendSender {
             "from": self.from,
             "to": [msg.to],
             "subject": msg.subject,
+            "text": msg.text,
         });
         if let Some(html) = msg.html {
             body["html"] = json!(html);
-        } else {
-            body["text"] = json!(msg.text);
         }
 
         let url = if self.base_url == DEFAULT_BASE_URL {
@@ -89,7 +88,7 @@ fn sanitize_reqwest_error(err: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{header, header_regex, method, path};
+    use wiremock::matchers::{body_json, header, header_regex, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -100,6 +99,13 @@ mod tests {
             .and(path("/emails"))
             .and(header("User-Agent", "oxidean-api/0.1"))
             .and(header_regex("Authorization", r"(?i)^Bearer\s+.+$"))
+            .and(body_json(json!({
+                "from": "Oxidean <noreply@example.com>",
+                "to": ["user@example.com"],
+                "subject": "Welcome",
+                "text": "Hello",
+                "html": "<p>Hello</p>",
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "email_test"})))
             .mount(&server)
             .await;
