@@ -17,13 +17,14 @@ import { trackDomErrors } from "@/test/dom-errors";
 const listMock = vi.fn();
 const orgTeamsMock = vi.fn();
 const updateMock = vi.fn();
+const addMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     repo: {
       teams: {
         list: (...args: unknown[]) => listMock(...args),
-        add: vi.fn(),
+        add: (...args: unknown[]) => addMock(...args),
         update: (...args: unknown[]) => updateMock(...args),
         remove: vi.fn(),
       },
@@ -40,6 +41,7 @@ beforeEach(() => {
   listMock.mockReset();
   orgTeamsMock.mockReset();
   updateMock.mockReset();
+  addMock.mockReset();
   listMock.mockResolvedValue({
     ok: true,
     data: {
@@ -84,6 +86,7 @@ beforeEach(() => {
     },
   });
   updateMock.mockResolvedValue({ ok: true, data: {} });
+  addMock.mockResolvedValue({ ok: true, data: {} });
 });
 
 afterEach(async () => {
@@ -126,6 +129,53 @@ describe("TeamsPanel browser DOM races", () => {
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();
       expect(updateMock).toHaveBeenCalled();
+    } finally {
+      tracker.dispose();
+    }
+  }, 30_000);
+
+  it("does not grant a different team after the selected team becomes unavailable", async () => {
+    const tracker = trackDomErrors();
+    try {
+      await mountWithQueryClient(TeamsPanel, {
+        owner: "acme",
+        name: "api",
+        orgOwned: true,
+      });
+      await waitForTestId("teams-panel");
+      await waitForTestId("team-add-open");
+      await clickTestId("team-add-open");
+      await pickSelectOptionByTestId("team-add-select", "team-add-option-ops");
+      await pickSelectOptionByTestId("team-add-perm", "team-add-perm-option-admin");
+      listMock.mockResolvedValue({
+        ok: true,
+        data: {
+          teams: [
+            {
+              team_id: "t1",
+              slug: "core",
+              name: "Core",
+              permission: "write",
+              created_at: "2026-01-01T00:00:00Z",
+            },
+            {
+              team_id: "t2",
+              slug: "ops",
+              name: "Ops",
+              permission: "read",
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+      });
+      await pickSelectOptionByTestId("team-perm-t1", "team-perm-t1-option-write");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await clickTestId("team-add-submit");
+
+      expect(addMock).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain("selected team is no longer available");
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
     } finally {
       tracker.dispose();
     }

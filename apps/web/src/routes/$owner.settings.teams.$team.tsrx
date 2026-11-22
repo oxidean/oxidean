@@ -79,6 +79,10 @@ function teamReposQueryKey(slug: string, team: string) {
   return ["org", "teamRepos", slug, team] as const;
 }
 
+function teamSlugFromPathname(pathname: string): string {
+  return decodeURIComponent(pathname.split("/").filter(Boolean)[3] ?? "");
+}
+
 function TeamRoleSelect({
   id,
   value,
@@ -181,8 +185,9 @@ function PermissionSelect({
 
 /** `/{owner}/settings/teams/{team}` — team detail (COL-05). */
 export function OrgTeamDetailPage() @{
+  const teamSlug = teamSlugFromPathname(usePathname());
   <AppPage>
-    <OrgSettingsShell active="teams">
+    <OrgSettingsShell active="teams" teamSlug={teamSlug}>
       <OrgTeamDetailContent />
     </OrgSettingsShell>
   </AppPage>;
@@ -191,14 +196,14 @@ export function OrgTeamDetailPage() @{
 function OrgTeamDetailContent() @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
-  const segs = pathname.split("/").filter(Boolean);
-  const teamSlug = decodeURIComponent(segs[3] ?? "");
-  const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;
+  const teamSlug = teamSlugFromPathname(pathname);
+  const data = useQuery(orgSettingsAccessQueryOptions(owner, teamSlug)).data;
   const queryClient = useQueryClient();
 
   const org = data?.kind === "ready" ? data.org : null;
   const slug = org?.slug ?? owner;
   const canAdmin = data?.kind === "ready" && data.canAdmin;
+  const canManageTeam = data?.kind === "ready" && data.canManageTeam;
 
   const teamQ = useQuery({
     queryKey: teamQueryKey(slug, teamSlug),
@@ -458,495 +463,507 @@ function OrgTeamDetailContent() @{
 
   @if (teamQ.isPending) {
     <p className="text-[14px] text-muted-foreground">Loading team…</p>;
-  } @else if (teamQ.isError || !team) {
-    <p role="alert" className="text-[14px] text-destructive">
-      {(teamQ.error instanceof Error ? teamQ.error.message : "Team not found.") as string}
-    </p>;
   } @else {
-    <section className="flex flex-col gap-8" data-testid="org-team-detail">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-[13px] text-muted-foreground">
-            <AppLink href={`/${slug}/settings/teams`} className="no-underline hover:underline">
-              Teams
-            </AppLink>
-            {" / " + (team.slug as string)}
-          </p>
-          <h2
-            className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
-            data-testid="team-name"
-          >
-            {team.name as string}
-          </h2>
-          @if (team.description) {
-            <p className="mt-1 text-[14px] text-muted-foreground">
-              {team.description as string}
-            </p>;
-          }
-        </div>
-        @if (canAdmin) {
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-11"
-              data-testid="team-edit-open"
-              onClick={() => {
-                editForm.setFieldValue("name", team.name);
-                editForm.setFieldValue("description", team.description);
-                editForm.setFieldValue("new_slug", team.slug);
-                setShowEdit(true);
-                setActionError("");
-              }}
+    @if (teamQ.isError || !team) {
+      <p role="alert" className="text-[14px] text-destructive">
+        {(teamQ.error instanceof Error ? teamQ.error.message : "Team not found.") as string}
+      </p>;
+    } @else {
+      <section className="flex flex-col gap-8" data-testid="org-team-detail">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[13px] text-muted-foreground">
+              <AppLink href={`/${slug}/settings/teams`} className="no-underline hover:underline">
+                Teams
+              </AppLink>
+              {" / " + (team.slug as string)}
+            </p>
+            <h2
+              className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
+              data-testid="team-name"
             >
-              Edit
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              className="h-11"
-              data-testid="team-delete-open"
-              onClick={() => {
-                setDeleteError("");
-                setConfirmDelete(true);
-              }}
-            >
-              Delete team
-            </Button>
-          </div>;
-        }
-      </div>
-
-      @if (showEdit && canAdmin) {
-        <form
-          className="flex flex-col gap-4 rounded-md border border-border p-4"
-          method="post"
-          action="#"
-          data-testid="team-edit-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void editForm.handleSubmit();
-          }}
-        >
-          <h3 className="text-[16px] font-semibold text-foreground">Edit team</h3>
-          @if (actionError) {
-            <AuthErrorBanner message={actionError} />;
-          }
-          <editForm.Field name="name">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="team-edit-name">Name</Label>
-                <Input
-                  id="team-edit-name"
-                  value={field.state.value}
-                  onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                  autoComplete="off"
-                />
-              </div>
-            )}
-          </editForm.Field>
-          <editForm.Field name="new_slug">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="team-edit-slug">Slug</Label>
-                <Input
-                  id="team-edit-slug"
-                  value={field.state.value}
-                  onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                  autoComplete="off"
-                />
-              </div>
-            )}
-          </editForm.Field>
-          <editForm.Field name="description">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="team-edit-description">Description</Label>
-                <Textarea
-                  id="team-edit-description"
-                  value={field.state.value}
-                  onInput={(e) => field.handleChange((e.target as HTMLTextAreaElement).value)}
-                  rows={2}
-                />
-              </div>
-            )}
-          </editForm.Field>
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" className="h-11" disabled={editPending}>
-              @if (editPending) {
-                <>Saving…</>;
-              } @else {
-                <>Save changes</>;
-              }
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-11"
-              disabled={editPending}
-              onClick={() => setShowEdit(false)}
-            >
-              Cancel
-            </Button>
+              {team.name as string}
+            </h2>
+            @if (team.description) {
+              <p className="mt-1 text-[14px] text-muted-foreground">
+                {team.description as string}
+              </p>;
+            }
           </div>
-        </form>;
-      }
-
-      <div className="flex flex-col gap-3" data-testid="team-members-section">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[16px] font-semibold text-foreground">Members</h3>
-          @if (canAdmin && !showAddMember) {
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-11 w-fit"
-              data-testid="member-add-open"
-              onClick={() => setShowAddMember(true)}
-            >
-              Add member
-            </Button>;
-          }
-        </div>
-        @if (memberError) {
-          <AuthErrorBanner message={memberError} />;
-        }
-        @if (showAddMember && canAdmin) {
-          <form
-            className="flex flex-col gap-4 rounded-md border border-border p-4"
-            method="post"
-            action="#"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void memberForm.handleSubmit();
-            }}
-          >
-            <memberForm.Field name="username">
-              {(field) => (
-                <MemberLookup
-                  id="team-member-lookup"
-                  label="Username"
-                  value={field.state.value}
-                  onValueChange={field.handleChange}
-                  context={{ kind: "org", slug }}
-                />
-              )}
-            </memberForm.Field>
-            <memberForm.Subscribe selector={(s) => s.values.role}>
-              {(role) => (
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="team-member-role">Team role</Label>
-                  <TeamRoleSelect
-                    id="team-member-role"
-                    value={role}
-                    onChange={(r) => memberForm.setFieldValue("role", r)}
-                  />
-                </div>
-              )}
-            </memberForm.Subscribe>
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="h-11" data-testid="member-add-submit">
-                Add member
-              </Button>
+          @if (canManageTeam) {
+            <div className="flex gap-2">
               <Button
                 type="button"
                 variant="secondary"
                 className="h-11"
+                data-testid="team-edit-open"
                 onClick={() => {
-                  setShowAddMember(false);
-                  memberForm.reset();
+                  editForm.setFieldValue("name", team.name);
+                  editForm.setFieldValue("description", team.description);
+                  editForm.setFieldValue("new_slug", team.slug);
+                  setShowEdit(true);
+                  setActionError("");
                 }}
               >
-                Cancel
+                Edit
               </Button>
-            </div>
-          </form>;
-        }
-        @if (membersQ.isPending) {
-          <p className="text-[14px] text-muted-foreground">Loading members…</p>;
-        } @else if (members.length === 0) {
-          <p className="text-[14px] text-muted-foreground">
-            No members yet. Team members must already belong to the organization.
-          </p>;
-        } @else {
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[28rem] border-collapse text-left text-[14px]">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">User</th>
-                  <th className="py-2 pr-4 font-medium">Team role</th>
-                  <th className="py-2 font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (const m of members; key m.user_id) {
-                  <tr className="border-b border-border">
-                    <td className="py-3 pr-4 font-medium text-foreground">
-                      {"@" + (m.username as string)}
-                    </td>
-                    <td className="py-3 pr-4">
-                      @if (canAdmin) {
-                        <TeamRoleSelect
-                          id={`member-role-${m.user_id}`}
-                          value={m.role}
-                          onChange={(r) => void setMemberRole(m, r)}
-                        />;
-                      } @else {
-                        <span className="text-muted-foreground">
-                          {teamRoleLabel(m.role) as string}
-                        </span>;
-                      }
-                    </td>
-                    <td className="py-3">
-                      @if (canAdmin) {
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-11 text-destructive"
-                          onClick={() => {
-                            setRemoveMemberError("");
-                            setRemoveMember(m);
-                          }}
-                        >
-                          Remove
-                        </Button>;
-                      }
-                    </td>
-                  </tr>;
-                }
-              </tbody>
-            </table>
-          </div>;
-        }
-      </div>
-
-      <div className="flex flex-col gap-3" data-testid="team-repos-section">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[16px] font-semibold text-foreground">Repositories</h3>
-          @if (canAdmin && !showAddRepo) {
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-11 w-fit"
-              data-testid="repo-add-open"
-              onClick={() => setShowAddRepo(true)}
-            >
-              Add repository
-            </Button>;
+              @if (canAdmin) {
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-11"
+                  data-testid="team-delete-open"
+                  onClick={() => {
+                    setDeleteError("");
+                    setConfirmDelete(true);
+                  }}
+                >
+                  Delete team
+                </Button>;
+              }
+            </div>;
           }
         </div>
-        @if (repoError) {
-          <AuthErrorBanner message={repoError} />;
-        }
-        @if (showAddRepo && canAdmin) {
+
+        @if (showEdit && canManageTeam) {
           <form
             className="flex flex-col gap-4 rounded-md border border-border p-4"
             method="post"
             action="#"
+            data-testid="team-edit-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void repoForm.handleSubmit();
+              void editForm.handleSubmit();
             }}
           >
-            <repoForm.Field name="repo">
+            <h3 className="text-[16px] font-semibold text-foreground">Edit team</h3>
+            @if (actionError) {
+              <AuthErrorBanner message={actionError} />;
+            }
+            <editForm.Field name="name">
               {(field) => (
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="team-repo-name">Repository name</Label>
+                  <Label htmlFor="team-edit-name">Name</Label>
                   <Input
-                    id="team-repo-name"
-                    data-testid="team-repo-name"
+                    id="team-edit-name"
                     value={field.state.value}
                     onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                    placeholder="repo-name"
                     autoComplete="off"
                   />
                 </div>
               )}
-            </repoForm.Field>
-            <repoForm.Subscribe selector={(s) => s.values.permission}>
-              {(perm) => (
+            </editForm.Field>
+            <editForm.Field name="new_slug">
+              {(field) => (
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="team-repo-perm">Permission</Label>
-                  <PermissionSelect
-                    id="team-repo-perm"
-                    value={perm}
-                    onChange={(p) => repoForm.setFieldValue("permission", p)}
+                  <Label htmlFor="team-edit-slug">Slug</Label>
+                  <Input
+                    id="team-edit-slug"
+                    value={field.state.value}
+                    onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
+                    autoComplete="off"
                   />
                 </div>
               )}
-            </repoForm.Subscribe>
+            </editForm.Field>
+            <editForm.Field name="description">
+              {(field) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="team-edit-description">Description</Label>
+                  <Textarea
+                    id="team-edit-description"
+                    value={field.state.value}
+                    onInput={(e) =>
+                      field.handleChange((e.target as HTMLTextAreaElement).value)
+                    }
+                    rows={2}
+                  />
+                </div>
+              )}
+            </editForm.Field>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="h-11" data-testid="repo-add-submit">
-                Grant access
+              <Button type="submit" className="h-11" disabled={editPending}>
+                @if (editPending) {
+                  <>Saving…</>;
+                } @else {
+                  <>Save changes</>;
+                }
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 className="h-11"
-                onClick={() => {
-                  setShowAddRepo(false);
-                  repoForm.reset();
-                }}
+                disabled={editPending}
+                onClick={() => setShowEdit(false)}
               >
                 Cancel
               </Button>
             </div>
           </form>;
         }
-        @if (reposQ.isPending) {
-          <p className="text-[14px] text-muted-foreground">Loading repositories…</p>;
-        } @else if (repos.length === 0) {
-          <p className="text-[14px] text-muted-foreground">
-            No repositories granted to this team.
-          </p>;
-        } @else {
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[28rem] border-collapse text-left text-[14px]">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">Repository</th>
-                  <th className="py-2 pr-4 font-medium">Permission</th>
-                  <th className="py-2 font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (const r of repos; key r.repo_id) {
-                  <tr
-                    className="border-b border-border"
-                    data-testid={`team-repo-${r.repo_name}`}
-                  >
-                    <td className="py-3 pr-4 font-medium text-foreground">
-                      <AppLink
-                        href={`/${slug}/${r.repo_name}`}
-                        className="text-foreground no-underline hover:underline"
+
+        <div className="flex flex-col gap-3" data-testid="team-members-section">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-foreground">Members</h3>
+            @if (canManageTeam && !showAddMember) {
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-11 w-fit"
+                data-testid="member-add-open"
+                onClick={() => setShowAddMember(true)}
+              >
+                Add member
+              </Button>;
+            }
+          </div>
+          @if (memberError) {
+            <AuthErrorBanner message={memberError} />;
+          }
+          @if (showAddMember && canManageTeam) {
+            <form
+              className="flex flex-col gap-4 rounded-md border border-border p-4"
+              method="post"
+              action="#"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void memberForm.handleSubmit();
+              }}
+            >
+              <memberForm.Field name="username">
+                {(field) => (
+                  <MemberLookup
+                    id="team-member-lookup"
+                    label="Username"
+                    value={field.state.value}
+                    onValueChange={field.handleChange}
+                    context={{ kind: "org", slug }}
+                  />
+                )}
+              </memberForm.Field>
+              <memberForm.Subscribe selector={(s) => s.values.role}>
+                {(role) => (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="team-member-role">Team role</Label>
+                    <TeamRoleSelect
+                      id="team-member-role"
+                      value={role}
+                      onChange={(r) => memberForm.setFieldValue("role", r)}
+                    />
+                  </div>
+                )}
+              </memberForm.Subscribe>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" className="h-11" data-testid="member-add-submit">
+                  Add member
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11"
+                  onClick={() => {
+                    setShowAddMember(false);
+                    memberForm.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>;
+          }
+          @if (membersQ.isPending) {
+            <p className="text-[14px] text-muted-foreground">Loading members…</p>;
+          } @else {
+            @if (members.length === 0) {
+              <p className="text-[14px] text-muted-foreground">
+                No members yet. Team members must already belong to the organization.
+              </p>;
+            } @else {
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[28rem] border-collapse text-left text-[14px]">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-2 pr-4 font-medium">User</th>
+                      <th className="py-2 pr-4 font-medium">Team role</th>
+                      <th className="py-2 font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (const m of members; key m.user_id) {
+                      <tr className="border-b border-border">
+                        <td className="py-3 pr-4 font-medium text-foreground">
+                          {"@" + (m.username as string)}
+                        </td>
+                        <td className="py-3 pr-4">
+                          @if (canManageTeam) {
+                            <TeamRoleSelect
+                              id={`member-role-${m.user_id}`}
+                              value={m.role}
+                              onChange={(r) => void setMemberRole(m, r)}
+                            />;
+                          } @else {
+                            <span className="text-muted-foreground">
+                              {teamRoleLabel(m.role) as string}
+                            </span>;
+                          }
+                        </td>
+                        <td className="py-3">
+                          @if (canManageTeam) {
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-11 text-destructive"
+                              onClick={() => {
+                                setRemoveMemberError("");
+                                setRemoveMember(m);
+                              }}
+                            >
+                              Remove
+                            </Button>;
+                          }
+                        </td>
+                      </tr>;
+                    }
+                  </tbody>
+                </table>
+              </div>;
+            }
+          }
+        </div>
+
+        <div className="flex flex-col gap-3" data-testid="team-repos-section">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-foreground">Repositories</h3>
+            @if (canManageTeam && !showAddRepo) {
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-11 w-fit"
+                data-testid="repo-add-open"
+                onClick={() => setShowAddRepo(true)}
+              >
+                Add repository
+              </Button>;
+            }
+          </div>
+          @if (repoError) {
+            <AuthErrorBanner message={repoError} />;
+          }
+          @if (showAddRepo && canManageTeam) {
+            <form
+              className="flex flex-col gap-4 rounded-md border border-border p-4"
+              method="post"
+              action="#"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void repoForm.handleSubmit();
+              }}
+            >
+              <repoForm.Field name="repo">
+                {(field) => (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="team-repo-name">Repository name</Label>
+                    <Input
+                      id="team-repo-name"
+                      data-testid="team-repo-name"
+                      value={field.state.value}
+                      onInput={(e) =>
+                        field.handleChange((e.target as HTMLInputElement).value)
+                      }
+                      placeholder="repo-name"
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
+              </repoForm.Field>
+              <repoForm.Subscribe selector={(s) => s.values.permission}>
+                {(perm) => (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="team-repo-perm">Permission</Label>
+                    <PermissionSelect
+                      id="team-repo-perm"
+                      value={perm}
+                      onChange={(p) => repoForm.setFieldValue("permission", p)}
+                    />
+                  </div>
+                )}
+              </repoForm.Subscribe>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" className="h-11" data-testid="repo-add-submit">
+                  Grant access
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11"
+                  onClick={() => {
+                    setShowAddRepo(false);
+                    repoForm.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>;
+          }
+          @if (reposQ.isPending) {
+            <p className="text-[14px] text-muted-foreground">Loading repositories…</p>;
+          } @else {
+            @if (repos.length === 0) {
+              <p className="text-[14px] text-muted-foreground">
+                No repositories granted to this team.
+              </p>;
+            } @else {
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[28rem] border-collapse text-left text-[14px]">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-2 pr-4 font-medium">Repository</th>
+                      <th className="py-2 pr-4 font-medium">Permission</th>
+                      <th className="py-2 font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (const r of repos; key r.repo_id) {
+                      <tr
+                        className="border-b border-border"
+                        data-testid={`team-repo-${r.repo_name}`}
                       >
-                        {r.repo_name as string}
-                      </AppLink>
-                    </td>
-                    <td className="py-3 pr-4">
-                      @if (canAdmin) {
-                        <PermissionSelect
-                          id={`repo-perm-${r.repo_id}`}
-                          value={r.permission}
-                          onChange={(p) => void updateRepoPerm(r, p)}
-                        />;
-                      } @else {
-                        <span className="text-muted-foreground">
-                          {permLabel(r.permission) as string}
-                        </span>;
-                      }
-                    </td>
-                    <td className="py-3">
-                      @if (canAdmin) {
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-11 text-destructive"
-                          onClick={() => {
-                            setRemoveRepoError("");
-                            setRemoveRepo(r);
-                          }}
-                        >
-                          Remove
-                        </Button>;
-                      }
-                    </td>
-                  </tr>;
-                }
-              </tbody>
-            </table>
-          </div>;
-        }
-      </div>
-
-      <AlertDialog open={!!removeMember} onOpenChange={(o) => !o && setRemoveMember(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove member</AlertDialogTitle>
-            <AlertDialogDescription>
-              {removeMember
-                ? `Remove @${removeMember.username} from ${team.name}? Their repository access through this team ends immediately.`
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          @if (removeMemberError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {removeMemberError as string}
-            </p>;
+                        <td className="py-3 pr-4 font-medium text-foreground">
+                          <AppLink
+                            href={`/${slug}/${r.repo_name}`}
+                            className="text-foreground no-underline hover:underline"
+                          >
+                            {r.repo_name as string}
+                          </AppLink>
+                        </td>
+                        <td className="py-3 pr-4">
+                          @if (canManageTeam) {
+                            <PermissionSelect
+                              id={`repo-perm-${r.repo_id}`}
+                              value={r.permission}
+                              onChange={(p) => void updateRepoPerm(r, p)}
+                            />;
+                          } @else {
+                            <span className="text-muted-foreground">
+                              {permLabel(r.permission) as string}
+                            </span>;
+                          }
+                        </td>
+                        <td className="py-3">
+                          @if (canManageTeam) {
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-11 text-destructive"
+                              onClick={() => {
+                                setRemoveRepoError("");
+                                setRemoveRepo(r);
+                              }}
+                            >
+                              Remove
+                            </Button>;
+                          }
+                        </td>
+                      </tr>;
+                    }
+                  </tbody>
+                </table>
+              </div>;
+            }
           }
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removeMemberPending}>Cancel</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={removeMemberPending}
-              data-testid="member-remove-confirm"
-              onClick={() => void confirmRemoveMember()}
-            >
-              Remove
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        </div>
 
-      <AlertDialog open={!!removeRepo} onOpenChange={(o) => !o && setRemoveRepo(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove repository access</AlertDialogTitle>
-            <AlertDialogDescription>
-              {removeRepo ? `Remove ${team.name}'s access to ${removeRepo.repo_name}?` : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          @if (removeRepoError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {removeRepoError as string}
-            </p>;
-          }
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removeRepoPending}>Cancel</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={removeRepoPending}
-              data-testid="repo-remove-confirm"
-              onClick={() => void confirmRemoveRepo()}
-            >
-              Remove
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <AlertDialog open={!!removeMember} onOpenChange={(o) => !o && setRemoveMember(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove member</AlertDialogTitle>
+              <AlertDialogDescription>
+                {removeMember
+                  ? `Remove @${removeMember.username} from ${team.name}? Their repository access through this team ends immediately.`
+                  : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            @if (removeMemberError) {
+              <p role="alert" className="text-[14px] text-destructive">
+                {removeMemberError as string}
+              </p>;
+            }
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={removeMemberPending}>Cancel</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={removeMemberPending}
+                data-testid="member-remove-confirm"
+                onClick={() => void confirmRemoveMember()}
+              >
+                Remove
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
-      <AlertDialog open={confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(false)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete team</AlertDialogTitle>
-            <AlertDialogDescription>
-              {`Delete ${team.name}? Members keep their organization membership but lose all repository access granted through this team.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          @if (deleteError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {deleteError as string}
-            </p>;
-          }
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletePending}>Cancel</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deletePending}
-              data-testid="team-delete-confirm"
-              onClick={() => void confirmDeleteTeam()}
-            >
-              Delete team
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>;
+        <AlertDialog open={!!removeRepo} onOpenChange={(o) => !o && setRemoveRepo(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove repository access</AlertDialogTitle>
+              <AlertDialogDescription>
+                {removeRepo ? `Remove ${team.name}'s access to ${removeRepo.repo_name}?` : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            @if (removeRepoError) {
+              <p role="alert" className="text-[14px] text-destructive">
+                {removeRepoError as string}
+              </p>;
+            }
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={removeRepoPending}>Cancel</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={removeRepoPending}
+                data-testid="repo-remove-confirm"
+                onClick={() => void confirmRemoveRepo()}
+              >
+                Remove
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete team</AlertDialogTitle>
+              <AlertDialogDescription>
+                {`Delete ${team.name}? Members keep their organization membership but lose all repository access granted through this team.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            @if (deleteError) {
+              <p role="alert" className="text-[14px] text-destructive">
+                {deleteError as string}
+              </p>;
+            }
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deletePending}>Cancel</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deletePending}
+                data-testid="team-delete-confirm"
+                onClick={() => void confirmDeleteTeam()}
+              >
+                Delete team
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </section>;
+    }
   }
 }

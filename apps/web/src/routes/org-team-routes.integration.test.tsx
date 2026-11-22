@@ -113,10 +113,50 @@ describe("organization team routes", () => {
     });
   });
 
+  it("lets an organization member find teams without admin controls", async () => {
+    listMineMock.mockResolvedValue({
+      ok: true,
+      data: { orgs: [{ slug: "acme", role: "member" }] },
+    });
+    window.history.pushState({}, "", "/acme/settings/teams");
+    renderWithQueryClient(OrgTeamsPage);
+
+    await waitFor(() => expect(screen.getByTestId("team-row-core")).toBeInTheDocument());
+    expect(screen.queryByTestId("team-create-open")).not.toBeInTheDocument();
+  });
+
   it("renders the team detail", async () => {
     window.history.pushState({}, "", "/acme/settings/teams/core");
     renderWithQueryClient(OrgTeamDetailPage);
     await waitFor(() => expect(screen.getByTestId("org-team-detail")).toBeInTheDocument());
     expect(screen.getByText("Core")).toBeInTheDocument();
+  });
+
+  it("lets a team maintainer manage that team without org-admin access", async () => {
+    listMineMock.mockResolvedValue({
+      ok: true,
+      data: { orgs: [{ slug: "acme", role: "member" }] },
+    });
+    teamMembersMock.mockResolvedValue({
+      ok: true,
+      data: {
+        members: [
+          {
+            user_id: "u1",
+            username: "ada",
+            role: "maintainer",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          { user_id: "u2", username: "bob", role: "member", created_at: "2026-01-01T00:00:00Z" },
+        ],
+      },
+    });
+    window.history.pushState({}, "", "/acme/settings/teams/core");
+    renderWithQueryClient(OrgTeamDetailPage);
+
+    await waitFor(() => expect(screen.getByTestId("team-edit-open")).toBeInTheDocument());
+    expect(screen.getByTestId("member-add-open")).toBeInTheDocument();
+    expect(screen.getByTestId("repo-add-open")).toBeInTheDocument();
+    expect(screen.queryByTestId("team-delete-open")).not.toBeInTheDocument();
   });
 });

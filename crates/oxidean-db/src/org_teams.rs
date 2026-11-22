@@ -1351,8 +1351,8 @@ pub async fn max_team_permission_for_user_repo(
     const TIER: &str = "CASE LOWER(TRIM(tr.permission))
         WHEN 'admin' THEN 3 WHEN 'write' THEN 2 WHEN 'read' THEN 1 ELSE 0 END";
     let rank = match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-            "SELECT MAX({TIER}) FROM organization_team_repos tr
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, Option<i64>>(sqlx::AssertSqlSafe(format!(
+            "SELECT CAST(MAX({TIER}) AS BIGINT) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
@@ -1366,8 +1366,8 @@ pub async fn max_team_permission_for_user_repo(
         .fetch_one(p)
         .await
         .map_err(|e| format!("max team permission failed: {e}"))?,
-        DbPool::MySql(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-            "SELECT MAX({TIER}) FROM organization_team_repos tr
+        DbPool::MySql(p) => sqlx::query_scalar::<_, Option<i64>>(sqlx::AssertSqlSafe(format!(
+            "SELECT CAST(MAX({TIER}) AS SIGNED) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
                  JOIN repositories r ON r.id = tr.repo_id AND r.deleted_at IS NULL
@@ -1381,7 +1381,7 @@ pub async fn max_team_permission_for_user_repo(
         .fetch_one(p)
         .await
         .map_err(|e| format!("max team permission failed: {e}"))?,
-        DbPool::Sqlite(p) => sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, Option<i64>>(sqlx::AssertSqlSafe(format!(
             "SELECT MAX({TIER}) FROM organization_team_repos tr
                  JOIN organization_team_members tm ON tm.team_id = tr.team_id
                  JOIN organization_teams t ON t.id = tr.team_id
@@ -1397,10 +1397,10 @@ pub async fn max_team_permission_for_user_repo(
         .await
         .map_err(|e| format!("max team permission failed: {e}"))?,
     };
-    Ok(match rank {
+    Ok(rank.and_then(|rank| match rank {
         3 => Some("admin".into()),
         2 => Some("write".into()),
         1 => Some("read".into()),
         _ => None,
-    })
+    }))
 }

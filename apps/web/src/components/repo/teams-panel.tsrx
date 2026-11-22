@@ -161,7 +161,13 @@ export function TeamsPanel({ owner, name, orgOwned }: TeamsPanelProps) @{
 
   async function submitAdd() {
     setAddError("");
-    const team = available.find((t) => t.id === addTeamId) ?? available[0];
+    const selected = addTeamId ? available.find((t) => t.id === addTeamId) : undefined;
+    if (addTeamId && !selected) {
+      setAddTeamId("");
+      setAddError("The selected team is no longer available. Select a team again.");
+      return;
+    }
+    const team = selected ?? available[0];
     if (!team) {
       setAddError("Pick a team to grant.");
       return;

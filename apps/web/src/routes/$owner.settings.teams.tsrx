@@ -26,7 +26,7 @@ export function teamsQueryKey(slug: string) {
 /** `/{owner}/settings/teams` — org teams list + create (COL-05). */
 export function OrgTeamsPage() @{
   <AppPage>
-    <OrgSettingsShell active="teams">
+    <OrgSettingsShell active="teams" allowOrgMember>
       <OrgTeamsContent />
     </OrgSettingsShell>
   </AppPage>;
@@ -35,7 +35,7 @@ export function OrgTeamsPage() @{
 function OrgTeamsContent() @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
-  const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;
+  const data = useQuery(orgSettingsAccessQueryOptions(owner, undefined, true)).data;
   const queryClient = useQueryClient();
 
   const org = data?.kind === "ready" ? data.org : null;
