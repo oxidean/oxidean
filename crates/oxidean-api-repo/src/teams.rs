@@ -119,7 +119,8 @@ pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTeamPubli
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let (_org_id, team) = org_and_team(ctx, &accessible, &req.team_slug).await?;
 
-    ctx.db
+    let grant = ctx
+        .db
         .upsert_team_repo(&team.id, &accessible.row.id, req.permission.as_str())
         .await
         .map_err(db_err)?;
@@ -144,7 +145,7 @@ pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTeamPubli
         slug: team.slug,
         name: team.name,
         permission: req.permission,
-        created_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        created_at: grant.created_at,
     })
 }
 

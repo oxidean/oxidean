@@ -124,12 +124,13 @@ async fn require_team_admin(
     team_id: &str,
     caller: &UserRow,
 ) -> Result<(), AppError> {
-    // Org role short-circuits; non-members fall through to the maintainer
-    // check so a maintainer keeps access even on odd role rows.
-    if let Ok(role) = require_org_role(ctx, &org.id, &caller.id).await {
-        if matches!(role, OrgRole::Owner | OrgRole::Admin) {
-            return Ok(());
-        }
+    // Org role gates first: Owner/Admin allowed, Member falls through to the
+    // maintainer check. A `require_org_role` *error* (non-member, or 2FA
+    // lockout) propagates — maintainers must not bypass the org lockout (#130).
+    match require_org_role(ctx, &org.id, &caller.id).await {
+        Ok(role) if matches!(role, OrgRole::Owner | OrgRole::Admin) => return Ok(()),
+        Ok(_) => {}
+        Err(e) => return Err(e),
     }
     let member = ctx
         .db
