@@ -1,5 +1,5 @@
 schema_version: 1
-request_id: IN-0001
+request_id: IN-0003
 work_item_id: WI-0005
 kind: approval
 question: Approve transition of WI-0005 (shipping → shipped)?
