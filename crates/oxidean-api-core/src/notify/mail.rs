@@ -161,6 +161,15 @@ fn escape_html(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+fn flatten_header_value(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Resolved context for one fan-out event — shared by every recipient's
 /// message.
 pub struct MailContext {
@@ -188,6 +197,7 @@ pub fn build_notification_email(
     } else {
         format!("[{}/{}] {} ({})", ctx.owner, ctx.repo, subject.title, tail)
     };
+    let title_line = flatten_header_value(&title_line);
     let url = format!(
         "{}{}",
         ctx.origin,
@@ -434,6 +444,17 @@ mod tests {
         let html = msg.html.expect("html body");
         assert!(html.contains("Fix &lt;b&gt; &amp; &quot;quotes&quot;"));
         assert!(html.contains("href=\"https://forge.test/alice/app/issues/42\""));
+    }
+
+    #[test]
+    fn build_email_flattens_control_characters_from_subject_header() {
+        let s = subject("issue", 42, "Fix issue\r\nBcc: attacker@example.com", None);
+        let msg = build_notification_email("u@ex.com", &s, "issue_comment", &ctx());
+        assert_eq!(
+            msg.subject,
+            "[alice/app] Fix issue Bcc: attacker@example.com (#42)"
+        );
+        assert!(!msg.subject.chars().any(char::is_control));
     }
 
     #[test]
