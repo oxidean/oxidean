@@ -68,7 +68,7 @@ Flow:
 2. Load `pull_comments` row; must belong to this pull
    (`pull.comment_not_found`); must be line-anchored RIGHT
    (`path` + `line`, `side == "RIGHT"`, `start_line` optional
-   ≤ `line`), non-pending (`pull.suggestion_invalid`).
+   ≤ `line`), non-pending and non-outdated (`pull.suggestion_invalid`).
 3. Parse ````suggestion` fences from `row.body`; select index
    `suggestion_index` (default 0); out-of-range →
    `pull.suggestion_not_found`.
@@ -85,9 +85,10 @@ Flow:
    beyond file length → `pull.suggestion_out_of_range`.
    CRLF files: splice operates on `\n`-split lines; existing CRLF
    terminator is preserved per retained line (no normalization).
-7. Commit via `ctx.git.commit_files(head_bare, head_ref, head_tip_sha,
-   message, [FileChange::Upsert{path, new_bytes}], author, email,
-   web_flow_key, capability_env_label(head_cap))`.
+7. Commit via `commit_files_with_expected_base` on `head_ref`, passing
+    `Some(head_tip_sha)`. The backend compares that tip with the fetched base
+    before creating a commit; a moved head returns a conflict. The publish
+    remains fast-forward-only.
    Message: req `message` trimmed non-empty, else
    `Apply suggestion from code review`. When the suggestion author ≠
    applier, append `\n\nCo-authored-by: {author_display}
@@ -152,8 +153,8 @@ AC-1 `pull.comments.create` with ````suggestion` fence on RIGHT-side line
 AC-2 Single-line comment (no `start_line`) → exactly `line` replaced.
 AC-3 `start_line..line` range → whole range replaced; empty suggestion
     body deletes the range.
-AC-4 LEFT-side, general, file-level, pending, closed-PR targets each
-    reject with the mapped error code.
+AC-4 LEFT-side, general, file-level, pending, outdated, and closed-PR
+    targets each reject with the mapped error code.
 AC-5 Caller lacking Write on both head and base repo → `not_found`-class
     denial; protected head branch rejects per `evaluate_push`.
 AC-6 Applying commits as the applier (signed web-flow commit) with
@@ -166,7 +167,8 @@ AC-7 `apply_batch` over 2+ comments in the same file yields ONE commit
 AC-8 Multi-fence comment: `suggestion_index` selects; missing index →
     `pull.suggestion_not_found`.
 AC-9 Out-of-range anchor (`line` > EOF) → `pull.suggestion_out_of_range`;
-    outdated comments still apply at the current head tip.
+    outdated comments reject with `pull.suggestion_invalid` rather than
+    applying stale line numbers to a changed head.
 AC-10 Web: a ````suggestion` block in a diff comment renders as a
     suggestion block (not a generic fence) with the Apply affordance for
     Write+ viewers; markdown around it renders unchanged.

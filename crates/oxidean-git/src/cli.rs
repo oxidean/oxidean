@@ -676,7 +676,7 @@ impl RemoteAuthFiles {
                 };
                 cfgs.push((
                     "http.extraHeader".into(),
-                    format!("Authorization: Basic {auth_b64}"),
+                    format!("Authorization: Basic ***"),
                 ));
                 let _ = askpass; // reserved if we switch to ASKPASS later
             }
@@ -1884,6 +1884,34 @@ impl GitBackend for CliGitBackend {
         signing_key_path: Option<&Path>,
         actor_capability: &str,
     ) -> Result<FilesCommit, GitError> {
+        self.commit_files_with_expected_base(
+            bare_path,
+            branch,
+            base,
+            message,
+            changes,
+            author_name,
+            author_email,
+            signing_key_path,
+            actor_capability,
+            None,
+        )
+        .await
+    }
+
+    async fn commit_files_with_expected_base(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+        expected_base_sha: Option<&str>,
+    ) -> Result<FilesCommit, GitError> {
         let branch = validate_treeish(branch)?;
         let base = validate_treeish(base)?;
         if changes.is_empty() {
@@ -1981,6 +2009,11 @@ impl GitBackend for CliGitBackend {
         } else {
             None
         };
+        if expected_base_sha.is_some_and(|expected| base_sha.as_deref() != Some(expected)) {
+            return Err(GitError::Conflict(
+                "branch tip moved while preparing changes — retry the operation".into(),
+            ));
+        }
 
         // Scratch index file — real repo index is never touched.
         let index = work.join("oxidean-index");
@@ -6931,6 +6964,50 @@ mod tests {
             .await
             .expect_err("missing delete must fail");
         assert!(matches!(err, GitError::NotFound(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn commit_files_rejects_a_moved_expected_base() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let expected = git.rev_parse(&bare, "main").await.unwrap();
+        git.commit_files(
+            &bare,
+            "main",
+            "main",
+            "concurrent update",
+            &[FileChange::Upsert {
+                path: "README.md".into(),
+                content: b"concurrent\n".to_vec(),
+            }],
+            "Writer",
+            "writer@example.com",
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+
+        let err = git
+            .commit_files_with_expected_base(
+                &bare,
+                "main",
+                "main",
+                "stale suggestion",
+                &[FileChange::Upsert {
+                    path: "README.md".into(),
+                    content: b"stale\n".to_vec(),
+                }],
+                "Writer",
+                "writer@example.com",
+                None,
+                "admin",
+                Some(&expected),
+            )
+            .await
+            .expect_err("stale base must not overwrite the current tip");
+        assert!(matches!(err, GitError::Conflict(_)), "{err:?}");
+        assert_eq!(show_file(&bare, "README.md").await, "concurrent\n");
     }
 
     #[tokio::test]

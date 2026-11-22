@@ -341,6 +341,7 @@ function CommentNote(props: {
   repoName: string;
   canInteract: boolean;
   canWrite: boolean;
+  canApplySuggestions: boolean;
   /** newNo → head-side line text, for the `-` half of the suggested diff. */
   rightLines: Map<number, string>;
   inBatch: boolean;
@@ -355,7 +356,7 @@ function CommentNote(props: {
 }) @{
   const c = props.comment;
   const rangeLabel = commentRangeLabel(c);
-  const appliable = suggestionAppliable(c) && props.canWrite;
+  const appliable = suggestionAppliable(c) && props.canApplySuggestions;
   // The suggested-diff `-` rows: the comment's anchored RIGHT lines as they
   // appear in this diff. `null` when the rendered hunks no longer cover the
   // anchor (outdated comment, scoped view) — the `+` half still renders.
@@ -465,6 +466,7 @@ function RowNotes(props: {
   canInteract: boolean;
   /** Write+ — hides the pending-draft "Add review comment" path. */
   canWrite: boolean;
+  canApplySuggestions: boolean;
   minimizeComments: boolean;
   rightLines: Map<number, string>;
   suggestionBatch: string[];
@@ -504,6 +506,7 @@ function RowNotes(props: {
           repoName={props.repoName}
           canInteract={props.canInteract}
           canWrite={props.canWrite}
+          canApplySuggestions={props.canApplySuggestions}
           rightLines={props.rightLines}
           inBatch={props.suggestionBatch.includes(c.id)}
           applyBusy={props.applyBusy}
@@ -539,6 +542,7 @@ export function PullV2DiffFile(props: {
   canInteract: boolean;
   /** Write+ capability — pending review drafts are Write-gated (#263). */
   canWrite?: boolean;
+  canApplySuggestions?: boolean;
   minimizeComments: boolean;
   /** Server-side pending drafts anchored to this file. */
   pending: PullCommentPublic[];

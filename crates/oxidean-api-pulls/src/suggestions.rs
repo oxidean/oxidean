@@ -127,7 +127,11 @@ fn fence_marker(trimmed: &str) -> Option<(char, usize)> {
 /// Closer line: only the fence char (allowing GFM's ≤3-space indentation and
 /// trailing whitespace), run length ≥ opener length.
 fn is_fence_close(line: &str, fence_ch: char, fence_len: usize) -> bool {
-    let t = line.trim();
+    let indent = line.chars().take_while(|ch| *ch == ' ').count();
+    if indent > 3 {
+        return false;
+    }
+    let t = line[indent..].trim_end_matches(' ');
     !t.is_empty() && t.chars().all(|c| c == fence_ch) && t.chars().count() >= fence_len
 }
 
@@ -160,6 +164,14 @@ struct ResolvedSuggestion {
 
 /// Validate that `row` is a submitted, RIGHT-side line-anchored comment on
 /// `pull` and pull its `index`-th suggestion block.
+fn validate_anchor_range(start_line: i64, end_line: i64) -> Result<(), AppError> {
+    if start_line > end_line {
+        Err(suggestion_invalid("suggestion range is invalid"))
+    } else {
+        Ok(())
+    }
+}
+
 fn resolve_suggestion(
     row: &PullCommentRow,
     pull: &PullRow,
@@ -196,6 +208,7 @@ fn resolve_suggestion(
     }
     let path = normalize_edit_path(path)?;
     let start_line = row.start_line.unwrap_or(line);
+    validate_anchor_range(start_line, line)?;
     let blocks = suggestion_blocks(&row.body);
     let Some(block) = blocks.get(index) else {
         return Err(suggestion_not_found());
@@ -330,14 +343,13 @@ async fn commit_to_head(
             "web-flow signing key is unavailable",
         )
     })?;
-    let author_name = if user.display_name.trim().is_empty() {
-        user.username.clone()
-    } else {
-        user.display_name.clone()
-    };
+    let author_name = oxidean_api_core::repo::author_resolve::safe_git_author_name(
+        &user.display_name,
+        &user.username,
+    );
     let result = ctx
         .git
-        .commit_files(
+        .commit_files_with_expected_base(
             &parts.head_bare,
             &pull.head_ref,
             // `base` is a *branch name* — the in-place tip the commit builds
@@ -350,6 +362,7 @@ async fn commit_to_head(
             &user.email,
             Some(signing_key.as_path()),
             capability_env_label(parts.head_cap),
+            Some(&parts.head_tip),
         )
         .await
         .map_err(file_git_err)?;
@@ -444,11 +457,10 @@ async fn message_with_coauthors(
             continue;
         }
         if let Ok(Some(u)) = ctx.db.find_user_by_id(id).await {
-            let name = if u.display_name.trim().is_empty() {
-                u.username.clone()
-            } else {
-                u.display_name.clone()
-            };
+            let name = oxidean_api_core::repo::author_resolve::safe_git_author_name(
+                &u.display_name,
+                &u.username,
+            );
             trailers.push(format!("Co-authored-by: {name} <{}>", coauthor_email(&u)));
         }
     }
@@ -549,13 +561,13 @@ pub async fn apply_batch(
             .map_err(db_err)?
             .ok_or_else(|| AppError::new("pull.comment_not_found", "Comment not found"))?;
         let suggestion = resolve_suggestion(&row, &pull, 0)?;
-        authors.push(suggestion.author_id.clone());
         by_path
             .entry(suggestion.path.clone())
             .or_default()
             .push(suggestion);
     }
     let mut changes = Vec::with_capacity(by_path.len());
+    let mut applied = 0;
     for (path, mut group) in by_path {
         // Reject overlapping ranges in the same file — GitHub refuses the
         // batch rather than guessing intent.
@@ -568,7 +580,12 @@ pub async fn apply_batch(
         let content = head_file_text(ctx, &parts, &path).await?;
         let mut next = content.clone();
         for s in group.iter().rev() {
-            next = splice_lines(&next, s.start_line, s.end_line, &s.suggestion)?;
+            let updated = splice_lines(&next, s.start_line, s.end_line, &s.suggestion)?;
+            if updated != next {
+                applied += 1;
+                authors.push(s.author_id.clone());
+            }
+            next = updated;
         }
         if next != content {
             changes.push(FileChange::Upsert {
@@ -580,7 +597,7 @@ pub async fn apply_batch(
     if changes.is_empty() {
         return Err(suggestion_invalid("suggestions make no change"));
     }
-    let applied = authors.len() as i64;
+    let applied = applied as i64;
     let base_message = req
         .message
         .as_deref()
@@ -598,7 +615,32 @@ pub async fn apply_batch(
 
 #[cfg(test)]
 mod tests {
-    use super::{splice_lines, suggestion_blocks};
+    use super::{is_fence_close, splice_lines, suggestion_blocks, validate_anchor_range};
+
+    #[test]
+    fn author_names_cannot_inject_commit_trailers() {
+        assert_eq!(
+            oxidean_api_core::repo::author_resolve::safe_git_author_name(
+                "Alice\r\n\nSigned-off-by: Admin <admin@example.com>",
+                "alice",
+            ),
+            "Alice Signed-off-by: Admin admin@example.com"
+        );
+    }
+
+    #[test]
+    fn reversed_anchor_ranges_are_rejected() {
+        assert!(validate_anchor_range(4, 3).is_err());
+        assert!(validate_anchor_range(3, 3).is_ok());
+    }
+
+    #[test]
+    fn closing_fence_allows_at_most_three_leading_spaces() {
+        assert!(is_fence_close("   ```", '`', 3));
+        assert!(is_fence_close("```   ", '`', 3));
+        assert!(!is_fence_close("    ```", '`', 3));
+        assert!(!is_fence_close("```\t", '`', 3));
+    }
 
     #[test]
     fn parses_single_suggestion_block() {

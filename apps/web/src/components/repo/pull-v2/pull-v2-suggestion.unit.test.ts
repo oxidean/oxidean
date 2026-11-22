@@ -56,6 +56,24 @@ describe("commentBodySegments", () => {
     expect(segs).toEqual([{ kind: "suggestion", text: "foo\n bar", index: 0 }]);
   });
 
+  it("does not treat a fence indented over three spaces as a closer", () => {
+    expect(commentBodySegments("```suggestion\nx\n    ```")).toEqual([
+      { kind: "suggestion", text: "x\n    ```", index: 0 },
+    ]);
+  });
+
+  it("allows trailing spaces on a closing fence", () => {
+    expect(commentBodySegments("```suggestion\nx\n```   ")).toEqual([
+      { kind: "suggestion", text: "x", index: 0 },
+    ]);
+  });
+
+  it("does not treat a tab-indented fence as a closer", () => {
+    expect(commentBodySegments("```suggestion\nx\n\t``` ")).toEqual([
+      { kind: "suggestion", text: "x\n\t``` ", index: 0 },
+    ]);
+  });
+
   it("treats EOF as the closer and keeps an empty body as a delete", () => {
     expect(commentBodySegments("```suggestion\nx\ny")).toEqual([
       { kind: "suggestion", text: "x\ny", index: 0 },
@@ -86,6 +104,7 @@ describe("suggestionAppliable", () => {
     expect(suggestionAppliable(withBody({ line: null }))).toBe(false);
     expect(suggestionAppliable(withBody({ path: null }))).toBe(false);
     expect(suggestionAppliable(withBody({ side: "LEFT" }))).toBe(false);
+    expect(suggestionAppliable(withBody({ side: null }))).toBe(false);
     expect(suggestionAppliable({ ...base, body: "plain note" })).toBe(false);
   });
 });

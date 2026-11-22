@@ -122,13 +122,13 @@ async fn signup_and_login(
     username: &str,
 ) -> (String, serde_json::Value) {
     let signup_body = format!(
-        r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
+        r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password": "***"}}}}"#
     );
     let signup = app.clone().oneshot(rpc_req(&signup_body)).await.unwrap();
     assert_eq!(signup.status(), StatusCode::OK);
     let _ = signup.into_body().collect().await;
     let login_body = format!(
-        r#"{{"procedure":"auth.login","input":{{"identifier":"{email}","password":"password1","remember_me":false}}}}"#
+        r#"{{"procedure":"auth.login","input":{{"identifier":"{email}","password": "***","remember_me":false}}}}"#
     );
     let login = app.clone().oneshot(rpc_req(&login_body)).await.unwrap();
     assert_eq!(login.status(), StatusCode::OK);

@@ -16,6 +16,33 @@ pub struct ResolvedAuthor {
     pub avatar_url: Option<String>,
 }
 
+/// Sanitize a user-provided name before using it in a Git author identity.
+pub fn safe_git_author_name(display_name: &str, username: &str) -> String {
+    let source = if display_name.trim().is_empty() {
+        username
+    } else {
+        display_name
+    };
+    let name = source
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '<' | '>') {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if name.is_empty() {
+        "Oxidean user".into()
+    } else {
+        name
+    }
+}
+
 /// Hostname used in `users.noreply.<host>` addresses.
 pub fn noreply_host() -> String {
     origin_hostname(&resolve_public_origin())

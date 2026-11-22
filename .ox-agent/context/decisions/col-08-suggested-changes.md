@@ -21,8 +21,8 @@ Status: accepted for WI-0004 implementation. Source: brainstorm-options.md
   anchors: it replaces `start_line..=line` (single line when `start_line`
   is absent) of the file at the *current* head tip; empty suggestion body
   deletes the range. `side=LEFT`, general/file-level comments, pending
-  drafts, and non-open PRs are rejected. `outdated` comments remain
-  applicable (GitHub parity) with the state surfaced in UI.
+  drafts, outdated comments, and non-open PRs are rejected so stale line
+  numbers cannot be applied to changed content.
 - **Permissions.** Mirror `pull.updateBranch`: Write+ on the head repo OR
   Write+ on the base repo; head-branch protection evaluated as
   `ProtectionIntent::Push` up front and re-verified by the `update` hook in

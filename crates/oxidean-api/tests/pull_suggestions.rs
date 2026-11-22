@@ -610,12 +610,16 @@ async fn apply_batch_commits_once_across_ranges() {
         "THREE",
     )
     .await;
+    let c3 = plant_suggestion(
+        &app, &cookie, "ownfive", "suggfive", number, 2, None, "line two",
+    )
+    .await;
 
     let apply = rpc_json(
         &app,
         &cookie,
         &format!(
-            r#"{{"procedure":"pull.suggestions.apply_batch","input":{{"owner":"ownfive","name":"suggfive","number":{number},"comment_ids":["{c1}","{c2}"]}}}}"#
+            r#"{{"procedure":"pull.suggestions.apply_batch","input":{{"owner":"ownfive","name":"suggfive","number":{number},"comment_ids":["{c1}","{c2}","{c3}"]}}}}"#
         ),
     )
     .await;

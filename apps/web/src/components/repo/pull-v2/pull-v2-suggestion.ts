@@ -23,9 +23,12 @@ function fenceMarker(trimmed: string): Fence | null {
   return len >= 3 ? { ch, len } : null;
 }
 
-/** Closer line: only the fence char (any indentation), run >= opener length. */
+/** Closer line: up to three leading spaces, then a matching fence run. */
 function isFenceClose(line: string, fence: Fence): boolean {
-  const t = line.trim();
+  let indent = 0;
+  while (line[indent] === " ") indent++;
+  if (indent > 3) return false;
+  const t = line.slice(indent).replace(/ +$/, "");
   if (!t) return false;
   for (const c of t) {
     if (c !== fence.ch) return false;
@@ -100,6 +103,6 @@ export function suggestionBlockCount(body: string): number {
  */
 export function suggestionAppliable(c: PullCommentPublic): boolean {
   if (c.pending || c.outdated || c.line == null || !c.path) return false;
-  if (c.side && c.side !== "RIGHT") return false;
+  if (c.side !== "RIGHT") return false;
   return suggestionBlockCount(c.body) > 0;
 }
