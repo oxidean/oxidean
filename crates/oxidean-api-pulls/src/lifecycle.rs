@@ -23,7 +23,7 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, A
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.get input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    to_public(ctx, &row).await
+    oxidean_api_core::pull::to_public_with_codeowners_status(ctx, &row).await
 }
 
 /// `pull.list` — Read+; default state `open` (D-PR-26).
@@ -485,6 +485,21 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             .map_err(db_err)?;
     }
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if head_changed || base_changed {
+        if let Err(error) = oxidean_api_core::pull::refresh_codeowners_review_requests(
+            &ctx.db,
+            ctx.git.as_ref(),
+            &ctx.repos_dir,
+            &accessible.row,
+            &accessible.owner_username,
+            &updated,
+            &user.id,
+        )
+        .await
+        {
+            tracing::warn!(error = %error, pull = %updated.id, "CODEOWNERS review request refresh failed");
+        }
+    }
     // Merge queue: a head move or base retarget removes the PR from its
     // train — the queued commit/branch is stale.
     if head_changed || base_ref != row.base_ref {

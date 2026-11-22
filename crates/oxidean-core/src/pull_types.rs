@@ -134,6 +134,26 @@ pub struct PullPublic {
     /// issues — PRs share the repo milestone set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub milestone: Option<Box<crate::MilestonePublic>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codeowners_status: Option<PullCodeownersStatus>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullCodeownersStatus {
+    pub required: bool,
+    pub file_present: bool,
+    #[serde(default)]
+    pub errors: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<PullCodeownersPathStatus>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullCodeownersPathStatus {
+    pub path: String,
+    #[serde(default)]
+    pub owners: Vec<String>,
+    pub approved: bool,
 }
 
 /// GitHub parity — at most three pinned pull requests per repository.

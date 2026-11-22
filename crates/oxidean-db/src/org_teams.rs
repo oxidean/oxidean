@@ -673,19 +673,50 @@ pub async fn list_team_members(
     pool: &DbPool,
     team_id: &str,
 ) -> Result<Vec<OrgTeamMemberListRow>, String> {
+    list_team_members_with_limit(pool, team_id, None).await
+}
+
+pub async fn list_team_members_limited(
+    pool: &DbPool,
+    team_id: &str,
+    limit: i64,
+) -> Result<Vec<OrgTeamMemberListRow>, String> {
+    list_team_members_with_limit(pool, team_id, Some(limit.max(1))).await
+}
+
+async fn list_team_members_with_limit(
+    pool: &DbPool,
+    team_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<OrgTeamMemberListRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(
-                "SELECT m.team_id, m.user_id, u.username, m.role,
+            let rows = if let Some(limit) = limit {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
+       to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
+FROM organization_team_members m
+JOIN users u ON u.id = m.user_id
+WHERE m.team_id = $1
+ORDER BY m.created_at ASC, m.user_id ASC LIMIT $2",
+                )
+                .bind(team_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+            } else {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
        to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM organization_team_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.team_id = $1
 ORDER BY m.created_at ASC, m.user_id ASC",
-            )
-            .bind(team_id)
-            .fetch_all(p)
-            .await
+                )
+                .bind(team_id)
+                .fetch_all(p)
+                .await
+            }
             .map_err(|e| format!("list team members failed: {e}"))?;
             rows.iter()
                 .map(|row| {
@@ -710,17 +741,32 @@ ORDER BY m.created_at ASC, m.user_id ASC",
                 .collect()
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(
-                "SELECT m.team_id, m.user_id, u.username, m.role,
+            let rows = if let Some(limit) = limit {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
+       DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
+FROM organization_team_members m
+JOIN users u ON u.id = m.user_id
+WHERE m.team_id = ?
+ORDER BY m.created_at ASC, m.user_id ASC LIMIT ?",
+                )
+                .bind(team_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+            } else {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
        DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM organization_team_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.team_id = ?
 ORDER BY m.created_at ASC, m.user_id ASC",
-            )
-            .bind(team_id)
-            .fetch_all(p)
-            .await
+                )
+                .bind(team_id)
+                .fetch_all(p)
+                .await
+            }
             .map_err(|e| format!("list team members failed: {e}"))?;
             rows.iter()
                 .map(|row| {
@@ -745,17 +791,32 @@ ORDER BY m.created_at ASC, m.user_id ASC",
                 .collect()
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(
-                "SELECT m.team_id, m.user_id, u.username, m.role,
+            let rows = if let Some(limit) = limit {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
+       strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) AS created_at
+FROM organization_team_members m
+JOIN users u ON u.id = m.user_id
+WHERE m.team_id = ?1
+ORDER BY m.created_at ASC, m.user_id ASC LIMIT ?2",
+                )
+                .bind(team_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+            } else {
+                sqlx::query(
+                    "SELECT m.team_id, m.user_id, u.username, m.role,
        strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) AS created_at
 FROM organization_team_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.team_id = ?1
 ORDER BY m.created_at ASC, m.user_id ASC",
-            )
-            .bind(team_id)
-            .fetch_all(p)
-            .await
+                )
+                .bind(team_id)
+                .fetch_all(p)
+                .await
+            }
             .map_err(|e| format!("list team members failed: {e}"))?;
             rows.iter()
                 .map(|row| {

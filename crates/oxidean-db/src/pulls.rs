@@ -2335,46 +2335,40 @@ pub async fn upsert_review_request(
     pull_id: &str,
     user_id: &str,
     requested_by: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query(
-                "INSERT INTO pull_review_requests (pull_id, user_id, requested_by)
+        DbPool::Postgres(p) => sqlx::query(
+            "INSERT INTO pull_review_requests (pull_id, user_id, requested_by)
  VALUES ($1,$2,$3) ON CONFLICT (pull_id, user_id) DO NOTHING",
-            )
-            .bind(pull_id)
-            .bind(user_id)
-            .bind(requested_by)
-            .execute(p)
-            .await
-            .map_err(|e| format!("upsert review request failed: {e}"))?;
-        }
-        DbPool::MySql(p) => {
-            sqlx::query(
-                "INSERT IGNORE INTO pull_review_requests (pull_id, user_id, requested_by)
+        )
+        .bind(pull_id)
+        .bind(user_id)
+        .bind(requested_by)
+        .execute(p)
+        .await
+        .map(|result| result.rows_affected() > 0),
+        DbPool::MySql(p) => sqlx::query(
+            "INSERT IGNORE INTO pull_review_requests (pull_id, user_id, requested_by)
  VALUES (?,?,?)",
-            )
-            .bind(pull_id)
-            .bind(user_id)
-            .bind(requested_by)
-            .execute(p)
-            .await
-            .map_err(|e| format!("upsert review request failed: {e}"))?;
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "INSERT OR IGNORE INTO pull_review_requests (pull_id, user_id, requested_by)
+        )
+        .bind(pull_id)
+        .bind(user_id)
+        .bind(requested_by)
+        .execute(p)
+        .await
+        .map(|result| result.rows_affected() > 0),
+        DbPool::Sqlite(p) => sqlx::query(
+            "INSERT OR IGNORE INTO pull_review_requests (pull_id, user_id, requested_by)
  VALUES (?1,?2,?3)",
-            )
-            .bind(pull_id)
-            .bind(user_id)
-            .bind(requested_by)
-            .execute(p)
-            .await
-            .map_err(|e| format!("upsert review request failed: {e}"))?;
-        }
+        )
+        .bind(pull_id)
+        .bind(user_id)
+        .bind(requested_by)
+        .execute(p)
+        .await
+        .map(|result| result.rows_affected() > 0),
     }
-    Ok(())
+    .map_err(|e| format!("upsert review request failed: {e}"))
 }
 
 pub async fn delete_review_request(

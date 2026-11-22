@@ -66,6 +66,7 @@ pub struct BranchProtectionRulePublic {
     /// PRs route through `merge_queue.*` (groups run required checks on the
     /// combined tree before the base ref fast-forwards).
     pub required_merge_queue: bool,
+    pub require_code_owner_reviews: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -112,6 +113,8 @@ pub struct BranchProtectionRuleInput {
     /// GitHub ruleset "Require merge queue" for matching branches.
     #[serde(default)]
     pub required_merge_queue: bool,
+    #[serde(default)]
+    pub require_code_owner_reviews: bool,
 }
 
 fn default_review_count() -> i32 {
@@ -155,6 +158,8 @@ pub struct BranchProtectionUpdateRequest {
     /// GitHub ruleset "Require merge queue" for matching branches.
     #[serde(default)]
     pub required_merge_queue: bool,
+    #[serde(default)]
+    pub require_code_owner_reviews: bool,
 }
 
 /// `repo.branchProtection.delete`.
@@ -286,4 +291,6 @@ pub struct ProtectionBlockReasons {
     /// GIT-22: commits newly introduced by the push lacking a verified signature.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unsigned_commits: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codeowners_errors: Vec<String>,
 }

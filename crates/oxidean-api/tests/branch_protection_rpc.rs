@@ -129,6 +129,7 @@ async fn branch_protection_rpc_admin_crud() {
     assert_eq!(created["data"]["required_approving_review_count"], 2);
     // GIT-22: field round-trips (default off).
     assert_eq!(created["data"]["require_signed_commits"], false);
+    assert_eq!(created["data"]["require_code_owner_reviews"], false);
     let id = created["data"]["id"].as_str().unwrap().to_string();
 
     let listed = rpc_json(
@@ -144,7 +145,7 @@ async fn branch_protection_rpc_admin_crud() {
         &app,
         &cookie,
         &format!(
-            r#"{{"procedure":"repo.branchProtection.update","input":{{"owner":"adminu","name":"core","id":"{id}","pattern":"main","require_reviews":true,"required_approving_review_count":1,"lock_branch":true,"require_signed_commits":true}}}}"#
+            r#"{{"procedure":"repo.branchProtection.update","input":{{"owner":"adminu","name":"core","id":"{id}","pattern":"main","require_reviews":true,"required_approving_review_count":1,"lock_branch":true,"require_signed_commits":true,"require_code_owner_reviews":true}}}}"#
         ),
     )
     .await;
@@ -152,6 +153,7 @@ async fn branch_protection_rpc_admin_crud() {
     assert_eq!(updated["data"]["pattern"], "main");
     assert_eq!(updated["data"]["lock_branch"], true);
     assert_eq!(updated["data"]["require_signed_commits"], true);
+    assert_eq!(updated["data"]["require_code_owner_reviews"], true);
 
     let deleted = rpc_json(
         &app,

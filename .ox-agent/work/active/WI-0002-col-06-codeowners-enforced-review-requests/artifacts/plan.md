@@ -3,7 +3,7 @@
 ## Stage 1 — Parser and matching contract
 
 - Add a pure CODEOWNERS parser/matcher in the existing pull-request or git-domain utility layer; avoid database access in parsing.
-- Red tests first for comments, blanks, root anchoring, `*` vs `**`, `?`, character classes, last-match precedence, unsupported negation/escaping, malformed lines, and configured size/count limits.
+- Red tests first for comments, blanks, root anchoring, `*` vs `**`, `?`, character classes, last-match precedence, unsupported negation/escaping, malformed lines, and configured size/count/work/fan-out limits.
 - Compile patterns once and return structured matches plus parse/owner-resolution errors.
 - Gate: unit suite passes; parser behavior matches the specification exactly.
 
@@ -12,7 +12,7 @@
 - Resolve user and same-org team owners against current users, organization membership, and write-capable repo access.
 - Add the owner request resolver that reads `.github/CODEOWNERS` from the PR base revision and matches the current changed-path set.
 - Wire PR creation and changed-file refresh to the existing review-request/notification path; keep recalculation idempotent and preserve manual requests.
-- Add integration tests for user/team resolution, ineligible/unknown owners, duplicate recomputation, manual-request preservation, and update-trigger behavior.
+- Add integration tests for user/team resolution, ineligible/unknown owners, author exclusion, bounded team fan-out, duplicate recomputation, manual-request preservation, and update-trigger behavior.
 - Gate: existing pull-request review-request tests and new notification/integration tests pass.
 
 ## Stage 3 — Branch-protection persistence and merge evaluation

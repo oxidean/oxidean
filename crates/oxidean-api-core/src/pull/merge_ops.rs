@@ -64,11 +64,14 @@ pub async fn evaluate_merge_gate(
         if r.state != "approved" {
             continue;
         }
-        if eff.dismiss_stale_reviews && r.commit_sha.as_deref() != Some(row.head_sha.as_str()) {
+        let current_head_review = r.commit_sha.as_deref() == Some(row.head_sha.as_str());
+        if eff.dismiss_stale_reviews && !current_head_review {
             continue;
         }
         approving_reviewer_ids.push(r.author_id.clone());
     }
+    let current_head_approving_reviewer_ids =
+        super::codeowners::current_head_approved_user_ids(&reviews, &row.head_sha);
     // Pending drafts never gate merges — only submitted comments count.
     let comments = ctx
         .db
@@ -123,11 +126,37 @@ pub async fn evaluate_merge_gate(
     let head_up_to_date = git_is_ancestor(&path_for_anc, &row.base_sha, &row.head_sha)
         .await
         .unwrap_or(true);
+    let (codeowners_approved, codeowners_errors) = if eff.require_code_owner_reviews {
+        match super::codeowners::evaluate(
+            &ctx.db,
+            ctx.git.as_ref(),
+            &ctx.repos_dir,
+            super::codeowners::EvaluationInput {
+                repository: &accessible.row,
+                base_owner: &accessible.owner_username,
+                pull: row,
+                approved_user_ids: &current_head_approving_reviewer_ids,
+                required: true,
+            },
+        )
+        .await
+        {
+            Ok(evaluation) => (evaluation.approved, evaluation.status.errors),
+            Err(_) => (
+                false,
+                vec!["CODEOWNERS evaluation could not complete".into()],
+            ),
+        }
+    } else {
+        (true, Vec::new())
+    };
     let merge_input = MergeEvalInput {
         approving_review_count: approving_reviewer_ids.len() as i32,
         unresolved_review_threads: unresolved,
         last_head_pusher_id: None,
         approving_reviewer_ids,
+        codeowners_approved,
+        codeowners_errors,
         head_sha: row.head_sha.clone(),
         base_sha: row.base_sha.clone(),
         head_up_to_date,

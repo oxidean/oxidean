@@ -86,6 +86,19 @@ async fn dialect_branch_protection_migrate_schema_presence() {
         );
     }
 
+    for dialect in ["sqlite", "postgres", "mysql"] {
+        let (_path, sql) = find_migration_containing(dialect, "require_code_owner_reviews")
+            .unwrap_or_else(|| panic!("missing {dialect} require_code_owner_reviews migration"));
+        assert!(
+            sql.contains("branch_protection_rules"),
+            "{dialect}: require_code_owner_reviews must alter branch_protection_rules"
+        );
+        assert!(
+            sql.to_ascii_lowercase().contains("default"),
+            "{dialect}: code-owner reviews must default off"
+        );
+    }
+
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("bp.db").display());
     let db = oxidean_db::Database::connect(&url).await.expect("connect");

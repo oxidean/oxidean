@@ -149,7 +149,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
 | `repo.deployKey.list` / `create` / `delete` | Per-repo deploy keys for Git-over-SSH (read or read/write scope) | Repo Admin |
 | `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
-| `repo.branchProtection.list` / `create` / `update` / `delete` | Classic branch protection rules (glob pattern on `refs/heads/*`); enforced by the bare-repo `update` hook on HTTPS + SSH pushes. `require_signed_commits` denies pushes introducing commits without a forge-verified SSH/GPG signature | Repo Admin |
+| `repo.branchProtection.list` / `create` / `update` / `delete` | Classic branch protection rules (glob pattern on `refs/heads/*`); enforced by the bare-repo `update` hook on HTTPS + SSH pushes. `require_signed_commits` denies pushes introducing commits without a forge-verified SSH/GPG signature. `require_code_owner_reviews` requires approval from a current owner other than the pull request author for each matched changed path; `.github/CODEOWNERS` is read from the pull request base commit, and owners must have current write access | Repo Admin |
 | `repo.tagProtection.list` / `create` / `update` / `delete` | Protected tag rulesets (glob pattern on `refs/tags/*`); `allow_create`/`allow_update`/`allow_delete` carve out actions for non-admins, `enforce_admins` removes the admin bypass | Repo Admin |
 | `repo.templates.list` | Issue/PR file templates read from the default-branch tree (`.oxidean/`/`.github/`/root/`docs` `ISSUE_TEMPLATE` + `PULL_REQUEST_TEMPLATE` locations; GitHub-style YAML frontmatter parsed) → `{ issues, pulls }` | Read+ (anonymous OK on public) |
 | `release.list` / `get` / `create` / `update` / `delete` / `deleteAsset` | Tag-based releases + notes; assets via HTTP | Session (+ capability) |
@@ -174,7 +174,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `notification.markAllRead` | Mark all own unread notifications read | Session |
 | `repo.file.create` / `update` / `delete` / `rename` / `upload` / `mkdir` | Browser file edits committed via the web-flow signing key; `new_branch` + `open_pr` for the protected-branch → PR flow | Session + Write+ |
 | `repo.file.commitPolicy` | Whether direct commits to `branch` are allowed or the PR flow is required | Session + Write+ |
-| `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
+| `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; `pull.get` includes optional per-path `codeowners_status` from the base revision, listing declared owner handles rather than expanded team membership; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
 | `pull.pin` / `pull.unpin` | Pinned-PR box entries — ordered, ≤3 per repo; `pinned` flag on `PullPublic`, `pinned` list on `pull.list` for the unfiltered open first page | Session (+ Write+) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
 | `pull.comments.list` / `create` / `update` / `delete` / `history` / `resolve` | General + line comments; create = verified + Read, update = author, delete = author or Write+, history = Read+, resolve = Write+ | Session (+ capability) |
@@ -849,6 +849,7 @@ Phase 12 ships pull requests (PR-01…07) on migration `0016_pull_requests`:
 | **Merge** | Methods `merge` \| `squash` \| `rebase` gated by `repo.mergeSettings.*` (defaults all enabled). Conflict → `pull.merge_conflict`. Optional `delete_branch`. |
 | **Update branch** | `pull.updateBranch` merges the base tip into the head branch (never rebases, never force-pushes); works for fork-head PRs and runs the same `synchronize` bookkeeping as a head push (stale line comments, review dismissal, webhooks, Actions). `pull.branchStatus` reports live `ahead_count`/`behind_count` + `can_update`. |
 | **Diff UX** | `pull.files` unified patch; web supports unified/split. Line comments carry path/side/line; outdated after head/base change. |
+| **CODEOWNERS** | `pull.get` reports declared owners and per-path approval status. Evaluation is bounded to 65,536 bytes, 3,000 lines, 255 pattern characters, 20 owners per line, 1,000 changed paths, 50,000,000 pattern-token × path-character work units, 500 distinct owners, 200 members per team, and 500 unique reviewer requests. Exceeding a limit appears in status and blocks merge only when `require_code_owner_reviews` is enabled. |
 
 Client surface: `client.pull.*` / `client.mergeSettings.*` / `client.issue.*` / `client.label.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
 
