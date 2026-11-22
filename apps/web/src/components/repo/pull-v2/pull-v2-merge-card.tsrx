@@ -3,6 +3,7 @@ import type {
   CheckRunPublic,
   MergeMethod,
   MergeQueueGetResponse,
+  PullPublic,
   PullReviewPublic,
   RepoMergeSettings,
 } from "@oxidean/api-client";
@@ -145,6 +146,21 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
     enabled: props.canWrite && props.pullState === "open",
   });
 
+  // Armed auto-merge state — same query key the page already holds.
+  const pullQ = useQuery({
+    queryKey: ["pull", "get", props.owner, props.repoName, props.number] as const,
+    queryFn: async (): Promise<PullPublic> => {
+      const res = await apiClient.pull.get({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+    enabled: props.pullState === "open",
+  });
+
   const checksQ = useQuery({
     queryKey: ["check", "runs", "listForRef", props.owner, props.repoName, props.headSha] as const,
     queryFn: async () => {
@@ -214,6 +230,7 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
 
   const settings: RepoMergeSettings | undefined = settingsQ.data;
   const queue = queueQ.data;
+  const armed = pullQ.data?.auto_merge ?? null;
 
   const checkRuns = checksQ.data?.check_runs ?? [];
   const failingChecks = checkRuns.filter(isFailingRun).length;
@@ -369,6 +386,39 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
     setBusy(false);
     if (!res.ok) {
       setError(res.error.message || "Could not remove from the merge queue");
+      return;
+    }
+    await invalidatePull();
+  }
+
+  async function enableAutoMerge() {
+    setBusy(true);
+    setError(null);
+    const res = await apiClient.pull.autoMerge.enable({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+      method: activeMethod,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not enable auto-merge");
+      return;
+    }
+    await invalidatePull();
+  }
+
+  async function disableAutoMerge() {
+    setBusy(true);
+    setError(null);
+    const res = await apiClient.pull.autoMerge.disable({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not disable auto-merge");
       return;
     }
     await invalidatePull();
@@ -566,6 +616,30 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
             </Button>
           </div>;
         }
+        @if (armed) {
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-2"
+            data-testid="pull-v2-auto-merge-armed"
+          >
+            <GitMerge aria-hidden size={15} className="shrink-0 text-purple-500" />
+            <p className="min-w-0 flex-1 text-muted-foreground">
+              {
+                `Auto-merge enabled by ${armed.set_by_username || "a collaborator"} — merges with ${armed.method} when checks and approvals pass.` as string
+              }
+            </p>
+            @if (props.canWrite) {
+              <button
+                type="button"
+                className="rounded-md border border-border px-1.5 py-0.5 text-[12px] text-foreground hover:bg-muted disabled:opacity-50"
+                disabled={busy}
+                data-testid="pull-v2-auto-merge-disable"
+                onClick={() => void disableAutoMerge()}
+              >
+                Disable
+              </button>;
+            }
+          </div>;
+        }
         <ul className="space-y-1 text-muted-foreground">
           @if (failingChecks > 0) {
             <li
@@ -738,26 +812,44 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
                         Delete head branch after merge
                       </label>;
                     }
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={busy || props.draft}
-                      title={
-                        props.draft
-                          ? "Mark the pull request ready first"
-                          : undefined
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || props.draft}
+                        title={
+                          props.draft
+                            ? "Mark the pull request ready first"
+                            : undefined
+                        }
+                        data-testid="pull-v2-merge-button"
+                        onClick={() => void merge()}
+                      >
+                        {
+                          (activeMethod === "merge"
+                            ? "Merge pull request"
+                            : activeMethod === "squash"
+                              ? "Squash and merge"
+                              : "Rebase and merge") as string
+                        }
+                      </Button>
+                      @if (
+                        settings?.allow_auto_merge &&
+                        !armed
+                      ) {
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy || props.draft}
+                          title="Merge automatically when checks and approvals pass"
+                          data-testid="pull-v2-auto-merge-enable"
+                          onClick={() => void enableAutoMerge()}
+                        >
+                          Enable auto-merge
+                        </Button>;
                       }
-                      data-testid="pull-v2-merge-button"
-                      onClick={() => void merge()}
-                    >
-                      {
-                        (activeMethod === "merge"
-                          ? "Merge pull request"
-                          : activeMethod === "squash"
-                            ? "Squash and merge"
-                            : "Rebase and merge") as string
-                      }
-                    </Button>
+                    </div>
                   </>;
                 }
               </>;

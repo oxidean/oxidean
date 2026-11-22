@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{comments, lifecycle, merge_ops, meta, rail, reviews, update_branch};
+use crate::{auto_merge, comments, lifecycle, merge_ops, meta, rail, reviews, update_branch};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -51,6 +51,8 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "pull.reviewRequests.add" => arm!(reviews::review_requests_add(ctx, input)),
         "pull.reviewRequests.remove" => arm!(reviews::review_requests_remove(ctx, input)),
         "pull.merge" => arm!(merge_ops::merge(ctx, input)),
+        "pull.auto_merge.enable" => arm!(auto_merge::enable(ctx, input)),
+        "pull.auto_merge.disable" => arm!(auto_merge::disable(ctx, input)),
         "pull.branchStatus" => arm!(update_branch::branch_status(ctx, input)),
         "pull.updateBranch" => arm!(update_branch::update_branch(ctx, input)),
         "repo.mergeSettings.get" => arm!(merge_ops::merge_settings_get(ctx, input)),

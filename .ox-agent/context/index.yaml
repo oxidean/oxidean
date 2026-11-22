@@ -1,6 +1,14 @@
 schema_version: 1
-generated_at: "2026-11-20T15:26:36Z"
+generated_at: "2026-11-22T15:41:02Z"
 files:
+    - path: context/decisions/auto-merge-core-orchestrator.md
+      sha256: 3bd18dd3fdf59f3d1b8d840fde718d0c68054f41eba4dcb2614b6c4d1922f8ba
+      bytes: 2240
+      kind: decision
+    - path: context/decisions/auto-merge-semantics.md
+      sha256: 9541ff3b7e423524cf12d7fe3e80fe52153e885946ea2d246bad0616bb3f289f
+      bytes: 2179
+      kind: decision
     - path: context/decisions/standing-decisions.md
       sha256: b557d51a295b0655c08d3f10b9cd7570208df2ba362dc1f08252c103f99df550
       bytes: 3085
@@ -10,7 +18,7 @@ files:
       bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: d28a2af54cbeaeb457078cb2ce870f1fa462cb1ee0311da32cd9560ad4f61fbc
+      sha256: 146e25b0f1cb363eef167385e97f6d7c22202c70ed8fdaf8bcbf515568981eb1
       bytes: 24504
       kind: other
     - path: context/product/tech-stack.md

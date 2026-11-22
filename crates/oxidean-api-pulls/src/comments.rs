@@ -540,5 +540,14 @@ pub async fn comments_resolve(
         .set_pull_comment_resolved(&req.comment_id, req.resolved)
         .await
         .map_err(db_err)?;
+    // COL-07: this signal may be the last gate greening an armed pull —
+    // re-evaluate and merge if it now passes.
+    {
+        let deps = oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx);
+        let scope = oxidean_api_core::merge_queue::QueueScope::of(&accessible);
+        if let Err(e) = oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &pull).await {
+            tracing::warn!(pull = %pull.id, error = %e.message, "auto-merge fire failed");
+        }
+    }
     comment_to_public(ctx, &row).await
 }

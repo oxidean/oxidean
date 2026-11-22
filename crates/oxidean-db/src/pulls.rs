@@ -24,6 +24,14 @@ pub struct PullRow {
     pub merged_by: Option<String>,
     pub merge_commit_sha: Option<String>,
     pub merge_method: Option<String>,
+    /// Armed auto-merge method (`merge|squash|rebase`); `NULL` = not armed
+    /// (COL-07 auto-merge-when-green).
+    pub auto_merge_method: Option<String>,
+    /// User id that armed auto-merge — merge attribution + disable ACL.
+    pub auto_merge_set_by: Option<String>,
+    /// Optional commit title/body armed along with the method.
+    pub auto_merge_commit_title: Option<String>,
+    pub auto_merge_commit_message: Option<String>,
     pub closed_at: Option<String>,
     pub closed_by: Option<String>,
     pub created_at: String,
@@ -42,6 +50,8 @@ pub struct RepoMergeSettingsRow {
     pub allow_merge_commit: bool,
     pub allow_squash_merge: bool,
     pub allow_rebase_merge: bool,
+    /// GitHub "Allow auto-merge" repository toggle (COL-07).
+    pub allow_auto_merge: bool,
 }
 
 macro_rules! flag_col {
@@ -103,6 +113,18 @@ macro_rules! map_pull {
             merge_method: row
                 .try_get("merge_method")
                 .map_err(|e| format!("pull row: {e}"))?,
+            auto_merge_method: row
+                .try_get("auto_merge_method")
+                .map_err(|e| format!("pull row: {e}"))?,
+            auto_merge_set_by: row
+                .try_get("auto_merge_set_by")
+                .map_err(|e| format!("pull row: {e}"))?,
+            auto_merge_commit_title: row
+                .try_get("auto_merge_commit_title")
+                .map_err(|e| format!("pull row: {e}"))?,
+            auto_merge_commit_message: row
+                .try_get("auto_merge_commit_message")
+                .map_err(|e| format!("pull row: {e}"))?,
             closed_at: row
                 .try_get("closed_at")
                 .map_err(|e| format!("pull row: {e}"))?,
@@ -139,6 +161,7 @@ macro_rules! map_pull {
 const PULL_COLS: &str = concat!(
     "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, ",
     "head_repo_id, head_ref, head_sha, merged_at, merged_by, merge_commit_sha, merge_method, ",
+    "auto_merge_method, auto_merge_set_by, auto_merge_commit_title, auto_merge_commit_message, ",
     "closed_at, closed_by, created_at, updated_at, pinned_position, milestone_id, ",
     "(SELECT COUNT(*) FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
@@ -147,7 +170,7 @@ const PULL_COLS: &str = concat!(
 const PULL_COLS_PG: &str = concat!(
     "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, head_repo_id, head_ref, head_sha, ",
     "to_char(merged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS merged_at, ",
-    "merged_by, merge_commit_sha, merge_method, ",
+    "merged_by, merge_commit_sha, merge_method, auto_merge_method, auto_merge_set_by, auto_merge_commit_title, auto_merge_commit_message, ",
     "to_char(closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS closed_at, ",
     "closed_by, ",
     "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, ",
@@ -160,7 +183,7 @@ const PULL_COLS_PG: &str = concat!(
 const PULL_COLS_MYSQL: &str = concat!(
     "id, repo_id, number, title, body, state, draft, author_id, base_ref, base_sha, head_repo_id, head_ref, head_sha, ",
     "DATE_FORMAT(merged_at, '%Y-%m-%dT%H:%i:%sZ') AS merged_at, ",
-    "merged_by, merge_commit_sha, merge_method, ",
+    "merged_by, merge_commit_sha, merge_method, auto_merge_method, auto_merge_set_by, auto_merge_commit_title, auto_merge_commit_message, ",
     "DATE_FORMAT(closed_at, '%Y-%m-%dT%H:%i:%sZ') AS closed_at, ",
     "closed_by, ",
     "DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, ",
@@ -1009,7 +1032,7 @@ pub async fn get_merge_settings(
     match pool {
         DbPool::Sqlite(p) => {
             let row = sqlx::query(
-                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge
+                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge, allow_auto_merge
                  FROM repositories WHERE id = ?1",
             )
             .bind(repo_id)
@@ -1020,11 +1043,12 @@ pub async fn get_merge_settings(
                 allow_merge_commit: flag_col!(row, "allow_merge_commit"),
                 allow_squash_merge: flag_col!(row, "allow_squash_merge"),
                 allow_rebase_merge: flag_col!(row, "allow_rebase_merge"),
+                allow_auto_merge: flag_col!(row, "allow_auto_merge"),
             })
         }
         DbPool::Postgres(p) => {
             let row = sqlx::query(
-                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge
+                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge, allow_auto_merge
                  FROM repositories WHERE id = $1",
             )
             .bind(repo_id)
@@ -1041,11 +1065,14 @@ pub async fn get_merge_settings(
                 allow_rebase_merge: row
                     .try_get("allow_rebase_merge")
                     .map_err(|e| format!("merge settings: {e}"))?,
+                allow_auto_merge: row
+                    .try_get("allow_auto_merge")
+                    .map_err(|e| format!("merge settings: {e}"))?,
             })
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(
-                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge
+                "SELECT allow_merge_commit, allow_squash_merge, allow_rebase_merge, allow_auto_merge
                  FROM repositories WHERE id = ?",
             )
             .bind(repo_id)
@@ -1056,6 +1083,7 @@ pub async fn get_merge_settings(
                 allow_merge_commit: flag_col!(row, "allow_merge_commit"),
                 allow_squash_merge: flag_col!(row, "allow_squash_merge"),
                 allow_rebase_merge: flag_col!(row, "allow_rebase_merge"),
+                allow_auto_merge: flag_col!(row, "allow_auto_merge"),
             })
         }
     }
@@ -1067,19 +1095,22 @@ pub async fn set_merge_settings(
     allow_merge_commit: bool,
     allow_squash_merge: bool,
     allow_rebase_merge: bool,
+    allow_auto_merge: bool,
 ) -> Result<(), String> {
     let a = if allow_merge_commit { 1 } else { 0 };
     let b = if allow_squash_merge { 1 } else { 0 };
     let c = if allow_rebase_merge { 1 } else { 0 };
+    let d = if allow_auto_merge { 1 } else { 0 };
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "UPDATE repositories SET allow_merge_commit = ?1, allow_squash_merge = ?2,
-                 allow_rebase_merge = ?3 WHERE id = ?4",
+                 allow_rebase_merge = ?3, allow_auto_merge = ?4 WHERE id = ?5",
             )
             .bind(a)
             .bind(b)
             .bind(c)
+            .bind(d)
             .bind(repo_id)
             .execute(p)
             .await
@@ -1088,11 +1119,12 @@ pub async fn set_merge_settings(
         DbPool::Postgres(p) => {
             sqlx::query(
                 "UPDATE repositories SET allow_merge_commit = $1, allow_squash_merge = $2,
-                 allow_rebase_merge = $3 WHERE id = $4",
+                 allow_rebase_merge = $3, allow_auto_merge = $4 WHERE id = $5",
             )
             .bind(allow_merge_commit)
             .bind(allow_squash_merge)
             .bind(allow_rebase_merge)
+            .bind(allow_auto_merge)
             .bind(repo_id)
             .execute(p)
             .await
@@ -1101,11 +1133,12 @@ pub async fn set_merge_settings(
         DbPool::MySql(p) => {
             sqlx::query(
                 "UPDATE repositories SET allow_merge_commit = ?, allow_squash_merge = ?,
-                 allow_rebase_merge = ? WHERE id = ?",
+                 allow_rebase_merge = ?, allow_auto_merge = ? WHERE id = ?",
             )
             .bind(a)
             .bind(b)
             .bind(c)
+            .bind(d)
             .bind(repo_id)
             .execute(p)
             .await
@@ -1113,6 +1146,165 @@ pub async fn set_merge_settings(
         }
     }
     Ok(())
+}
+
+/// Arm auto-merge on a pull (COL-07) — stores the method, the enabling
+/// user, and the optional commit title/body GitHub's GraphQL input takes.
+#[allow(clippy::too_many_arguments)]
+pub async fn set_pull_auto_merge(
+    pool: &DbPool,
+    id: &str,
+    method: &str,
+    set_by: &str,
+    commit_title: Option<&str>,
+    commit_message: Option<&str>,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = ?2, auto_merge_set_by = ?3,
+                 auto_merge_commit_title = ?4, auto_merge_commit_message = ?5 WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(method)
+            .bind(set_by)
+            .bind(commit_title)
+            .bind(commit_message)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull auto_merge failed: {e}"))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = $2, auto_merge_set_by = $3,
+                 auto_merge_commit_title = $4, auto_merge_commit_message = $5 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(method)
+            .bind(set_by)
+            .bind(commit_title)
+            .bind(commit_message)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull auto_merge failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = ?, auto_merge_set_by = ?,
+                 auto_merge_commit_title = ?, auto_merge_commit_message = ? WHERE id = ?",
+            )
+            .bind(method)
+            .bind(set_by)
+            .bind(commit_title)
+            .bind(commit_message)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set pull auto_merge failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Disarm auto-merge — explicit disable, head push, retarget, close.
+pub async fn clear_pull_auto_merge(pool: &DbPool, id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = NULL, auto_merge_set_by = NULL,
+                 auto_merge_commit_title = NULL, auto_merge_commit_message = NULL WHERE id = ?1",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("clear pull auto_merge failed: {e}"))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = NULL, auto_merge_set_by = NULL,
+                 auto_merge_commit_title = NULL, auto_merge_commit_message = NULL WHERE id = $1",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("clear pull auto_merge failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE pull_requests SET auto_merge_method = NULL, auto_merge_set_by = NULL,
+                 auto_merge_commit_title = NULL, auto_merge_commit_message = NULL WHERE id = ?",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("clear pull auto_merge failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Open pulls armed for auto-merge whose head is `head_sha` — the fire-path
+/// lookup run after a check/status lands on that sha (COL-07).
+pub async fn list_armed_pulls_for_head(
+    pool: &DbPool,
+    repo_id: &str,
+    head_sha: &str,
+) -> Result<Vec<PullRow>, String> {
+    let sql = format!(
+        "SELECT {cols} FROM pull_requests
+         WHERE repo_id = {ph} AND head_sha = {ph} AND state = 'open'
+           AND auto_merge_method IS NOT NULL",
+        cols = match pool {
+            DbPool::Sqlite(_) => PULL_COLS,
+            DbPool::Postgres(_) => PULL_COLS_PG,
+            DbPool::MySql(_) => PULL_COLS_MYSQL,
+        },
+        ph = "%PH%"
+    );
+    match pool {
+        DbPool::Sqlite(p) => {
+            let sql = sql.replace("%PH%", "?");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(head_sha)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list armed pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+        DbPool::Postgres(p) => {
+            let sql = sql.replacen("%PH%", "$1", 1).replacen("%PH%", "$2", 1);
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(head_sha)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list armed pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+        DbPool::MySql(p) => {
+            let sql = sql.replace("%PH%", "?");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(repo_id)
+                .bind(head_sha)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list armed pulls failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull!(r));
+            }
+            Ok(out)
+        }
+    }
 }
 
 pub async fn set_forked_from(

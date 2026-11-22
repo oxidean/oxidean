@@ -7,7 +7,7 @@
 //! merge-gate machinery stay in `oxidean_api_core::pull` — `repo::files`'s
 //! create-PR flow and `merge_queue` lean on them cross-domain.
 
-mod closing_refs;
+pub mod auto_merge;
 pub mod comments;
 pub mod lifecycle;
 pub mod merge_ops;
@@ -53,6 +53,8 @@ pub const PROCEDURES: &[&str] = &[
     "pull.reviewRequests.add",
     "pull.reviewRequests.remove",
     "pull.merge",
+    "pull.auto_merge.enable",
+    "pull.auto_merge.disable",
     "pull.branchStatus",
     "pull.updateBranch",
     "repo.mergeSettings.get",

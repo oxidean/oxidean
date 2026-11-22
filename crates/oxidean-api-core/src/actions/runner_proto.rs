@@ -1026,6 +1026,20 @@ pub(crate) async fn finalize_task_update(
     {
         tracing::warn!(error = %e, job_id = %job.id, "failed to publish job commit status");
     }
+    if matches!(status, "success" | "failure" | "cancelled") {
+        if let Ok(Some(run)) = state.db.find_action_run_by_id(&job.run_id).await {
+            let deps = crate::merge_queue::MqDeps {
+                db: state.db.clone(),
+                git: state.git.clone(),
+                repos_dir: state.repos_dir.clone(),
+                pages_dir: state.pages_dir.clone(),
+                env_name: state.env_name.clone(),
+                job_token_actor: false,
+                actions_enabled: crate::actions::env_actions_enabled(),
+            };
+            crate::auto_merge::spawn_maybe_fire_for_head(deps, run.repository_id, run.head_sha);
+        }
+    }
     // If the write didn't land the job was already terminal — tell the
     // runner when that's a cancel so it aborts instead of continuing.
     if landed {

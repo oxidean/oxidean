@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! `oxidean-api-core` — the shared foundation every `oxidean-api-*` domain
 //! crate builds on: `RpcCtx`/`AppState`, session+auth plumbing, RPC dispatch,
 //! and the cross-domain services (repo ACL, git/LFS transports, protection,
@@ -12,6 +14,7 @@ pub mod admin;
 pub mod app;
 pub mod audit;
 pub mod auth;
+pub mod auto_merge;
 pub mod check;
 pub mod comment_attachments;
 pub mod crypto;

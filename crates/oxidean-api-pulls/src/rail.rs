@@ -59,7 +59,7 @@ pub async fn milestone_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<Pul
     to_public(ctx, &refreshed).await
 }
 
-use crate::closing_refs::closing_refs;
+use oxidean_api_core::pull::closing_refs::closing_refs;
 
 /// Resolve one closing ref to its target repo + issue row. Qualified
 /// `owner/repo#N` refs honor the same read ACL as `pull.development.list`;
@@ -292,9 +292,15 @@ pub async fn deployments_list(
 
 #[cfg(test)]
 mod tests {
-    use crate::closing_refs::closing_refs;
+    use oxidean_api_core::pull::closing_refs::closing_refs;
 
-    fn refs(text: &str) -> Vec<(Option<crate::closing_refs::RepoSlug>, i64, &'static str)> {
+    fn refs(
+        text: &str,
+    ) -> Vec<(
+        Option<oxidean_api_core::pull::closing_refs::RepoSlug>,
+        i64,
+        &'static str,
+    )> {
         closing_refs(text)
             .into_iter()
             .map(|r| (r.repo, r.number, r.relation))

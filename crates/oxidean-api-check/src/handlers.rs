@@ -719,6 +719,12 @@ pub async fn runs_create(
     if status == "completed" {
         dispatch::emit_check_run_webhook(&ctx.db, &row, "completed", &env_name).await;
         notify_actions_check_run(ctx, &accessible, &row, "completed", &user).await;
+        oxidean_api_core::auto_merge::maybe_fire_for_head(
+            &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
+            &row.repository_id,
+            &row.head_sha,
+        )
+        .await;
         emit_suite_completed_if_due(ctx, &suite.id, &env_name, &accessible, &user).await;
     }
 
@@ -803,6 +809,12 @@ pub async fn runs_update(
     if stored.status == "completed" && row.status != "completed" {
         dispatch::emit_check_run_webhook(&ctx.db, &stored, "completed", &env_name).await;
         notify_actions_check_run(ctx, &accessible, &stored, "completed", &user).await;
+        oxidean_api_core::auto_merge::maybe_fire_for_head(
+            &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
+            &stored.repository_id,
+            &stored.head_sha,
+        )
+        .await;
         emit_suite_completed_if_due(ctx, &row.check_suite_id, &env_name, &accessible, &user).await;
     }
 

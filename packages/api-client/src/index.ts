@@ -4647,6 +4647,8 @@ export type PullPublic = {
   labels?: LabelPublic[];
   pinned?: boolean;
   milestone?: MilestonePublic | null;
+  /** Armed auto-merge state (COL-07); `null` = auto-merge not enabled. */
+  auto_merge?: PullAutoMergePublic | null;
 };
 
 export type CreatePullRequest = {
@@ -4760,6 +4762,29 @@ export type MergePullResponse = {
   merge_commit_sha: string;
 };
 
+/** Armed auto-merge state on a pull (COL-07) — GitHub's `autoMergeRequest`
+ *  embed; absent/null on `PullPublic.auto_merge` means not armed. */
+export type PullAutoMergePublic = {
+  /** Merge method the merge will use when the gate greens. */
+  method: MergeMethod;
+  /** User id that armed auto-merge. */
+  set_by: string;
+  /** Username of the arming user. */
+  set_by_username: string;
+  commit_title?: string | null;
+  commit_message?: string | null;
+};
+
+export type PullAutoMergeEnableRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  /** Method the eventual merge uses — must be repo-allowed. */
+  method: MergeMethod;
+  commit_title?: string | null;
+  commit_message?: string | null;
+};
+
 export type PullBranchStatusResponse = {
   /** `up_to_date` | `behind` (head lacks commits the base branch added). */
   status: string;
@@ -4781,6 +4806,8 @@ export type RepoMergeSettings = {
   allow_merge_commit: boolean;
   allow_squash_merge: boolean;
   allow_rebase_merge: boolean;
+  /** COL-07: pull auto-merge-when-green may be armed on this repo. */
+  allow_auto_merge: boolean;
 };
 
 export type UpdateRepoMergeSettingsRequest = {
@@ -4789,6 +4816,7 @@ export type UpdateRepoMergeSettingsRequest = {
   allow_merge_commit?: boolean | null;
   allow_squash_merge?: boolean | null;
   allow_rebase_merge?: boolean | null;
+  allow_auto_merge?: boolean | null;
 };
 
 export type PullCommentPublic = {
@@ -7000,6 +7028,12 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),
       merge: (input: MergePullRequest) =>
         rpcCall<MergePullResponse>(opts, "pull.merge", input),
+      autoMerge: {
+        enable: (input: PullAutoMergeEnableRequest) =>
+          rpcCall<PullPublic>(opts, "pull.auto_merge.enable", input),
+        disable: (input: PullRefRequest) =>
+          rpcCall<PullPublic>(opts, "pull.auto_merge.disable", input),
+      },
       branchStatus: (input: PullRefRequest) =>
         rpcCall<PullBranchStatusResponse>(opts, "pull.branchStatus", input),
       updateBranch: (input: PullRefRequest) =>

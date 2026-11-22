@@ -3,16 +3,16 @@
 //! `owner/repo#N` refs repo-qualified.
 
 /// Parsed `(owner, repo)` pair from an `owner/repo#N` ref.
-pub(crate) type RepoSlug = (String, String);
+pub type RepoSlug = (String, String);
 
 /// `parse_ref_tail` result: repo qualifier, issue number, end offset.
 type RefTail = (Option<RepoSlug>, i64, usize);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ClosingRef {
-    pub(crate) relation: &'static str,
-    pub(crate) repo: Option<(String, String)>,
-    pub(crate) number: i64,
+pub struct ClosingRef {
+    pub relation: &'static str,
+    pub repo: Option<(String, String)>,
+    pub number: i64,
 }
 
 const KEYWORDS: &[(&str, &str)] = &[
@@ -115,7 +115,7 @@ fn matches_keyword(text: &str, idx: usize) -> Option<(&'static str, usize)> {
     None
 }
 
-pub(crate) fn closing_refs(text: &str) -> Vec<ClosingRef> {
+pub fn closing_refs(text: &str) -> Vec<ClosingRef> {
     let mut hits: Vec<(usize, ClosingRef)> = Vec::new();
     let mut idx = 0;
     while idx < text.len() {

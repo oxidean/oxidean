@@ -46,6 +46,7 @@ export function MergeSettingsPanel(props: {
         allow_merge_commit: next.allow_merge_commit,
         allow_squash_merge: next.allow_squash_merge,
         allow_rebase_merge: next.allow_rebase_merge,
+        allow_auto_merge: next.allow_auto_merge,
       });
       if (!res.ok) {
         setError(res.error.message || "Could not update merge settings.");
@@ -106,6 +107,7 @@ export function MergeSettingsPanel(props: {
                     allow_merge_commit: (e.target as HTMLInputElement).checked,
                     allow_squash_merge: s.allow_squash_merge,
                     allow_rebase_merge: s.allow_rebase_merge,
+                    allow_auto_merge: s.allow_auto_merge,
                   })
                 }
               />
@@ -121,6 +123,7 @@ export function MergeSettingsPanel(props: {
                     allow_merge_commit: s.allow_merge_commit,
                     allow_squash_merge: (e.target as HTMLInputElement).checked,
                     allow_rebase_merge: s.allow_rebase_merge,
+                    allow_auto_merge: s.allow_auto_merge,
                   })
                 }
               />
@@ -136,11 +139,32 @@ export function MergeSettingsPanel(props: {
                     allow_merge_commit: s.allow_merge_commit,
                     allow_squash_merge: s.allow_squash_merge,
                     allow_rebase_merge: (e.target as HTMLInputElement).checked,
+                    allow_auto_merge: s.allow_auto_merge,
                   })
                 }
               />
               Allow rebase merging
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={s.allow_auto_merge}
+                disabled={pending}
+                onChange={(e) =>
+                  void saveNext({
+                    allow_merge_commit: s.allow_merge_commit,
+                    allow_squash_merge: s.allow_squash_merge,
+                    allow_rebase_merge: s.allow_rebase_merge,
+                    allow_auto_merge: (e.target as HTMLInputElement).checked,
+                  })
+                }
+              />
+              Allow auto-merge
+            </label>
+            <p className="text-[13px] text-muted-foreground">
+              Auto-merge merges a pull request automatically once required checks and
+              approvals pass. Pushing new commits disables it.
+            </p>
           </div>;
         }
 

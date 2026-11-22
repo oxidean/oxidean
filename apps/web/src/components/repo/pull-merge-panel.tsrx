@@ -1,5 +1,10 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { MergeMethod, MergeQueueGetResponse, RepoMergeSettings } from "@oxidean/api-client";
+import type {
+  MergeMethod,
+  MergeQueueGetResponse,
+  PullPublic,
+  RepoMergeSettings,
+} from "@oxidean/api-client";
 import { useState } from "octane";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -89,8 +94,23 @@ export function PullMergePanel(props: PullMergePanelProps) @{
     enabled: props.canWrite && props.pullState === "open",
   });
 
+  const pullQ = useQuery({
+    queryKey: ["pull", "get", props.owner, props.repoName, props.number] as const,
+    queryFn: async (): Promise<PullPublic> => {
+      const res = await apiClient.pull.get({
+        owner: props.owner,
+        name: props.repoName,
+        number: props.number,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+    enabled: props.canWrite && props.pullState === "open",
+  });
+
   const settings: RepoMergeSettings | undefined = settingsQ.data;
   const queue = queueQ.data;
+  const armed = pullQ.data?.auto_merge ?? null;
 
   async function invalidatePull() {
     await Promise.all([
@@ -165,6 +185,39 @@ export function PullMergePanel(props: PullMergePanelProps) @{
     setBusy(false);
     if (!res.ok) {
       setError(res.error.message || "Could not remove from the merge queue");
+      return;
+    }
+    await invalidatePull();
+  }
+
+  async function enableAutoMerge() {
+    setBusy(true);
+    setError(null);
+    const res = await apiClient.pull.autoMerge.enable({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+      method,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not enable auto-merge");
+      return;
+    }
+    await invalidatePull();
+  }
+
+  async function disableAutoMerge() {
+    setBusy(true);
+    setError(null);
+    const res = await apiClient.pull.autoMerge.disable({
+      owner: props.owner,
+      name: props.repoName,
+      number: props.number,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error.message || "Could not disable auto-merge");
       return;
     }
     await invalidatePull();
@@ -307,6 +360,42 @@ export function PullMergePanel(props: PullMergePanelProps) @{
               <Button type="button" disabled={busy} onClick={() => void merge()}>
                 Merge pull request
               </Button>
+              @if (settings?.allow_auto_merge) {
+                <>
+                  @if (armed) {
+                    <div
+                      className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-1.5"
+                      data-testid="pull-auto-merge-armed"
+                    >
+                      <p className="text-sm text-muted-foreground">
+                        {
+                          `Auto-merge enabled by ${armed.set_by_username || "a collaborator"} — ${armed.method} when checks pass` as string
+                        }
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={busy}
+                        data-testid="pull-auto-merge-disable"
+                        onClick={() => void disableAutoMerge()}
+                      >
+                        Disable auto-merge
+                      </Button>
+                    </div>;
+                  } @else {
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busy}
+                      title="Merge automatically when checks and approvals pass"
+                      data-testid="pull-auto-merge-enable"
+                      onClick={() => void enableAutoMerge()}
+                    >
+                      Enable auto-merge
+                    </Button>;
+                  }
+                </>;
+              }
             </>;
           }
         </>;

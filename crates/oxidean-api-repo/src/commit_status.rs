@@ -128,6 +128,14 @@ pub async fn create(
         oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
             .await;
     }
+    // COL-07: an external status may be the last required check greening
+    // an armed pull on this sha — re-evaluate and merge.
+    oxidean_api_core::auto_merge::maybe_fire_for_head(
+        &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
+        &accessible.row.id,
+        req.sha.trim(),
+    )
+    .await;
     row_public(&row)
 }
 

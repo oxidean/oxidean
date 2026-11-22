@@ -45,7 +45,7 @@ use oxidean_core::{
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow};
 
 use oxidean_api_core::actions::discover_workflows;
-use oxidean_api_core::actions::dispatch::{bare_repo_path, enqueue_run};
+use oxidean_api_core::actions::dispatch::bare_repo_path;
 use oxidean_api_core::actions::logs::read_job_log;
 use oxidean_api_core::actions::secrets::{encrypt_secret, validate_secret_name};
 use oxidean_api_core::actions::tokens::mint_registration_token;
@@ -2479,8 +2479,8 @@ pub async fn dispatch_workflow(
     let default_title =
         oxidean_api_core::actions::dispatch::head_commit_subject(ctx.git.as_ref(), &bare, &treeish)
             .await;
-    let (run_id, _jobs) = enqueue_run(
-        &ctx.db,
+    let (run_id, _jobs) = oxidean_api_core::actions::dispatch::enqueue_run_with_auto_merge(
+        oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
         &accessible.row.id,
         &wf.path,
         &wf.document,

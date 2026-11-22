@@ -195,6 +195,15 @@ pub async fn reviews_submit(
         oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
             .await;
     }
+    // COL-07: this signal may be the last gate greening an armed pull —
+    // re-evaluate and merge if it now passes.
+    {
+        let deps = oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx);
+        let scope = oxidean_api_core::merge_queue::QueueScope::of(&accessible);
+        if let Err(e) = oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &pull).await {
+            tracing::warn!(pull = %pull.id, error = %e.message, "auto-merge fire failed");
+        }
+    }
     review_to_public(ctx, &row).await
 }
 
@@ -267,6 +276,15 @@ pub async fn reviews_dismiss(
     ) {
         oxidean_api_core::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev)
             .await;
+    }
+    // COL-07: this signal may be the last gate greening an armed pull —
+    // re-evaluate and merge if it now passes.
+    {
+        let deps = oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx);
+        let scope = oxidean_api_core::merge_queue::QueueScope::of(&accessible);
+        if let Err(e) = oxidean_api_core::auto_merge::maybe_fire_pull(&deps, &scope, &pull).await {
+            tracing::warn!(pull = %pull.id, error = %e.message, "auto-merge fire failed");
+        }
     }
     review_to_public(ctx, &row).await
 }
