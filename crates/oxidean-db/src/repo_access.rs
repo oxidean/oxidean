@@ -40,13 +40,19 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = $1
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
-                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
-                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                                JOIN organization_teams t ON t.id = tr.team_id
-                                JOIN organization_members m ON m.org_id = t.org_id
-                                  AND m.user_id = tm.user_id
-                                WHERE tr.repo_id = r.id AND tm.user_id = $1
-                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
+                      OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                 JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                 JOIN organization_teams t ON t.id = tr.team_id
+                                 JOIN organizations o ON o.id = t.org_id
+                                 JOIN organization_members m ON m.org_id = t.org_id
+                                   AND m.user_id = tm.user_id
+                                 WHERE tr.repo_id = r.id AND tm.user_id = $1
+                                   AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                                   AND (NOT o.require_two_factor
+                                        OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                                   WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                                        OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                                   WHERE w.user_id = tm.user_id)))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -74,13 +80,19 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = ?
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
-                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
-                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                                JOIN organization_teams t ON t.id = tr.team_id
-                                JOIN organization_members m ON m.org_id = t.org_id
-                                  AND m.user_id = tm.user_id
-                                WHERE tr.repo_id = r.id AND tm.user_id = ?
-                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
+                      OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                 JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                 JOIN organization_teams t ON t.id = tr.team_id
+                                 JOIN organizations o ON o.id = t.org_id
+                                 JOIN organization_members m ON m.org_id = t.org_id
+                                   AND m.user_id = tm.user_id
+                                 WHERE tr.repo_id = r.id AND tm.user_id = ?
+                                   AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                                   AND (o.require_two_factor = 0
+                                        OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                                   WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                                        OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                                   WHERE w.user_id = tm.user_id)))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -115,13 +127,19 @@ pub async fn readable_repo_ids(
                      OR EXISTS (SELECT 1 FROM repository_collaborators c
                                 WHERE c.repo_id = r.id AND c.user_id = ?1
                                   AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin'))
-                     OR EXISTS (SELECT 1 FROM organization_team_repos tr
-                                JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                                JOIN organization_teams t ON t.id = tr.team_id
-                                JOIN organization_members m ON m.org_id = t.org_id
-                                  AND m.user_id = tm.user_id
-                                WHERE tr.repo_id = r.id AND tm.user_id = ?1
-                                  AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin'))
+                      OR EXISTS (SELECT 1 FROM organization_team_repos tr
+                                 JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                                 JOIN organization_teams t ON t.id = tr.team_id
+                                 JOIN organizations o ON o.id = t.org_id
+                                 JOIN organization_members m ON m.org_id = t.org_id
+                                   AND m.user_id = tm.user_id
+                                 WHERE tr.repo_id = r.id AND tm.user_id = ?1
+                                   AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                                   AND (o.require_two_factor = 0
+                                        OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                                   WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                                        OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                                   WHERE w.user_id = tm.user_id)))
                      OR (LOWER(r.owner_type) = 'org' AND EXISTS (
                          SELECT 1 FROM organization_members m
                          JOIN organizations o ON o.id = m.org_id
@@ -164,13 +182,19 @@ pub async fn readers_of_repo(
                        WHERE c.repo_id = $1
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
                      UNION
-                     SELECT tm.user_id FROM organization_team_repos tr
-                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                       JOIN organization_teams t ON t.id = tr.team_id
-                       JOIN organization_members m0 ON m0.org_id = t.org_id
-                         AND m0.user_id = tm.user_id
-                       WHERE tr.repo_id = $1
-                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                      SELECT tm.user_id FROM organization_team_repos tr
+                        JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                        JOIN organization_teams t ON t.id = tr.team_id
+                        JOIN organizations o ON o.id = t.org_id
+                        JOIN organization_members m0 ON m0.org_id = t.org_id
+                          AND m0.user_id = tm.user_id
+                        WHERE tr.repo_id = $1
+                          AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                          AND (NOT o.require_two_factor
+                               OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                          WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                               OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                          WHERE w.user_id = tm.user_id))
                      UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id
@@ -199,13 +223,19 @@ pub async fn readers_of_repo(
                        WHERE c.repo_id = ?
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
                      UNION
-                     SELECT tm.user_id FROM organization_team_repos tr
-                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                       JOIN organization_teams t ON t.id = tr.team_id
-                       JOIN organization_members m0 ON m0.org_id = t.org_id
-                         AND m0.user_id = tm.user_id
-                       WHERE tr.repo_id = ?
-                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                      SELECT tm.user_id FROM organization_team_repos tr
+                        JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                        JOIN organization_teams t ON t.id = tr.team_id
+                        JOIN organizations o ON o.id = t.org_id
+                        JOIN organization_members m0 ON m0.org_id = t.org_id
+                          AND m0.user_id = tm.user_id
+                        WHERE tr.repo_id = ?
+                          AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                          AND (o.require_two_factor = 0
+                               OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                          WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                               OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                          WHERE w.user_id = tm.user_id))
                      UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id
@@ -237,13 +267,19 @@ pub async fn readers_of_repo(
                        WHERE c.repo_id = ?1
                          AND LOWER(TRIM(c.permission)) IN ('read', 'write', 'admin')
                      UNION
-                     SELECT tm.user_id FROM organization_team_repos tr
-                       JOIN organization_team_members tm ON tm.team_id = tr.team_id
-                       JOIN organization_teams t ON t.id = tr.team_id
-                       JOIN organization_members m0 ON m0.org_id = t.org_id
-                         AND m0.user_id = tm.user_id
-                       WHERE tr.repo_id = ?1
-                         AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                      SELECT tm.user_id FROM organization_team_repos tr
+                        JOIN organization_team_members tm ON tm.team_id = tr.team_id
+                        JOIN organization_teams t ON t.id = tr.team_id
+                        JOIN organizations o ON o.id = t.org_id
+                        JOIN organization_members m0 ON m0.org_id = t.org_id
+                          AND m0.user_id = tm.user_id
+                        WHERE tr.repo_id = ?1
+                          AND LOWER(TRIM(tr.permission)) IN ('read', 'write', 'admin')
+                          AND (o.require_two_factor = 0
+                               OR EXISTS (SELECT 1 FROM user_totp_secrets s
+                                          WHERE s.user_id = tm.user_id AND s.confirmed_at IS NOT NULL)
+                               OR EXISTS (SELECT 1 FROM webauthn_credentials w
+                                          WHERE w.user_id = tm.user_id))
                      UNION
                      SELECT m.user_id FROM organization_members m
                        JOIN organizations o ON o.id = m.org_id

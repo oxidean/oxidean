@@ -722,6 +722,98 @@ async fn team_maintainer_cannot_grant_access_to_repo_without_admin() {
     assert_eq!(after["error"]["code"], "repo.not_found", "{after}");
 }
 
+#[tokio::test]
+async fn notification_list_prunes_team_access_after_org_two_factor_lockout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("team_2fa_notifications.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+    let f = fixture(&app, &db, "locked").await;
+
+    let (_, repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"secrets","visibility":"private","owner":"locked-org"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(repo["ok"], true, "{repo}");
+    let (_, team) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.create","input":{"slug":"locked-org","name":"readers"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(team["ok"], true, "{team}");
+    let (_, member) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.members.add","input":{"slug":"locked-org","team_slug":"readers","username":"lockedmem"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(member["ok"], true, "{member}");
+    let (_, grant) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.repos.add","input":{"slug":"locked-org","team_slug":"readers","repo":"secrets","permission":"read"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(grant["ok"], true, "{grant}");
+
+    let repo_id = repo["data"]["id"].as_str().unwrap();
+    let owner = db
+        .find_user_by_username("lockedowner")
+        .await
+        .expect("owner lookup")
+        .expect("owner");
+    db.insert_notification(
+        "team-2fa-notification",
+        &f.member_id,
+        &owner.id,
+        "issue_comment",
+        "issue",
+        repo_id,
+        1,
+        "Private issue",
+        None,
+    )
+    .await
+    .expect("insert notification");
+
+    let before = rpc_json(
+        &app,
+        r#"{"procedure":"notification.list","input":{"filter":"all"}}"#,
+        Some(&f.member_cookie),
+    )
+    .await
+    .1;
+    assert_eq!(before["data"]["notifications"].as_array().unwrap().len(), 1);
+
+    let org = db
+        .find_organization_by_slug("locked-org")
+        .await
+        .expect("organization lookup")
+        .expect("organization");
+    db.update_organization_settings(&org.id, None, None, Some(true))
+        .await
+        .expect("require two-factor");
+
+    let after = rpc_json(
+        &app,
+        r#"{"procedure":"notification.list","input":{"filter":"all"}}"#,
+        Some(&f.member_cookie),
+    )
+    .await
+    .1;
+    assert_eq!(after["ok"], true, "{after}");
+    assert_eq!(after["data"]["notifications"].as_array().unwrap().len(), 0);
+    assert_eq!(after["data"]["total"], 0);
+}
+
 /// AC7+AC8: removing a team member drops access; removing the org member
 /// removes team rows (member_count drops).
 #[tokio::test]
