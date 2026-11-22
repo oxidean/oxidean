@@ -23,6 +23,14 @@ pub struct MergeActor<'a> {
     pub login: &'a str,
 }
 
+#[derive(Clone, Copy)]
+pub struct MergeOptions<'a> {
+    pub method: MergeMethod,
+    pub commit_title: Option<&'a str>,
+    pub commit_message: Option<&'a str>,
+    pub delete_branch: bool,
+}
+
 /// Merge `row` onto `row.base_ref` inside `scope` using `method`, record
 /// the merge, and replay the post-merge fan-out. Returns the merge commit
 /// sha. The pull row must already be known-open and the caller must have
@@ -31,20 +39,22 @@ pub async fn execute(
     deps: &MqDeps,
     scope: &QueueScope,
     row: &PullRow,
-    method: MergeMethod,
-    commit_title: Option<&str>,
-    commit_message: Option<&str>,
-    delete_branch: bool,
+    options: MergeOptions<'_>,
     actor: &MergeActor<'_>,
 ) -> Result<String, AppError> {
     let path = bare_repo_path(&deps.repos_dir, &scope.owner, &scope.name)?;
     ensure_head_objects_in_base(&deps.db, deps.git.as_ref(), &deps.repos_dir, &path, row).await?;
 
-    let message = commit_title
+    let message = options
+        .commit_title
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(row.title.as_str());
-    let full_message = match commit_message.map(str::trim).filter(|s| !s.is_empty()) {
+    let full_message = match options
+        .commit_message
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(body) => format!("{message}\n\n{body}"),
         None => message.to_string(),
     };
@@ -59,7 +69,7 @@ pub async fn execute(
         .ok()
         .filter(|s| !s.is_empty());
 
-    let sha = match method {
+    let sha = match options.method {
         MergeMethod::Merge => {
             deps.git
                 .merge_commit(&path, &row.base_ref, &row.head_sha, &full_message)
@@ -87,7 +97,7 @@ pub async fn execute(
 
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     deps.db
-        .mark_pull_merged(&row.id, actor.id, &sha, method.as_str(), &now)
+        .mark_pull_merged(&row.id, actor.id, &sha, options.method.as_str(), &now)
         .await
         .map_err(db_err)?;
     // An armed auto-merge is consumed by the merge that satisfies it —
@@ -180,7 +190,7 @@ pub async fn execute(
         }
     }
 
-    if delete_branch
+    if options.delete_branch
         && row.head_repo_id == row.repo_id
         && deps.git.branch_delete(&path, &row.head_ref).await.is_ok()
     {

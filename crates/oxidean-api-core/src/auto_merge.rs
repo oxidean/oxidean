@@ -143,10 +143,12 @@ pub async fn maybe_fire_pull(
         deps,
         scope,
         &row,
-        method,
-        row.auto_merge_commit_title.as_deref(),
-        row.auto_merge_commit_message.as_deref(),
-        false,
+        merge_exec::MergeOptions {
+            method,
+            commit_title: row.auto_merge_commit_title.as_deref(),
+            commit_message: row.auto_merge_commit_message.as_deref(),
+            delete_branch: false,
+        },
         &merge_exec::MergeActor {
             id: set_by,
             login: &actor_login,

@@ -336,10 +336,12 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         &oxidean_api_core::merge_queue::MqDeps::from_ctx(ctx),
         &oxidean_api_core::merge_queue::QueueScope::of(&accessible),
         &row,
-        req.method,
-        req.commit_title.as_deref(),
-        req.commit_message.as_deref(),
-        req.delete_branch.unwrap_or(false),
+        oxidean_api_core::pull::merge_exec::MergeOptions {
+            method: req.method,
+            commit_title: req.commit_title.as_deref(),
+            commit_message: req.commit_message.as_deref(),
+            delete_branch: req.delete_branch.unwrap_or(false),
+        },
         &oxidean_api_core::pull::merge_exec::MergeActor {
             id: &user.id,
             login: &user.username,
