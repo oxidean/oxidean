@@ -15,6 +15,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use oxidean_api::actions::{dispatch::enqueue_run, mint_registration_token, parse_workflow_yaml};
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
@@ -43,7 +44,8 @@ async fn test_app() -> T {
         "development",
     )
     .with_repos_dir(repos.clone())
-    .with_pages_dir(pages);
+    .with_pages_dir(pages)
+    .with_actions_enabled(true);
     let cors = build_cors("development", None).expect("cors");
     T {
         app: router_with_state(state, cors),
@@ -350,6 +352,120 @@ async fn auto_merge_fires_when_required_status_goes_green() {
     assert_eq!(merged["merged_by"], uid, "{merged}");
 }
 
+#[tokio::test]
+async fn auto_merge_enable_requires_write_even_for_pull_author() {
+    let t = test_app().await;
+    let (owner_cookie, _owner_id) = seed(&t, "am-auth-owner@ex.com", "amauthowner", "core").await;
+    let (author_cookie, author_id) =
+        signup_and_login(&t.app, "am-auth-author@ex.com", "amauthor").await;
+    verify_user(&t.db, &author_id).await;
+    let add = rpc_json(
+        &t.app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"amauthowner","name":"core","username":"amauthor","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(add["ok"], true, "{add}");
+    let pr = open_pr(&t, &author_cookie, "amauthowner", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    allow_auto_merge(&t, &owner_cookie, "amauthowner", "core").await;
+    protect_status(&t, &owner_cookie, "amauthowner", "core", "ci").await;
+
+    let downgrade = rpc_json(
+        &t.app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"repo.collaborators.update","input":{{"owner":"amauthowner","name":"core","user_id":"{author_id}","permission":"read"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(downgrade["ok"], true, "{downgrade}");
+
+    let denied = arm(&t, &author_cookie, "amauthowner", "core", number, "merge").await;
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "repo.not_found", "{denied}");
+}
+
+#[tokio::test]
+async fn auto_merge_holds_when_enabler_loses_write_access() {
+    let t = test_app().await;
+    let (owner_cookie, _owner_id) = seed(&t, "am-loss-owner@ex.com", "amlossowner", "core").await;
+    let (writer_cookie, writer_id) =
+        signup_and_login(&t.app, "am-loss-writer@ex.com", "amlosswriter").await;
+    verify_user(&t.db, &writer_id).await;
+    let add = rpc_json(
+        &t.app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"amlossowner","name":"core","username":"amlosswriter","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(add["ok"], true, "{add}");
+    allow_auto_merge(&t, &owner_cookie, "amlossowner", "core").await;
+    protect_status(&t, &owner_cookie, "amlossowner", "core", "ci").await;
+    let pr = open_pr(&t, &owner_cookie, "amlossowner", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    let head = pr["head_sha"].as_str().unwrap();
+    let armed = arm(&t, &writer_cookie, "amlossowner", "core", number, "merge").await;
+    assert_eq!(armed["ok"], true, "{armed}");
+
+    let downgrade = rpc_json(
+        &t.app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"repo.collaborators.update","input":{{"owner":"amlossowner","name":"core","user_id":"{writer_id}","permission":"read"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(downgrade["ok"], true, "{downgrade}");
+    let green = rpc_json(
+        &t.app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"repo.commitStatus.create","input":{{"owner":"amlossowner","name":"core","sha":"{head}","context":"ci","state":"success"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(green["ok"], true, "{green}");
+    let still_open = get_pull(&t, &owner_cookie, "amlossowner", "core", number).await;
+    assert_eq!(still_open["state"], "open", "{still_open}");
+    assert_eq!(
+        still_open["auto_merge"]["set_by"], writer_id,
+        "{still_open}"
+    );
+}
+
+#[tokio::test]
+async fn auto_merge_still_fires_after_repo_setting_is_disabled() {
+    let t = test_app().await;
+    let (cookie, _uid) = seed(&t, "am-setting@ex.com", "amsetting", "core").await;
+    allow_auto_merge(&t, &cookie, "amsetting", "core").await;
+    protect_status(&t, &cookie, "amsetting", "core", "ci").await;
+    let pr = open_pr(&t, &cookie, "amsetting", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    let head = pr["head_sha"].as_str().unwrap();
+    let armed = arm(&t, &cookie, "amsetting", "core", number, "merge").await;
+    assert_eq!(armed["ok"], true, "{armed}");
+
+    let disabled = rpc_json(
+        &t.app,
+        &cookie,
+        r#"{"procedure":"repo.mergeSettings.update","input":{"owner":"amsetting","name":"core","allow_auto_merge":false}}"#,
+    )
+    .await;
+    assert_eq!(disabled["ok"], true, "{disabled}");
+    let green = rpc_json(
+        &t.app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"repo.commitStatus.create","input":{{"owner":"amsetting","name":"core","sha":"{head}","context":"ci","state":"success"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(green["ok"], true, "{green}");
+    let merged = get_pull(&t, &cookie, "amsetting", "core", number).await;
+    assert_eq!(merged["state"], "merged", "{merged}");
+}
+
 /// Check-run completion (not just suite completion) satisfies required
 /// contexts — a run named after the context fires the merge.
 #[tokio::test]
@@ -378,6 +494,126 @@ async fn auto_merge_fires_on_check_run_completion() {
     let merged = get_pull(&t, &cookie, "am3", "core", n).await;
     assert_eq!(merged["state"], "merged", "{merged}");
     assert_eq!(merged["merge_method"], "merge", "{merged}");
+}
+
+/// Actions runner completion publishes the commit status and check-run gate,
+/// then fires an armed pull on the same head.
+#[tokio::test]
+async fn auto_merge_fires_when_actions_job_status_goes_green() {
+    let t = test_app().await;
+    let (cookie, uid) = seed(&t, "am-actions@ex.com", "amactions", "core").await;
+    allow_auto_merge(&t, &cookie, "amactions", "core").await;
+    protect_status(&t, &cookie, "amactions", "core", "CI / build").await;
+    let pr = open_pr(&t, &cookie, "amactions", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    let head_sha = pr["head_sha"].as_str().unwrap().to_string();
+    let repository_id = repo_id(&t, &uid, "core").await;
+
+    let armed = arm(&t, &cookie, "amactions", "core", number, "squash").await;
+    assert_eq!(armed["ok"], true, "{armed}");
+
+    let workflow = parse_workflow_yaml(
+        br#"
+name: CI
+on: [pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+"#,
+    )
+    .unwrap();
+    enqueue_run(
+        &t.db,
+        &repository_id,
+        ".github/workflows/ci.yml",
+        &workflow,
+        "pull_request",
+        &head_sha,
+        "refs/heads/feature",
+        Some(&uid),
+        None,
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let registration_token = mint_registration_token(&t.db).await.unwrap();
+    let registered = t
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "auto-merge-runner",
+                        "labels": ["ubuntu-latest"],
+                        "token": registration_token,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(registered.status(), StatusCode::OK);
+    let registered: serde_json::Value =
+        serde_json::from_slice(&registered.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    let runner_token = registered["runner_token"].as_str().unwrap();
+
+    let fetched = t
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched.status(), StatusCode::OK);
+    let fetched: serde_json::Value =
+        serde_json::from_slice(&fetched.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let job_id = fetched["job_id"].as_str().unwrap();
+
+    let completed = t
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/update_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from(
+                    serde_json::json!({"job_id": job_id, "state": "success"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed.status(), StatusCode::OK);
+
+    let mut merged = false;
+    for _ in 0..40 {
+        if get_pull(&t, &cookie, "amactions", "core", number).await["state"] == "merged" {
+            merged = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(merged, "Actions job success did not trigger auto-merge");
 }
 
 /// Approval landing greens the gate — the armed PR merges.

@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! `oxidean-api-core` — the shared foundation every `oxidean-api-*` domain
 //! crate builds on: `RpcCtx`/`AppState`, session+auth plumbing, RPC dispatch,
 //! and the cross-domain services (repo ACL, git/LFS transports, protection,

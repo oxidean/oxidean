@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use oxidean_api_core::pull::{acl, db_err, emit_pull_event, load_pull_in_repo, to_public};
 
-/// `pull.auto_merge.enable` — Author or Write+; open non-draft pull on a
+/// `pull.auto_merge.enable` — Write+; open pull on a
 /// repo with `allow_auto_merge`; method must be one the repo's merge
 /// settings allow. Re-arming replaces method/title/message.
 pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> {
@@ -23,12 +23,8 @@ pub async fn enable(ctx: &RpcCtx, input: Value) -> Result<PullPublic, AppError> 
             format!("invalid pull.auto_merge.enable input: {e}"),
         )
     })?;
-    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    if !acl::can_edit_pull(&user.id, &row, accessible.capability) {
-        return Err(oxidean_api_core::repo::not_found());
-    }
-    oxidean_api_core::repo::ensure_not_archived(&accessible)?;
     let settings = ctx
         .db
         .get_repo_merge_settings(&accessible.row.id)

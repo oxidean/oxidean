@@ -23,6 +23,12 @@ use oxidean_db::PullRow;
 /// Re-evaluate every armed pull on `repo_id` whose head sha is `head_sha`
 /// — the check/status seams know the completed sha, nothing else.
 /// Soft-fails per pull: one failing merge must not starve the others.
+pub fn spawn_maybe_fire_for_head(deps: MqDeps, repo_id: String, head_sha: String) {
+    tokio::spawn(async move {
+        maybe_fire_for_head(&deps, &repo_id, &head_sha).await;
+    });
+}
+
 pub async fn maybe_fire_for_head(deps: &MqDeps, repo_id: &str, head_sha: &str) {
     let pulls = match deps.db.list_armed_pulls_for_head(repo_id, head_sha).await {
         Ok(v) => v,
@@ -79,29 +85,17 @@ pub async fn maybe_fire_pull(
     if repo_row.archived {
         return Ok(());
     }
-    // Flipping the repo setting off mid-flight holds the arm — the pull
-    // stays enabled but nothing merges until the setting returns.
-    let allow_auto = deps
-        .db
-        .get_repo_merge_settings(&repo_row.id)
-        .await
-        .map_err(db_err)?
-        .allow_auto_merge;
-    if !allow_auto {
-        return Ok(());
-    }
-
     let owner_ref = owner_ref_for_repo(&deps.db, &repo_row)
         .await
         .map_err(|e| AppError::new("repo.internal", e))?
         .ok_or_else(|| AppError::new("repo.internal", "repository owner missing"))?;
-    // The enabler's capability at *fire* time — a maintainer whose write
-    // bit was revoked since enabling must not merge through a stale arm.
+    // The enabler must still have Write+ at fire time; authorship alone
+    // cannot authorize a merge through a stale arm.
     let capability = effective_capability(&deps.db, Some(set_by), &repo_row, &owner_ref)
         .await
         .map_err(|e| AppError::new("repo.internal", e))?;
-    // Enabler lost all repo access since arming — hold, don't merge.
-    if capability.is_none() {
+    // Enabler lost Write+ since arming — hold, don't merge.
+    if !crate::repo::meets(capability, crate::repo::Capability::Write) {
         return Ok(());
     }
     let accessible = AccessibleRepo {
@@ -131,6 +125,28 @@ pub async fn maybe_fire_pull(
         return Ok(());
     }
 
+    let current = deps
+        .db
+        .find_pull_by_id(&row.id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("pull.not_found", "pull request not found"))?;
+    if current.state != "open"
+        || current.head_sha != row.head_sha
+        || current.base_ref != row.base_ref
+        || current.auto_merge_method.as_deref() != Some(method.as_str())
+        || current.auto_merge_set_by.as_deref() != Some(set_by)
+    {
+        return Ok(());
+    }
+    let current_capability =
+        effective_capability(&deps.db, Some(set_by), &accessible.row, &owner_ref)
+            .await
+            .map_err(|e| AppError::new("repo.internal", e))?;
+    if !crate::repo::meets(current_capability, crate::repo::Capability::Write) {
+        return Ok(());
+    }
+
     let actor_login = deps
         .db
         .find_user_by_id(set_by)
@@ -142,11 +158,11 @@ pub async fn maybe_fire_pull(
     merge_exec::execute(
         deps,
         scope,
-        &row,
+        &current,
         merge_exec::MergeOptions {
             method,
-            commit_title: row.auto_merge_commit_title.as_deref(),
-            commit_message: row.auto_merge_commit_message.as_deref(),
+            commit_title: current.auto_merge_commit_title.as_deref(),
+            commit_message: current.auto_merge_commit_message.as_deref(),
             delete_branch: false,
         },
         &merge_exec::MergeActor {
