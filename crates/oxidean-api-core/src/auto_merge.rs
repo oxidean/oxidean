@@ -1,10 +1,10 @@
 //! COL-07 auto-merge orchestrator — plain-PR auto-merge-when-green.
 //!
 //! A pull is *armed* when `auto_merge_method` is set (see
-//! `pull.auto_merge.enable`). Six fire seams — check-run completion,
-//! commit-status arrival, review approval, review dismissal, thread
-//! resolution, `pull.updateBranch`, `enqueue` check — plus the enable RPC
-//! itself call [`maybe_fire_pull`]/[`maybe_fire_for_head`]; each re-reads
+//! `pull.auto_merge.enable`). Fire seams — terminal Actions job status,
+//! check-run completion, commit-status arrival, review approval, review
+//! dismissal, thread resolution, draft-to-ready transition, and the enable
+//! RPC itself call [`maybe_fire_pull`]/[`maybe_fire_for_head`]; each re-reads
 //! the pull row, rebuilds the *enabling* user's capability, re-runs the
 //! shared `evaluate_merge_gate`, and merges via `pull::merge_exec` only
 //! when every protection is green. A merge queue-required base branch

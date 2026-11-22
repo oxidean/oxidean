@@ -100,8 +100,14 @@ async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (S
         )))
         .await
         .unwrap();
-    assert_eq!(signup.status(), StatusCode::OK);
-    let _ = signup.into_body().collect().await;
+    let signup_status = signup.status();
+    let signup_body = signup.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        signup_status,
+        StatusCode::OK,
+        "signup failed: {}",
+        String::from_utf8_lossy(&signup_body)
+    );
     let login = app
         .clone()
         .oneshot(rpc_req(&format!(
@@ -494,6 +500,56 @@ async fn auto_merge_fires_on_check_run_completion() {
     let merged = get_pull(&t, &cookie, "am3", "core", n).await;
     assert_eq!(merged["state"], "merged", "{merged}");
     assert_eq!(merged["merge_method"], "merge", "{merged}");
+}
+
+#[tokio::test]
+async fn auto_merge_fires_before_the_check_suite_completes() {
+    let t = test_app().await;
+    let (cookie, _uid) = seed(&t, "am12@ex.com", "am12", "core").await;
+    allow_auto_merge(&t, &cookie, "am12", "core").await;
+    protect_status(&t, &cookie, "am12", "core", "build").await;
+    let pr = open_pr(&t, &cookie, "am12", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    let head = pr["head_sha"].as_str().unwrap();
+    let armed = arm(&t, &cookie, "am12", "core", number, "merge").await;
+    assert_eq!(armed["ok"], true, "{armed}");
+
+    let required = rpc_json(
+        &t.app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"check.runs.create","input":{{"owner":"am12","name":"core","check_name":"build","head_sha":"{head}","status":"in_progress"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(required["ok"], true, "{required}");
+    let required_id = required["data"]["id"].as_str().unwrap();
+    let suite_id = required["data"]["check_suite_id"].as_str().unwrap();
+
+    let unrelated = rpc_json(
+        &t.app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"check.runs.create","input":{{"owner":"am12","name":"core","check_name":"unrelated","head_sha":"{head}","status":"in_progress"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(unrelated["ok"], true, "{unrelated}");
+
+    let completed = rpc_json(
+        &t.app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"check.runs.update","input":{{"owner":"am12","name":"core","id":"{required_id}","status":"completed","conclusion":"success"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(completed["ok"], true, "{completed}");
+    let suite = t.db.find_check_suite(suite_id).await.unwrap().unwrap();
+    assert_eq!(suite.status, "in_progress");
+
+    let merged = get_pull(&t, &cookie, "am12", "core", number).await;
+    assert_eq!(merged["state"], "merged", "{merged}");
 }
 
 /// Actions runner completion publishes the commit status and check-run gate,
