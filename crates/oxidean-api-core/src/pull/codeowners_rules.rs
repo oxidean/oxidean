@@ -144,6 +144,9 @@ impl Codeowners {
     }
 
     pub fn owners_for_paths(&self, paths: &[String]) -> Result<Vec<Vec<Owner>>, String> {
+        if paths.iter().any(|path| !valid_repo_path(path)) {
+            return Err("changed path is not a valid repository-relative path".into());
+        }
         let pattern_tokens = self
             .rules
             .iter()
@@ -219,6 +222,13 @@ impl Pattern {
         if raw.is_empty() || raw.starts_with('/') {
             return Err("pattern must be repository-root-relative".into());
         }
+        let normalized;
+        let raw = if let Some(prefix) = raw.strip_suffix('/') {
+            normalized = format!("{prefix}/**");
+            normalized.as_str()
+        } else {
+            raw
+        };
 
         let chars: Vec<char> = raw.chars().collect();
         let mut tokens = Vec::with_capacity(chars.len());
@@ -420,6 +430,19 @@ mod tests {
             vec![Owner::User("owner".into())]
         );
         assert!(anchored.owners_for_path("nested/src/lib.rs").is_empty());
+
+        let directory = Codeowners::parse(b"docs/ @docs-team\n");
+        assert_eq!(
+            directory.owners_for_path("docs/guide.md"),
+            vec![Owner::User("docs-team".into())]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_changed_paths_instead_of_leaving_them_uncovered() {
+        let parsed = Codeowners::parse(b"src/** @owner\n");
+        let paths = vec!["src\\main.rs".into()];
+        assert!(parsed.owners_for_paths(&paths).is_err());
     }
 
     #[test]

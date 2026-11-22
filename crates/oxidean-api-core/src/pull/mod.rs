@@ -815,7 +815,7 @@ pub async fn refresh_codeowners_review_requests(
         },
     )
     .await?;
-    let added = codeowners::request_reviewers(db, &pull.id, &pull.author_id, &evaluation).await?;
+    let added = codeowners::request_reviewers(db, &pull.id, actor_id, &evaluation).await?;
     if !added.is_empty() {
         notify::fanout_suppress_ignored(
             db,

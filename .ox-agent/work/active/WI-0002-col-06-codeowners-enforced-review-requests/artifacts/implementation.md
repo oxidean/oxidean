@@ -2,9 +2,9 @@
 
 ## Delivered behavior
 
-- Reads only `.github/CODEOWNERS` from the pull request base commit and evaluates the bounded supported glob subset.
+- Reads only `.github/CODEOWNERS` from the pull request base commit and evaluates the bounded supported glob subset, including directory-tree patterns ending in `/`. Invalid changed paths return evaluation errors instead of silently becoming uncovered.
 - Resolves same-organization users and teams with current write access; fans team owners out to eligible reviewers; excludes the pull author.
-- Keeps review requests idempotent and additive, preserves manual requests, and surfaces declared owner handles and evaluation errors in pull status.
+- Keeps review requests idempotent and additive, preserves manual requests, attributes refresh requests to the actor who updated the head, and surfaces declared owner handles and evaluation errors in pull status.
 - Adds opt-in `require_code_owner_reviews` branch protection with per-path owner approval, current-head-only approvals, and current membership/access rechecks.
 - Bounds parsing, matching work, owner resolution, team fan-out, and reviewer requests. Adds all-dialect persistence, API/OpenAPI/client synchronization, documentation, settings UI, and browser coverage.
 
@@ -15,9 +15,9 @@
 - `cargo test -p oxidean-api --test branch_protect_push`: 12 passed.
 - `cargo test -p oxidean-db --test dialect_branch_protection`: 1 passed.
 - `cargo test -p oxidean-db --test dialect_orgs`: 4 passed.
-- `cargo test -p oxidean-api-core`: 227 passed.
+- `cargo test -p oxidean-api-core`: 228 passed.
 - `cargo clippy -p oxidean-api-core -p oxidean-api-pulls -p oxidean-api-repo -p oxidean-api -p oxidean-db --all-targets -- -D warnings`: passed.
-- `make rpc-sync-check`, `make openapi-sync-check`, `make web-lint`, `make web-format-check`, `make browser-coverage-check-pr`: passed.
+- `make rpc-gen` regenerated the client DTOs for code-owner branch protection and pull status; `make rpc-sync-check`, `make openapi-sync-check`, `make web-lint`, `make web-format-check`, and `make browser-coverage-check-pr` passed.
 - `make test-web-browser`: 51 files, 119 tests passed.
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
