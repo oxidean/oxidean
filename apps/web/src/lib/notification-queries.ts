@@ -49,21 +49,25 @@ export function invalidateNotificationQueries(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: ["notification"] });
 }
 
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 export function subjectHref(n: NotificationPublic): string {
   switch (n.subject_kind) {
     case "pull_request":
       return `/${n.owner}/${n.repo}/pull/${n.subject_number}`;
     case "release":
       return n.subject_ref
-        ? `/${n.owner}/${n.repo}/releases/${n.subject_ref}`
+        ? `/${n.owner}/${n.repo}/releases/${pathSegment(n.subject_ref)}`
         : `/${n.owner}/${n.repo}/releases`;
     case "workflow_run":
       return n.subject_ref
-        ? `/${n.owner}/${n.repo}/actions/${n.subject_ref}`
+        ? `/${n.owner}/${n.repo}/actions/${pathSegment(n.subject_ref)}`
         : `/${n.owner}/${n.repo}/actions`;
     case "push":
       return n.subject_ref
-        ? `/${n.owner}/${n.repo}/commits/${n.subject_ref}`
+        ? `/${n.owner}/${n.repo}/commits/${n.subject_ref.split("/").map(pathSegment).join("/")}`
         : `/${n.owner}/${n.repo}`;
     default:
       return `/${n.owner}/${n.repo}/issues/${n.subject_number}`;
