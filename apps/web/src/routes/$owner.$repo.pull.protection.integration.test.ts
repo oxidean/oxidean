@@ -18,5 +18,15 @@ describe("PR merge protection blockers (PR-08 / D-24)", () => {
     expect(src).toMatch(/conversations/);
     expect(src).toMatch(/up_to_date/);
     expect(src).toMatch(/locked/);
+    expect(src).toMatch(/<PullCodeownersStatus status=\{props\.codeownersStatus\} \/>/);
+    expect(src).toMatch(
+      /props\.codeownersStatus\.file_present \|\| props\.codeownersStatus\.errors\.length > 0/,
+    );
+    const permissionGuard = src.indexOf('@if (!props.canWrite || props.pullState !== "open")');
+    const readOnlyStatus = src.indexOf("<PullCodeownersStatus", permissionGuard);
+    const writeBranch = src.indexOf("} @else {", permissionGuard);
+    expect(permissionGuard).toBeGreaterThanOrEqual(0);
+    expect(readOnlyStatus).toBeGreaterThan(permissionGuard);
+    expect(readOnlyStatus).toBeLessThan(writeBranch);
   }, 30_000);
 });

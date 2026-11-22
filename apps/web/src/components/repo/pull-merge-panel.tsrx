@@ -18,6 +18,33 @@ type PullMergePanelProps = {
   } | null;
 };
 
+function PullCodeownersStatus(props: {
+  status: NonNullable<PullMergePanelProps["codeownersStatus"]>;
+}) @{
+  <section className="rounded-md border border-border p-3" data-testid="pull-codeowners-status">
+    <h4 className="text-sm font-medium">CODEOWNERS review status</h4>
+    @if (props.status.errors.length > 0) {
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-destructive">
+        @for (const issue of props.status.errors; key issue) {
+          <li>{issue as string}</li>;
+        }
+      </ul>;
+    }
+    @if (props.status.paths.length > 0) {
+      <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+        @for (const path of props.status.paths; key path.path) {
+          <li>
+            <code>{path.path as string}</code>
+            {path.owners.length > 0
+              ? ` — ${path.owners.join(", ")}${path.approved ? " approved" : " awaiting approval"}`
+              : " — no code owners"}
+          </li>;
+        }
+      </ul>;
+    }
+  </section>;
+}
+
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 const REASON_LABELS: Record<string, string> = {
@@ -178,36 +205,24 @@ export function PullMergePanel(props: PullMergePanelProps) @{
   }
 
   @if (!props.canWrite || props.pullState !== "open") {
-    <div />;
+    <>
+      @if (
+        props.pullState === "open" &&
+        props.codeownersStatus &&
+        (props.codeownersStatus.file_present || props.codeownersStatus.errors.length > 0)
+      ) {
+        <PullCodeownersStatus status={props.codeownersStatus} />;
+      }
+      <div />
+    </>;
   } @else {
     <div className="space-y-3 rounded-md border border-border p-3" data-testid="pull-merge-panel">
       <h3 className="text-sm font-semibold">Merge pull request</h3>
-      @if (props.codeownersStatus?.file_present) {
-        <section
-          className="rounded-md border border-border p-3"
-          data-testid="pull-codeowners-status"
-        >
-          <h4 className="text-sm font-medium">CODEOWNERS review status</h4>
-          @if (props.codeownersStatus.errors.length > 0) {
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-destructive">
-              @for (const issue of props.codeownersStatus.errors; key issue) {
-                <li>{issue as string}</li>;
-              }
-            </ul>;
-          }
-          @if (props.codeownersStatus.paths.length > 0) {
-            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-              @for (const path of props.codeownersStatus.paths; key path.path) {
-                <li>
-                  <code>{path.path as string}</code>
-                  {path.owners.length > 0
-                    ? ` — ${path.owners.join(", ")}${path.approved ? " approved" : " awaiting approval"}`
-                    : " — no code owners"}
-                </li>;
-              }
-            </ul>;
-          }
-        </section>;
+      @if (
+        props.codeownersStatus &&
+        (props.codeownersStatus.file_present || props.codeownersStatus.errors.length > 0)
+      ) {
+        <PullCodeownersStatus status={props.codeownersStatus} />;
       }
       @if (blockers.length > 0) {
         <div

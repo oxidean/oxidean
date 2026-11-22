@@ -28,7 +28,10 @@ pub fn current_head_approved_user_ids(
     let mut latest: BTreeMap<String, &PullReviewRow> = BTreeMap::new();
     for review in reviews {
         match latest.get(&review.author_id) {
-            Some(previous) if previous.submitted_at >= review.submitted_at => {}
+            Some(previous)
+                if previous.submitted_at > review.submitted_at
+                    || (previous.submitted_at == review.submitted_at
+                        && previous.id > review.id) => {}
             _ => {
                 latest.insert(review.author_id.clone(), review);
             }
@@ -74,7 +77,17 @@ pub async fn evaluate(
         .await
     {
         Ok(bytes) => bytes,
-        Err(GitError::NotFound(_)) => return Ok(evaluation),
+        Err(GitError::NotFound(_)) => {
+            if matches!(git.commit_exists(&bare, &pull.base_sha).await, Ok(true)) {
+                return Ok(evaluation);
+            }
+            evaluation
+                .status
+                .errors
+                .push("could not read .github/CODEOWNERS from the pull request base".into());
+            evaluation.approved = !required;
+            return Ok(evaluation);
+        }
         Err(_) => {
             evaluation
                 .status
@@ -328,28 +341,68 @@ async fn resolve_owner(
     }
 }
 
+pub struct ReviewerRequestBatch {
+    pub added_user_ids: Vec<String>,
+    pub error: Option<String>,
+}
+
 pub async fn request_reviewers(
     db: &Database,
     pull_id: &str,
     requested_by: &str,
     evaluation: &Evaluation,
-) -> Result<Vec<String>, String> {
-    let mut added = Vec::new();
+) -> ReviewerRequestBatch {
+    let mut result = ReviewerRequestBatch {
+        added_user_ids: Vec::new(),
+        error: None,
+    };
     for user_id in &evaluation.requested_user_ids {
-        if db
+        let inserted = db
             .upsert_pull_review_request(pull_id, user_id, requested_by)
-            .await?
-        {
-            added.push(user_id.clone());
+            .await;
+        record_review_request(&mut result, user_id, inserted);
+    }
+    result
+}
+
+fn record_review_request(
+    result: &mut ReviewerRequestBatch,
+    user_id: &str,
+    inserted: Result<bool, String>,
+) {
+    match inserted {
+        Ok(true) => result.added_user_ids.push(user_id.to_string()),
+        Ok(false) => {}
+        Err(error) => {
+            if result.error.is_none() {
+                result.error = Some(error);
+            }
         }
     }
-    Ok(added)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{distinct_owner_count, MAX_DECLARED_OWNERS};
+    use super::{
+        current_head_approved_user_ids, distinct_owner_count, record_review_request,
+        ReviewerRequestBatch, MAX_DECLARED_OWNERS,
+    };
     use crate::pull::codeowners_rules::Owner;
+    use oxidean_db::PullReviewRow;
+
+    fn review(id: &str, state: &str) -> PullReviewRow {
+        PullReviewRow {
+            id: id.into(),
+            pull_id: "pull".into(),
+            author_id: "reviewer".into(),
+            state: state.into(),
+            body: String::new(),
+            commit_sha: Some("head".into()),
+            submitted_at: "2026-11-22T12:00:00Z".into(),
+            dismissed_at: None,
+            dismiss_reason: None,
+        }
+    }
 
     #[test]
     fn distinct_owner_budget_deduplicates_and_caps_owner_resolution() {
@@ -361,5 +414,30 @@ mod tests {
 
         let repeated = vec![vec![Owner::User("same".into())]; MAX_DECLARED_OWNERS + 1];
         assert_eq!(distinct_owner_count(&repeated), 1);
+    }
+
+    #[test]
+    fn failed_request_keeps_prior_insertions_for_notification() {
+        let mut result = ReviewerRequestBatch {
+            added_user_ids: Vec::new(),
+            error: None,
+        };
+        record_review_request(&mut result, "first-owner", Ok(true));
+        record_review_request(&mut result, "second-owner", Err("database failure".into()));
+
+        assert_eq!(result.added_user_ids, ["first-owner"]);
+        assert_eq!(result.error.as_deref(), Some("database failure"));
+    }
+
+    #[test]
+    fn later_same_second_review_replaces_the_earlier_review() {
+        let approved_then_changes = [review("a", "approved"), review("b", "changes_requested")];
+        assert!(current_head_approved_user_ids(&approved_then_changes, "head").is_empty());
+
+        let changes_then_approved = [review("a", "changes_requested"), review("b", "approved")];
+        assert_eq!(
+            current_head_approved_user_ids(&changes_then_approved, "head"),
+            ["reviewer".to_string()].into()
+        );
     }
 }

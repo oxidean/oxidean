@@ -245,6 +245,10 @@ async fn pull_create_requests_matching_codeowners_from_base_revision() {
         .iter()
         .filter(|notification| notification.reason == "pr_review_requested")
         .count();
+    assert_eq!(
+        notification_count_before_repeat, 1,
+        "newly matched owners must receive a review-request notification"
+    );
     let repeated_change = rpc_json(
         &app,
         &owner_cookie,
@@ -381,12 +385,147 @@ async fn pull_create_requests_matching_codeowners_from_base_revision() {
     )
     .await;
     assert_eq!(stale_detail["ok"], true, "{stale_detail}");
-    assert!(stale_detail["data"]["codeowners_status"]["paths"]
+    let stale_path = stale_detail["data"]["codeowners_status"]["paths"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|path| path["path"] == "docs/owned.rs")
-        .all(|path| path["approved"] == false));
+        .find(|path| path["path"] == "docs/owned.rs")
+        .expect("stale changed path must appear in pull status");
+    assert_eq!(stale_path["approved"], false);
+
+    let stored_pull = db
+        .find_pull_by_id(pull["data"]["id"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let valid_base_sha = stored_pull.base_sha.clone();
+    db.update_pull_fields(
+        &stored_pull.id,
+        &stored_pull.title,
+        &stored_pull.body,
+        stored_pull.draft,
+        &stored_pull.base_ref,
+        "missing-base-commit",
+    )
+    .await
+    .unwrap();
+    let missing_base_merge = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(missing_base_merge["ok"], false, "{missing_base_merge}");
+    assert!(missing_base_merge["error"]["data"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str() == Some("codeowners")));
+    let missing_base_detail = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(missing_base_detail["ok"], true, "{missing_base_detail}");
+    assert_eq!(
+        missing_base_detail["data"]["codeowners_status"]["file_present"],
+        false
+    );
+    assert!(!missing_base_detail["data"]["codeowners_status"]["errors"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    db.update_pull_fields(
+        &stored_pull.id,
+        &stored_pull.title,
+        &stored_pull.body,
+        stored_pull.draft,
+        &stored_pull.base_ref,
+        &valid_base_sha,
+    )
+    .await
+    .unwrap();
+
+    let coverage_branch = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"coowner","name":"core","branch":"codeowners-path-coverage","start":"main"}}"#,
+    )
+    .await;
+    assert_eq!(coverage_branch["ok"], true, "{coverage_branch}");
+    for (path, content) in [
+        ("docs/owned.rs", "owned coverage"),
+        ("docs/other.rs", "other coverage"),
+    ] {
+        let update = rpc_json(
+            &app,
+            &owner_cookie,
+            &format!(
+                r#"{{"procedure":"repo.file.create","input":{{"owner":"coowner","name":"core","branch":"codeowners-path-coverage","path":"{path}","content":"{content}","message":"Add path-coverage fixture"}}}}"#
+            ),
+        )
+        .await;
+        assert_eq!(update["ok"], true, "{update}");
+    }
+    let coverage_pull = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"coowner","name":"core","title":"CODEOWNERS path coverage","base_ref":"main","head_ref":"codeowners-path-coverage"}}"#,
+    )
+    .await;
+    assert_eq!(coverage_pull["ok"], true, "{coverage_pull}");
+    let coverage_number = coverage_pull["data"]["number"].as_i64().unwrap();
+    let coverage_approval = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"coowner","name":"core","number":{coverage_number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_approval["ok"], true, "{coverage_approval}");
+    let coverage_status = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{coverage_number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_status["ok"], true, "{coverage_status}");
+    let coverage_paths = coverage_status["data"]["codeowners_status"]["paths"]
+        .as_array()
+        .unwrap();
+    assert!(coverage_paths.iter().any(|path| {
+        path["path"] == "docs/owned.rs"
+            && path["owners"] == serde_json::json!(["@coowner", "@coreviewer"])
+            && path["approved"] == true
+    }));
+    assert!(coverage_paths.iter().any(|path| {
+        path["path"] == "docs/other.rs"
+            && path["owners"] == serde_json::json!(["@otherreviewer"])
+            && path["approved"] == false
+    }));
+    let coverage_merge = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{coverage_number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_merge["ok"], false, "{coverage_merge}");
+    assert!(coverage_merge["error"]["data"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str() == Some("codeowners")));
+
     let current_head_approval = rpc_json(
         &app,
         &reviewer_cookie,

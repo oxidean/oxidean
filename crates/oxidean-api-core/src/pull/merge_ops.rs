@@ -70,8 +70,6 @@ pub async fn evaluate_merge_gate(
         }
         approving_reviewer_ids.push(r.author_id.clone());
     }
-    let current_head_approving_reviewer_ids =
-        super::codeowners::current_head_approved_user_ids(&reviews, &row.head_sha);
     // Pending drafts never gate merges — only submitted comments count.
     let comments = ctx
         .db
@@ -127,6 +125,8 @@ pub async fn evaluate_merge_gate(
         .await
         .unwrap_or(true);
     let (codeowners_approved, codeowners_errors) = if eff.require_code_owner_reviews {
+        let current_head_approving_reviewer_ids =
+            super::codeowners::current_head_approved_user_ids(&reviews, &row.head_sha);
         match super::codeowners::evaluate(
             &ctx.db,
             ctx.git.as_ref(),

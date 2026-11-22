@@ -2,11 +2,11 @@
 
 ## Delivered behavior
 
-- Reads only `.github/CODEOWNERS` from the pull request base commit and evaluates the bounded supported glob subset, including directory-tree patterns ending in `/`. Invalid changed paths return evaluation errors instead of silently becoming uncovered.
+- Reads only `.github/CODEOWNERS` from a valid pull request base commit and evaluates the bounded supported glob subset, including directory-tree patterns ending in `/`. A missing file is neutral only when the base commit exists; missing base commits, control-character paths, and other invalid paths return evaluation errors instead of silently becoming uncovered. Renames evaluate both old and new paths.
 - Resolves same-organization users and teams with current write access; fans team owners out to eligible reviewers; excludes the pull author.
-- Keeps review requests idempotent and additive, preserves manual requests, attributes refresh requests to the actor who updated the head, and surfaces declared owner handles and evaluation errors in pull status.
-- Adds opt-in `require_code_owner_reviews` branch protection with per-path owner approval, current-head-only approvals, and current membership/access rechecks.
-- Bounds parsing, matching work, and name-only changed-path enumeration (1 MiB and 1,000-path caps); banned users are excluded from direct and team ownership. Owner resolution, team fan-out, and reviewer requests are also bounded. Adds all-dialect persistence, API/OpenAPI/client synchronization, documentation, settings UI, and browser coverage.
+- Keeps review requests idempotent and additive, preserves manual requests, attributes refresh requests to the actor who updated the head, and notifies successfully inserted reviewers even if a later insert fails. Pull status surfaces declared owner handles and evaluation errors, including errors when the CODEOWNERS file cannot be read.
+- Adds opt-in `require_code_owner_reviews` branch protection with per-path owner approval, current-head-only approvals, and current membership/access rechecks. Enforcement applies to pull-request merges; direct pushes remain governed by the existing push-protection rules.
+- Bounds parsing, matching work, and NUL-delimited name-only changed-path enumeration (1 MiB and 1,000-path caps); rename detection is disabled so both path names are evaluated. Non-UTF-8 and control-character paths fail closed. Banned users are excluded from direct and team ownership. Owner resolution, team fan-out, and reviewer requests are also bounded. Adds all-dialect persistence, API/OpenAPI/client synchronization, documentation, settings UI, and browser coverage.
 
 ## Verification
 

@@ -848,6 +848,10 @@ pub trait GitBackend: Send + Sync {
     /// `git rev-list --count <refname>`. Unborn → 0.
     async fn rev_list_count(&self, repo: &Path, refname: &str) -> Result<u64, GitError>;
 
+    async fn commit_exists(&self, repo: &Path, refname: &str) -> Result<bool, GitError> {
+        Ok(self.rev_list_count(repo, refname).await? > 0)
+    }
+
     /// `git shortlog -sn -e` contributors for `refname`, capped to `limit` (max 100).
     async fn shortlog(
         &self,

@@ -2701,7 +2701,7 @@ impl GitBackend for CliGitBackend {
                 "diff",
                 "--no-ext-diff",
                 "--no-textconv",
-                "--find-renames",
+                "--no-renames",
                 "--name-only",
                 "-z",
                 range.as_str(),
@@ -3504,6 +3504,26 @@ impl GitBackend for CliGitBackend {
         let text = String::from_utf8_lossy(&stdout);
         let n = text.trim().parse::<u64>().unwrap_or(0);
         Ok(n)
+    }
+
+    async fn commit_exists(&self, repo: &Path, refname: &str) -> Result<bool, GitError> {
+        let refname = validate_treeish(refname)?;
+        let repo_s = repo_str(repo)?;
+        let output = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{refname}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|error| GitError::Process(format!("failed to spawn git: {error}")))?;
+        Ok(output.success())
     }
 
     async fn shortlog(
@@ -4861,6 +4881,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn commit_exists_distinguishes_missing_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("commit_exists.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "base",
+            &[("base.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+
+        assert!(git.commit_exists(&bare, "main").await.unwrap());
+        assert!(!git.commit_exists(&bare, "missing-base").await.unwrap());
+    }
+
+    #[tokio::test]
     async fn cat_blob_returns_seeded_bytes() {
         let tmp = tempfile::tempdir().unwrap();
         let bare = tmp.path().join("blob.git");
@@ -5285,6 +5324,106 @@ mod tests {
             .expect("complete changed paths");
         assert_eq!(complete.paths, ["one.txt", "two.txt"]);
         assert!(!complete.truncated);
+    }
+
+    #[tokio::test]
+    async fn changed_paths_include_both_sides_of_a_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("changed_paths_rename.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "base",
+            &[("src/private/key.rs".into(), b"secret\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        let base = git
+            .list_refs(&bare)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|reference| reference.name == "refs/heads/main")
+            .unwrap()
+            .oid;
+        git.commit_files(
+            &bare,
+            "feature",
+            "main",
+            "move protected file",
+            &[
+                FileChange::Delete {
+                    path: "src/private/key.rs".into(),
+                },
+                FileChange::Upsert {
+                    path: "docs/key.rs".into(),
+                    content: b"secret\n".to_vec(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+
+        let paths = git
+            .changed_paths(&bare, &base, "feature", 10)
+            .await
+            .expect("changed paths");
+        assert_eq!(paths.paths, ["docs/key.rs", "src/private/key.rs"]);
+        assert!(!paths.truncated);
+    }
+
+    #[tokio::test]
+    async fn changed_paths_preserve_quoted_unicode_and_control_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("changed_paths_special.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "base",
+            &[("base.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        let base = git
+            .list_refs(&bare)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|reference| reference.name == "refs/heads/main")
+            .unwrap()
+            .oid;
+        let special_path = "docs/quoted \"café\nname.rs".to_string();
+        git.commit_files(
+            &bare,
+            "feature",
+            "main",
+            "add special path",
+            &[FileChange::Upsert {
+                path: special_path.clone(),
+                content: b"content\n".to_vec(),
+            }],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+
+        let paths = git
+            .changed_paths(&bare, &base, "feature", 10)
+            .await
+            .expect("changed paths");
+        assert!(paths.paths.contains(&special_path));
+        assert!(!paths.truncated);
     }
 
     #[tokio::test]

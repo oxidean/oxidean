@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use sqlx::Row;
+
 fn migrations_dir(dialect: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("migrations")
@@ -89,13 +91,20 @@ async fn dialect_branch_protection_migrate_schema_presence() {
     for dialect in ["sqlite", "postgres", "mysql"] {
         let (_path, sql) = find_migration_containing(dialect, "require_code_owner_reviews")
             .unwrap_or_else(|| panic!("missing {dialect} require_code_owner_reviews migration"));
+        let normalized = sql
+            .to_ascii_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let expected_column = match dialect {
+            "sqlite" => "require_code_owner_reviews integer not null default 0",
+            "postgres" => "require_code_owner_reviews boolean not null default false",
+            "mysql" => "require_code_owner_reviews tinyint(1) not null default 0",
+            _ => unreachable!(),
+        };
         assert!(
-            sql.contains("branch_protection_rules"),
-            "{dialect}: require_code_owner_reviews must alter branch_protection_rules"
-        );
-        assert!(
-            sql.to_ascii_lowercase().contains("default"),
-            "{dialect}: code-owner reviews must default off"
+            normalized.contains("branch_protection_rules") && normalized.contains(expected_column),
+            "{dialect}: CODEOWNERS protection must be a false-by-default branch_protection_rules column"
         );
     }
 
@@ -105,6 +114,20 @@ async fn dialect_branch_protection_migrate_schema_presence() {
     db.migrate()
         .await
         .expect("migrate must apply branch protection schema");
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("SQLite pool");
+    let columns = sqlx::query("PRAGMA table_info(branch_protection_rules)")
+        .fetch_all(&pool)
+        .await
+        .expect("branch protection column metadata");
+    let codeowners_default = columns
+        .iter()
+        .find(|row| {
+            row.try_get::<String, _>("name").ok().as_deref() == Some("require_code_owner_reviews")
+        })
+        .expect("CODEOWNERS protection column")
+        .try_get::<Option<String>, _>("dflt_value")
+        .expect("CODEOWNERS protection default");
+    assert_eq!(codeowners_default.as_deref(), Some("0"));
     let rules = db
         .list_branch_protection_rules("missing")
         .await

@@ -815,18 +815,21 @@ pub async fn refresh_codeowners_review_requests(
         },
     )
     .await?;
-    let added = codeowners::request_reviewers(db, &pull.id, actor_id, &evaluation).await?;
-    if !added.is_empty() {
+    let result = codeowners::request_reviewers(db, &pull.id, actor_id, &evaluation).await;
+    if !result.added_user_ids.is_empty() {
         notify::fanout_suppress_ignored(
             db,
             actor_id,
-            added,
+            result.added_user_ids,
             "pr_review_requested",
             &notify::subject_for_pull(pull),
         )
         .await;
     }
-    Ok(())
+    match result.error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 pub async fn to_public_with_codeowners_status(
@@ -1052,9 +1055,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     .await
     {
         Ok(evaluation) => {
-            if let Err(error) =
-                codeowners::request_reviewers(&ctx.db, &row.id, &row.author_id, &evaluation).await
-            {
+            let result =
+                codeowners::request_reviewers(&ctx.db, &row.id, &row.author_id, &evaluation).await;
+            if let Some(error) = result.error {
                 tracing::warn!(error = %error, pull = %row.id, "CODEOWNERS review requests failed");
             }
         }

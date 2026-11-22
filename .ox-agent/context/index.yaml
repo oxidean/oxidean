@@ -1,9 +1,9 @@
 schema_version: 1
-generated_at: "2026-11-22T22:28:06Z"
+generated_at: "2026-11-22T22:37:46Z"
 files:
     - path: context/decisions/adr-2026-11-22-codeowners-enforced-review-requests.md
-      sha256: 78e5ff1eabd56efec0a3ac7af1a08a65f493f6e90c2a886e765b17dfc25e0e33
-      bytes: 5196
+      sha256: 4e2207d69333a101475d9c80a068df4e13b1de47097c0f9521c2b2368bf754d1
+      bytes: 5589
       kind: decision
     - path: context/decisions/adr-2026-11-22-org-teams.md
       sha256: c335d203707a4d965d4c9fae3344186c88615f2b20d8c21eaf115b231235aacb

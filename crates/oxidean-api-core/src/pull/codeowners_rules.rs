@@ -177,6 +177,7 @@ fn valid_repo_path(path: &str) -> bool {
         && !path.is_empty()
         && !path.starts_with('/')
         && !path.contains('\\')
+        && !path.chars().any(char::is_control)
         && path
             .split('/')
             .all(|part| !part.is_empty() && part != "." && part != "..")
@@ -443,6 +444,9 @@ mod tests {
         let parsed = Codeowners::parse(b"src/** @owner\n");
         let paths = vec!["src\\main.rs".into()];
         assert!(parsed.owners_for_paths(&paths).is_err());
+        assert!(parsed
+            .owners_for_paths(&["src/new\nline.rs".into()])
+            .is_err());
     }
 
     #[test]
