@@ -649,6 +649,79 @@ async fn team_grant_highest_wins_and_org_only() {
     assert_eq!(get2["data"]["can_admin"], true, "team admin wins — {get2}");
 }
 
+#[tokio::test]
+async fn team_maintainer_cannot_grant_access_to_repo_without_admin() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("team_maintainer_grant.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+    let f = fixture(&app, &db, "grantguard").await;
+
+    let (_, repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"private","visibility":"private","owner":"grantguard-org"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(repo["ok"], true, "{repo}");
+
+    let (_, team) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.create","input":{"slug":"grantguard-org","name":"maintainers"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(team["ok"], true, "{team}");
+
+    let (_, member) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.members.add","input":{"slug":"grantguard-org","team_slug":"maintainers","username":"grantguardmem"}}"#,
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(member["ok"], true, "{member}");
+
+    let (_, role) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"org.teams.members.set_role","input":{{"slug":"grantguard-org","team_slug":"maintainers","user_id":"{}","role":"maintainer"}}}}"#,
+            f.member_id
+        ),
+        Some(&f.owner_cookie),
+    )
+    .await;
+    assert_eq!(role["ok"], true, "{role}");
+
+    let (_, before) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.get","input":{"owner":"grantguard-org","name":"private"}}"#,
+        Some(&f.member_cookie),
+    )
+    .await;
+    assert_eq!(before["error"]["code"], "repo.not_found", "{before}");
+
+    let (_, grant) = rpc_json(
+        &app,
+        r#"{"procedure":"org.teams.repos.add","input":{"slug":"grantguard-org","team_slug":"maintainers","repo":"private","permission":"admin"}}"#,
+        Some(&f.member_cookie),
+    )
+    .await;
+    assert_eq!(grant["error"]["code"], "repo.not_found", "{grant}");
+
+    let (_, after) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.get","input":{"owner":"grantguard-org","name":"private"}}"#,
+        Some(&f.member_cookie),
+    )
+    .await;
+    assert_eq!(after["error"]["code"], "repo.not_found", "{after}");
+}
+
 /// AC7+AC8: removing a team member drops access; removing the org member
 /// removes team rows (member_count drops).
 #[tokio::test]

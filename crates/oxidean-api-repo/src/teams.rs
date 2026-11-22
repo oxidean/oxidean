@@ -119,11 +119,27 @@ pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTeamPubli
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let (_org_id, team) = org_and_team(ctx, &accessible, &req.team_slug).await?;
 
+    let existing = ctx
+        .db
+        .find_team_repo(&team.id, &accessible.row.id)
+        .await
+        .map_err(db_err)?;
     let grant = ctx
         .db
         .upsert_team_repo(&team.id, &accessible.row.id, req.permission.as_str())
         .await
         .map_err(db_err)?;
+    let rank = |permission: &str| match permission {
+        "admin" => 3,
+        "write" => 2,
+        _ => 1,
+    };
+    if existing
+        .as_ref()
+        .is_some_and(|existing| rank(req.permission.as_str()) < rank(&existing.permission))
+    {
+        notify::sweep_repo_access(&ctx.db, &accessible.row.id).await;
+    }
 
     audit::record(
         ctx,

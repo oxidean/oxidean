@@ -128,7 +128,7 @@ async fn require_team_admin(
     // maintainer check. A `require_org_role` *error* (non-member, or 2FA
     // lockout) propagates — maintainers must not bypass the org lockout (#130).
     match require_org_role(ctx, &org.id, &caller.id).await {
-        Ok(role) if matches!(role, OrgRole::Owner | OrgRole::Admin) => return Ok(()),
+        Ok(OrgRole::Owner | OrgRole::Admin) => return Ok(()),
         Ok(_) => {}
         Err(e) => return Err(e),
     }
@@ -652,6 +652,20 @@ async fn load_org_repo(
     Ok(repo)
 }
 
+async fn load_admin_org_repo(
+    ctx: &RpcCtx,
+    org: &OrganizationRow,
+    repo_name: &str,
+) -> Result<oxidean_db::RepositoryRow, AppError> {
+    let repo = load_org_repo(ctx, org, repo_name).await?;
+    let accessible =
+        oxidean_api_core::repo::resolve_repo_for_admin(ctx, &org.slug, repo_name).await?;
+    if accessible.row.id != repo.id {
+        return Err(AppError::new("repo.not_found", "Repository not found"));
+    }
+    Ok(repo)
+}
+
 /// `org.teams.repos.add` — Admin+/maintainer; upsert grant (PUT parity).
 pub async fn repos_add(
     ctx: &RpcCtx,
@@ -667,13 +681,29 @@ pub async fn repos_add(
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
     require_team_admin(ctx, &org, &team.id, &caller).await?;
-    let repo = load_org_repo(ctx, &org, &req.repo).await?;
+    let repo = load_admin_org_repo(ctx, &org, &req.repo).await?;
 
+    let existing = ctx
+        .db
+        .find_team_repo(&team.id, &repo.id)
+        .await
+        .map_err(team_db_err)?;
     let row = ctx
         .db
         .upsert_team_repo(&team.id, &repo.id, req.permission.as_str())
         .await
         .map_err(team_db_err)?;
+    let rank = |permission: &str| match permission {
+        "admin" => 3,
+        "write" => 2,
+        _ => 1,
+    };
+    if existing
+        .as_ref()
+        .is_some_and(|grant| rank(req.permission.as_str()) < rank(&grant.permission))
+    {
+        notify::sweep_repo_access(&ctx.db, &repo.id).await;
+    }
 
     audit::record(
         ctx,
@@ -714,7 +744,7 @@ pub async fn repos_update(
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
     require_team_admin(ctx, &org, &team.id, &caller).await?;
-    let repo = load_org_repo(ctx, &org, &req.repo).await?;
+    let repo = load_admin_org_repo(ctx, &org, &req.repo).await?;
 
     let existing = ctx
         .db
@@ -783,7 +813,7 @@ pub async fn repos_remove(
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let team = load_team(ctx, &org, &req.team_slug).await?;
     require_team_admin(ctx, &org, &team.id, &caller).await?;
-    let repo = load_org_repo(ctx, &org, &req.repo).await?;
+    let repo = load_admin_org_repo(ctx, &org, &req.repo).await?;
 
     ctx.db
         .delete_team_repo(&team.id, &repo.id)
