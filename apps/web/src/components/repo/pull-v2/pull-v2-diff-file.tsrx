@@ -219,7 +219,7 @@ function SuggestionBlock(props: {
   onToggleBatch: () => void;
 }) @{
   const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState("Apply suggestion from code review");
   const removedRows = (props.removed ?? []).map((text, i) => ({ k: `r${i}`, text }));
   const addedRows = (props.text === "" ? [] : props.text.split("\n")).map((text, i) => ({
     k: `a${i}`,
@@ -229,7 +229,7 @@ function SuggestionBlock(props: {
     const ok = await props.onCommit(message.trim() || null);
     if (ok) {
       setOpen(false);
-      setMessage("");
+      setMessage("Apply suggestion from code review");
     }
   }
   <div
@@ -291,7 +291,6 @@ function SuggestionBlock(props: {
         <input
           type="text"
           className="w-full rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground"
-          placeholder="Apply suggestion from code review"
           value={message}
           disabled={props.busy}
           data-testid="pull-v2-suggestion-message"
@@ -313,7 +312,7 @@ function SuggestionBlock(props: {
             disabled={props.busy}
             onClick={() => {
               setOpen(false);
-              setMessage("");
+              setMessage("Apply suggestion from code review");
             }}
           >
             Cancel

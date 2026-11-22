@@ -804,6 +804,25 @@ async fn apply_to_fork_head_as_maintainer() {
     .await;
     assert_eq!(apply["ok"], true, "fork apply — {apply}");
     assert_eq!(apply["data"]["branch"], "main");
+    let pull_after = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"upown","name":"up","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(pull_after["data"]["head_sha"], apply["data"]["commit_sha"]);
+    let stale_apply = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.suggestions.apply","input":{{"owner":"upown","name":"up","number":{number},"comment_id":"{cid}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(stale_apply["ok"], false, "stale suggestion — {stale_apply}");
+    assert_eq!(stale_apply["error"]["code"], "pull.suggestion_invalid");
 
     // The commit landed on the FORK's main, not upstream's.
     let fblob = blob_content(&app, &fork_cookie, "fkown", "up", "main", "docs/guide.md").await;

@@ -293,6 +293,8 @@ async fn gate(
     Ok((
         pull,
         ApplyContextParts {
+            base_owner: accessible.owner_username.clone(),
+            base_name: accessible.row.name.clone(),
             head_repo,
             head_slug,
             head_cap,
@@ -303,6 +305,8 @@ async fn gate(
 }
 
 struct ApplyContextParts {
+    base_owner: String,
+    base_name: String,
     head_repo: oxidean_db::RepositoryRow,
     head_slug: String,
     head_cap: Option<Capability>,
@@ -393,19 +397,23 @@ async fn commit_to_head(
         &ctx.env_name,
     )
     .await;
-    oxidean_api_core::pull::synchronize_after_push(
+    oxidean_api_core::pull::synchronize_pull_after_head_move(
         &ctx.db,
         &ctx.repos_dir,
-        &parts.head_repo.id,
+        ctx.git.as_ref(),
+        pull,
+        &parts.base_owner,
+        &parts.base_name,
         &parts.head_slug,
         &parts.head_repo.name,
+        &result.sha,
         &user.username,
         &user.id,
-        &updates,
         &ctx.env_name,
         oxidean_api_core::actions::events::rpc_caller_is_job_token(ctx),
     )
-    .await;
+    .await
+    .map_err(db_err)?;
     // GITHUB_TOKEN parity — job-token commits never start `push` runs.
     if !oxidean_api_core::actions::events::rpc_caller_is_job_token(ctx) {
         oxidean_api_core::actions::notify_push_actions(

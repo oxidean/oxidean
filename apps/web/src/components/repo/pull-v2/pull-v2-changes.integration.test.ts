@@ -370,6 +370,10 @@ describe("PullV2Changes suggestion blocks (COL-08)", () => {
     expect(block.textContent).toContain("new();");
     expect(block.textContent).toContain("better();");
     fireEvent.click(await screen.findByTestId("pull-v2-suggestion-commit-open"));
+    const messageInput = (await screen.findByTestId(
+      "pull-v2-suggestion-message",
+    )) as HTMLInputElement;
+    expect(messageInput.value).toBe("Apply suggestion from code review");
     fireEvent.click(await screen.findByTestId("pull-v2-suggestion-commit"));
     await waitFor(() => {
       expect(suggestionsApplyMock).toHaveBeenCalledWith(
@@ -379,7 +383,7 @@ describe("PullV2Changes suggestion blocks (COL-08)", () => {
           number: 3,
           commentId: "sg1",
           suggestionIndex: 0,
-          message: null,
+          message: "Apply suggestion from code review",
         }),
       );
     });
