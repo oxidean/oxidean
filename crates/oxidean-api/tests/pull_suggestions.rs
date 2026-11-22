@@ -205,6 +205,80 @@ async fn plant_comment_body(
 }
 
 #[tokio::test]
+async fn apply_rejects_suggestion_anchored_to_previous_head() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("sugg_old_head.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "oldhead@ex.com", "oldhead").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    let number = setup_pr(&app, &cookie, "oldhead", "sugg_old_head").await;
+    let before = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"oldhead","name":"sugg_old_head","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    let old_head = before["data"]["head_sha"].as_str().unwrap();
+
+    let update = rpc_json(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.file.update","input":{"owner":"oldhead","name":"sugg_old_head","branch":"feature","path":"docs/guide.md","content":"new head line one\nnew head line two\nnew head line three\nnew head line four\nnew head line five\n","message":"Advance feature head"}}"#,
+    )
+    .await;
+    assert_eq!(update["ok"], true, "advance head — {update}");
+
+    let after = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"oldhead","name":"sugg_old_head","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_ne!(
+        after["data"]["head_sha"].as_str().unwrap(),
+        old_head,
+        "feature branch head must advance"
+    );
+
+    let body = "Please fix:\n```suggestion\nreplace line two\n```\n";
+    let stale_comment = serde_json::json!({
+        "procedure": "pull.comments.create",
+        "input": {
+            "owner": "oldhead",
+            "name": "sugg_old_head",
+            "number": number,
+            "body": body,
+            "path": "docs/guide.md",
+            "side": "RIGHT",
+            "line": 2,
+            "commit_sha": old_head
+        }
+    });
+    let comment = rpc_json(&app, &cookie, &stale_comment.to_string()).await;
+    assert_eq!(comment["ok"], true, "stale comment — {comment}");
+
+    let apply = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.suggestions.apply","input":{{"owner":"oldhead","name":"sugg_old_head","number":{number},"comment_id":"{}"}}}}"#,
+            comment["data"]["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert_eq!(apply["ok"], false, "stale suggestion — {apply}");
+    assert_eq!(apply["error"]["code"], "pull.suggestion_invalid");
+}
+
+#[tokio::test]
 async fn apply_single_line_suggestion_commits_to_head() {
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("sugg1.db").display());

@@ -190,6 +190,11 @@ fn resolve_suggestion(
             "suggestion is on an outdated diff position",
         ));
     }
+    if row.commit_sha.as_deref() != Some(pull.head_sha.as_str()) {
+        return Err(suggestion_invalid(
+            "suggestion is anchored to a different head commit",
+        ));
+    }
     if row.side.as_deref() != Some("RIGHT") {
         return Err(suggestion_invalid(
             "suggestions require a RIGHT-side line anchor",
