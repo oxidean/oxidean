@@ -62,6 +62,21 @@ describe("commentBodySegments", () => {
     ]);
   });
 
+  it("keeps CRLF fence parsing and indices aligned with the server", () => {
+    expect(commentBodySegments("```suggestion\r\nx\r\n```\r\n```suggestion\r\ny\r\n```")).toEqual([
+      { kind: "suggestion", text: "x", index: 0 },
+      { kind: "suggestion", text: "y", index: 1 },
+    ]);
+  });
+
+  it("does not recognize a tab-indented suggestion opener", () => {
+    expect(
+      commentBodySegments("\t```suggestion\nx\n```").some(
+        (segment) => segment.kind === "suggestion",
+      ),
+    ).toBe(false);
+  });
+
   it("allows trailing spaces on a closing fence", () => {
     expect(commentBodySegments("```suggestion\nx\n```   ")).toEqual([
       { kind: "suggestion", text: "x", index: 0 },

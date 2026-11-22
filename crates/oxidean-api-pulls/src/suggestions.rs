@@ -73,8 +73,8 @@ pub fn suggestion_blocks(body: &str) -> Vec<SuggestionBlock> {
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
-        let stripped = line.trim_start();
-        let indent = line.len() - stripped.len();
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        let stripped = &line[indent..];
         let Some((fence_ch, fence_len)) = fence_marker(stripped) else {
             i += 1;
             continue;
@@ -632,6 +632,11 @@ mod tests {
     fn reversed_anchor_ranges_are_rejected() {
         assert!(validate_anchor_range(4, 3).is_err());
         assert!(validate_anchor_range(3, 3).is_ok());
+    }
+
+    #[test]
+    fn tab_indented_openers_are_not_fences() {
+        assert!(suggestion_blocks("\t```suggestion\nreplacement\n```\n").is_empty());
     }
 
     #[test]

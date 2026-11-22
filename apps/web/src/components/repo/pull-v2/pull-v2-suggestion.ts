@@ -51,7 +51,7 @@ function stripIndent(line: string, indent: number): string {
  * ````suggestion` inside code never counts; EOF closes an open fence.
  */
 export function commentBodySegments(body: string): SuggestionSegment[] {
-  const lines = body.split("\n");
+  const lines = body.split(/\r?\n/);
   const out: SuggestionSegment[] = [];
   let mdStart = 0;
   let index = 0;
@@ -63,8 +63,9 @@ export function commentBodySegments(body: string): SuggestionSegment[] {
   };
   while (i < lines.length) {
     const line = lines[i];
-    const stripped = line.trimStart();
-    const indent = line.length - stripped.length;
+    let indent = 0;
+    while (line[indent] === " ") indent++;
+    const stripped = line.slice(indent);
     const fence = indent <= 3 ? fenceMarker(stripped) : null;
     if (!fence) {
       i++;
