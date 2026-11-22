@@ -1,0 +1,14 @@
+schema_version: 1
+request_id: IN-0001
+work_item_id: WI-0003
+kind: approval
+question: Approve transition of WI-0003 (shipping → shipped)?
+action:
+    type: transition
+    work_item_id: WI-0003
+    target: shipped
+status: cancelled
+created_by: ox-agent
+answered_by: Devin
+created_at: "2026-11-22T16:12:34Z"
+answered_at: "2026-11-22T19:30:32Z"
