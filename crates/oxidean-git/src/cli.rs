@@ -676,7 +676,7 @@ impl RemoteAuthFiles {
                 };
                 cfgs.push((
                     "http.extraHeader".into(),
-                    format!("Authorization: Basic ***"),
+                    format!("Authorization: Basic {auth_b64}"),
                 ));
                 let _ = askpass; // reserved if we switch to ASKPASS later
             }
