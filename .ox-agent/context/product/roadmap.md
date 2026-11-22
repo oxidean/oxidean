@@ -67,10 +67,10 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [x] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser. (#99)
 - [~] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions. Backend shipped — `POST /api/uploads/comment-attachments` with per-user quota and orphan GC, wired into the pull-v2 composers (overview comments, review bar, diff review comments; `pr-new-ui` flag). Issue-comment and release-discussion composers still lack upload UI.
 - [x] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles. User-profile pins shipped — `user_pinned_repos`, `user.listPinnedRepos`/`user.setPinnedRepos` (≤6, ordered, owned repos), the Pinned cards section and "Customize your pins" dialog. Repo issue/PR pinning shipped — `pinned_position` on `issues`/`pull_requests`, `issue.pin`/`issue.unpin` and `pull.pin`/`pull.unpin` (≤3 each, ordered, Write+), pinned boxes on the issues/PRs indexes and pin toggles on detail pages. Org-profile pins shipped — `org_pinned_repos`, `org.listPinnedRepos`/`org.setPinnedRepos` (≤6, ordered, org-owned repos, Admin+ edit), shared Pinned cards section on `/{org}`.
-- [~] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today. Staged as work item `WI-0001`.
-- [~] **COL-06** CODEOWNERS-enforced review requests (COLLAB-V2-03). Staged as work item `WI-0002`.
-- [~] **COL-07** Merge queue and auto-merge-when-green (COLLAB-V2-04). Merge queue shipped — `merge_queue.*` RPCs (enqueue/dequeue/get/list/groups), merge groups, branch-protection "must go through the merge queue" mode, merge-panel UI. Standalone auto-merge-when-green on plain PRs still open (`auto_merge` is stubbed null on the REST surface) — staged as work item `WI-0003`.
-- [~] **COL-08** Suggested-change code blocks in review comments. Staged as work item `WI-0004`.
+- [~] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today. In review in [PR #288](https://github.com/oxidean/oxidean/pull/288) (work item `WI-0001`).
+- [~] **COL-06** CODEOWNERS-enforced review requests (COLLAB-V2-03). Work item `WI-0002` is active with no implementation PR yet; it depends on the team model in [PR #288](https://github.com/oxidean/oxidean/pull/288).
+- [~] **COL-07** Merge queue and auto-merge-when-green (COLLAB-V2-04). Merge queue shipped — `merge_queue.*` RPCs (enqueue/dequeue/get/list/groups), merge groups, branch-protection "must go through the merge queue" mode, merge-panel UI. Standalone auto-merge-when-green on plain PRs remains open (`auto_merge` is stubbed null on the REST surface) — in review in [PR #287](https://github.com/oxidean/oxidean/pull/287) (work item `WI-0003`); race-safety and completed-check re-evaluation findings remain open.
+- [~] **COL-08** Suggested-change code blocks in review comments. In review in [PR #286](https://github.com/oxidean/oxidean/pull/286) (work item `WI-0004`); stale-anchor validation has been pushed for review.
 - [~] **COL-09** Discussions and gists/snippets as separate sharing surfaces. Discussions shipped end-to-end — `discussions.*` RPCs (categories, comments, answers, pin/lock/transfer), repo unit toggle, `/discussions` UI. Gists/snippets remain unshipped.
 - [~] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01). Repo-scoped boards shipped — `projects.*`/`projects.columns.*`/`projects.cards.*` RPCs and the `/projects` kanban UI. Org/user-scoped boards remain open.
 - [x] **COL-11** Wiki per repository (COLLAB-V2-02). `wiki.pages.*`/`wiki.revisions.*` RPCs (REST mirror too), `/wiki` UI with revision history, repo-migrate sidecar support, per-repo unit toggle.
@@ -107,7 +107,7 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. The Acti
 
 ## Notifications and email
 
-- [~] **NOT-01** Outbound email for watched/assigned/mentioned issue and PR activity. Email infra exists (`EmailSender`: SMTP/Resend/log) but is wired to auth mail only; notification fan-out writes DB rows, no email send. Staged as work item `WI-0005`.
+- [~] **NOT-01** Outbound email for watched/assigned/mentioned issue and PR activity. Email infra exists (`EmailSender`: SMTP/Resend/log) but is wired to auth mail only; notification fan-out writes DB rows, no email send. In review in [PR #285](https://github.com/oxidean/oxidean/pull/285) (work item `WI-0005`); the SQLite migration test now pins its dialect explicitly.
 - [ ] **NOT-02** Email digests (COLLAB-V2-06).
 - [ ] **NOT-03** Reply-by-email: inbound replies append to the issue/PR thread.
 - [~] **NOT-04** Notification filters: watch levels (`all`/`participating`/`ignore` with mention suppression), `user.follow`, and auto-unwatch on access loss shipped (DEBT-06). Global mute, per-type filters, and email prefs remain open.
@@ -164,11 +164,13 @@ Carried from [.ox-agent/context/specs/_archive/gsd/PROJECT.md](../specs/_archive
 
 The v1 carry-overs, API/integration surface, daily-gap GIT items, most of the Actions CI surface, and the k8s/storage deploy tracks have all landed. What remains, roughly by leverage:
 
-**Promoted tranche (staged as work items under `.ox-agent/work/active/`):** WI-0001 org teams (COL-05) · WI-0002 CODEOWNERS review requests (COL-06) · WI-0003 auto-merge-when-green (COL-07 tail) · WI-0004 suggested-change blocks (COL-08) · WI-0005 outbound notification email (NOT-01).
+**Promoted tranche (tracked under `.ox-agent/work/active/`):** WI-0001 org teams ([PR #288](https://github.com/oxidean/oxidean/pull/288)) · WI-0002 CODEOWNERS review requests (active; no PR yet; depends on #288) · WI-0003 auto-merge-when-green ([PR #287](https://github.com/oxidean/oxidean/pull/287)) · WI-0004 suggested-change blocks ([PR #286](https://github.com/oxidean/oxidean/pull/286)) · WI-0005 outbound notification email ([PR #285](https://github.com/oxidean/oxidean/pull/285)).
+
+**Current review status:** follow-up fixes for org 2FA notification access, stale suggestion anchors, and the SQLite notification test are pushed to PRs #288, #286, and #285, respectively; their CI is rerunning. PR #287 still has race-safety and completed-check re-evaluation findings to resolve. None of the four PRs is merge-ready.
 
 What remains, roughly by leverage:
 
-1. **COL tails** — the four promoted items above first; then gists (COL-09 tail), org-scoped boards (COL-10 tail), attachment UI on issue/release composers (COL-03 tail).
+1. **COL tails** — finish the active promoted tranche above first; then gists (COL-09 tail), org-scoped boards (COL-10 tail), attachment UI on issue/release composers (COL-03 tail).
 2. **NOT rest** — digests (NOT-02) and reply-by-email (NOT-03) build on WI-0005; global mute / per-type filters / email prefs (NOT-04 tail) pair naturally with it.
 3. **SEC** — OAuth social login, LDAP, self-service session controls, CAPTCHA, a real audit-log view, moderation queue, private-instance mode. SEC-08 (advisories/dependency graph) stays staged last.
 4. **SRCH-01 + SRCH-03** — the indexed cross-repo code search is the biggest remaining search gap; explore topic/org browsing is cheap after it.

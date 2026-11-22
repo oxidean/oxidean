@@ -1,5 +1,5 @@
 schema_version: 1
-generated_at: "2026-11-20T15:26:36Z"
+generated_at: "2026-11-22T18:53:05Z"
 files:
     - path: context/decisions/standing-decisions.md
       sha256: b557d51a295b0655c08d3f10b9cd7570208df2ba362dc1f08252c103f99df550
@@ -10,8 +10,8 @@ files:
       bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: d28a2af54cbeaeb457078cb2ce870f1fa462cb1ee0311da32cd9560ad4f61fbc
-      bytes: 24504
+      sha256: 3bf0f0a7f27b91a6c3e77b1abfc4da8c3d9bb99bcaea6f8fa2a3dd71bf49994b
+      bytes: 25591
       kind: other
     - path: context/product/tech-stack.md
       sha256: efea7fb72bee455f870dc07463f39a188de11823b226b873b5b3d7edd2d65c2e
