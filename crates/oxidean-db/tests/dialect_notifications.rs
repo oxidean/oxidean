@@ -82,7 +82,9 @@ async fn dialect_notification_subject_kinds_migration_present() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("kinds.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
     db.migrate()
         .await
         .expect("migrate 0044_notification_subject_kinds");
