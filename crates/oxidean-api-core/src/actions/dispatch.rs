@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::actions::discover_workflows;
 use crate::actions::parse::WorkflowDocument;
+use crate::merge_queue::MqDeps;
 
 /// Instance gate from AppState / env (D-ACT-06).
 pub fn instance_actions_enabled(flag: bool) -> bool {
@@ -23,6 +24,93 @@ pub fn env_actions_enabled() -> bool {
             !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
         })
         .unwrap_or(true)
+}
+
+pub(crate) fn auto_merge_deps(
+    db: &Database,
+    repos_dir: &Path,
+    env_name: &str,
+    job_token_actor: bool,
+    actions_enabled: bool,
+) -> MqDeps {
+    MqDeps {
+        db: db.clone(),
+        git: Arc::new(oxidean_git::CliGitBackend::new()),
+        repos_dir: repos_dir.to_path_buf(),
+        pages_dir: crate::pages::resolve_pages_dir(),
+        env_name: env_name.to_string(),
+        job_token_actor,
+        actions_enabled,
+    }
+}
+
+pub(crate) fn auto_merge_deps_from_bare(
+    db: &Database,
+    bare_repo: &Path,
+    env_name: &str,
+    job_token_actor: bool,
+    actions_enabled: bool,
+) -> Option<MqDeps> {
+    Some(auto_merge_deps(
+        db,
+        bare_repo.parent()?.parent()?,
+        env_name,
+        job_token_actor,
+        actions_enabled,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn enqueue_run_with_auto_merge(
+    deps: MqDeps,
+    repository_id: &str,
+    workflow_path: &str,
+    doc: &WorkflowDocument,
+    event: &str,
+    head_sha: &str,
+    head_ref: &str,
+    triggered_by: Option<&str>,
+    head_repo_id: Option<&str>,
+    event_payload: Option<&serde_json::Value>,
+    hold_for_approval: bool,
+    default_title: Option<&str>,
+) -> Result<(String, Vec<String>), String> {
+    let (run_id, job_ids) = enqueue_run(
+        &deps.db,
+        repository_id,
+        workflow_path,
+        doc,
+        event,
+        head_sha,
+        head_ref,
+        triggered_by,
+        head_repo_id,
+        event_payload,
+        hold_for_approval,
+        default_title,
+    )
+    .await?;
+    match deps.db.list_action_jobs_for_run(&run_id).await {
+        Ok(jobs)
+            if jobs.iter().any(|job| {
+                matches!(
+                    job.status.as_str(),
+                    "success" | "failure" | "cancelled" | "skipped"
+                )
+            }) =>
+        {
+            crate::auto_merge::spawn_maybe_fire_for_head(
+                deps,
+                repository_id.to_string(),
+                head_sha.to_string(),
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, %run_id, "post-enqueue auto-merge recheck failed");
+        }
+    }
+    Ok((run_id, job_ids))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -105,6 +193,13 @@ async fn dispatch_push_inner(
     if !bare.exists() {
         return Err(format!("bare repo missing: {}", bare.display()));
     }
+    let auto_merge_deps = auto_merge_deps(
+        db,
+        repos_dir,
+        &std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into()),
+        false,
+        actions_enabled_instance,
+    );
 
     let sender = match pusher_id {
         Some(uid) => db
@@ -268,8 +363,8 @@ async fn dispatch_push_inner(
             ) {
                 continue;
             }
-            enqueue_run(
-                db,
+            enqueue_run_with_auto_merge(
+                auto_merge_deps.clone(),
                 repository_id,
                 &wf.path,
                 &wf.document,

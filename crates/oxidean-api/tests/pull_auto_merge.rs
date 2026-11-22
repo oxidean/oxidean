@@ -15,7 +15,10 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use oxidean_api::actions::{dispatch::enqueue_run, mint_registration_token, parse_workflow_yaml};
+use oxidean_api::actions::{
+    dispatch::{enqueue_run, enqueue_run_with_auto_merge},
+    mint_registration_token, parse_workflow_yaml,
+};
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
@@ -550,6 +553,72 @@ async fn auto_merge_fires_before_the_check_suite_completes() {
 
     let merged = get_pull(&t, &cookie, "am12", "core", number).await;
     assert_eq!(merged["state"], "merged", "{merged}");
+}
+
+#[tokio::test]
+async fn auto_merge_fires_when_required_actions_job_is_skipped_at_enqueue() {
+    let t = test_app().await;
+    let (cookie, uid) = seed(&t, "am-skipped@ex.com", "amskipped", "core").await;
+    allow_auto_merge(&t, &cookie, "amskipped", "core").await;
+    protect_status(&t, &cookie, "amskipped", "core", "CI / build").await;
+    let pr = open_pr(&t, &cookie, "amskipped", "core").await;
+    let number = pr["number"].as_i64().unwrap();
+    let head_sha = pr["head_sha"].as_str().unwrap().to_string();
+    let repository_id = repo_id(&t, &uid, "core").await;
+    let armed = arm(&t, &cookie, "amskipped", "core", number, "squash").await;
+    assert_eq!(armed["ok"], true, "{armed}");
+
+    let workflow = parse_workflow_yaml(
+        br#"
+name: CI
+on: [pull_request]
+jobs:
+  build:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo skipped
+"#,
+    )
+    .unwrap();
+    let deps = oxidean_api::merge_queue::MqDeps {
+        db: t.db.clone(),
+        git: Arc::new(CliGitBackend::new()),
+        repos_dir: t.repos_dir.clone(),
+        pages_dir: t._dir.path().join("pages"),
+        env_name: "development".into(),
+        job_token_actor: false,
+        actions_enabled: true,
+    };
+    enqueue_run_with_auto_merge(
+        deps,
+        &repository_id,
+        ".github/workflows/ci.yml",
+        &workflow,
+        "pull_request",
+        &head_sha,
+        "refs/heads/feature",
+        Some(&uid),
+        None,
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mut merged = false;
+    for _ in 0..40 {
+        if get_pull(&t, &cookie, "amskipped", "core", number).await["state"] == "merged" {
+            merged = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        merged,
+        "skipped required Actions job did not trigger auto-merge"
+    );
 }
 
 /// Actions runner completion publishes the commit status and check-run gate,

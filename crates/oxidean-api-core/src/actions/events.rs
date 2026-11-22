@@ -26,7 +26,6 @@ use oxidean_git::GitBackend;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::discover_workflows;
-use crate::actions::dispatch::enqueue_run;
 
 /// PR lifecycle activity types that enqueue workflows (D-ACT-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,7 +115,18 @@ pub async fn notify_pull_request_actions(
     git: &dyn GitBackend,
     event: &PullRequestEvent,
 ) {
-    if let Err(e) = dispatch_pull_request_inner(db, git, event).await {
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let Some(deps) = crate::actions::dispatch::auto_merge_deps_from_bare(
+        db,
+        &event.base_bare,
+        &env_name,
+        event.job_token_actor,
+        event.actions_enabled_instance,
+    ) else {
+        tracing::warn!(repository_id = %event.repository_id, "actions pull_request dispatch missing repository root");
+        return;
+    };
+    if let Err(e) = dispatch_pull_request_inner(db, git, event, &deps).await {
         tracing::warn!(
             error = %e,
             repository_id = %event.repository_id,
@@ -135,13 +145,23 @@ pub async fn dispatch_pull_request(
     git: Arc<dyn GitBackend>,
     event: &PullRequestEvent,
 ) -> Result<usize, String> {
-    dispatch_pull_request_inner(db, git.as_ref(), event).await
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let deps = crate::actions::dispatch::auto_merge_deps_from_bare(
+        db,
+        &event.base_bare,
+        &env_name,
+        event.job_token_actor,
+        event.actions_enabled_instance,
+    )
+    .ok_or_else(|| "actions pull_request dispatch missing repository root".to_string())?;
+    dispatch_pull_request_inner(db, git.as_ref(), event, &deps).await
 }
 
 async fn dispatch_pull_request_inner(
     db: &Database,
     git: &dyn GitBackend,
     event: &PullRequestEvent,
+    auto_merge_deps: &crate::merge_queue::MqDeps,
 ) -> Result<usize, String> {
     if event.job_token_actor {
         // GITHUB_TOKEN parity — token-caused mutations never start runs.
@@ -305,8 +325,8 @@ async fn dispatch_pull_request_inner(
             // Trusted context — the run belongs to the base repo: base branch
             // ref+sha, no fork clamp (`head_repo_id` unset). GitHub titles
             // `pull_request*` runs with the PR title, not the commit subject.
-            let (run_id, _) = enqueue_run(
-                db,
+            let (run_id, _) = crate::actions::dispatch::enqueue_run_with_auto_merge(
+                auto_merge_deps.clone(),
                 &event.repository_id,
                 &wf.path,
                 &wf.document,
@@ -442,8 +462,8 @@ async fn dispatch_pull_request_inner(
         ) {
             continue;
         }
-        let (run_id, _) = enqueue_run(
-            db,
+        let (run_id, _) = crate::actions::dispatch::enqueue_run_with_auto_merge(
+            auto_merge_deps.clone(),
             &event.repository_id,
             &wf.path,
             &wf.document,
@@ -555,7 +575,16 @@ pub async fn dispatch_pull_request_for_sha(
         job_token_actor: false,
         actions_enabled_instance,
     };
-    dispatch_pull_request_inner(db, git, &event).await
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let deps = crate::actions::dispatch::auto_merge_deps_from_bare(
+        db,
+        bare,
+        &env_name,
+        false,
+        actions_enabled_instance,
+    )
+    .ok_or_else(|| "actions pull_request dispatch missing repository root".to_string())?;
+    dispatch_pull_request_inner(db, git, &event, &deps).await
 }
 
 /// Repo lifecycle event for domain-mutation dispatch (`release`, `issues`,
@@ -625,7 +654,18 @@ pub fn rpc_lifecycle_event(
 /// Soft-fail wrapper — a release/issue mutation must never fail because
 /// Actions dispatch failed.
 pub async fn notify_lifecycle_actions(db: &Database, git: &dyn GitBackend, event: &LifecycleEvent) {
-    if let Err(e) = dispatch_lifecycle_inner(db, git, event).await {
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let Some(deps) = crate::actions::dispatch::auto_merge_deps_from_bare(
+        db,
+        &event.bare_repo,
+        &env_name,
+        event.job_token_actor,
+        event.actions_enabled_instance,
+    ) else {
+        tracing::warn!(repository_id = %event.repository_id, "actions lifecycle dispatch missing repository root");
+        return;
+    };
+    if let Err(e) = dispatch_lifecycle_inner(db, git, event, &deps).await {
         tracing::warn!(
             error = %e,
             repository_id = %event.repository_id,
@@ -642,6 +682,7 @@ async fn dispatch_lifecycle_inner(
     db: &Database,
     git: &dyn GitBackend,
     event: &LifecycleEvent,
+    auto_merge_deps: &crate::merge_queue::MqDeps,
 ) -> Result<usize, String> {
     if event.job_token_actor {
         // GITHUB_TOKEN parity — token-caused mutations never start runs.
@@ -701,8 +742,8 @@ async fn dispatch_lifecycle_inner(
         if !types.is_empty() && !types.iter().any(|t| t == &event.action) {
             continue;
         }
-        enqueue_run(
-            db,
+        crate::actions::dispatch::enqueue_run_with_auto_merge(
+            auto_merge_deps.clone(),
             &event.repository_id,
             &wf.path,
             &wf.document,
@@ -731,7 +772,14 @@ pub async fn notify_workflow_run_actions(
     run: &oxidean_db::ActionRunRow,
     env_name: &str,
 ) {
-    if let Err(e) = dispatch_workflow_run_inner(db, git, repos_dir, run, env_name).await {
+    let deps = crate::actions::dispatch::auto_merge_deps(
+        db,
+        repos_dir,
+        env_name,
+        false,
+        crate::actions::env_actions_enabled(),
+    );
+    if let Err(e) = dispatch_workflow_run_inner(db, git, repos_dir, run, env_name, &deps).await {
         tracing::warn!(
             error = %e,
             run_id = %run.id,
@@ -756,6 +804,7 @@ async fn dispatch_workflow_run_inner(
     repos_dir: &Path,
     run: &oxidean_db::ActionRunRow,
     env_name: &str,
+    auto_merge_deps: &crate::merge_queue::MqDeps,
 ) -> Result<usize, String> {
     if !crate::actions::env_actions_enabled()
         || !db.get_repo_actions_enabled(&run.repository_id).await?
@@ -905,8 +954,8 @@ async fn dispatch_workflow_run_inner(
         // Downstream runs execute in trusted context: default-branch sha/ref,
         // no fork clamp, no fork-approval hold (the workflow text came from
         // the repo's own default branch).
-        let (run_id, _) = enqueue_run(
-            db,
+        let (run_id, _) = crate::actions::dispatch::enqueue_run_with_auto_merge(
+            auto_merge_deps.clone(),
             &run.repository_id,
             &wf.path,
             &wf.document,

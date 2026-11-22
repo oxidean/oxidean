@@ -214,8 +214,15 @@ pub async fn sweep_scheduled_workflows(
                     }
                 }
                 let payload = crate::actions::payload::schedule_payload(cron, &repository);
-                match crate::actions::dispatch::enqueue_run(
+                let auto_merge_deps = crate::actions::dispatch::auto_merge_deps(
                     db,
+                    repos_dir,
+                    &std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into()),
+                    false,
+                    crate::actions::env_actions_enabled(),
+                );
+                match crate::actions::dispatch::enqueue_run_with_auto_merge(
+                    auto_merge_deps,
                     &repo.id,
                     &wf.path,
                     &wf.document,
