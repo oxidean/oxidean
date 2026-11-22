@@ -1,0 +1,13 @@
+schema_version: 1
+request_id: IN-0004
+work_item_id: WI-0004
+run_id: run_1795363308416_4e2fbe
+kind: approval
+question: 'WI-0004 COL-08 is ship-ready: PR #286 (https://github.com/oxidean/oxidean/pull/286) is open with CodeRabbit requested and CI running. Approve transitioning the work item to shipped?'
+action:
+    type: transition
+    work_item_id: WI-0004
+    target: shipped
+status: pending
+created_by: cli
+created_at: "2026-11-22T16:03:38Z"

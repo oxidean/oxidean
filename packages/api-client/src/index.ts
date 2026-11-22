@@ -4856,6 +4856,39 @@ export type DeletePullCommentResponse = {
   ok: boolean;
 };
 
+export type ApplyPullSuggestionRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  commentId: string;
+  /** Which suggestion fence in the comment body to apply (default 0). */
+  suggestionIndex?: number | null;
+  /** Commit message; defaults to "Apply suggestion from code review". */
+  message?: string | null;
+};
+
+export type ApplyPullSuggestionResponse = {
+  commit_sha: string;
+  /** Head branch that received the commit. */
+  branch: string;
+};
+
+export type ApplyPullSuggestionBatchRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  commentIds: string[];
+  /** Commit message; defaults to "Apply suggestions from code review". */
+  message?: string | null;
+};
+
+export type ApplyPullSuggestionBatchResponse = {
+  commit_sha: string;
+  branch: string;
+  /** Number of suggestion blocks applied. */
+  applied: number;
+};
+
 export type PullDiffFile = {
   path: string;
   status: string;
@@ -7017,6 +7050,20 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<CommentHistoryResponse>(opts, "pull.comments.history", input),
         resolve: (input: ResolvePullCommentRequest) =>
           rpcCall<PullCommentPublic>(opts, "pull.comments.resolve", input),
+      },
+      suggestions: {
+        apply: (input: ApplyPullSuggestionRequest) =>
+          rpcCall<ApplyPullSuggestionResponse>(
+            opts,
+            "pull.suggestions.apply",
+            input,
+          ),
+        applyBatch: (input: ApplyPullSuggestionBatchRequest) =>
+          rpcCall<ApplyPullSuggestionBatchResponse>(
+            opts,
+            "pull.suggestions.apply_batch",
+            input,
+          ),
       },
       reviews: {
         list: (input: PullRefRequest) =>

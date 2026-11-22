@@ -34,6 +34,7 @@ import {
   fileStatusMeta,
   type DraftTarget,
 } from "./pull-v2-diff-utils";
+import { commentBodySegments, suggestionAppliable } from "./pull-v2-suggestion";
 
 type KeyedRow = HighlightedDiffLine & {
   index: number;
@@ -200,18 +201,182 @@ function LineDraftBox(props: {
 }
 
 /**
+ * COL-08 — one ````suggestion` block rendered as a suggested diff: `-` rows
+ * replay the anchored head lines (when the rendered diff still covers them),
+ * `+` rows show the proposed replacement. "Commit suggestion" opens an
+ * inline commit-message form (GitHub's dialog, inlined); "Add suggestion to
+ * batch" enrolls the comment in the shared batch strip on the changes tab.
+ */
+function SuggestionBlock(props: {
+  text: string;
+  removed: string[] | null;
+  canApply: boolean;
+  batchable: boolean;
+  inBatch: boolean;
+  busy: boolean;
+  error: string | null;
+  onCommit: (message: string | null) => Promise<boolean>;
+  onToggleBatch: () => void;
+}) @{
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("Apply suggestion from code review");
+  const removedRows = (props.removed ?? []).map((text, i) => ({ k: `r${i}`, text }));
+  const addedRows = (props.text === "" ? [] : props.text.split("\n")).map((text, i) => ({
+    k: `a${i}`,
+    text,
+  }));
+  async function commit() {
+    const ok = await props.onCommit(message.trim() || null);
+    if (ok) {
+      setOpen(false);
+      setMessage("Apply suggestion from code review");
+    }
+  }
+  <div
+    className="my-1 overflow-hidden rounded-md border border-border"
+    data-testid="pull-v2-suggestion"
+  >
+    <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-2 py-1">
+      <span className="text-[12px] font-semibold text-foreground">Suggested change</span>
+      @if (props.batchable || props.canApply) {
+        <span className="ml-auto flex items-center gap-1.5">
+          @if (props.batchable) {
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
+              disabled={props.busy}
+              data-testid="pull-v2-suggestion-batch"
+              onClick={() => props.onToggleBatch()}
+            >
+              {props.inBatch ? "Remove from batch" : "Add suggestion to batch"}
+            </button>;
+          }
+          @if (props.canApply) {
+            <button
+              type="button"
+              className="rounded border border-border bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground hover:bg-muted disabled:opacity-60"
+              disabled={props.busy}
+              data-testid="pull-v2-suggestion-commit-open"
+              onClick={() => setOpen(!open)}
+            >
+              Commit suggestion
+            </button>;
+          }
+        </span>;
+      }
+    </div>
+    <div className="font-mono text-[12px] leading-5">
+      @for (const r of removedRows; key r.k) {
+        <div className="flex bg-[var(--diff-del-bg)] px-1.5">
+          <span className="w-4 shrink-0 select-none text-[var(--diff-del-fg)]">-</span>
+          <span className="whitespace-pre-wrap break-all text-foreground">
+            {r.text as string}
+          </span>
+        </div>;
+      }
+      @for (const a of addedRows; key a.k) {
+        <div className="flex bg-[var(--diff-add-bg)] px-1.5">
+          <span className="w-4 shrink-0 select-none text-[var(--diff-add-fg)]">+</span>
+          <span className="whitespace-pre-wrap break-all text-foreground">
+            {a.text as string}
+          </span>
+        </div>;
+      }
+    </div>
+    @if (open) {
+      <div
+        className="space-y-1.5 border-t border-border px-2 py-1.5"
+        data-testid="pull-v2-suggestion-commit-form"
+      >
+        <input
+          type="text"
+          className="w-full rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground"
+          value={message}
+          disabled={props.busy}
+          data-testid="pull-v2-suggestion-message"
+          onInput={(e) => setMessage((e.currentTarget as HTMLInputElement).value)}
+        />
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className="rounded-md bg-primary px-2 py-1 text-[12px] font-medium text-primary-foreground disabled:opacity-60"
+            disabled={props.busy}
+            data-testid="pull-v2-suggestion-commit"
+            onClick={() => void commit()}
+          >
+            Commit changes
+          </button>
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted"
+            disabled={props.busy}
+            onClick={() => {
+              setOpen(false);
+              setMessage("Apply suggestion from code review");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+        @if (props.error) {
+          <p role="alert" className="text-[12px] text-destructive">
+            {props.error as string}
+          </p>;
+        }
+      </div>;
+    }
+  </div>;
+}
+
+/**
  * A review comment rendered under its anchor line — server-persisted pending
  * drafts render like submitted comments plus a "Pending" badge + Discard.
+ * ````suggestion` blocks render as suggested diffs (COL-08) with apply
+ * controls when the comment is appliable and the caller has Write.
  */
 function CommentNote(props: {
   comment: PullCommentPublic;
   owner: string;
   repoName: string;
   canInteract: boolean;
+  canWrite: boolean;
+  canApplySuggestions: boolean;
+  /** newNo → head-side line text, for the `-` half of the suggested diff. */
+  rightLines: Map<number, string>;
+  inBatch: boolean;
+  applyBusy: boolean;
+  /** Apply error scoped to this comment (null when the error is elsewhere). */
+  applyError: string | null;
+  onApplySuggestion:
+    | ((commentId: string, index: number, message: string | null) => Promise<boolean>)
+    | null;
+  onToggleBatch: ((id: string) => void) | null;
   onDiscard: ((id: string) => void) | null;
 }) @{
   const c = props.comment;
   const rangeLabel = commentRangeLabel(c);
+  const appliable = suggestionAppliable(c) && props.canApplySuggestions;
+  // The suggested-diff `-` rows: the comment's anchored RIGHT lines as they
+  // appear in this diff. `null` when the rendered hunks no longer cover the
+  // anchor (outdated comment, scoped view) — the `+` half still renders.
+  const removed = useMemo(() => {
+    if (c.side !== "RIGHT" || c.line == null) return null;
+    const start = c.start_line ?? c.line;
+    const end = c.line;
+    const out: string[] = [];
+    for (let n = start; n <= end; n++) {
+      const t = props.rightLines.get(n);
+      if (t == null) return null;
+      out.push(t);
+    }
+    return out;
+  }, [c.id, c.side, c.line, c.start_line, props.rightLines]);
+  const parts = commentBodySegments(c.body).map((seg, i) => ({
+    k: `seg-${i}`,
+    md: seg.kind === "md" ? seg.text : null,
+    sugText: seg.kind === "suggestion" ? seg.text : null,
+    sugIndex: seg.kind === "suggestion" ? seg.index : -1,
+  }));
   <div
     className={
       cn(
@@ -255,12 +420,32 @@ function CommentNote(props: {
         </button>;
       }
     </div>
-    <MarkdownBody
-      markdown={c.body}
-      owner={props.owner}
-      repo={props.repoName}
-      className="mt-1 text-[13px]"
-    />
+    @for (const part of parts; key part.k) {
+      @if (part.md != null) {
+        <MarkdownBody
+          markdown={part.md as string}
+          owner={props.owner}
+          repo={props.repoName}
+          className="mt-1 text-[13px]"
+        />;
+      } @else {
+        <SuggestionBlock
+          text={part.sugText ?? ""}
+          removed={removed}
+          canApply={appliable && props.onApplySuggestion != null}
+          batchable={appliable && props.onToggleBatch != null}
+          inBatch={props.inBatch}
+          busy={props.applyBusy}
+          error={props.applyError}
+          onCommit={(msg) =>
+            props.onApplySuggestion
+              ? props.onApplySuggestion(c.id, part.sugIndex, msg)
+              : Promise.resolve(false)
+          }
+          onToggleBatch={() => props.onToggleBatch?.(c.id)}
+        />;
+      }
+    }
   </div>;
 }
 
@@ -280,7 +465,16 @@ function RowNotes(props: {
   canInteract: boolean;
   /** Write+ — hides the pending-draft "Add review comment" path. */
   canWrite: boolean;
+  canApplySuggestions: boolean;
   minimizeComments: boolean;
+  rightLines: Map<number, string>;
+  suggestionBatch: string[];
+  applyBusy: boolean;
+  applyError: { scope: string; message: string } | null;
+  onApplySuggestion:
+    | ((commentId: string, index: number, message: string | null) => Promise<boolean>)
+    | null;
+  onToggleBatch: ((id: string) => void) | null;
   onDraftBody: (body: string) => void;
   onSubmitDraft: (pending: boolean) => void;
   onCancelDraft: () => void;
@@ -310,6 +504,16 @@ function RowNotes(props: {
           owner={props.owner}
           repoName={props.repoName}
           canInteract={props.canInteract}
+          canWrite={props.canWrite}
+          canApplySuggestions={props.canApplySuggestions}
+          rightLines={props.rightLines}
+          inBatch={props.suggestionBatch.includes(c.id)}
+          applyBusy={props.applyBusy}
+          applyError={
+            props.applyError?.scope === c.id ? (props.applyError.message as string) : null
+          }
+          onApplySuggestion={props.onApplySuggestion}
+          onToggleBatch={props.onToggleBatch}
           onDiscard={c.pending ? props.onDiscardPending : null}
         />;
       }
@@ -337,6 +541,7 @@ export function PullV2DiffFile(props: {
   canInteract: boolean;
   /** Write+ capability — pending review drafts are Write-gated (#263). */
   canWrite?: boolean;
+  canApplySuggestions?: boolean;
   minimizeComments: boolean;
   /** Server-side pending drafts anchored to this file. */
   pending: PullCommentPublic[];
@@ -353,6 +558,15 @@ export function PullV2DiffFile(props: {
   onSubmitDraft: (pending: boolean) => void;
   onCancelDraft: () => void;
   onDiscardPending: (id: string) => void;
+  /** COL-08 — ids of comments enrolled in the apply-suggestions batch. */
+  suggestionBatch?: string[];
+  applyBusy?: boolean;
+  /** `{scope}` is a comment id or `"__batch"` — scoped error display. */
+  applyError?: { scope: string; message: string } | null;
+  onApplySuggestion?:
+    | ((commentId: string, index: number, message: string | null) => Promise<boolean>)
+    | null;
+  onToggleBatch?: ((id: string) => void) | null;
 }) @{
   const large = props.file.patch.length > DIFF_LARGE_PATCH_CHARS;
   const bodyId = useId();
@@ -447,6 +661,18 @@ export function PullV2DiffFile(props: {
     }
     return s;
   }, [keyed, props.draft]);
+
+  // RIGHT-side head text by new line number — the `-` half of a suggested
+  // change preview (COL-08): the suggestion replaces exactly these lines.
+  const rightLines = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of keyed) {
+      if (r.newNo != null && (r.kind === "add" || r.kind === "ctx")) {
+        m.set(r.newNo, r.text.slice(1));
+      }
+    }
+    return m;
+  }, [keyed]);
 
   const fileComments = useMemo(() => allComments.filter((c) => c.line == null), [allComments]);
   const commentCount = props.pending.length + props.submitted.length;
@@ -677,6 +903,13 @@ export function PullV2DiffFile(props: {
           canInteract={props.canInteract}
           canWrite={props.canWrite ?? false}
           minimizeComments={props.minimizeComments}
+          rightLines={rightLines}
+          canApplySuggestions={props.canApplySuggestions ?? false}
+          suggestionBatch={props.suggestionBatch ?? []}
+          applyBusy={props.applyBusy ?? false}
+          applyError={props.applyError ?? null}
+          onApplySuggestion={props.onApplySuggestion ?? null}
+          onToggleBatch={props.onToggleBatch ?? null}
           onDraftBody={props.onDraftBody}
           onSubmitDraft={props.onSubmitDraft}
           onCancelDraft={props.onCancelDraft}
@@ -817,6 +1050,13 @@ export function PullV2DiffFile(props: {
                       canInteract={props.canInteract}
                       canWrite={props.canWrite ?? false}
                       minimizeComments={props.minimizeComments}
+                      rightLines={rightLines}
+                      canApplySuggestions={props.canApplySuggestions ?? false}
+                      suggestionBatch={props.suggestionBatch ?? []}
+                      applyBusy={props.applyBusy ?? false}
+                      applyError={props.applyError ?? null}
+                      onApplySuggestion={props.onApplySuggestion ?? null}
+                      onToggleBatch={props.onToggleBatch ?? null}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}
                       onCancelDraft={props.onCancelDraft}
@@ -957,6 +1197,13 @@ export function PullV2DiffFile(props: {
                       canInteract={props.canInteract}
                       canWrite={props.canWrite ?? false}
                       minimizeComments={props.minimizeComments}
+                      rightLines={rightLines}
+                      canApplySuggestions={props.canApplySuggestions ?? false}
+                      suggestionBatch={props.suggestionBatch ?? []}
+                      applyBusy={props.applyBusy ?? false}
+                      applyError={props.applyError ?? null}
+                      onApplySuggestion={props.onApplySuggestion ?? null}
+                      onToggleBatch={props.onToggleBatch ?? null}
                       onDraftBody={props.onDraftBody}
                       onSubmitDraft={props.onSubmitDraft}
                       onCancelDraft={props.onCancelDraft}

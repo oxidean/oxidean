@@ -601,6 +601,40 @@ pub trait GitBackend: Send + Sync {
         actor_capability: &str,
     ) -> Result<FilesCommit, GitError>;
 
+    /// Commit only when the base ref still matches the caller's captured tip.
+    /// Backends that cannot enforce that condition fail closed.
+    async fn commit_files_with_expected_base(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+        expected_base_sha: Option<&str>,
+    ) -> Result<FilesCommit, GitError> {
+        if expected_base_sha.is_some() {
+            return Err(GitError::InvalidArg(
+                "backend does not support expected-base commits".into(),
+            ));
+        }
+        self.commit_files(
+            bare_path,
+            branch,
+            base,
+            message,
+            changes,
+            author_name,
+            author_email,
+            signing_key_path,
+            actor_capability,
+        )
+        .await
+    }
+
     /// `git ls-tree <treeish> -- <path>` — the entry for `path` itself (blob /
     /// tree / commit gitlink), not its children. `Ok(None)` when `treeish` or
     /// `path` does not resolve (missing path, unborn ref).

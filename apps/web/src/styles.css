@@ -522,6 +522,30 @@
     font-size: 0.8125rem;
     border-radius: 0;
   }
+  /* COL-08 — ````suggestion` fences render as a labeled suggested-change
+     block (diff-green), distinct from ordinary code fences. */
+  .prose-oxidean .md-suggestion {
+    margin: 0.5em 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-left: 0.25em solid var(--diff-add-fg);
+    border-radius: 0.375rem;
+  }
+  .prose-oxidean .md-suggestion-label {
+    padding: 0.25em 0.75em;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--diff-add-bg) 60%, transparent);
+    color: var(--diff-add-fg);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .prose-oxidean .md-suggestion pre.md-suggestion-code {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--diff-add-bg);
+    color: var(--diff-add-fg);
+  }
   .prose-oxidean table {
     width: 100%;
     border-collapse: collapse;

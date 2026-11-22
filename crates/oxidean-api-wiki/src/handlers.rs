@@ -431,11 +431,10 @@ async fn commit_page(
                 "web-flow signing key is unavailable",
             )
         })?;
-    let author_name = if user.display_name.trim().is_empty() {
-        user.username.clone()
-    } else {
-        user.display_name.clone()
-    };
+    let author_name = oxidean_api_core::repo::author_resolve::safe_git_author_name(
+        &user.display_name,
+        &user.username,
+    );
     let result = ctx
         .git
         .commit_files(

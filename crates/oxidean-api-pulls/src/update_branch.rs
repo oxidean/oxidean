@@ -21,7 +21,7 @@ use oxidean_api_core::pull::{
 
 /// Head repo row + owner slug + caller's effective capability on it.
 /// `pull.head_unavailable` when the head repo (or its owner) is gone.
-async fn resolve_head(
+pub(crate) async fn resolve_head(
     ctx: &RpcCtx,
     base: &AccessibleRepo,
     row: &PullRow,

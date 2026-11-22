@@ -377,6 +377,54 @@ pub struct DeletePullCommentResponse {
     pub ok: bool,
 }
 
+/// `pull.suggestions.apply` input (COL-08) — apply one suggestion fenced
+/// block from a diff-anchored review comment as a commit on the PR head
+/// branch.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ApplyPullSuggestionRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "commentId", alias = "comment_id")]
+    pub comment_id: String,
+    /// Which suggestion fence in the comment body to apply (default 0).
+    #[serde(rename = "suggestionIndex", alias = "suggestion_index", default)]
+    pub suggestion_index: Option<i64>,
+    /// Commit message; defaults to "Apply suggestion from code review".
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// `pull.suggestions.apply` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ApplyPullSuggestionResponse {
+    pub commit_sha: String,
+    /// Head branch that received the commit.
+    pub branch: String,
+}
+
+/// `pull.suggestions.apply_batch` input (COL-08) — apply the first
+/// suggestion fence of each listed comment in ONE head-branch commit.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ApplyPullSuggestionBatchRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "commentIds", alias = "comment_ids")]
+    pub comment_ids: Vec<String>,
+    /// Commit message; defaults to "Apply suggestions from code review".
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// `pull.suggestions.apply_batch` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ApplyPullSuggestionBatchResponse {
+    pub commit_sha: String,
+    pub branch: String,
+    /// Number of suggestion blocks applied.
+    pub applied: i64,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewPublic {
     pub id: String,

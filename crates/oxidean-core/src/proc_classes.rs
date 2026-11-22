@@ -299,6 +299,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "pull.comments.update"
         | "pull.comments.delete"
         | "pull.comments.resolve"
+        | "pull.suggestions.apply"
+        | "pull.suggestions.apply_batch"
         | "pull.reviews.submit"
         | "pull.reviews.dismiss"
         | "pull.reviewRequests.add"

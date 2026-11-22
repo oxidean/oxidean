@@ -14,6 +14,7 @@ pub mod merge_ops;
 pub mod meta;
 pub mod rail;
 pub mod reviews;
+pub mod suggestions;
 pub mod update_branch;
 
 mod dispatch;
@@ -46,6 +47,8 @@ pub const PROCEDURES: &[&str] = &[
     "pull.comments.delete",
     "pull.comments.history",
     "pull.comments.resolve",
+    "pull.suggestions.apply",
+    "pull.suggestions.apply_batch",
     "pull.reviews.list",
     "pull.reviews.submit",
     "pull.reviews.dismiss",

@@ -1054,6 +1054,9 @@ export function PullDetailV2(props: PullDetailV2Props) @{
             number={props.number}
             canInteract={props.canInteract}
             canWrite={props.canWrite}
+            canApplySuggestions={
+              pullState === "open" && (props.canWrite || (branchQ.data?.can_update ?? false))
+            }
             isAuthor={props.isAuthor}
             currentUserId={props.currentUserId}
             changesSha={props.changesSha}
