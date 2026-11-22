@@ -34,6 +34,7 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_RESEND_BASE_URL` | Optional | `https://api.resend.com` | Override Resend HTTP API base (local stubs). Leave unset in production. |
 | `OXIDEAN_SMTP_URL` | Optional | _(unset)_ | SMTP URL for lettre (e.g. `smtp://127.0.0.1:1025`). Used when Resend key is unset / provider is smtp. |
 | `OXIDEAN_MAIL_FROM` | Optional | `Oxidean <noreply@localhost>` | Default From address when DB settings do not override. |
+| `OXIDEAN_NOTIFY_EMAIL_ENABLED` | Optional | `true` | Master switch for outbound notification email (NOT-01). `0`/`false`/`no`/`off` keeps inbox rows but sends no mail. Watch levels and the configured provider/from apply unchanged. |
 | `WORKOS_API_KEY` | Optional† | _(unset)_ | WorkOS API key (enterprise SSO). Required for WorkOS provider mode. |
 | `WORKOS_CLIENT_ID` | Optional† | _(unset)_ | WorkOS AuthKit client id. |
 | `OXIDEAN_WORKOS_BASE_URL` | Optional | WorkOS SDK cloud default | Server-side WorkOS API base override for local stubs. Leave unset in production. |
@@ -344,6 +345,7 @@ Or wipe `users` / `sessions` and re-bootstrap with `OXIDEAN_ADMIN_*` or the `/se
 | `OXIDEAN_AUTO_MIGRATE` | `true` (any value other than `true`/`1` disables) | `main.rs` |
 | `OXIDEAN_ALLOW_SIGNUP` | `false` (only `true`/`1` opens signup at seed) | `crates/oxidean-api-core/src/auth/seed.rs` / bootstrap |
 | `OXIDEAN_MAIL_FROM` | `Oxidean <noreply@localhost>` | `crates/oxidean-api-core/src/email/mod.rs` |
+| `OXIDEAN_NOTIFY_EMAIL_ENABLED` | `true` | `crates/oxidean-api-core/src/notify/mail.rs` |
 | Resend API base | `https://api.resend.com` | `crates/oxidean-api-core/src/email/resend.rs` |
 | Compose `DATABASE_URL` | `postgres://oxidean:***@postgres:5432/oxidean` | `docker-compose.yml` |
 | Compose `OXIDEAN_ENV` | `compose` | `docker-compose.yml` |
