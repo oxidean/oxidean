@@ -1,6 +1,10 @@
 schema_version: 1
-generated_at: "2026-11-20T15:26:36Z"
+generated_at: "2026-11-22T15:40:40Z"
 files:
+    - path: context/decisions/notify-email-dispatch.md
+      sha256: bc8e83d5d98a1a5fcc2299b1607ac2e61162eec2d81f20d8fc10a7ab05ba6ac7
+      bytes: 3117
+      kind: decision
     - path: context/decisions/standing-decisions.md
       sha256: b557d51a295b0655c08d3f10b9cd7570208df2ba362dc1f08252c103f99df550
       bytes: 3085
@@ -10,7 +14,7 @@ files:
       bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: d28a2af54cbeaeb457078cb2ce870f1fa462cb1ee0311da32cd9560ad4f61fbc
+      sha256: 146e25b0f1cb363eef167385e97f6d7c22202c70ed8fdaf8bcbf515568981eb1
       bytes: 24504
       kind: other
     - path: context/product/tech-stack.md
