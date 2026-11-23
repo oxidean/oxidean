@@ -1,6 +1,10 @@
 schema_version: 1
-generated_at: "2026-11-20T15:26:36Z"
+generated_at: "2026-11-22T16:15:36Z"
 files:
+    - path: context/decisions/adr-2026-11-22-org-teams.md
+      sha256: c335d203707a4d965d4c9fae3344186c88615f2b20d8c21eaf115b231235aacb
+      bytes: 3951
+      kind: decision
     - path: context/decisions/standing-decisions.md
       sha256: b557d51a295b0655c08d3f10b9cd7570208df2ba362dc1f08252c103f99df550
       bytes: 3085
@@ -10,8 +14,8 @@ files:
       bytes: 1718
       kind: other
     - path: context/product/roadmap.md
-      sha256: d28a2af54cbeaeb457078cb2ce870f1fa462cb1ee0311da32cd9560ad4f61fbc
-      bytes: 24504
+      sha256: f75ea23ac84810bf08fd032aaeeab3efdde7a2f1484038ce6254a5bf10e8998c
+      bytes: 24760
       kind: other
     - path: context/product/tech-stack.md
       sha256: efea7fb72bee455f870dc07463f39a188de11823b226b873b5b3d7edd2d65c2e

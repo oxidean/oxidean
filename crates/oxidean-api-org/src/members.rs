@@ -228,6 +228,7 @@ pub async fn remove(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
     }
     guard_last_owner(ctx, &org.id, &req.user_id, was_owner).await?;
 
+    // COL-05: leaving the org also leaves its teams — grants are member-scoped.
     ctx.db
         .remove_org_member(&org.id, &req.user_id)
         .await

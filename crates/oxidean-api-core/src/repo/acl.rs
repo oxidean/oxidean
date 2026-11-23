@@ -59,13 +59,15 @@ pub fn meets(have: Option<Capability>, need: Capability) -> bool {
 }
 
 /// Highest-wins among applicable sources (D-ORG-05 / ASSUME A1).
-/// Collaborator raises but cannot lower Owner/Admin; Member uses member_base.
+/// Collaborator raises but cannot lower Owner/Admin; Member uses member_base;
+/// `team_grant` is the caller's best org-team grant on this repo (COL-05).
 pub fn coalesce(
     personal_owner: bool,
     org_role: Option<OrgRole>,
     member_base: MemberBasePermission,
     collaborator: Option<Capability>,
     public_repo: bool,
+    team_grant: Option<Capability>,
 ) -> Option<Capability> {
     let mut best: Option<Capability> = None;
     let bump = |b: &mut Option<Capability>, c: Capability| {
@@ -85,6 +87,9 @@ pub fn coalesce(
     }
     if let Some(c) = collaborator {
         bump(&mut best, c);
+    }
+    if let Some(t) = team_grant {
+        bump(&mut best, t);
     }
     if public_repo {
         bump(&mut best, Capability::Read);
@@ -286,7 +291,7 @@ pub async fn effective_capability(
 
     // Membership (with org-2FA lockout) and collaborator lookups are
     // independent — run them concurrently instead of sequential round trips.
-    let ((org_role, member_base, org_locked), collab_row) = tokio::try_join!(
+    let ((org_role, member_base, org_locked), collab_row, team_row) = tokio::try_join!(
         async {
             if let (OwnerRef::Org { id, .. }, Some(caller)) = (owner, caller_user_id) {
                 return org_member_capability_sources(db, id, caller).await;
@@ -299,14 +304,27 @@ pub async fn effective_capability(
             }
             Ok(None)
         },
+        async {
+            // Team grants only exist on org-owned repos (COL-05).
+            if let (OwnerRef::Org { .. }, Some(caller)) = (owner, caller_user_id) {
+                return db.max_team_permission_for_user_repo(&repo.id, caller).await;
+            }
+            Ok(None)
+        },
     )?;
 
-    // A locked-out member's collaborator grant on an org-owned repo is still
-    // org-scoped access — suppress it alongside the role/base grants (#130).
+    // A locked-out member's collaborator/team grant on an org-owned repo is
+    // still org-scoped access — suppress it alongside the role/base grants
+    // (#130). Team grants are member-scoped in SQL too (belt and suspenders).
     let collaborator = if org_locked {
         None
     } else {
         collab_row.and_then(|row| parse_collaborator_capability(&row.permission))
+    };
+    let team_grant = if org_locked {
+        None
+    } else {
+        team_row.and_then(|perm| parse_collaborator_capability(&perm))
     };
 
     let public_repo = !is_private_visibility(&repo.visibility);
@@ -316,6 +334,7 @@ pub async fn effective_capability(
         member_base,
         collaborator,
         public_repo,
+        team_grant,
     ))
 }
 
@@ -458,7 +477,7 @@ mod coalesce_tests {
     #[test]
     fn coalesce_personal_owner_is_admin() {
         assert_eq!(
-            coalesce(true, None, MemberBasePermission::None, None, false),
+            coalesce(true, None, MemberBasePermission::None, None, false, None),
             Some(Capability::Admin)
         );
     }
@@ -471,7 +490,8 @@ mod coalesce_tests {
                 Some(OrgRole::Owner),
                 MemberBasePermission::None,
                 None,
-                false
+                false,
+                None
             ),
             Some(Capability::Admin)
         );
@@ -485,7 +505,8 @@ mod coalesce_tests {
                 Some(OrgRole::Admin),
                 MemberBasePermission::Read,
                 None,
-                false
+                false,
+                None
             ),
             Some(Capability::Admin)
         );
@@ -499,7 +520,8 @@ mod coalesce_tests {
                 Some(OrgRole::Member),
                 MemberBasePermission::None,
                 None,
-                false
+                false,
+                None
             ),
             None
         );
@@ -513,7 +535,8 @@ mod coalesce_tests {
                 Some(OrgRole::Member),
                 MemberBasePermission::Read,
                 None,
-                false
+                false,
+                None
             ),
             Some(Capability::Read)
         );
@@ -527,7 +550,8 @@ mod coalesce_tests {
                 Some(OrgRole::Member),
                 MemberBasePermission::Write,
                 None,
-                false
+                false,
+                None
             ),
             Some(Capability::Write)
         );
@@ -541,16 +565,47 @@ mod coalesce_tests {
                 Some(OrgRole::Member),
                 MemberBasePermission::None,
                 Some(Capability::Write),
-                false
+                false,
+                None
             ),
             Some(Capability::Write)
         );
     }
 
     #[test]
+    fn coalesce_team_grant_raises_read() {
+        assert_eq!(
+            coalesce(
+                false,
+                Some(OrgRole::Member),
+                MemberBasePermission::None,
+                None,
+                false,
+                Some(Capability::Admin)
+            ),
+            Some(Capability::Admin)
+        );
+    }
+
+    #[test]
+    fn coalesce_team_grant_does_not_lower_higher() {
+        assert_eq!(
+            coalesce(
+                false,
+                Some(OrgRole::Owner),
+                MemberBasePermission::None,
+                None,
+                false,
+                Some(Capability::Read)
+            ),
+            Some(Capability::Admin)
+        );
+    }
+
+    #[test]
     fn coalesce_public_repo_grants_read() {
         assert_eq!(
-            coalesce(false, None, MemberBasePermission::None, None, true),
+            coalesce(false, None, MemberBasePermission::None, None, true, None),
             Some(Capability::Read)
         );
     }
@@ -558,7 +613,7 @@ mod coalesce_tests {
     #[test]
     fn coalesce_anonymous_private_is_none() {
         assert_eq!(
-            coalesce(false, None, MemberBasePermission::None, None, false),
+            coalesce(false, None, MemberBasePermission::None, None, false, None),
             None
         );
     }

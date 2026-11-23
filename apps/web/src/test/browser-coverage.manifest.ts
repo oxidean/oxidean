@@ -273,6 +273,26 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/teams-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/teams-panel.browser.test.tsx",
+        subject: "teams-panel",
+      },
+    ],
+  },
+  {
+    surface: "routes/$owner.settings.teams.$team.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/$owner.settings.teams.$team.browser.test.tsx",
+        subject: "settings.teams",
+      },
+    ],
+  },
+  {
     surface: "components/repo/ref-select.tsrx",
     coverage: [
       {

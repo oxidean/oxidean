@@ -6,6 +6,7 @@ import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import { useEffect } from "octane";
 import { CollaboratorsPanel } from "@/components/repo/collaborators-panel";
+import { TeamsPanel } from "@/components/repo/teams-panel";
 import { BranchProtectionPanel } from "@/components/repo/branch-protection-panel";
 import { DeployKeysPanel } from "@/components/repo/deploy-keys-panel";
 import { LfsBrowser } from "@/components/repo/lfs-browser";
@@ -122,6 +123,7 @@ function RepoSettingsPageContent() @{
           <div className={FLUSH_FIRST}>
             <CollaboratorsPanel owner={owner} name={repoName} />
           </div>
+          <TeamsPanel owner={owner} name={repoName} orgOwned={repo.owner_type === "org"} />
           <DeployKeysPanel owner={owner} name={repoName} can_admin={canAdmin} />
         </>;
       } @else if (section === "branches") {

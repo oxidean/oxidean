@@ -134,6 +134,7 @@ async fn capability_for_owner(
             MemberBasePermission::None,
             None,
             public,
+            None,
         ));
     };
     if owner_type == "user" {
@@ -143,12 +144,13 @@ async fn capability_for_owner(
             MemberBasePermission::None,
             None,
             public,
+            None,
         ));
     }
     // Org 2FA lockout (#130): members without a confirmed factor get no
     // org-derived grants — same suppression `org::require_org_role` applies.
     let (org_role, member_base, _locked) = org_member_capability_sources(db, owner_id, uid).await?;
-    Ok(coalesce(false, org_role, member_base, None, public))
+    Ok(coalesce(false, org_role, member_base, None, public, None))
 }
 
 async fn authorize_pkg(

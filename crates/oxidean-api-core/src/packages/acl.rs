@@ -89,6 +89,7 @@ pub async fn owner_capability(
             MemberBasePermission::None,
             None,
             public,
+            None,
         ));
     };
 
@@ -101,6 +102,7 @@ pub async fn owner_capability(
             MemberBasePermission::None,
             None,
             public,
+            None,
         ));
     }
 
@@ -109,7 +111,7 @@ pub async fn owner_capability(
     let (org_role, member_base, _locked) =
         org_member_capability_sources(db, &package.owner_id, uid).await?;
     let public = is_public(&package.visibility);
-    Ok(coalesce(false, org_role, member_base, None, public))
+    Ok(coalesce(false, org_role, member_base, None, public, None))
 }
 
 pub fn authorize(

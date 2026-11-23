@@ -22,6 +22,7 @@ pub mod search;
 pub mod social_lists;
 pub mod sync_fork;
 pub mod tag_protection;
+pub mod teams;
 pub mod templates;
 pub mod units;
 
@@ -94,6 +95,10 @@ pub const PROCEDURES: &[&str] = &[
     "repo.collaborators.add",
     "repo.collaborators.update",
     "repo.collaborators.remove",
+    "repo.teams.list",
+    "repo.teams.add",
+    "repo.teams.update",
+    "repo.teams.remove",
     "repo.invites.create",
     "repo.invites.createLink",
     "repo.invites.list",

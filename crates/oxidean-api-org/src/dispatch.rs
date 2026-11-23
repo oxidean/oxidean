@@ -5,7 +5,7 @@ use oxidean_api_core::rpc::RpcCtx;
 use oxidean_core::RpcResponse;
 use serde_json::Value;
 
-use crate::{handlers, invites, members, pinned, runners, secrets, vars};
+use crate::{handlers, invites, members, pinned, runners, secrets, teams, vars};
 
 macro_rules! arm {
     ($handler:expr) => {
@@ -50,6 +50,19 @@ pub async fn dispatch(ctx: &mut RpcCtx, procedure: &str, input: Value) -> Option
         "org.members.list" => arm!(members::list(ctx, input)),
         "org.members.remove" => arm!(members::remove(ctx, input)),
         "org.members.updateRole" => arm!(members::update_role(ctx, input)),
+        "org.teams.create" => arm!(teams::create(ctx, input)),
+        "org.teams.delete" => arm!(teams::delete(ctx, input)),
+        "org.teams.get" => arm!(teams::get(ctx, input)),
+        "org.teams.list" => arm!(teams::list(ctx, input)),
+        "org.teams.members.add" => arm!(teams::members_add(ctx, input)),
+        "org.teams.members.list" => arm!(teams::members_list(ctx, input)),
+        "org.teams.members.remove" => arm!(teams::members_remove(ctx, input)),
+        "org.teams.members.set_role" => arm!(teams::members_set_role(ctx, input)),
+        "org.teams.repos.add" => arm!(teams::repos_add(ctx, input)),
+        "org.teams.repos.list" => arm!(teams::repos_list(ctx, input)),
+        "org.teams.repos.remove" => arm!(teams::repos_remove(ctx, input)),
+        "org.teams.repos.update" => arm!(teams::repos_update(ctx, input)),
+        "org.teams.update" => arm!(teams::update(ctx, input)),
         "org.updateSettings" => arm!(handlers::update_settings(ctx, input)),
         _ => None,
     }

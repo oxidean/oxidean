@@ -1,0 +1,12 @@
+schema_version: 1
+request_id: IN-0001
+work_item_id: WI-0001
+kind: approval
+question: 'WI-0001 (COL-05 org teams) shipping is complete: PR #288 open and mergeable (https://github.com/oxidean/oxidean/pull/288), all verification gates passed, CodeRabbit review triggered, origin/main merged. Approve transition shipping -> shipped (PR merge remains your call; this marks the ox-agent item delivered)?'
+action:
+    type: transition
+    work_item_id: WI-0001
+    target: shipped
+status: pending
+created_by: cli
+created_at: "2026-11-22T16:16:12Z"

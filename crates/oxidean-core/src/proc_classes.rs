@@ -447,6 +447,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "webhook.redeliver" => WebhooksWrite,
 
         "repo.collaborators.list"
+        | "repo.teams.list"
         | "repo.branchProtection.list"
         | "repo.tagProtection.list"
         | "repo.mirror.get"
@@ -460,6 +461,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.collaborators.add"
         | "repo.collaborators.update"
         | "repo.collaborators.remove"
+        | "repo.teams.add"
+        | "repo.teams.update"
+        | "repo.teams.remove"
         | "repo.branchProtection.create"
         | "repo.branchProtection.update"
         | "repo.branchProtection.delete"
@@ -515,7 +519,14 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "gpgKey.list" => GpgKeyRead,
         "gpgKey.add" | "gpgKey.revoke" => GpgKeyWrite,
 
-        "label.listForOrg" | "org.listMine" | "org.members.list" | "org.invites.list" => OrgRead,
+        "label.listForOrg"
+        | "org.listMine"
+        | "org.members.list"
+        | "org.invites.list"
+        | "org.teams.list"
+        | "org.teams.get"
+        | "org.teams.members.list"
+        | "org.teams.repos.list" => OrgRead,
         // Org Actions secrets — classified with the secrets families like
         // their repo-level siblings (FG `secrets` perm).
         "org.actions.secrets.list"
@@ -536,6 +547,15 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "org.actions.runners.createRemoveToken" => ActionsWrite,
         "org.create"
         | "org.updateSettings"
+        | "org.teams.create"
+        | "org.teams.update"
+        | "org.teams.delete"
+        | "org.teams.members.add"
+        | "org.teams.members.remove"
+        | "org.teams.members.set_role"
+        | "org.teams.repos.add"
+        | "org.teams.repos.update"
+        | "org.teams.repos.remove"
         | "org.members.add"
         | "org.members.remove"
         | "org.members.updateRole"

@@ -7,6 +7,7 @@ import type { OrgSettingsNavActive } from "@/components/org/org-settings-nav";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import { usePathname } from "@/lib/pathname.tsrx";
 import { matchPath } from "@/lib/route-params";
+import { apiClient } from "@/lib/api-client";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchOrgGet, fetchOrgListMine } from "@/lib/ssr-org";
 
@@ -20,11 +21,15 @@ type OrgSettingsAccess =
   | { kind: "not-found" }
   | { kind: "forbidden"; org: OrgPublic }
   | { kind: "error"; message: string }
-  | { kind: "ready"; org: OrgPublic; canAdmin: boolean };
+  | { kind: "ready"; org: OrgPublic; canAdmin: boolean; canManageTeam: boolean };
 
-export function orgSettingsAccessQueryOptions(owner: string) {
+export function orgSettingsAccessQueryOptions(
+  owner: string,
+  teamSlug?: string,
+  allowOrgMember = false,
+) {
   return queryOptions({
-    queryKey: ["org", "settingsAccess", owner],
+    queryKey: ["org", "settingsAccess", owner, teamSlug ?? null, allowOrgMember],
     queryFn: async (): Promise<OrgSettingsAccess> => {
       try {
         const me = await fetchSessionMe();
@@ -34,14 +39,37 @@ export function orgSettingsAccessQueryOptions(owner: string) {
         }
         const got = await fetchOrgGet({ slug: owner });
         if (!got.ok) return { kind: "not-found" };
-        let canAdmin = false;
         const mine = await fetchOrgListMine();
-        if (mine.ok) {
-          const entry = mine.data.orgs.find((o) => o.slug === got.data.slug);
-          canAdmin = entry?.role === "owner" || entry?.role === "admin";
+        if (!mine.ok)
+          return { kind: "error", message: mine.error.message || "Could not load organizations." };
+        const entry = mine.data.orgs.find((o) => o.slug === got.data.slug);
+        if (!entry) return { kind: "forbidden", org: got.data };
+        const canAdmin = entry.role === "owner" || entry.role === "admin";
+        if (!canAdmin) {
+          if (!teamSlug) {
+            return allowOrgMember
+              ? { kind: "ready", org: got.data, canAdmin: false, canManageTeam: false }
+              : { kind: "forbidden", org: got.data };
+          }
+          const members = await apiClient.org.teams.members.list({
+            slug: got.data.slug,
+            team_slug: teamSlug,
+          });
+          if (!members.ok) {
+            if (members.error.code === "org.team_not_found") return { kind: "not-found" };
+            if (members.error.code === "org.forbidden") return { kind: "forbidden", org: got.data };
+            return {
+              kind: "error",
+              message: members.error.message || "Could not load team access.",
+            };
+          }
+          const managesTeam = members.data.members.some(
+            (member) => member.user_id === me.data.id && member.role === "maintainer",
+          );
+          if (!managesTeam) return { kind: "forbidden", org: got.data };
+          return { kind: "ready", org: got.data, canAdmin: false, canManageTeam: true };
         }
-        if (!canAdmin) return { kind: "forbidden", org: got.data };
-        return { kind: "ready", org: got.data, canAdmin: true };
+        return { kind: "ready", org: got.data, canAdmin: true, canManageTeam: !!teamSlug };
       } catch {
         return {
           kind: "error",
@@ -70,11 +98,15 @@ export function orgSettingsOwner(pathname: string): string {
  */
 export function OrgSettingsShell(props: {
   active: OrgSettingsNavActive;
+  teamSlug?: string;
+  allowOrgMember?: boolean;
   children?: unknown;
 }) @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
-  const accessQ = useQuery(orgSettingsAccessQueryOptions(owner));
+  const accessQ = useQuery(
+    orgSettingsAccessQueryOptions(owner, props.teamSlug, props.allowOrgMember),
+  );
   const access = accessQ.data;
 
   const redirectTo =
