@@ -53,7 +53,7 @@
     "@octanejs/vite-plugin": "^0.6.0",
     "@tailwindcss/vite": "^4.3.5",
     "@testing-library/dom": "^10.4.2",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/jest-dom": "^8.0.0",
     "@tsrx/oxc": "^0.24.0",
     "@types/hast": "3.0.5",
     "@types/pngjs": "6.0.5",
