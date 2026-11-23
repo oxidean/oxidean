@@ -25,24 +25,39 @@ pub fn current_head_approved_user_ids(
     reviews: &[PullReviewRow],
     head_sha: &str,
 ) -> BTreeSet<String> {
-    let mut latest: BTreeMap<String, &PullReviewRow> = BTreeMap::new();
+    let mut latest: BTreeMap<String, (&PullReviewRow, bool)> = BTreeMap::new();
     for review in reviews {
-        match latest.get(&review.author_id) {
-            Some(previous)
-                if previous.submitted_at > review.submitted_at
-                    || (previous.submitted_at == review.submitted_at
-                        && previous.id > review.id) => {}
-            _ => {
-                latest.insert(review.author_id.clone(), review);
+        match latest.get(&review.author_id).copied() {
+            None => {
+                latest.insert(review.author_id.clone(), (review, false));
             }
+            Some((previous, _)) if previous.submitted_at > review.submitted_at => {}
+            Some((previous, _)) if previous.submitted_at < review.submitted_at => {
+                latest.insert(review.author_id.clone(), (review, false));
+            }
+            Some((previous, _)) => match (previous.submission_order, review.submission_order) {
+                (Some(previous_order), Some(review_order)) if previous_order > review_order => {}
+                (Some(previous_order), Some(review_order)) if previous_order < review_order => {
+                    latest.insert(review.author_id.clone(), (review, false));
+                }
+                (Some(_), None) => {}
+                (None, Some(_)) => {
+                    latest.insert(review.author_id.clone(), (review, false));
+                }
+                _ => {
+                    latest.insert(review.author_id.clone(), (previous, true));
+                }
+            },
         }
     }
     latest
-        .values()
-        .filter(|review| {
-            review.state == "approved" && review.commit_sha.as_deref() == Some(head_sha)
+        .into_values()
+        .filter(|&(review, ambiguous)| {
+            !ambiguous
+                && review.state == "approved"
+                && review.commit_sha.as_deref() == Some(head_sha)
         })
-        .map(|review| review.author_id.clone())
+        .map(|(review, _)| review.author_id.clone())
         .collect()
 }
 
@@ -390,7 +405,7 @@ mod tests {
     use crate::pull::codeowners_rules::Owner;
     use oxidean_db::PullReviewRow;
 
-    fn review(id: &str, state: &str) -> PullReviewRow {
+    fn review(id: &str, state: &str, submission_order: Option<i64>) -> PullReviewRow {
         PullReviewRow {
             id: id.into(),
             pull_id: "pull".into(),
@@ -399,6 +414,7 @@ mod tests {
             body: String::new(),
             commit_sha: Some("head".into()),
             submitted_at: "2026-11-22T12:00:00Z".into(),
+            submission_order,
             dismissed_at: None,
             dismiss_reason: None,
         }
@@ -431,13 +447,28 @@ mod tests {
 
     #[test]
     fn later_same_second_review_replaces_the_earlier_review() {
-        let approved_then_changes = [review("a", "approved"), review("b", "changes_requested")];
+        let approved_then_changes = [
+            review("b", "approved", Some(1)),
+            review("a", "changes_requested", Some(2)),
+        ];
         assert!(current_head_approved_user_ids(&approved_then_changes, "head").is_empty());
 
-        let changes_then_approved = [review("a", "changes_requested"), review("b", "approved")];
+        let changes_then_approved = [
+            review("b", "changes_requested", Some(1)),
+            review("a", "approved", Some(2)),
+        ];
         assert_eq!(
             current_head_approved_user_ids(&changes_then_approved, "head"),
             ["reviewer".to_string()].into()
         );
+    }
+
+    #[test]
+    fn ambiguous_legacy_same_second_reviews_do_not_count_as_approval() {
+        let reviews = [
+            review("b", "approved", None),
+            review("a", "changes_requested", None),
+        ];
+        assert!(current_head_approved_user_ids(&reviews, "head").is_empty());
     }
 }

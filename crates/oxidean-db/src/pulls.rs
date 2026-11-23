@@ -1985,6 +1985,7 @@ pub struct PullReviewRow {
     pub body: String,
     pub commit_sha: Option<String>,
     pub submitted_at: String,
+    pub submission_order: Option<i64>,
     pub dismissed_at: Option<String>,
     pub dismiss_reason: Option<String>,
 }
@@ -2012,6 +2013,9 @@ macro_rules! map_pull_review {
             submitted_at: row
                 .try_get("submitted_at")
                 .map_err(|e| format!("pull review: {e}"))?,
+            submission_order: row
+                .try_get("submission_order")
+                .map_err(|e| format!("pull review: {e}"))?,
             dismissed_at: row
                 .try_get("dismissed_at")
                 .map_err(|e| format!("pull review: {e}"))?,
@@ -2022,23 +2026,49 @@ macro_rules! map_pull_review {
     }};
 }
 
-const PRV_SELECT_PG: &str = "SELECT id, pull_id, author_id, state, body, commit_sha,
+const PRV_SELECT_PG: &str = "SELECT id, pull_id, author_id, state, body, commit_sha, submission_order,
        to_char(submitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS submitted_at,
        CASE WHEN dismissed_at IS NULL THEN NULL ELSE to_char(dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS dismissed_at,
        dismiss_reason
 FROM pull_reviews";
 
-const PRV_SELECT_MYSQL: &str = "SELECT id, pull_id, author_id, state, body, commit_sha,
+const PRV_SELECT_MYSQL: &str = "SELECT id, pull_id, author_id, state, body, commit_sha, submission_order,
        DATE_FORMAT(submitted_at, '%Y-%m-%dT%H:%i:%sZ') AS submitted_at,
        CASE WHEN dismissed_at IS NULL THEN NULL ELSE DATE_FORMAT(dismissed_at, '%Y-%m-%dT%H:%i:%sZ') END AS dismissed_at,
        dismiss_reason
 FROM pull_reviews";
 
-const PRV_SELECT_SQLITE: &str = "SELECT id, pull_id, author_id, state, body, commit_sha,
+const PRV_SELECT_SQLITE: &str = "SELECT id, pull_id, author_id, state, body, commit_sha, submission_order,
        strftime('%Y-%m-%dT%H:%M:%SZ', submitted_at) AS submitted_at,
        CASE WHEN dismissed_at IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%SZ', dismissed_at) END AS dismissed_at,
        dismiss_reason
 FROM pull_reviews";
+
+async fn next_pull_review_submission_order(pool: &DbPool) -> Result<i64, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(
+            "INSERT INTO pull_review_submission_order DEFAULT VALUES RETURNING id",
+        )
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("allocate pull review submission order failed: {e}")),
+        DbPool::MySql(p) => {
+            let result = sqlx::query("INSERT INTO pull_review_submission_order () VALUES ()")
+                .execute(p)
+                .await
+                .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
+            i64::try_from(result.last_insert_id())
+                .map_err(|e| format!("pull review submission order overflow: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            let result = sqlx::query("INSERT INTO pull_review_submission_order DEFAULT VALUES")
+                .execute(p)
+                .await
+                .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
+            Ok(result.last_insert_rowid())
+        }
+    }
+}
 
 pub async fn insert_pull_review(
     pool: &DbPool,
@@ -2049,11 +2079,12 @@ pub async fn insert_pull_review(
     body: &str,
     commit_sha: Option<&str>,
 ) -> Result<PullReviewRow, String> {
+    let submission_order = next_pull_review_submission_order(pool).await?;
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha)
- VALUES ($1,$2,$3,$4,$5,$6)",
+                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
+ VALUES ($1,$2,$3,$4,$5,$6,$7)",
             )
             .bind(id)
             .bind(pull_id)
@@ -2061,14 +2092,15 @@ pub async fn insert_pull_review(
             .bind(state)
             .bind(body)
             .bind(commit_sha)
+            .bind(submission_order)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha)
- VALUES (?,?,?,?,?,?)",
+                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
+ VALUES (?,?,?,?,?,?,?)",
             )
             .bind(id)
             .bind(pull_id)
@@ -2076,14 +2108,15 @@ pub async fn insert_pull_review(
             .bind(state)
             .bind(body)
             .bind(commit_sha)
+            .bind(submission_order)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha)
- VALUES (?1,?2,?3,?4,?5,?6)",
+                "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
+ VALUES (?1,?2,?3,?4,?5,?6,?7)",
             )
             .bind(id)
             .bind(pull_id)
@@ -2091,6 +2124,7 @@ pub async fn insert_pull_review(
             .bind(state)
             .bind(body)
             .bind(commit_sha)
+            .bind(submission_order)
             .execute(p)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;

@@ -7,7 +7,9 @@
 - `cargo test -p oxidean-api --test branch_protect_push`: 12 passed.
 - `cargo test -p oxidean-db --test dialect_branch_protection`: 1 passed; migration text asserts false/zero defaults for all dialects and SQLite schema metadata reports default `0`.
 - `cargo test -p oxidean-db --test dialect_orgs`: 4 passed.
-- `cargo test -p oxidean-api-core pull::codeowners::tests`: 3 passed, including equal-timestamp review ordering and partial request-insert retention; `cargo test -p oxidean-api-core pull::codeowners_rules::tests`: 8 passed, including control-character path rejection.
+- `cargo test -p oxidean-api-core pull::codeowners::tests`: 4 passed, including same-second submission-order selection, fail-closed ambiguous legacy ties, and partial request-insert retention; `cargo test -p oxidean-api-core pull::codeowners_rules::tests`: 8 passed, including control-character path rejection.
+- `cargo test -p oxidean-db --test dialect_pulls`: 3 passed; the tests check generated-order migration definitions for all dialects and increasing SQLite review orders. `cargo test -p oxidean-db --test dialect_actions migrate_reseats_pre_rebase_versions`: 1 passed with migration 107 in the repaired ledger.
+- `cargo clippy -p oxidean-api-core -p oxidean-db -p oxidean-api-pulls -p oxidean-api --all-targets -- -D warnings`: passed. `cargo test -p oxidean-api-core`: 231 passed; `cargo test -p oxidean-api --test pull_reviews`: 4 passed.
 - `cargo test -p oxidean-git changed_paths_`: 3 passed, covering bounded output, both paths of a rename, and exact NUL-delimited quoted/Unicode/control-character paths; `commit_exists_distinguishes_missing_commits` passed.
 - `cargo fmt --all -- --check`, `git diff --check`, web lint, web format, and the focused pull-protection integration test (1 passed) passed. RPC/client sync, OpenAPI sync, targeted Clippy (`oxidean-api-core` and `oxidean-git`), Rust formatting, and `git diff --check` passed. The pull-protection route integration test passed (1 test); web lint and format checks passed.
 - Browser component tests: 51 files, 119 tests passed.
@@ -15,6 +17,6 @@
 
 ## Delivery state
 
-PR #290 is open at `feat/col-06-codeowners` against `feat/col-05-org-teams` (PR #288). The latest local update includes deterministic review ordering, notification-safe partial request handling, missing-base fail-closed behavior, NUL-delimited rename-safe path enumeration, control-character rejection, migration-default assertions, and the diagnostic UI/documentation clarifications. The branch remains stacked on PR #288. The verified update is ready to commit and push; remote CI and review state must be rechecked after push. No merge was attempted.
+PR #290 is open at `feat/col-06-codeowners` against `feat/col-05-org-teams` (PR #288). The latest update includes database-generated monotonic review ordering, fail-closed handling for ambiguous legacy ties, notification-safe partial request handling, missing-base fail-closed behavior, NUL-delimited rename-safe path enumeration, control-character rejection, migration-default assertions, and the diagnostic UI/documentation clarifications. The branch remains stacked on PR #288. Remote CI and the CodeRabbit verdict must be rechecked on the updated head before merge readiness. No merge was attempted.
 
 The three-dialect migration adds an opt-in boolean with a false default and is additive. Rollback is to disable the protection setting and revert the application change; no data deletion is required.
