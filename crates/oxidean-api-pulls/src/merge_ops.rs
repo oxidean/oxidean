@@ -305,33 +305,13 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     }
 
     // Phase 13 / PR-08: shared protection evaluate against base branch (D-22).
-    {
-        let eff = effective_for_branch(&ctx.db, &accessible.row.id, &row.base_ref).await?;
-        if eff.matched {
-            // GitHub's "Require merge queue" ruleset — direct merges are
-            // never permitted; `merge_queue.enqueue` routes the PR through
-            // group verification instead.
-            if eff.required_merge_queue {
-                return Err(AppError::new(
-                    "pull.merge_queue_required",
-                    "merge queue is required for the base branch — add this pull request to the merge queue instead",
-                ));
-            }
-            evaluate_merge_gate(
-                ctx,
-                &accessible,
-                &eff,
-                &row,
-                Some(match req.method {
-                    MergeMethod::Merge => "merge".into(),
-                    MergeMethod::Squash => "squash".into(),
-                    MergeMethod::Rebase => "rebase".into(),
-                }),
-            )
-            .await?;
-        }
+    let eff = effective_for_branch(&ctx.db, &accessible.row.id, &row.base_ref).await?;
+    if eff.matched && eff.required_merge_queue {
+        return Err(AppError::new(
+            "pull.merge_queue_required",
+            "merge queue is required for the base branch — add this pull request to the merge queue instead",
+        ));
     }
-
     let path = bare_repo_path(
         &ctx.repos_dir,
         &accessible.owner_username,
@@ -345,6 +325,21 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         &row,
     )
     .await?;
+
+    if eff.matched {
+        evaluate_merge_gate(
+            ctx,
+            &accessible,
+            &eff,
+            &row,
+            Some(match req.method {
+                MergeMethod::Merge => "merge".into(),
+                MergeMethod::Squash => "squash".into(),
+                MergeMethod::Rebase => "rebase".into(),
+            }),
+        )
+        .await?;
+    }
 
     let message = req
         .commit_title

@@ -580,7 +580,7 @@ async fn pull_create_requests_matching_codeowners_from_base_revision() {
 }
 
 #[tokio::test]
-async fn pull_create_requests_team_codeowners_from_current_org_grant() {
+async fn pull_create_requests_team_codeowners_and_merges_fork_with_missing_head_objects() {
     let dir = tempfile::tempdir().unwrap();
     let repos = dir.path().join("repos");
     let url = format!(
@@ -590,7 +590,7 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     let db = Database::connect(&url).await.unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
-    let app = test_app(db.clone(), repos).await;
+    let app = test_app(db.clone(), repos.clone()).await;
 
     let (owner_cookie, owner_v) = signup_and_login(&app, "team-owner@ex.com", "teamowner").await;
     verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
@@ -600,6 +600,8 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     let (_, second_reviewer_v) =
         signup_and_login(&app, "team-reviewer2@ex.com", "teamreviewer2").await;
     verify_user(&db, second_reviewer_v["data"]["id"].as_str().unwrap()).await;
+    let (fork_cookie, fork_v) = signup_and_login(&app, "team-forker@ex.com", "teamforker").await;
+    verify_user(&db, fork_v["data"]["id"].as_str().unwrap()).await;
 
     let org = rpc_json(
         &app,
@@ -655,7 +657,7 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     let repo = rpc_json(
         &app,
         &owner_cookie,
-        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"private","owner":"teamorg"}}"#,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","owner":"teamorg"}}"#,
     )
     .await;
     assert_eq!(repo["ok"], true, "{repo}");
@@ -676,28 +678,35 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     let codeowners = rpc_json(
         &app,
         &owner_cookie,
-        r#"{"procedure":"repo.file.create","input":{"owner":"teamorg","name":"core","path":".github/CODEOWNERS","content":"docs/** @teamorg/reviewers\n","message":"Add team CODEOWNERS"}}"#,
+        r#"{"procedure":"repo.file.create","input":{"owner":"teamorg","name":"core","path":".github/CODEOWNERS","content":"docs/** @teamorg/Reviewers\n","message":"Add team CODEOWNERS"}}"#,
     )
     .await;
     assert_eq!(codeowners["ok"], true, "{codeowners}");
+    let fork = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"repo.fork","input":{"owner":"teamorg","name":"core"}}"#,
+    )
+    .await;
+    assert_eq!(fork["ok"], true, "{fork}");
     let branch = rpc_json(
         &app,
-        &owner_cookie,
-        r#"{"procedure":"repo.branchCreate","input":{"owner":"teamorg","name":"core","branch":"feature","start":"main"}}"#,
+        &fork_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"teamforker","name":"core","branch":"feature","start":"main"}}"#,
     )
     .await;
     assert_eq!(branch["ok"], true, "{branch}");
     let changed_file = rpc_json(
         &app,
-        &owner_cookie,
-        r#"{"procedure":"repo.file.create","input":{"owner":"teamorg","name":"core","branch":"feature","path":"docs/owned.rs","content":"owned\n","message":"Add owned file"}}"#,
+        &fork_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"teamforker","name":"core","branch":"feature","path":"docs/owned.rs","content":"owned\n","message":"Add owned file"}}"#,
     )
     .await;
     assert_eq!(changed_file["ok"], true, "{changed_file}");
     let pull = rpc_json(
         &app,
-        &owner_cookie,
-        r#"{"procedure":"pull.create","input":{"owner":"teamorg","name":"core","title":"Team-owned change","base_ref":"main","head_ref":"feature"}}"#,
+        &fork_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"teamorg","name":"core","title":"Team-owned change","base_ref":"main","head_ref":"feature","head_owner":"teamforker","head_name":"core"}}"#,
     )
     .await;
     assert_eq!(pull["ok"], true, "{pull}");
@@ -727,9 +736,10 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     )
     .await;
     assert_eq!(detail["ok"], true, "{detail}");
+    let head_sha = detail["data"]["head_sha"].as_str().unwrap();
     assert_eq!(
         detail["data"]["codeowners_status"]["paths"][0]["owners"],
-        serde_json::json!(["@teamorg/reviewers"])
+        serde_json::json!(["@teamorg/Reviewers"])
     );
     let approval = rpc_json(
         &app,
@@ -740,6 +750,51 @@ async fn pull_create_requests_team_codeowners_from_current_org_grant() {
     )
     .await;
     assert_eq!(approval["ok"], true, "{approval}");
+    let base_bare = repos.join("teamorg").join("core.git");
+    for pull_ref in [
+        format!("refs/pull/{number}/head"),
+        format!("refs/pull/{number}/merge"),
+    ] {
+        let remove_pull_ref = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&base_bare)
+            .args(["update-ref", "-d"])
+            .arg(&pull_ref)
+            .status()
+            .unwrap();
+        assert!(remove_pull_ref.success());
+    }
+    let expire_reflogs = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["reflog", "expire", "--expire=now", "--all"])
+        .status()
+        .unwrap();
+    assert!(expire_reflogs.success());
+    let prune = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["gc", "--prune=now", "--quiet"])
+        .status()
+        .unwrap();
+    assert!(prune.success());
+    let head_present = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["cat-file", "-e", head_sha])
+        .status()
+        .unwrap();
+    let refs = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+        .output()
+        .unwrap();
+    assert!(
+        !head_present.success(),
+        "fork head object must be absent before merge; refs={}",
+        String::from_utf8_lossy(&refs.stdout)
+    );
     let merged = rpc_json(
         &app,
         &reviewer_cookie,
