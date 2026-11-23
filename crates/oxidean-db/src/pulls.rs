@@ -2044,32 +2044,6 @@ const PRV_SELECT_SQLITE: &str = "SELECT id, pull_id, author_id, state, body, com
        dismiss_reason
 FROM pull_reviews";
 
-async fn next_pull_review_submission_order(pool: &DbPool) -> Result<i64, String> {
-    match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(
-            "INSERT INTO pull_review_submission_order DEFAULT VALUES RETURNING id",
-        )
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("allocate pull review submission order failed: {e}")),
-        DbPool::MySql(p) => {
-            let result = sqlx::query("INSERT INTO pull_review_submission_order () VALUES ()")
-                .execute(p)
-                .await
-                .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
-            i64::try_from(result.last_insert_id())
-                .map_err(|e| format!("pull review submission order overflow: {e}"))
-        }
-        DbPool::Sqlite(p) => {
-            let result = sqlx::query("INSERT INTO pull_review_submission_order DEFAULT VALUES")
-                .execute(p)
-                .await
-                .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
-            Ok(result.last_insert_rowid())
-        }
-    }
-}
-
 pub async fn insert_pull_review(
     pool: &DbPool,
     id: &str,
@@ -2079,9 +2053,19 @@ pub async fn insert_pull_review(
     body: &str,
     commit_sha: Option<&str>,
 ) -> Result<PullReviewRow, String> {
-    let submission_order = next_pull_review_submission_order(pool).await?;
     match pool {
         DbPool::Postgres(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin pull review transaction failed: {e}"))?;
+            let submission_order = sqlx::query_scalar::<_, i64>(
+                "UPDATE pull_review_submission_order SET last_order = last_order + 1 \
+                 WHERE id = 1 RETURNING last_order",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
  VALUES ($1,$2,$3,$4,$5,$6,$7)",
@@ -2093,11 +2077,32 @@ pub async fn insert_pull_review(
             .bind(body)
             .bind(commit_sha)
             .bind(submission_order)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit pull review failed: {e}"))?;
         }
         DbPool::MySql(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin pull review transaction failed: {e}"))?;
+            let last_order = sqlx::query_scalar::<_, i64>(
+                "SELECT last_order FROM pull_review_submission_order WHERE id = 1 FOR UPDATE",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
+            let submission_order = last_order
+                .checked_add(1)
+                .ok_or_else(|| "pull review submission order overflow".to_string())?;
+            sqlx::query("UPDATE pull_review_submission_order SET last_order = ? WHERE id = 1")
+                .bind(submission_order)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
  VALUES (?,?,?,?,?,?,?)",
@@ -2109,11 +2114,25 @@ pub async fn insert_pull_review(
             .bind(body)
             .bind(commit_sha)
             .bind(submission_order)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit pull review failed: {e}"))?;
         }
         DbPool::Sqlite(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin pull review transaction failed: {e}"))?;
+            let submission_order = sqlx::query_scalar::<_, i64>(
+                "UPDATE pull_review_submission_order SET last_order = last_order + 1 \
+                 WHERE id = 1 RETURNING last_order",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| format!("allocate pull review submission order failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO pull_reviews (id, pull_id, author_id, state, body, commit_sha, submission_order)
  VALUES (?1,?2,?3,?4,?5,?6,?7)",
@@ -2125,9 +2144,12 @@ pub async fn insert_pull_review(
             .bind(body)
             .bind(commit_sha)
             .bind(submission_order)
-            .execute(p)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("insert pull review failed: {e}"))?;
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit pull review failed: {e}"))?;
         }
     }
     find_pull_review_by_id(pool, id)
@@ -3196,5 +3218,96 @@ pub async fn latest_review_commit_sha(
         .await
         .map(|v| v.flatten())
         .map_err(|e| format!("latest review sha failed: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod submission_order_tests {
+    use super::insert_pull_review;
+    use crate::pool::DbPool;
+    use sqlx::{
+        sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+        Row,
+    };
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::Barrier;
+
+    #[tokio::test]
+    async fn concurrent_review_inserts_store_orders_in_row_insertion_order() {
+        const REVIEW_COUNT: usize = 32;
+
+        let file = tempfile::NamedTempFile::new().expect("create database file");
+        let options = SqliteConnectOptions::new()
+            .filename(file.path())
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(30));
+        let sqlite_pool = SqlitePoolOptions::new()
+            .max_connections(8)
+            .connect_with(options)
+            .await
+            .expect("connect database");
+        sqlx::query(
+            "CREATE TABLE pull_reviews (
+                id TEXT PRIMARY KEY,
+                pull_id TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                body TEXT NOT NULL,
+                commit_sha TEXT,
+                submitted_at TEXT NOT NULL DEFAULT '2026-11-23T10:00:00Z',
+                submission_order INTEGER UNIQUE,
+                dismissed_at TEXT,
+                dismiss_reason TEXT
+            )",
+        )
+        .execute(&sqlite_pool)
+        .await
+        .expect("create reviews table");
+        sqlx::query(
+            "CREATE TABLE pull_review_submission_order (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                last_order INTEGER NOT NULL
+            )",
+        )
+        .execute(&sqlite_pool)
+        .await
+        .expect("create order table");
+        sqlx::query("INSERT INTO pull_review_submission_order (id, last_order) VALUES (1, 0)")
+            .execute(&sqlite_pool)
+            .await
+            .expect("initialize order");
+
+        let pool = DbPool::Sqlite(sqlite_pool.clone());
+        let barrier = Arc::new(Barrier::new(REVIEW_COUNT));
+        let mut tasks = Vec::with_capacity(REVIEW_COUNT);
+        for index in 0..REVIEW_COUNT {
+            let pool = pool.clone();
+            let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                let id = format!("review-{index}");
+                barrier.wait().await;
+                insert_pull_review(&pool, &id, "pull", "author", "commented", "", None).await
+            }));
+        }
+        for task in tasks {
+            task.await
+                .expect("join review insert")
+                .expect("insert review");
+        }
+
+        let rows = sqlx::query("SELECT submission_order FROM pull_reviews ORDER BY rowid")
+            .fetch_all(&sqlite_pool)
+            .await
+            .expect("list inserted reviews");
+        let orders = rows
+            .iter()
+            .map(|row| {
+                row.try_get::<i64, _>("submission_order")
+                    .expect("submission order")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(orders, (1..=REVIEW_COUNT as i64).collect::<Vec<_>>());
+        sqlite_pool.close().await;
     }
 }
