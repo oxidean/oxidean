@@ -46,6 +46,30 @@ fn find_migration_containing(dialect: &str, needle: &str) -> Option<(PathBuf, St
     None
 }
 
+fn codeowners_default_is_disabled(dialect: &str, sql: &str) -> bool {
+    let normalized = sql
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (column, expected_default) = match dialect {
+        "sqlite" => ("require_code_owner_reviews integer not null", "0"),
+        "postgres" => ("require_code_owner_reviews boolean not null", "false"),
+        "mysql" => ("require_code_owner_reviews tinyint(1) not null", "0"),
+        _ => return false,
+    };
+    if !normalized.contains("branch_protection_rules") {
+        return false;
+    }
+    let Some((_, definition)) = normalized.split_once(column) else {
+        return false;
+    };
+    let Some((_, default)) = definition.split_once(" default ") else {
+        return false;
+    };
+    default.trim().trim_end_matches(';').trim() == expected_default
+}
+
 fn assert_protection_sql(dialect: &str, sql: &str) {
     assert!(
         sql.contains("branch_protection_rules"),
@@ -91,19 +115,8 @@ async fn dialect_branch_protection_migrate_schema_presence() {
     for dialect in ["sqlite", "postgres", "mysql"] {
         let (_path, sql) = find_migration_containing(dialect, "require_code_owner_reviews")
             .unwrap_or_else(|| panic!("missing {dialect} require_code_owner_reviews migration"));
-        let normalized = sql
-            .to_ascii_lowercase()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let expected_column = match dialect {
-            "sqlite" => "require_code_owner_reviews integer not null default 0",
-            "postgres" => "require_code_owner_reviews boolean not null default false",
-            "mysql" => "require_code_owner_reviews tinyint(1) not null default 0",
-            _ => unreachable!(),
-        };
         assert!(
-            normalized.contains("branch_protection_rules") && normalized.contains(expected_column),
+            codeowners_default_is_disabled(dialect, &sql),
             "{dialect}: CODEOWNERS protection must be a false-by-default branch_protection_rules column"
         );
     }
@@ -133,4 +146,24 @@ async fn dialect_branch_protection_migrate_schema_presence() {
         .await
         .expect("list rules on empty");
     assert!(rules.is_empty());
+}
+
+#[test]
+fn codeowners_migration_default_check_rejects_numeric_prefixes() {
+    assert!(!codeowners_default_is_disabled(
+        "mysql",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews TINYINT(1) NOT NULL DEFAULT 01;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "mysql",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews TINYINT(1) NOT NULL DEFAULT 0;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "postgres",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews BOOLEAN NOT NULL DEFAULT FALSE;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "sqlite",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews INTEGER NOT NULL DEFAULT 0;"
+    ));
 }
