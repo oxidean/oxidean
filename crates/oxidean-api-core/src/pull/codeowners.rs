@@ -31,20 +31,23 @@ pub fn current_head_approved_user_ids(
             None => {
                 latest.insert(review.author_id.clone(), (review, false));
             }
-            Some((previous, _)) if previous.submitted_at > review.submitted_at => {}
-            Some((previous, _)) if previous.submitted_at < review.submitted_at => {
-                latest.insert(review.author_id.clone(), (review, false));
-            }
             Some((previous, _)) => match (previous.submission_order, review.submission_order) {
                 (Some(previous_order), Some(review_order)) if previous_order > review_order => {}
                 (Some(previous_order), Some(review_order)) if previous_order < review_order => {
                     latest.insert(review.author_id.clone(), (review, false));
                 }
+                (Some(_), Some(_)) => {
+                    latest.insert(review.author_id.clone(), (previous, true));
+                }
                 (Some(_), None) => {}
                 (None, Some(_)) => {
                     latest.insert(review.author_id.clone(), (review, false));
                 }
-                _ => {
+                (None, None) if previous.submitted_at > review.submitted_at => {}
+                (None, None) if previous.submitted_at < review.submitted_at => {
+                    latest.insert(review.author_id.clone(), (review, false));
+                }
+                (None, None) => {
                     latest.insert(review.author_id.clone(), (previous, true));
                 }
             },
@@ -406,6 +409,15 @@ mod tests {
     use oxidean_db::PullReviewRow;
 
     fn review(id: &str, state: &str, submission_order: Option<i64>) -> PullReviewRow {
+        review_at(id, state, submission_order, "2026-11-22T12:00:00Z")
+    }
+
+    fn review_at(
+        id: &str,
+        state: &str,
+        submission_order: Option<i64>,
+        submitted_at: &str,
+    ) -> PullReviewRow {
         PullReviewRow {
             id: id.into(),
             pull_id: "pull".into(),
@@ -413,7 +425,7 @@ mod tests {
             state: state.into(),
             body: String::new(),
             commit_sha: Some("head".into()),
-            submitted_at: "2026-11-22T12:00:00Z".into(),
+            submitted_at: submitted_at.into(),
             submission_order,
             dismissed_at: None,
             dismiss_reason: None,
@@ -461,6 +473,20 @@ mod tests {
             current_head_approved_user_ids(&changes_then_approved, "head"),
             ["reviewer".to_string()].into()
         );
+    }
+
+    #[test]
+    fn submission_order_precedes_transaction_start_timestamp() {
+        let reviews = [
+            review_at("approval", "approved", Some(1), "2026-11-22T12:00:02Z"),
+            review_at(
+                "changes",
+                "changes_requested",
+                Some(2),
+                "2026-11-22T12:00:00Z",
+            ),
+        ];
+        assert!(current_head_approved_user_ids(&reviews, "head").is_empty());
     }
 
     #[test]
