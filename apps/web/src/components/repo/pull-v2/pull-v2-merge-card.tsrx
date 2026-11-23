@@ -539,7 +539,11 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
           testid="pull-v2-comments-bar"
         />
       </div>
-      <div className="flex flex-col gap-1.5 px-3 py-3" data-testid="pull-v2-approvals-row">
+      <div
+        className="flex flex-col gap-1.5 px-3 py-3"
+        data-testid="pull-v2-approvals-row"
+        data-reviews-loaded={reviewsQ.isSuccess ? "true" : "false"}
+      >
         <span className="flex items-center gap-1.5">
           <span className="font-medium text-foreground">Approvals</span>
           @if (approvalDetail) {

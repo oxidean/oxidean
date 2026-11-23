@@ -489,7 +489,17 @@ describe("PullV2Overview conversation", () => {
   });
 
   it("does not restore an approval after the latest review is dismissed", async () => {
-    reviewsListMock.mockResolvedValue({
+    let resolveReviews!: (value: unknown) => void;
+    reviewsListMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveReviews = resolve;
+        }),
+    );
+    renderOverview([]);
+    const approvals = screen.getByTestId("pull-v2-approvals-row");
+    expect(approvals.getAttribute("data-reviews-loaded")).toBe("false");
+    resolveReviews({
       ok: true,
       data: {
         reviews: [
@@ -515,9 +525,9 @@ describe("PullV2Overview conversation", () => {
         ],
       },
     });
-    renderOverview([]);
     await waitFor(() => {
-      expect(screen.getByTestId("pull-v2-approvals-row").textContent).not.toContain("1 approval");
+      expect(approvals.getAttribute("data-reviews-loaded")).toBe("true");
     });
+    expect(approvals.textContent).not.toContain("1 approval");
   });
 });
