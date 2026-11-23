@@ -90,6 +90,7 @@ fn row_public(row: &BranchProtectionRuleRow) -> BranchProtectionRulePublic {
         lock_branch: row.lock_branch,
         require_signed_commits: row.require_signed_commits,
         required_merge_queue: row.required_merge_queue,
+        require_code_owner_reviews: row.require_code_owner_reviews,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }
@@ -153,6 +154,7 @@ pub async fn create(
             req.lock_branch,
             req.require_signed_commits,
             req.required_merge_queue,
+            req.require_code_owner_reviews,
         )
         .await
         .map_err(db_err)?;
@@ -195,6 +197,7 @@ pub async fn update(
             req.lock_branch,
             req.require_signed_commits,
             req.required_merge_queue,
+            req.require_code_owner_reviews,
         )
         .await
         .map_err(db_err)?;
@@ -270,6 +273,7 @@ fn rule_payload(row: &BranchProtectionRuleRow) -> serde_json::Value {
         "pattern": row.pattern,
         "enforce_admins": row.enforce_admins,
         "required_approving_review_count": row.required_approving_review_count,
+        "require_code_owner_reviews": row.require_code_owner_reviews,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     })

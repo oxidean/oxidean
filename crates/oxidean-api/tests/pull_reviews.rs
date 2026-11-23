@@ -99,6 +99,717 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
 }
 
 #[tokio::test]
+async fn pull_create_requests_matching_codeowners_from_base_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_codeowners.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "co-owner@ex.com", "coowner").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
+    let (reviewer_cookie, reviewer_v) =
+        signup_and_login(&app, "co-reviewer@ex.com", "coreviewer").await;
+    verify_user(&db, reviewer_v["data"]["id"].as_str().unwrap()).await;
+    let (other_reviewer_cookie, other_reviewer_v) =
+        signup_and_login(&app, "co-reviewer2@ex.com", "otherreviewer").await;
+    verify_user(&db, other_reviewer_v["data"]["id"].as_str().unwrap()).await;
+    let (_, manual_reviewer_v) =
+        signup_and_login(&app, "manual-reviewer@ex.com", "manualreviewer").await;
+    verify_user(&db, manual_reviewer_v["data"]["id"].as_str().unwrap()).await;
+
+    let create_repo = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(create_repo["ok"], true, "{create_repo}");
+    let add_collaborator = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"coowner","name":"core","username":"coreviewer","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(add_collaborator["ok"], true, "{add_collaborator}");
+    for username in ["otherreviewer", "manualreviewer"] {
+        let add = rpc_json(
+            &app,
+            &owner_cookie,
+            &format!(
+                r#"{{"procedure":"repo.collaborators.add","input":{{"owner":"coowner","name":"core","username":"{username}","permission":"write"}}}}"#
+            ),
+        )
+        .await;
+        assert_eq!(add["ok"], true, "{add}");
+    }
+    let protection = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchProtection.create","input":{"owner":"coowner","name":"core","pattern":"main","require_code_owner_reviews":true,"dismiss_stale_reviews":false}}"#,
+    )
+    .await;
+    assert_eq!(protection["ok"], true, "{protection}");
+    assert_eq!(protection["data"]["require_code_owner_reviews"], true);
+
+    let codeowners = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"coowner","name":"core","path":".github/CODEOWNERS","content":"docs/owned.rs @coowner @coreviewer\ndocs/other.rs @otherreviewer\n","message":"Add CODEOWNERS"}}"#,
+    )
+    .await;
+    assert_eq!(codeowners["ok"], true, "{codeowners}");
+    let branch = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"coowner","name":"core","branch":"feature","start":"main"}}"#,
+    )
+    .await;
+    assert_eq!(branch["ok"], true, "{branch}");
+    let head_codeowners = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.update","input":{"owner":"coowner","name":"core","branch":"feature","path":".github/CODEOWNERS","content":"docs/owned.rs @otherreviewer\n","message":"Change head CODEOWNERS"}}"#,
+    )
+    .await;
+    assert_eq!(head_codeowners["ok"], true, "{head_codeowners}");
+    let changed_file = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"coowner","name":"core","branch":"feature","path":"docs/owned.rs","content":"owned\n","message":"Add owned file"}}"#,
+    )
+    .await;
+    assert_eq!(changed_file["ok"], true, "{changed_file}");
+
+    let pull = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"coowner","name":"core","title":"Owned change","base_ref":"main","head_ref":"feature"}}"#,
+    )
+    .await;
+    assert_eq!(pull["ok"], true, "{pull}");
+    let number = pull["data"]["number"].as_i64().unwrap();
+    let initial_requests = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviewRequests.list","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(initial_requests["ok"], true, "{initial_requests}");
+    let initial_usernames = initial_requests["data"]["usernames"].as_array().unwrap();
+    assert!(initial_usernames
+        .iter()
+        .any(|username| username.as_str() == Some("coreviewer")));
+    assert!(initial_usernames
+        .iter()
+        .all(|username| username.as_str() != Some("otherreviewer")));
+    let manual_request = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviewRequests.add","input":{{"owner":"coowner","name":"core","number":{number},"username":"manualreviewer"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(manual_request["ok"], true, "{manual_request}");
+    let stale_approval = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"coowner","name":"core","number":{number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(stale_approval["ok"], true, "{stale_approval}");
+    let changed_file = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"coowner","name":"core","branch":"feature","path":"docs/other.rs","content":"other\n","message":"Add second owned file"}}"#,
+    )
+    .await;
+    assert_eq!(changed_file["ok"], true, "{changed_file}");
+    let (notifications_before_repeat, _) = db
+        .list_notifications(
+            other_reviewer_v["data"]["id"].as_str().unwrap(),
+            false,
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+    let notification_count_before_repeat = notifications_before_repeat
+        .iter()
+        .filter(|notification| notification.reason == "pr_review_requested")
+        .count();
+    assert_eq!(
+        notification_count_before_repeat, 1,
+        "newly matched owners must receive a review-request notification"
+    );
+    let repeated_change = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.update","input":{"owner":"coowner","name":"core","branch":"feature","path":"docs/other.rs","content":"other v2\n","message":"Update second owned file"}}"#,
+    )
+    .await;
+    assert_eq!(repeated_change["ok"], true, "{repeated_change}");
+    let (notifications_after_repeat, _) = db
+        .list_notifications(
+            other_reviewer_v["data"]["id"].as_str().unwrap(),
+            false,
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+    let notification_count_after_repeat = notifications_after_repeat
+        .iter()
+        .filter(|notification| notification.reason == "pr_review_requested")
+        .count();
+    assert_eq!(
+        notification_count_after_repeat, notification_count_before_repeat,
+        "recalculating unchanged ownership must not send another review-request notification; before={:?}, after={:?}",
+        notifications_before_repeat.iter().map(|n| &n.reason).collect::<Vec<_>>(),
+        notifications_after_repeat.iter().map(|n| &n.reason).collect::<Vec<_>>()
+    );
+    let requests = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviewRequests.list","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(requests["ok"], true, "{requests}");
+    assert!(
+        requests["data"]["usernames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|username| username.as_str() == Some("coreviewer")),
+        "matching CODEOWNERS owner must be requested — {requests}"
+    );
+    let usernames = requests["data"]["usernames"].as_array().unwrap();
+    for expected in ["coreviewer", "otherreviewer", "manualreviewer"] {
+        assert!(
+            usernames
+                .iter()
+                .any(|username| username.as_str() == Some(expected)),
+            "review request {expected} must be present after changed-file refresh — {requests}"
+        );
+    }
+    assert!(
+        usernames
+            .iter()
+            .all(|username| username.as_str() != Some("coowner")),
+        "the pull request author cannot review their own change — {requests}"
+    );
+
+    let blocked = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        blocked["ok"], false,
+        "code-owner approval must block merge — {blocked}"
+    );
+    assert_eq!(blocked["error"]["code"], "pull.merge_blocked");
+    assert!(
+        blocked["error"]["data"]["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason.as_str() == Some("codeowners")),
+        "stable CODEOWNERS blocker — {blocked}"
+    );
+
+    let still_blocked = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        still_blocked["ok"], false,
+        "each matched path needs an owner approval — {still_blocked}"
+    );
+    assert!(
+        still_blocked["error"]["data"]["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason.as_str() == Some("codeowners")),
+        "the second path remains blocked — {still_blocked}"
+    );
+    let second_approval = rpc_json(
+        &app,
+        &other_reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"coowner","name":"core","number":{number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(second_approval["ok"], true, "{second_approval}");
+    let stale_owner_still_blocked = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        stale_owner_still_blocked["ok"], false,
+        "a stale owner approval cannot satisfy CODEOWNERS even when stale reviews are otherwise allowed — {stale_owner_still_blocked}"
+    );
+    assert!(stale_owner_still_blocked["error"]["data"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str() == Some("codeowners")));
+    let stale_detail = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(stale_detail["ok"], true, "{stale_detail}");
+    let stale_path = stale_detail["data"]["codeowners_status"]["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|path| path["path"] == "docs/owned.rs")
+        .expect("stale changed path must appear in pull status");
+    assert_eq!(stale_path["approved"], false);
+
+    let stored_pull = db
+        .find_pull_by_id(pull["data"]["id"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let valid_base_sha = stored_pull.base_sha.clone();
+    db.update_pull_fields(
+        &stored_pull.id,
+        &stored_pull.title,
+        &stored_pull.body,
+        stored_pull.draft,
+        &stored_pull.base_ref,
+        "missing-base-commit",
+    )
+    .await
+    .unwrap();
+    let missing_base_merge = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(missing_base_merge["ok"], false, "{missing_base_merge}");
+    assert!(missing_base_merge["error"]["data"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str() == Some("codeowners")));
+    let missing_base_detail = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(missing_base_detail["ok"], true, "{missing_base_detail}");
+    assert_eq!(
+        missing_base_detail["data"]["codeowners_status"]["file_present"],
+        false
+    );
+    assert!(!missing_base_detail["data"]["codeowners_status"]["errors"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    db.update_pull_fields(
+        &stored_pull.id,
+        &stored_pull.title,
+        &stored_pull.body,
+        stored_pull.draft,
+        &stored_pull.base_ref,
+        &valid_base_sha,
+    )
+    .await
+    .unwrap();
+
+    let coverage_branch = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"coowner","name":"core","branch":"codeowners-path-coverage","start":"main"}}"#,
+    )
+    .await;
+    assert_eq!(coverage_branch["ok"], true, "{coverage_branch}");
+    for (path, content) in [
+        ("docs/owned.rs", "owned coverage"),
+        ("docs/other.rs", "other coverage"),
+    ] {
+        let update = rpc_json(
+            &app,
+            &owner_cookie,
+            &format!(
+                r#"{{"procedure":"repo.file.create","input":{{"owner":"coowner","name":"core","branch":"codeowners-path-coverage","path":"{path}","content":"{content}","message":"Add path-coverage fixture"}}}}"#
+            ),
+        )
+        .await;
+        assert_eq!(update["ok"], true, "{update}");
+    }
+    let coverage_pull = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"coowner","name":"core","title":"CODEOWNERS path coverage","base_ref":"main","head_ref":"codeowners-path-coverage"}}"#,
+    )
+    .await;
+    assert_eq!(coverage_pull["ok"], true, "{coverage_pull}");
+    let coverage_number = coverage_pull["data"]["number"].as_i64().unwrap();
+    let coverage_approval = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"coowner","name":"core","number":{coverage_number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_approval["ok"], true, "{coverage_approval}");
+    let coverage_status = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{coverage_number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_status["ok"], true, "{coverage_status}");
+    let coverage_paths = coverage_status["data"]["codeowners_status"]["paths"]
+        .as_array()
+        .unwrap();
+    assert!(coverage_paths.iter().any(|path| {
+        path["path"] == "docs/owned.rs"
+            && path["owners"] == serde_json::json!(["@coowner", "@coreviewer"])
+            && path["approved"] == true
+    }));
+    assert!(coverage_paths.iter().any(|path| {
+        path["path"] == "docs/other.rs"
+            && path["owners"] == serde_json::json!(["@otherreviewer"])
+            && path["approved"] == false
+    }));
+    let coverage_merge = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{coverage_number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(coverage_merge["ok"], false, "{coverage_merge}");
+    assert!(coverage_merge["error"]["data"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str() == Some("codeowners")));
+
+    let current_head_approval = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"coowner","name":"core","number":{number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(current_head_approval["ok"], true, "{current_head_approval}");
+    let merged = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"coowner","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        merged["ok"], true,
+        "current owner approval must satisfy CODEOWNERS — {merged}"
+    );
+
+    let detail = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"coowner","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(detail["ok"], true, "{detail}");
+    assert_eq!(detail["data"]["codeowners_status"]["file_present"], true);
+    let paths = detail["data"]["codeowners_status"]["paths"]
+        .as_array()
+        .unwrap();
+    assert_eq!(paths.len(), 3);
+    assert!(paths.iter().any(|path| {
+        path["path"] == "docs/owned.rs"
+            && path["owners"] == serde_json::json!(["@coowner", "@coreviewer"])
+            && path["approved"] == true
+    }));
+    assert!(paths.iter().any(|path| {
+        path["path"] == "docs/other.rs"
+            && path["owners"] == serde_json::json!(["@otherreviewer"])
+            && path["approved"] == true
+    }));
+    assert!(paths.iter().any(|path| {
+        path["path"] == ".github/CODEOWNERS"
+            && path["owners"] == serde_json::json!([])
+            && path["approved"] == true
+    }));
+}
+
+#[tokio::test]
+async fn pull_create_requests_team_codeowners_and_merges_fork_with_missing_head_objects() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("pull_team_codeowners.db").display()
+    );
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "team-owner@ex.com", "teamowner").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
+    let (reviewer_cookie, reviewer_v) =
+        signup_and_login(&app, "team-reviewer@ex.com", "teamreviewer").await;
+    verify_user(&db, reviewer_v["data"]["id"].as_str().unwrap()).await;
+    let (_, second_reviewer_v) =
+        signup_and_login(&app, "team-reviewer2@ex.com", "teamreviewer2").await;
+    verify_user(&db, second_reviewer_v["data"]["id"].as_str().unwrap()).await;
+    let (fork_cookie, fork_v) = signup_and_login(&app, "team-forker@ex.com", "teamforker").await;
+    verify_user(&db, fork_v["data"]["id"].as_str().unwrap()).await;
+
+    let org = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.create","input":{"slug":"teamorg"}}"#,
+    )
+    .await;
+    assert_eq!(org["ok"], true, "{org}");
+    let member = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.members.add","input":{"slug":"teamorg","username":"teamreviewer","role":"member"}}"#,
+    )
+    .await;
+    assert_eq!(member["ok"], true, "{member}");
+    let second_member = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.members.add","input":{"slug":"teamorg","username":"teamreviewer2","role":"member"}}"#,
+    )
+    .await;
+    assert_eq!(second_member["ok"], true, "{second_member}");
+    let team = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.teams.create","input":{"slug":"teamorg","name":"Reviewers","team_slug":"reviewers"}}"#,
+    )
+    .await;
+    assert_eq!(team["ok"], true, "{team}");
+    let team_member = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.teams.members.add","input":{"slug":"teamorg","team_slug":"reviewers","username":"teamreviewer"}}"#,
+    )
+    .await;
+    assert_eq!(team_member["ok"], true, "{team_member}");
+    let second_team_member = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.teams.members.add","input":{"slug":"teamorg","team_slug":"reviewers","username":"teamreviewer2"}}"#,
+    )
+    .await;
+    assert_eq!(second_team_member["ok"], true, "{second_team_member}");
+    db.set_user_banned_at(
+        second_reviewer_v["data"]["id"].as_str().unwrap(),
+        "2000-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    let team_id = team["data"]["id"].as_str().unwrap();
+    let limited_members = db.list_team_members_limited(team_id, 1).await.unwrap();
+    assert_eq!(limited_members.len(), 1);
+    let repo = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","owner":"teamorg"}}"#,
+    )
+    .await;
+    assert_eq!(repo["ok"], true, "{repo}");
+    let grant = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"org.teams.repos.add","input":{"slug":"teamorg","team_slug":"reviewers","repo":"core","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(grant["ok"], true, "{grant}");
+    let protection = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchProtection.create","input":{"owner":"teamorg","name":"core","pattern":"main","require_code_owner_reviews":true}}"#,
+    )
+    .await;
+    assert_eq!(protection["ok"], true, "{protection}");
+    let codeowners = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"teamorg","name":"core","path":".github/CODEOWNERS","content":"docs/** @teamorg/Reviewers\n","message":"Add team CODEOWNERS"}}"#,
+    )
+    .await;
+    assert_eq!(codeowners["ok"], true, "{codeowners}");
+    let fork = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"repo.fork","input":{"owner":"teamorg","name":"core"}}"#,
+    )
+    .await;
+    assert_eq!(fork["ok"], true, "{fork}");
+    let branch = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"teamforker","name":"core","branch":"feature","start":"main"}}"#,
+    )
+    .await;
+    assert_eq!(branch["ok"], true, "{branch}");
+    let changed_file = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"repo.file.create","input":{"owner":"teamforker","name":"core","branch":"feature","path":"docs/owned.rs","content":"owned\n","message":"Add owned file"}}"#,
+    )
+    .await;
+    assert_eq!(changed_file["ok"], true, "{changed_file}");
+    let pull = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"teamorg","name":"core","title":"Team-owned change","base_ref":"main","head_ref":"feature","head_owner":"teamforker","head_name":"core"}}"#,
+    )
+    .await;
+    assert_eq!(pull["ok"], true, "{pull}");
+    let number = pull["data"]["number"].as_i64().unwrap();
+    let requests = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviewRequests.list","input":{{"owner":"teamorg","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(requests["ok"], true, "{requests}");
+    let requested_usernames = requests["data"]["usernames"].as_array().unwrap();
+    assert!(requested_usernames
+        .iter()
+        .any(|requested| requested.as_str() == Some("teamreviewer")));
+    assert!(requested_usernames
+        .iter()
+        .all(|requested| requested.as_str() != Some("teamreviewer2")));
+    let detail = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.get","input":{{"owner":"teamorg","name":"core","number":{number}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(detail["ok"], true, "{detail}");
+    let head_sha = detail["data"]["head_sha"].as_str().unwrap();
+    assert_eq!(
+        detail["data"]["codeowners_status"]["paths"][0]["owners"],
+        serde_json::json!(["@teamorg/Reviewers"])
+    );
+    let approval = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.reviews.submit","input":{{"owner":"teamorg","name":"core","number":{number},"state":"approved"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(approval["ok"], true, "{approval}");
+    let base_bare = repos.join("teamorg").join("core.git");
+    for pull_ref in [
+        format!("refs/pull/{number}/head"),
+        format!("refs/pull/{number}/merge"),
+    ] {
+        let remove_pull_ref = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&base_bare)
+            .args(["update-ref", "-d"])
+            .arg(&pull_ref)
+            .status()
+            .unwrap();
+        assert!(remove_pull_ref.success());
+    }
+    let expire_reflogs = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["reflog", "expire", "--expire=now", "--all"])
+        .status()
+        .unwrap();
+    assert!(expire_reflogs.success());
+    let prune = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["gc", "--prune=now", "--quiet"])
+        .status()
+        .unwrap();
+    assert!(prune.success());
+    let head_present = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["cat-file", "-e", head_sha])
+        .status()
+        .unwrap();
+    let refs = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&base_bare)
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+        .output()
+        .unwrap();
+    assert!(
+        !head_present.success(),
+        "fork head object must be absent before merge; refs={}",
+        String::from_utf8_lossy(&refs.stdout)
+    );
+    let merged = rpc_json(
+        &app,
+        &reviewer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.merge","input":{{"owner":"teamorg","name":"core","number":{number},"method":"merge"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        merged["ok"], true,
+        "team member with current write access approves — {merged}"
+    );
+}
+
+#[tokio::test]
 async fn pull_reviews_submit_dismiss_author_cannot_approve() {
     let dir = tempfile::tempdir().unwrap();
     let repos = dir.path().join("repos");

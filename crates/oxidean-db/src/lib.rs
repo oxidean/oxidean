@@ -432,6 +432,14 @@ impl Database {
         org_teams::list_team_members(self.require_pool()?, team_id).await
     }
 
+    pub async fn list_team_members_limited(
+        &self,
+        team_id: &str,
+        limit: i64,
+    ) -> Result<Vec<OrgTeamMemberListRow>, String> {
+        org_teams::list_team_members_limited(self.require_pool()?, team_id, limit).await
+    }
+
     pub async fn update_team_member_role(
         &self,
         team_id: &str,
@@ -1970,7 +1978,7 @@ impl Database {
         pull_id: &str,
         user_id: &str,
         requested_by: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         pulls::upsert_review_request(self.require_pool()?, pull_id, user_id, requested_by).await
     }
 
@@ -2026,6 +2034,7 @@ impl Database {
         lock_branch: bool,
         require_signed_commits: bool,
         required_merge_queue: bool,
+        require_code_owner_reviews: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::insert_rule(
             self.require_pool()?,
@@ -2046,6 +2055,7 @@ impl Database {
             lock_branch,
             require_signed_commits,
             required_merge_queue,
+            require_code_owner_reviews,
         )
         .await
     }
@@ -2070,6 +2080,7 @@ impl Database {
         lock_branch: bool,
         require_signed_commits: bool,
         required_merge_queue: bool,
+        require_code_owner_reviews: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::update_rule(
             self.require_pool()?,
@@ -2090,6 +2101,7 @@ impl Database {
             lock_branch,
             require_signed_commits,
             required_merge_queue,
+            require_code_owner_reviews,
         )
         .await
     }

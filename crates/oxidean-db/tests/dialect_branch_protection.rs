@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use sqlx::Row;
+
 fn migrations_dir(dialect: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("migrations")
@@ -42,6 +44,30 @@ fn find_migration_containing(dialect: &str, needle: &str) -> Option<(PathBuf, St
         }
     }
     None
+}
+
+fn codeowners_default_is_disabled(dialect: &str, sql: &str) -> bool {
+    let normalized = sql
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (column, expected_default) = match dialect {
+        "sqlite" => ("require_code_owner_reviews integer not null", "0"),
+        "postgres" => ("require_code_owner_reviews boolean not null", "false"),
+        "mysql" => ("require_code_owner_reviews tinyint(1) not null", "0"),
+        _ => return false,
+    };
+    if !normalized.contains("branch_protection_rules") {
+        return false;
+    }
+    let Some((_, definition)) = normalized.split_once(column) else {
+        return false;
+    };
+    let Some((_, default)) = definition.split_once(" default ") else {
+        return false;
+    };
+    default.trim().trim_end_matches(';').trim() == expected_default
 }
 
 fn assert_protection_sql(dialect: &str, sql: &str) {
@@ -86,15 +112,58 @@ async fn dialect_branch_protection_migrate_schema_presence() {
         );
     }
 
+    for dialect in ["sqlite", "postgres", "mysql"] {
+        let (_path, sql) = find_migration_containing(dialect, "require_code_owner_reviews")
+            .unwrap_or_else(|| panic!("missing {dialect} require_code_owner_reviews migration"));
+        assert!(
+            codeowners_default_is_disabled(dialect, &sql),
+            "{dialect}: CODEOWNERS protection must be a false-by-default branch_protection_rules column"
+        );
+    }
+
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("bp.db").display());
     let db = oxidean_db::Database::connect(&url).await.expect("connect");
     db.migrate()
         .await
         .expect("migrate must apply branch protection schema");
+    let pool = sqlx::SqlitePool::connect(&url).await.expect("SQLite pool");
+    let columns = sqlx::query("PRAGMA table_info(branch_protection_rules)")
+        .fetch_all(&pool)
+        .await
+        .expect("branch protection column metadata");
+    let codeowners_default = columns
+        .iter()
+        .find(|row| {
+            row.try_get::<String, _>("name").ok().as_deref() == Some("require_code_owner_reviews")
+        })
+        .expect("CODEOWNERS protection column")
+        .try_get::<Option<String>, _>("dflt_value")
+        .expect("CODEOWNERS protection default");
+    assert_eq!(codeowners_default.as_deref(), Some("0"));
     let rules = db
         .list_branch_protection_rules("missing")
         .await
         .expect("list rules on empty");
     assert!(rules.is_empty());
+}
+
+#[test]
+fn codeowners_migration_default_check_rejects_numeric_prefixes() {
+    assert!(!codeowners_default_is_disabled(
+        "mysql",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews TINYINT(1) NOT NULL DEFAULT 01;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "mysql",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews TINYINT(1) NOT NULL DEFAULT 0;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "postgres",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews BOOLEAN NOT NULL DEFAULT FALSE;"
+    ));
+    assert!(codeowners_default_is_disabled(
+        "sqlite",
+        "ALTER TABLE branch_protection_rules ADD COLUMN require_code_owner_reviews INTEGER NOT NULL DEFAULT 0;"
+    ));
 }

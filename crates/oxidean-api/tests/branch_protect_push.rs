@@ -247,6 +247,7 @@ async fn branch_protect_push_denies_force_push() {
         lock_branch: false,
         require_signed_commits: false,
         required_merge_queue: false,
+        require_code_owner_reviews: false,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -281,6 +282,7 @@ async fn branch_protect_push_lock_branch() {
         lock_branch: true,
         require_signed_commits: false,
         required_merge_queue: false,
+        require_code_owner_reviews: false,
         created_at: String::new(),
         updated_at: String::new(),
     };

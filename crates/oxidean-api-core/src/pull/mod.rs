@@ -4,14 +4,19 @@
 //! `pull.*` RPC handlers live in `oxidean-api-pulls` (issue #162).
 
 pub mod acl;
+pub mod codeowners;
+pub mod codeowners_rules;
 pub mod merge_ops;
 pub mod refs;
+mod review_order;
+pub use review_order::latest_unambiguous_reviews_by_author;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use oxidean_core::{
-    AppError, CreatePullRequest, IssueAssigneePublic, LabelPublic, MergeMethod, PullPublic,
-    PullState,
+    AppError, CreatePullRequest, IssueAssigneePublic, LabelPublic, MergeMethod,
+    PullCodeownersStatus, PullPublic, PullState,
 };
 use oxidean_db::{Database, PullRow};
 use oxidean_git::{CliGitBackend, GitBackend};
@@ -422,7 +427,23 @@ pub async fn synchronize_pull_after_head_move(
     // object in first (the head tip may belong to a fork bare).
     let mut pull_for_ref = pull.clone();
     pull_for_ref.head_sha = new_head_sha.to_string();
+    pull_for_ref.base_sha = base_sha.clone();
     refs::sync_head_ref(git, repos_dir, db, base_owner, base_name, &pull_for_ref).await;
+    if let Ok(Some(repository)) = db.find_repository_by_id(&pull.repo_id).await {
+        if let Err(error) = refresh_codeowners_review_requests(
+            db,
+            git,
+            repos_dir,
+            &repository,
+            base_owner,
+            &pull_for_ref,
+            actor_id,
+        )
+        .await
+        {
+            tracing::warn!(error = %error, pull = %pull.id, "CODEOWNERS review request refresh failed");
+        }
+    }
     let _ = db.mark_pull_line_comments_outdated(&pull.id).await;
 
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -764,6 +785,7 @@ pub fn pull_row_to_public(row: &PullRow, enr: &PullEnrichment) -> Result<PullPub
             .and_then(|id| enr.milestones.get(id))
             .cloned()
             .map(Box::new),
+        codeowners_status: None,
     })
 }
 
@@ -771,6 +793,116 @@ pub async fn to_public(ctx: &RpcCtx, row: &PullRow) -> Result<PullPublic, AppErr
     let rows = std::slice::from_ref(row);
     let enrichment = load_pull_enrichment(ctx, rows).await?;
     pull_row_to_public(row, &enrichment)
+}
+
+pub async fn refresh_codeowners_review_requests(
+    db: &Database,
+    git: &dyn GitBackend,
+    repos_dir: &Path,
+    repository: &oxidean_db::RepositoryRow,
+    base_owner: &str,
+    pull: &PullRow,
+    actor_id: &str,
+) -> Result<(), String> {
+    let evaluation = codeowners::evaluate(
+        db,
+        git,
+        repos_dir,
+        codeowners::EvaluationInput {
+            repository,
+            base_owner,
+            pull,
+            approved_user_ids: &BTreeSet::new(),
+            required: false,
+        },
+    )
+    .await?;
+    let result = codeowners::request_reviewers(db, &pull.id, actor_id, &evaluation).await;
+    if !result.added_user_ids.is_empty() {
+        notify::fanout_suppress_ignored(
+            db,
+            actor_id,
+            result.added_user_ids,
+            "pr_review_requested",
+            &notify::subject_for_pull(pull),
+        )
+        .await;
+    }
+    match result.error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+pub async fn to_public_with_codeowners_status(
+    ctx: &RpcCtx,
+    row: &PullRow,
+) -> Result<PullPublic, AppError> {
+    let mut pull = to_public(ctx, row).await?;
+    let mut status = PullCodeownersStatus::default();
+    let repository = match ctx.db.find_repository_by_id(&row.repo_id).await {
+        Ok(Some(repository)) => repository,
+        _ => {
+            status
+                .errors
+                .push("Repository ownership could not be resolved".into());
+            pull.codeowners_status = Some(status);
+            return Ok(pull);
+        }
+    };
+    let owner = match crate::repo::owner_ref_for_repo(&ctx.db, &repository).await {
+        Ok(Some(owner)) => owner,
+        _ => {
+            status
+                .errors
+                .push("Repository ownership could not be resolved".into());
+            pull.codeowners_status = Some(status);
+            return Ok(pull);
+        }
+    };
+    let protection =
+        match protection::effective_for_branch(&ctx.db, &row.repo_id, &row.base_ref).await {
+            Ok(protection) => protection,
+            Err(_) => {
+                status
+                    .errors
+                    .push("Branch protection could not be evaluated".into());
+                pull.codeowners_status = Some(status);
+                return Ok(pull);
+            }
+        };
+    let reviews = match ctx.db.list_pull_reviews(&row.id).await {
+        Ok(reviews) => reviews,
+        Err(_) => {
+            status
+                .errors
+                .push("Pull request reviews could not be evaluated".into());
+            pull.codeowners_status = Some(status);
+            return Ok(pull);
+        }
+    };
+    let approved = codeowners::current_head_approved_user_ids(&reviews, &row.head_sha);
+    match codeowners::evaluate(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        codeowners::EvaluationInput {
+            repository: &repository,
+            base_owner: owner.slug(),
+            pull: row,
+            approved_user_ids: &approved,
+            required: protection.require_code_owner_reviews,
+        },
+    )
+    .await
+    {
+        Ok(evaluation) => status = evaluation.status,
+        Err(_) => status
+            .errors
+            .push("CODEOWNERS evaluation could not complete".into()),
+    }
+    pull.codeowners_status = Some(status);
+    Ok(pull)
 }
 
 pub async fn to_public_many(ctx: &RpcCtx, rows: &[PullRow]) -> Result<Vec<PullPublic>, AppError> {
@@ -910,6 +1042,31 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &row,
     )
     .await;
+    match codeowners::evaluate(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        codeowners::EvaluationInput {
+            repository: &accessible.row,
+            base_owner: &accessible.owner_username,
+            pull: &row,
+            approved_user_ids: &BTreeSet::new(),
+            required: false,
+        },
+    )
+    .await
+    {
+        Ok(evaluation) => {
+            let result =
+                codeowners::request_reviewers(&ctx.db, &row.id, &row.author_id, &evaluation).await;
+            if let Some(error) = result.error {
+                tracing::warn!(error = %error, pull = %row.id, "CODEOWNERS review requests failed");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, pull = %row.id, "CODEOWNERS evaluation failed")
+        }
+    }
     let subject = notify::subject_for_pull(&row);
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
     let requested = ctx
@@ -968,5 +1125,5 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         false,
     )
     .await;
-    to_public(ctx, &row).await
+    to_public_with_codeowners_status(ctx, &row).await
 }

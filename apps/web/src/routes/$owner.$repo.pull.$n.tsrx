@@ -323,6 +323,7 @@ function PullDetailPageContent() @{
               number={number}
               canWrite={canWrite}
               pullState={(pull.state as string) ?? "open"}
+              codeownersStatus={pull.codeowners_status}
             />
             <div className="flex gap-3 border-b border-border" role="tablist">
               <button

@@ -328,6 +328,14 @@ pub struct DiffResult {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedPaths {
+    pub paths: Vec<String>,
+    pub truncated: bool,
+}
+
+pub const MAX_CHANGED_PATH_OUTPUT_BYTES: usize = 1_048_576;
+
 /// Optional knobs for a unified diff (WI-0001 diff settings).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffOpts {
@@ -677,6 +685,32 @@ pub trait GitBackend: Send + Sync {
         self.diff(repo, base, head).await
     }
 
+    async fn changed_paths(
+        &self,
+        repo: &Path,
+        base: &str,
+        head: &str,
+        limit: usize,
+    ) -> Result<ChangedPaths, GitError> {
+        let diff = self.diff(repo, base, head).await?;
+        let truncated = diff.truncated
+            || diff.files.len() > limit
+            || diff
+                .files
+                .iter()
+                .take(limit)
+                .map(|file| file.path.len())
+                .sum::<usize>()
+                > MAX_CHANGED_PATH_OUTPUT_BYTES;
+        let paths = diff
+            .files
+            .into_iter()
+            .take(limit)
+            .map(|file| file.path)
+            .collect();
+        Ok(ChangedPaths { paths, truncated })
+    }
+
     /// Per-line blame for a text file (`git blame --line-porcelain`).
     async fn blame(&self, repo: &Path, refname: &str, path: &str) -> Result<BlameFile, GitError>;
 
@@ -813,6 +847,10 @@ pub trait GitBackend: Send + Sync {
 
     /// `git rev-list --count <refname>`. Unborn → 0.
     async fn rev_list_count(&self, repo: &Path, refname: &str) -> Result<u64, GitError>;
+
+    async fn commit_exists(&self, repo: &Path, refname: &str) -> Result<bool, GitError> {
+        Ok(self.rev_list_count(repo, refname).await? > 0)
+    }
 
     /// `git shortlog -sn -e` contributors for `refname`, capped to `limit` (max 100).
     async fn shortlog(

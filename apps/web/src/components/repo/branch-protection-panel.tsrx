@@ -53,6 +53,7 @@ export function BranchProtectionPanel(props: {
   const [lockBranch, setLockBranch] = useState(false);
   const [requireSigned, setRequireSigned] = useState(false);
   const [requireQueue, setRequireQueue] = useState(false);
+  const [requireCodeOwnerReviews, setRequireCodeOwnerReviews] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -74,6 +75,7 @@ export function BranchProtectionPanel(props: {
     setLockBranch(false);
     setRequireSigned(false);
     setRequireQueue(false);
+    setRequireCodeOwnerReviews(false);
   }
 
   function loadRuleForEdit(rule: BranchProtectionRulePublic) {
@@ -93,6 +95,7 @@ export function BranchProtectionPanel(props: {
     setLockBranch(rule.lock_branch);
     setRequireSigned(rule.require_signed_commits);
     setRequireQueue(rule.required_merge_queue);
+    setRequireCodeOwnerReviews(rule.require_code_owner_reviews);
     setError("");
   }
 
@@ -123,6 +126,7 @@ export function BranchProtectionPanel(props: {
       lock_branch: lockBranch,
       require_signed_commits: requireSigned,
       required_merge_queue: requireQueue,
+      require_code_owner_reviews: requireCodeOwnerReviews,
     };
     try {
       const res = editingId
@@ -453,6 +457,23 @@ export function BranchProtectionPanel(props: {
                       />
                       Require merge queue
                     </label>
+                    <label className="flex items-center gap-2 text-[14px]">
+                      <input
+                        type="checkbox"
+                        checked={requireCodeOwnerReviews}
+                        onChange={(e) =>
+                          setRequireCodeOwnerReviews(
+                            (e.target as HTMLInputElement).checked,
+                          )
+                        }
+                        data-testid="bp-code-owner-reviews"
+                      />
+                      Require code owner reviews
+                    </label>
+                    <p className="text-[13px] text-muted-foreground sm:col-span-2">
+                      Each changed file matched by .github/CODEOWNERS needs approval
+                      from a current owner other than the pull request author.
+                    </p>
                   </div>
                   @if (error) {
                     <p role="alert" className="text-[14px] text-destructive">

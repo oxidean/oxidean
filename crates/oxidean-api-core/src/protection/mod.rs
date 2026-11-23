@@ -42,6 +42,7 @@ pub struct EffectiveProtection {
     /// GitHub ruleset "Require merge queue" — `pulls.merge` rejects direct
     /// merges; PRs route through `merge_queue.*` group verification.
     pub required_merge_queue: bool,
+    pub require_code_owner_reviews: bool,
 }
 
 /// Inputs for merge evaluation beyond push.
@@ -53,6 +54,8 @@ pub struct MergeEvalInput {
     pub last_head_pusher_id: Option<String>,
     /// Approving reviewer user ids (latest-per-user Approves).
     pub approving_reviewer_ids: Vec<String>,
+    pub codeowners_approved: bool,
+    pub codeowners_errors: Vec<String>,
     pub head_sha: String,
     pub base_sha: String,
     /// True when head is ancestor of / up-to-date with base tip (or equal).
@@ -182,6 +185,9 @@ pub fn union_rules(rules: &[BranchProtectionRuleRow], branch: &str) -> Effective
         }
         if rule.required_merge_queue {
             eff.required_merge_queue = true;
+        }
+        if rule.require_code_owner_reviews {
+            eff.require_code_owner_reviews = true;
         }
     }
     if !any {
@@ -410,6 +416,9 @@ pub fn evaluate_merge(
             }
         }
     }
+    if eff.require_code_owner_reviews && !input.codeowners_approved {
+        reasons.push("codeowners".to_string());
+    }
     if eff.require_conversation_resolution && input.unresolved_review_threads > 0 {
         reasons.push("conversations".to_string());
     }
@@ -457,6 +466,7 @@ pub fn evaluate_merge(
             approving_review_count: Some(input.approving_review_count),
             missing_status_contexts: missing_statuses,
             unsigned_commits: Vec::new(),
+            codeowners_errors: input.codeowners_errors.clone(),
         })
         .unwrap_or_default(),
     ))
@@ -1050,6 +1060,34 @@ mod tests {
     }
 
     #[test]
+    fn code_owner_review_requirement_blocks_each_unapproved_match() {
+        let protection = EffectiveProtection {
+            matched: true,
+            require_code_owner_reviews: true,
+            ..EffectiveProtection::default()
+        };
+        let input = MergeEvalInput {
+            codeowners_approved: false,
+            codeowners_errors: vec!["src/main.rs: unknown owner @missing".into()],
+            ..MergeEvalInput::default()
+        };
+        let error = evaluate_merge(&protection, None, &input).expect_err("owner approval required");
+        assert_eq!(error.code, "pull.merge_blocked");
+        let data = error.data.expect("structured blocker data");
+        assert_eq!(data["reasons"], serde_json::json!(["codeowners"]));
+        assert_eq!(
+            data["codeowners_errors"],
+            serde_json::json!(["src/main.rs: unknown owner @missing"])
+        );
+
+        let satisfied = MergeEvalInput {
+            codeowners_approved: true,
+            ..input
+        };
+        assert!(evaluate_merge(&protection, None, &satisfied).is_ok());
+    }
+
+    #[test]
     fn tag_from_ref_strips_prefix() {
         assert_eq!(tag_from_ref("refs/tags/v1.0.0"), Some("v1.0.0"));
         assert_eq!(tag_from_ref("refs/tags/release/v2"), Some("release/v2"));
@@ -1127,6 +1165,7 @@ mod tests {
             lock_branch: false,
             require_signed_commits: false,
             required_merge_queue: false,
+            require_code_owner_reviews: false,
             created_at: String::new(),
             updated_at: String::new(),
         };

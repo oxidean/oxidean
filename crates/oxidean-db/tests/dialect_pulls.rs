@@ -3,6 +3,30 @@
 use oxidean_core::Role;
 use oxidean_db::Database;
 
+#[test]
+fn dialect_pull_review_submission_order_migrations_use_serialized_counters() {
+    for dialect in ["sqlite", "postgres", "mysql"] {
+        let path = format!(
+            "{}/migrations/{dialect}/0107_pull_review_submission_order.sql",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let sql =
+            std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{dialect}: missing {path}"));
+        for needle in [
+            "submission_order",
+            "pull_review_submission_order",
+            "last_order",
+            "INSERT INTO pull_review_submission_order",
+            "CREATE UNIQUE INDEX",
+        ] {
+            assert!(
+                sql.contains(needle),
+                "{dialect}: migration must contain {needle}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn dialect_pulls_migrate_0016_schema_presence() {
     for (label, path) in [
@@ -106,6 +130,110 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
         .expect("insert pull");
     assert_eq!(pull.number, n);
     assert_eq!(pull.state, "open");
+
+    let first_review = db
+        .insert_pull_review(
+            "z-first",
+            &pull.id,
+            &author.id,
+            "approved",
+            "",
+            Some("first-head"),
+        )
+        .await
+        .expect("insert first review");
+    let second_review = db
+        .insert_pull_review(
+            "a-second",
+            &pull.id,
+            &author.id,
+            "changes_requested",
+            "",
+            Some("second-head"),
+        )
+        .await
+        .expect("insert second review");
+    assert!(first_review.submission_order.is_some());
+    assert!(
+        first_review.submission_order < second_review.submission_order,
+        "review submissions must receive increasing order values"
+    );
+    let raw_sqlite = sqlx::SqlitePool::connect(&url)
+        .await
+        .expect("connect to force transaction-time inversion");
+    for (id, submitted_at) in [
+        (&first_review.id, "2026-11-23T11:00:02Z"),
+        (&second_review.id, "2026-11-23T11:00:00Z"),
+    ] {
+        sqlx::query("UPDATE pull_reviews SET submitted_at = ?1 WHERE id = ?2")
+            .bind(submitted_at)
+            .bind(id)
+            .execute(&raw_sqlite)
+            .await
+            .expect("set inverted transaction timestamps");
+    }
+    let ordered = db
+        .list_pull_reviews(&pull.id)
+        .await
+        .expect("list ordered reviews");
+    assert_eq!(
+        ordered
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["z-first", "a-second"]
+    );
+    let batched = db
+        .list_reviews_for_pulls(std::slice::from_ref(&pull.id))
+        .await
+        .expect("list ordered reviews in batch");
+    assert_eq!(
+        batched
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["z-first", "a-second"]
+    );
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("latest review commit"),
+        Some("second-head".into())
+    );
+    sqlx::query("UPDATE pull_reviews SET submission_order = NULL WHERE id = ?1")
+        .bind(&first_review.id)
+        .execute(&raw_sqlite)
+        .await
+        .expect("make first review a legacy row");
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("ordered review must outrank legacy row"),
+        Some("second-head".into())
+    );
+    sqlx::query("UPDATE pull_reviews SET submission_order = NULL WHERE id = ?1")
+        .bind(&second_review.id)
+        .execute(&raw_sqlite)
+        .await
+        .expect("make second review a legacy row");
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("legacy timestamp fallback"),
+        Some("first-head".into())
+    );
+    let legacy_ordered = db
+        .list_pull_reviews(&pull.id)
+        .await
+        .expect("list legacy reviews by timestamp");
+    assert_eq!(
+        legacy_ordered
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a-second", "z-first"]
+    );
+    raw_sqlite.close().await;
 
     let found = db
         .find_pull_by_repo_number(&repo.id, n)
@@ -359,4 +487,115 @@ async fn dialect_pulls_batch_enrichment() {
         .await
         .expect("empty labels")
         .is_empty());
+}
+
+#[tokio::test]
+async fn postgres_review_order_follows_insert_order_not_transaction_start() {
+    use sqlx::{postgres::PgPoolOptions, Row};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("skipping: DATABASE_URL unset");
+        return;
+    };
+    if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
+        eprintln!("skipping: DATABASE_URL is not PostgreSQL");
+        return;
+    }
+
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .expect("connect PostgreSQL");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let schema = format!("pull_review_order_{}_{}", std::process::id(), nonce);
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&pool)
+        .await
+        .expect("create isolated schema");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {schema}.pull_review_submission_order (id SMALLINT PRIMARY KEY, last_order BIGINT NOT NULL)"
+    )))
+    .execute(&pool)
+    .await
+    .expect("create order table");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO {schema}.pull_review_submission_order (id, last_order) VALUES (1, 0)"
+    )))
+    .execute(&pool)
+    .await
+    .expect("seed order table");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {schema}.pull_reviews (state TEXT NOT NULL, submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(), submission_order BIGINT NOT NULL)"
+    )))
+    .execute(&pool)
+    .await
+    .expect("create reviews table");
+
+    let mut earlier = pool.begin().await.expect("begin earlier transaction");
+    let earlier_started = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>("SELECT now()")
+        .fetch_one(&mut *earlier)
+        .await
+        .expect("read earlier transaction timestamp");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut later = pool.begin().await.expect("begin later transaction");
+    let later_started = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>("SELECT now()")
+        .fetch_one(&mut *later)
+        .await
+        .expect("read later transaction timestamp");
+    let approval_order = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        "UPDATE {schema}.pull_review_submission_order SET last_order = last_order + 1 WHERE id = 1 RETURNING last_order"
+    )))
+    .fetch_one(&mut *later)
+    .await
+    .expect("allocate approval order");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO {schema}.pull_reviews (state, submission_order) VALUES ('approved', $1)"
+    )))
+    .bind(approval_order)
+    .execute(&mut *later)
+    .await
+    .expect("insert approval");
+    later.commit().await.expect("commit later transaction");
+
+    let changes_order = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        "UPDATE {schema}.pull_review_submission_order SET last_order = last_order + 1 WHERE id = 1 RETURNING last_order"
+    )))
+    .fetch_one(&mut *earlier)
+    .await
+    .expect("allocate changes-requested order");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO {schema}.pull_reviews (state, submission_order) VALUES ('changes_requested', $1)"
+    )))
+    .bind(changes_order)
+    .execute(&mut *earlier)
+    .await
+    .expect("insert changes-requested review");
+    earlier.commit().await.expect("commit earlier transaction");
+
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT state, submitted_at, submission_order FROM {schema}.pull_reviews ORDER BY submission_order"
+    )))
+    .fetch_all(&pool)
+    .await
+    .expect("read reviews");
+    assert_eq!(approval_order, 1);
+    assert_eq!(changes_order, 2);
+    assert_eq!(rows[0].get::<String, _>("state"), "approved");
+    assert_eq!(rows[1].get::<String, _>("state"), "changes_requested");
+    let approval_at = rows[0].get::<chrono::DateTime<chrono::Utc>, _>("submitted_at");
+    let changes_at = rows[1].get::<chrono::DateTime<chrono::Utc>, _>("submitted_at");
+    assert!(earlier_started < later_started);
+    assert!(changes_at < approval_at);
+
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&pool)
+        .await
+        .expect("drop isolated schema");
+    pool.close().await;
 }

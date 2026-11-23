@@ -174,11 +174,6 @@ pub async fn enqueue(
     {
         return Err(conflict("pull request is already queued"));
     }
-    // Same gate `pull.merge` runs — reviews, threads, required contexts,
-    // up-to-date-head. The queue decides the method (`None` skips the
-    // repo's allowed-methods check).
-    oxidean_api_core::pull::merge_ops::evaluate_merge_gate(ctx, &accessible, &eff, &pull, None)
-        .await?;
     let bare = bare_repo_path(
         &ctx.repos_dir,
         &accessible.owner_username,
@@ -192,6 +187,11 @@ pub async fn enqueue(
         &pull,
     )
     .await?;
+    // Same gate `pull.merge` runs — reviews, threads, required contexts,
+    // up-to-date-head. The queue decides the method (`None` skips the
+    // repo's allowed-methods check).
+    oxidean_api_core::pull::merge_ops::evaluate_merge_gate(ctx, &accessible, &eff, &pull, None)
+        .await?;
     // GitHub's mergeable gate at enqueue: the PR must merge cleanly onto
     // the live base tip — mid-train conflicts surface at group formation.
     let base_sha = ctx

@@ -17887,6 +17887,12 @@ components:
             Milestone this pull belongs to (embedded object, GitHub parity with
             issues — PRs share the repo milestone set).
           nullable: true
+        codeowners_status:
+          anyOf:
+          - $ref: '#/components/schemas/PullCodeownersStatus'
+          - enum:
+            - null
+          nullable: true
       required:
       - id
       - repo_id
@@ -17913,6 +17919,41 @@ components:
       - closed
       - merged
       description: 'PR lifecycle: open ↔ closed; merged is terminal for reopen-as-open of same merge.'
+    PullCodeownersStatus:
+      type: object
+      properties:
+        required:
+          type: boolean
+        file_present:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+          default: []
+        paths:
+          type: array
+          items:
+            $ref: '#/components/schemas/PullCodeownersPathStatus'
+          default: []
+      required:
+      - required
+      - file_present
+    PullCodeownersPathStatus:
+      type: object
+      properties:
+        path:
+          type: string
+        owners:
+          type: array
+          items:
+            type: string
+          default: []
+        approved:
+          type: boolean
+      required:
+      - path
+      - approved
     MergePullResponse:
       type: object
       properties:

@@ -2087,6 +2087,7 @@ export type BranchProtectionRulePublic = {
   require_signed_commits: boolean;
   /** PRs merge only via the merge queue — direct `pull.merge` is rejected. */
   required_merge_queue: boolean;
+  require_code_owner_reviews: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -2115,6 +2116,7 @@ export type BranchProtectionRuleInput = {
   require_signed_commits?: boolean;
   /** Require the merge queue for PRs targeting matching branches. */
   required_merge_queue?: boolean;
+  require_code_owner_reviews?: boolean;
 };
 
 export type BranchProtectionUpdateRequest = BranchProtectionRuleInput & {
@@ -4752,6 +4754,19 @@ export type IssueLinksListResponse = {
 
 export type PullState = "open" | "closed" | "merged";
 
+export type PullCodeownersPathStatus = {
+  path: string;
+  owners: string[];
+  approved: boolean;
+};
+
+export type PullCodeownersStatus = {
+  required: boolean;
+  file_present: boolean;
+  errors: string[];
+  paths: PullCodeownersPathStatus[];
+};
+
 export type PullPublic = {
   id: string;
   repo_id: string;
@@ -4782,6 +4797,7 @@ export type PullPublic = {
   labels?: LabelPublic[];
   pinned?: boolean;
   milestone?: MilestonePublic | null;
+  codeowners_status?: PullCodeownersStatus | null;
 };
 
 export type CreatePullRequest = {
