@@ -457,7 +457,7 @@ describe("PullV2Overview conversation", () => {
             author_username: "linus",
             state: "changes_requested",
             body: "needs work",
-            submitted_at: "2026-03-01T10:00:00Z",
+            submitted_at: "2026-03-07T10:00:00Z",
           },
           {
             id: "rev-new",
@@ -485,6 +485,39 @@ describe("PullV2Overview conversation", () => {
       const approvals = screen.getByTestId("pull-v2-approvals-row").textContent;
       expect(approvals).toContain("2 approvals");
       expect(approvals).not.toContain("Changes requested");
+    });
+  });
+
+  it("does not restore an approval after the latest review is dismissed", async () => {
+    reviewsListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        reviews: [
+          {
+            id: "rev-approved",
+            pull_id: "p1",
+            author_id: "u3",
+            author_username: "linus",
+            state: "approved",
+            body: "",
+            submitted_at: "2026-03-07T10:00:00Z",
+          },
+          {
+            id: "rev-dismissed",
+            pull_id: "p1",
+            author_id: "u3",
+            author_username: "linus",
+            state: "dismissed",
+            body: "",
+            submitted_at: "2026-03-06T10:00:00Z",
+            dismissed_at: "2026-03-08T10:00:00Z",
+          },
+        ],
+      },
+    });
+    renderOverview([]);
+    await waitFor(() => {
+      expect(screen.getByTestId("pull-v2-approvals-row").textContent).not.toContain("1 approval");
     });
   });
 });

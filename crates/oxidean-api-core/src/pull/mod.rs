@@ -9,6 +9,7 @@ pub mod codeowners_rules;
 pub mod merge_ops;
 pub mod refs;
 mod review_order;
+pub use review_order::latest_unambiguous_reviews_by_author;
 
 use std::collections::BTreeSet;
 use std::path::Path;

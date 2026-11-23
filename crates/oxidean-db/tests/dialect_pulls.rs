@@ -132,17 +132,24 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
     assert_eq!(pull.state, "open");
 
     let first_review = db
-        .insert_pull_review("pr-order-1", &pull.id, &author.id, "approved", "", None)
+        .insert_pull_review(
+            "z-first",
+            &pull.id,
+            &author.id,
+            "approved",
+            "",
+            Some("first-head"),
+        )
         .await
         .expect("insert first review");
     let second_review = db
         .insert_pull_review(
-            "pr-order-2",
+            "a-second",
             &pull.id,
             &author.id,
             "changes_requested",
             "",
-            None,
+            Some("second-head"),
         )
         .await
         .expect("insert second review");
@@ -151,6 +158,82 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
         first_review.submission_order < second_review.submission_order,
         "review submissions must receive increasing order values"
     );
+    let raw_sqlite = sqlx::SqlitePool::connect(&url)
+        .await
+        .expect("connect to force transaction-time inversion");
+    for (id, submitted_at) in [
+        (&first_review.id, "2026-11-23T11:00:02Z"),
+        (&second_review.id, "2026-11-23T11:00:00Z"),
+    ] {
+        sqlx::query("UPDATE pull_reviews SET submitted_at = ?1 WHERE id = ?2")
+            .bind(submitted_at)
+            .bind(id)
+            .execute(&raw_sqlite)
+            .await
+            .expect("set inverted transaction timestamps");
+    }
+    let ordered = db
+        .list_pull_reviews(&pull.id)
+        .await
+        .expect("list ordered reviews");
+    assert_eq!(
+        ordered
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["z-first", "a-second"]
+    );
+    let batched = db
+        .list_reviews_for_pulls(std::slice::from_ref(&pull.id))
+        .await
+        .expect("list ordered reviews in batch");
+    assert_eq!(
+        batched
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["z-first", "a-second"]
+    );
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("latest review commit"),
+        Some("second-head".into())
+    );
+    sqlx::query("UPDATE pull_reviews SET submission_order = NULL WHERE id = ?1")
+        .bind(&first_review.id)
+        .execute(&raw_sqlite)
+        .await
+        .expect("make first review a legacy row");
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("ordered review must outrank legacy row"),
+        Some("second-head".into())
+    );
+    sqlx::query("UPDATE pull_reviews SET submission_order = NULL WHERE id = ?1")
+        .bind(&second_review.id)
+        .execute(&raw_sqlite)
+        .await
+        .expect("make second review a legacy row");
+    assert_eq!(
+        db.latest_review_commit_sha(&pull.id, &author.id)
+            .await
+            .expect("legacy timestamp fallback"),
+        Some("first-head".into())
+    );
+    let legacy_ordered = db
+        .list_pull_reviews(&pull.id)
+        .await
+        .expect("list legacy reviews by timestamp");
+    assert_eq!(
+        legacy_ordered
+            .iter()
+            .map(|review| review.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a-second", "z-first"]
+    );
+    raw_sqlite.close().await;
 
     let found = db
         .find_pull_by_repo_number(&repo.id, n)

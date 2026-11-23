@@ -2204,7 +2204,7 @@ pub async fn find_pull_review_by_id(
 pub async fn list_pull_reviews(pool: &DbPool, pull_id: &str) -> Result<Vec<PullReviewRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let q = format!("{PRV_SELECT_PG} WHERE pull_id = $1 ORDER BY submitted_at ASC, id ASC");
+            let q = format!("{PRV_SELECT_PG} WHERE pull_id = $1 ORDER BY CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC");
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
@@ -2218,7 +2218,7 @@ pub async fn list_pull_reviews(pool: &DbPool, pull_id: &str) -> Result<Vec<PullR
         }
         DbPool::MySql(p) => {
             let q =
-                format!("{PRV_SELECT_MYSQL} WHERE pull_id = ? ORDER BY submitted_at ASC, id ASC");
+                format!("{PRV_SELECT_MYSQL} WHERE pull_id = ? ORDER BY CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC");
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
@@ -2232,7 +2232,7 @@ pub async fn list_pull_reviews(pool: &DbPool, pull_id: &str) -> Result<Vec<PullR
         }
         DbPool::Sqlite(p) => {
             let q =
-                format!("{PRV_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY submitted_at ASC, id ASC");
+                format!("{PRV_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC");
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
@@ -2298,7 +2298,7 @@ pub async fn list_reviews_for_pulls(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!(
-                "{PRV_SELECT_PG} WHERE pull_id = ANY($1) ORDER BY submitted_at ASC, id ASC"
+                "{PRV_SELECT_PG} WHERE pull_id = ANY($1) ORDER BY pull_id ASC, CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC"
             );
             let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_ids)
@@ -2311,7 +2311,7 @@ pub async fn list_reviews_for_pulls(
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, pull_ids.len());
             let q_str = format!(
-                "{PRV_SELECT_MYSQL} WHERE pull_id IN ({in_list}) ORDER BY submitted_at ASC, id ASC"
+                "{PRV_SELECT_MYSQL} WHERE pull_id IN ({in_list}) ORDER BY pull_id ASC, CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC"
             );
             let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
@@ -2325,7 +2325,7 @@ pub async fn list_reviews_for_pulls(
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, pull_ids.len());
             let q_str = format!(
-                "{PRV_SELECT_SQLITE} WHERE pull_id IN ({in_list}) ORDER BY submitted_at ASC, id ASC"
+                "{PRV_SELECT_SQLITE} WHERE pull_id IN ({in_list}) ORDER BY pull_id ASC, CASE WHEN submission_order IS NULL THEN 0 ELSE 1 END ASC, submission_order ASC, submitted_at ASC, id ASC"
             );
             let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
@@ -3186,7 +3186,7 @@ pub async fn latest_review_commit_sha(
             "SELECT commit_sha FROM pull_reviews \
              WHERE pull_id = $1 AND author_id = $2 \
              AND state <> 'dismissed' AND commit_sha IS NOT NULL \
-             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+             ORDER BY CASE WHEN submission_order IS NULL THEN 1 ELSE 0 END ASC, submission_order DESC, submitted_at DESC, id DESC LIMIT 1",
         )
         .bind(pull_id)
         .bind(author_id)
@@ -3198,7 +3198,7 @@ pub async fn latest_review_commit_sha(
             "SELECT commit_sha FROM pull_reviews \
              WHERE pull_id = ? AND author_id = ? \
              AND state <> 'dismissed' AND commit_sha IS NOT NULL \
-             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+             ORDER BY CASE WHEN submission_order IS NULL THEN 1 ELSE 0 END ASC, submission_order DESC, submitted_at DESC, id DESC LIMIT 1",
         )
         .bind(pull_id)
         .bind(author_id)
@@ -3210,7 +3210,7 @@ pub async fn latest_review_commit_sha(
             "SELECT commit_sha FROM pull_reviews \
              WHERE pull_id = ?1 AND author_id = ?2 \
              AND state <> 'dismissed' AND commit_sha IS NOT NULL \
-             ORDER BY submitted_at DESC, id DESC LIMIT 1",
+             ORDER BY CASE WHEN submission_order IS NULL THEN 1 ELSE 0 END ASC, submission_order DESC, submitted_at DESC, id DESC LIMIT 1",
         )
         .bind(pull_id)
         .bind(author_id)

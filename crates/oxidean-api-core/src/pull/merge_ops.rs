@@ -37,7 +37,7 @@ fn approving_reviewer_ids(
     head_sha: &str,
     dismiss_stale_reviews: bool,
 ) -> Vec<String> {
-    super::review_order::latest_unambiguous_reviews_by_author(reviews)
+    super::latest_unambiguous_reviews_by_author(reviews.iter())
         .into_iter()
         .filter(|review| {
             review.state == "approved"

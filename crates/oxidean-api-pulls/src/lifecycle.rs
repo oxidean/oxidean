@@ -12,8 +12,9 @@ use oxidean_api_core::notify;
 use oxidean_api_core::pull::acl;
 use oxidean_api_core::pull::refs;
 use oxidean_api_core::pull::{
-    db_err, emit_pull_event, load_pull_in_repo, notify_actions_for_pull, resolve_ref_sha,
-    to_public, to_public_many, validate_body, validate_ref_name, validate_title,
+    db_err, emit_pull_event, latest_unambiguous_reviews_by_author, load_pull_in_repo,
+    notify_actions_for_pull, resolve_ref_sha, to_public, to_public_many, validate_body,
+    validate_ref_name, validate_title,
 };
 use oxidean_api_core::rpc::RpcCtx;
 
@@ -237,18 +238,11 @@ fn pull_review_state_matches(
     reviews: Option<&Vec<&oxidean_db::PullReviewRow>>,
     want: &str,
 ) -> bool {
-    let mut latest: std::collections::BTreeMap<&str, &oxidean_db::PullReviewRow> =
-        std::collections::BTreeMap::new();
-    for r in reviews.into_iter().flatten() {
-        match latest.get(r.author_id.as_str()) {
-            Some(prev) if prev.submitted_at >= r.submitted_at => {}
-            _ => {
-                latest.insert(r.author_id.as_str(), r);
-            }
-        }
-    }
-    let has_changes = latest.values().any(|r| r.state == "changes_requested");
-    let has_approved = latest.values().any(|r| r.state == "approved");
+    let latest = latest_unambiguous_reviews_by_author(reviews.into_iter().flatten().copied());
+    let has_changes = latest
+        .iter()
+        .any(|review| review.state == "changes_requested");
+    let has_approved = latest.iter().any(|review| review.state == "approved");
     let actual = if has_changes {
         "changes_requested"
     } else if has_approved {
@@ -598,4 +592,76 @@ pub async fn unpin(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
     }
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     to_public(ctx, &updated).await
+}
+
+#[cfg(test)]
+mod review_state_tests {
+    use super::pull_review_state_matches;
+    use oxidean_db::PullReviewRow;
+
+    fn review(id: &str, state: &str, submission_order: i64, submitted_at: &str) -> PullReviewRow {
+        PullReviewRow {
+            id: id.into(),
+            pull_id: "pull".into(),
+            author_id: "reviewer".into(),
+            state: state.into(),
+            body: String::new(),
+            commit_sha: Some("head".into()),
+            submitted_at: submitted_at.into(),
+            submission_order: Some(submission_order),
+            dismissed_at: None,
+            dismiss_reason: None,
+        }
+    }
+
+    #[test]
+    fn ambiguous_legacy_reviews_do_not_match_an_approval_or_changes_filter() {
+        let rows = [
+            PullReviewRow {
+                id: "legacy-approved".into(),
+                pull_id: "pull".into(),
+                author_id: "reviewer".into(),
+                state: "approved".into(),
+                body: String::new(),
+                commit_sha: Some("head".into()),
+                submitted_at: "2026-11-23T11:00:00Z".into(),
+                submission_order: None,
+                dismissed_at: None,
+                dismiss_reason: None,
+            },
+            PullReviewRow {
+                id: "legacy-changes".into(),
+                pull_id: "pull".into(),
+                author_id: "reviewer".into(),
+                state: "changes_requested".into(),
+                body: String::new(),
+                commit_sha: Some("head".into()),
+                submitted_at: "2026-11-23T11:00:00Z".into(),
+                submission_order: None,
+                dismissed_at: None,
+                dismiss_reason: None,
+            },
+        ];
+        let reviews = rows.iter().collect::<Vec<_>>();
+        assert!(!pull_review_state_matches(Some(&reviews), "approved"));
+        assert!(!pull_review_state_matches(
+            Some(&reviews),
+            "changes_requested"
+        ));
+        assert!(pull_review_state_matches(Some(&reviews), "review_required"));
+    }
+
+    #[test]
+    fn review_state_filter_uses_persisted_order_when_transaction_timestamps_invert() {
+        let rows = [
+            review("approval", "approved", 1, "2026-11-23T11:00:02Z"),
+            review("changes", "changes_requested", 2, "2026-11-23T11:00:00Z"),
+        ];
+        let reviews = rows.iter().collect::<Vec<_>>();
+        assert!(pull_review_state_matches(
+            Some(&reviews),
+            "changes_requested"
+        ));
+        assert!(!pull_review_state_matches(Some(&reviews), "approved"));
+    }
 }

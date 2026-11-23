@@ -227,18 +227,19 @@ export function PullV2MergeCard(props: PullV2MergeCardProps) @{
   const anchored = comments.filter((c) => !!c.path);
   const resolvedThreads = anchored.filter((c) => c.resolved).length;
   const openComments = anchored.length - resolvedThreads;
-  const reviews = (reviewsQ.data?.reviews ?? []).filter((r) => !r.dismissed_at);
+  const reviews = reviewsQ.data?.reviews ?? [];
   const latestReviews = [
     ...reviews
-      .reduce((acc, r) => {
-        const prev = acc.get(r.author_id);
-        if (!prev || r.submitted_at > prev.submitted_at) acc.set(r.author_id, r);
+      .reduce((acc, review) => {
+        acc.set(review.author_id, review);
         return acc;
       }, new Map<string, PullReviewPublic>())
       .values(),
   ];
-  const approvals = latestReviews.filter((r) => r.state === "approved").length;
-  const changesRequested = latestReviews.some((r) => r.state === "changes_requested");
+  const approvals = latestReviews.filter((r) => r.state === "approved" && !r.dismissed_at).length;
+  const changesRequested = latestReviews.some(
+    (r) => r.state === "changes_requested" && !r.dismissed_at,
+  );
   const requestedReviewers = reviewRequestsQ.data?.usernames ?? [];
   const checkDetail =
     failingChecks > 0

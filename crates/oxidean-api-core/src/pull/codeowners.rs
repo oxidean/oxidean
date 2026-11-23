@@ -25,7 +25,7 @@ pub fn current_head_approved_user_ids(
     reviews: &[PullReviewRow],
     head_sha: &str,
 ) -> BTreeSet<String> {
-    super::review_order::latest_unambiguous_reviews_by_author(reviews)
+    super::latest_unambiguous_reviews_by_author(reviews.iter())
         .into_iter()
         .filter(|review| {
             review.state == "approved" && review.commit_sha.as_deref() == Some(head_sha)

@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 
 use oxidean_db::PullReviewRow;
 
-pub(crate) fn latest_unambiguous_reviews_by_author(
-    reviews: &[PullReviewRow],
-) -> Vec<&PullReviewRow> {
+pub fn latest_unambiguous_reviews_by_author<'a>(
+    reviews: impl IntoIterator<Item = &'a PullReviewRow>,
+) -> Vec<&'a PullReviewRow> {
     let mut latest: BTreeMap<&str, (&PullReviewRow, bool)> = BTreeMap::new();
     for review in reviews {
         let author_id = review.author_id.as_str();
