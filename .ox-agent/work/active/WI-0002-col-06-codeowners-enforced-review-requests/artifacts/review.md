@@ -11,7 +11,7 @@ The read-only review compared the CODEOWNERS implementation with the WI-0002 spe
 - Excluded banned users from direct and team owner eligibility.
 - Switched CODEOWNERS changed-path enumeration to a NUL-delimited name-only Git diff capped at 1 MiB and the configured path count, instead of materializing patch content. Disabled rename detection so both old and new paths are checked; non-UTF-8 and control-character paths fail closed.
 - Distinguished an absent CODEOWNERS file on a valid base commit from an unavailable base commit; the latter now blocks required evaluation and its diagnostic is rendered even when no file is present.
-- Serialized review-order allocation with review insertion. The latest-review selector now prioritizes that sequence over transaction-start timestamps; this matters on PostgreSQL, where an earlier transaction may insert after a later one. New ordered reviews take precedence over legacy rows, while legacy-to-legacy timestamp ties fail closed.
+- Serialized review-order allocation with review insertion. A shared latest-review selector now prioritizes that sequence over transaction-start timestamps in both ordinary approval counts and CODEOWNERS checks; on PostgreSQL an earlier transaction can insert after a later one. Ordered reviews take precedence over legacy rows, while ambiguous legacy ties fail closed. Regression tests cover both merge-gate paths and the PostgreSQL timestamp inversion.
 - Preserved notifications for successful review-request inserts when a later insert fails; strengthened the notification and stale-path regression assertions.
 - Verified the false default in each dialect migration and the applied SQLite column metadata. Documented that code-owner enforcement applies to pull merges, not direct pushes.
 

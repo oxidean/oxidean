@@ -32,6 +32,21 @@ async fn git_is_ancestor(
     Ok(out.status.success())
 }
 
+fn approving_reviewer_ids(
+    reviews: &[oxidean_db::PullReviewRow],
+    head_sha: &str,
+    dismiss_stale_reviews: bool,
+) -> Vec<String> {
+    super::review_order::latest_unambiguous_reviews_by_author(reviews)
+        .into_iter()
+        .filter(|review| {
+            review.state == "approved"
+                && (!dismiss_stale_reviews || review.commit_sha.as_deref() == Some(head_sha))
+        })
+        .map(|review| review.author_id.clone())
+        .collect()
+}
+
 /// The branch-protection merge gate shared by `pull.merge` and
 /// `merge_queue.enqueue` — GitHub only admits PRs to the queue (or the merge
 /// button) once every *other* protection is green: approvals, stale-review
@@ -48,28 +63,8 @@ pub async fn evaluate_merge_gate(
     merge_method: Option<String>,
 ) -> Result<(), AppError> {
     let reviews = ctx.db.list_pull_reviews(&row.id).await.map_err(db_err)?;
-    // Latest-per-user review state (D-PR-07); dismiss_stale excludes Approves on older SHAs.
-    let mut latest: std::collections::BTreeMap<String, &oxidean_db::PullReviewRow> =
-        std::collections::BTreeMap::new();
-    for r in &reviews {
-        match latest.get(&r.author_id) {
-            Some(prev) if prev.submitted_at >= r.submitted_at => {}
-            _ => {
-                latest.insert(r.author_id.clone(), r);
-            }
-        }
-    }
-    let mut approving_reviewer_ids = Vec::new();
-    for r in latest.values() {
-        if r.state != "approved" {
-            continue;
-        }
-        let current_head_review = r.commit_sha.as_deref() == Some(row.head_sha.as_str());
-        if eff.dismiss_stale_reviews && !current_head_review {
-            continue;
-        }
-        approving_reviewer_ids.push(r.author_id.clone());
-    }
+    let approving_reviewer_ids =
+        approving_reviewer_ids(&reviews, &row.head_sha, eff.dismiss_stale_reviews);
     // Pending drafts never gate merges — only submitted comments count.
     let comments = ctx
         .db
@@ -165,4 +160,51 @@ pub async fn evaluate_merge_gate(
         status_by_context,
     };
     evaluate_merge(eff, accessible.capability, &merge_input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::approving_reviewer_ids;
+    use oxidean_db::PullReviewRow;
+
+    fn review(
+        state: &str,
+        submission_order: Option<i64>,
+        submitted_at: &str,
+        commit_sha: &str,
+    ) -> PullReviewRow {
+        PullReviewRow {
+            id: format!("{state}-{submission_order:?}"),
+            pull_id: "pull".into(),
+            author_id: "reviewer".into(),
+            state: state.into(),
+            body: String::new(),
+            commit_sha: Some(commit_sha.into()),
+            submitted_at: submitted_at.into(),
+            submission_order,
+            dismissed_at: None,
+            dismiss_reason: None,
+        }
+    }
+
+    #[test]
+    fn later_changes_requested_review_clears_approval_despite_earlier_transaction_start() {
+        let reviews = [
+            review("approved", Some(1), "2026-11-23T11:00:02Z", "head"),
+            review("changes_requested", Some(2), "2026-11-23T11:00:00Z", "head"),
+        ];
+        assert!(approving_reviewer_ids(&reviews, "head", false).is_empty());
+    }
+
+    #[test]
+    fn dismiss_stale_reviews_filters_the_latest_approval_by_head() {
+        let reviews = [
+            review("approved", Some(1), "2026-11-23T11:00:00Z", "old-head"),
+            review("approved", Some(2), "2026-11-23T11:00:01Z", "head"),
+        ];
+        assert_eq!(
+            approving_reviewer_ids(&reviews, "head", true),
+            ["reviewer".to_string()]
+        );
+    }
 }

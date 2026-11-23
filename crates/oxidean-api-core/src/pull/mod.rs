@@ -8,6 +8,7 @@ pub mod codeowners;
 pub mod codeowners_rules;
 pub mod merge_ops;
 pub mod refs;
+mod review_order;
 
 use std::collections::BTreeSet;
 use std::path::Path;

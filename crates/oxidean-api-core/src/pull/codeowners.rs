@@ -25,45 +25,14 @@ pub fn current_head_approved_user_ids(
     reviews: &[PullReviewRow],
     head_sha: &str,
 ) -> BTreeSet<String> {
-    let mut latest: BTreeMap<String, (&PullReviewRow, bool)> = BTreeMap::new();
-    for review in reviews {
-        match latest.get(&review.author_id).copied() {
-            None => {
-                latest.insert(review.author_id.clone(), (review, false));
-            }
-            Some((previous, _)) => match (previous.submission_order, review.submission_order) {
-                (Some(previous_order), Some(review_order)) if previous_order > review_order => {}
-                (Some(previous_order), Some(review_order)) if previous_order < review_order => {
-                    latest.insert(review.author_id.clone(), (review, false));
-                }
-                (Some(_), Some(_)) => {
-                    latest.insert(review.author_id.clone(), (previous, true));
-                }
-                (Some(_), None) => {}
-                (None, Some(_)) => {
-                    latest.insert(review.author_id.clone(), (review, false));
-                }
-                (None, None) if previous.submitted_at > review.submitted_at => {}
-                (None, None) if previous.submitted_at < review.submitted_at => {
-                    latest.insert(review.author_id.clone(), (review, false));
-                }
-                (None, None) => {
-                    latest.insert(review.author_id.clone(), (previous, true));
-                }
-            },
-        }
-    }
-    latest
-        .into_values()
-        .filter(|&(review, ambiguous)| {
-            !ambiguous
-                && review.state == "approved"
-                && review.commit_sha.as_deref() == Some(head_sha)
+    super::review_order::latest_unambiguous_reviews_by_author(reviews)
+        .into_iter()
+        .filter(|review| {
+            review.state == "approved" && review.commit_sha.as_deref() == Some(head_sha)
         })
-        .map(|(review, _)| review.author_id.clone())
+        .map(|review| review.author_id.clone())
         .collect()
 }
-
 pub struct EvaluationInput<'a> {
     pub repository: &'a RepositoryRow,
     pub base_owner: &'a str,
@@ -401,6 +370,8 @@ fn record_review_request(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
         current_head_approved_user_ids, distinct_owner_count, record_review_request,
         ReviewerRequestBatch, MAX_DECLARED_OWNERS,
@@ -471,7 +442,7 @@ mod tests {
         ];
         assert_eq!(
             current_head_approved_user_ids(&changes_then_approved, "head"),
-            ["reviewer".to_string()].into()
+            BTreeSet::from(["reviewer".to_string()])
         );
     }
 
