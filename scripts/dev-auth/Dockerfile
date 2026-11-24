@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.4.4-alpine
+FROM oven/bun:1.4.5-alpine
 WORKDIR /app
 COPY stubs.mjs ./
 ENV PORT=9092
