@@ -302,7 +302,7 @@ services:
   # One-shot bucket creation — exits once the api's bucket exists.
   objectstore-init:
     profiles: ["s3"]
-    image: amazon/aws-cli:2.40.2
+    image: amazon/aws-cli:2.41.2
     restart: "no"
     depends_on:
       objectstore:
